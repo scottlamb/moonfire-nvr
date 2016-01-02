@@ -55,30 +55,109 @@
 
 namespace moonfire_nvr {
 
-bool DirForEach(const std::string &dir_path,
-                std::function<IterationControl(const dirent *)> fn,
-                std::string *error_message) {
-  DIR *owned_dir = opendir(dir_path.c_str());
-  if (owned_dir == nullptr) {
-    int err = errno;
-    *error_message =
-        StrCat("Unable to examine ", dir_path, ": ", strerror(err));
-    return false;
-  }
-  struct dirent *ent;
-  while (errno = 0, (ent = readdir(owned_dir)) != nullptr) {
-    if (fn(ent) == IterationControl::kBreak) {
-      closedir(owned_dir);
-      return true;
+namespace {
+
+class RealFile : public File {
+ public:
+  explicit RealFile(int fd) : fd_(fd) {}
+  RealFile(const RealFile &) = delete;
+  void operator=(const RealFile &) = delete;
+
+  ~RealFile() final { Close(); }
+
+  int Close() final {
+    if (fd_ < 0) {
+      return 0;
     }
+    int ret;
+    while ((ret = close(fd_)) != 0 && errno == EINTR)
+      ;
+    if (ret != 0) {
+      return errno;
+    }
+    fd_ = -1;
+    return 0;
   }
-  int err = errno;
-  closedir(owned_dir);
-  if (err != 0) {
-    *error_message = StrCat("readdir failed: ", strerror(err));
-    return false;
+
+  int Write(re2::StringPiece *data) final {
+    if (fd_ < 0) {
+      return EBADF;
+    }
+    ssize_t ret;
+    while ((ret = write(fd_, data->data(), data->size())) == -1 &&
+           errno == EINTR)
+      ;
+    if (ret < 0) {
+      return errno;
+    }
+    data->remove_prefix(ret);
+    return 0;
   }
-  return true;
+
+ private:
+  int fd_ = -1;
+};
+
+class RealFilesystem : public Filesystem {
+ public:
+  bool DirForEach(const char *dir_path,
+                  std::function<IterationControl(const dirent *)> fn,
+                  std::string *error_message) final {
+    DIR *owned_dir = opendir(dir_path);
+    if (owned_dir == nullptr) {
+      int err = errno;
+      *error_message =
+          StrCat("Unable to examine ", dir_path, ": ", strerror(err));
+      return false;
+    }
+    struct dirent *ent;
+    while (errno = 0, (ent = readdir(owned_dir)) != nullptr) {
+      if (fn(ent) == IterationControl::kBreak) {
+        closedir(owned_dir);
+        return true;
+      }
+    }
+    int err = errno;
+    closedir(owned_dir);
+    if (err != 0) {
+      *error_message = StrCat("readdir failed: ", strerror(err));
+      return false;
+    }
+    return true;
+  }
+
+  int Open(const char *path, int flags, std::unique_ptr<File> *f) final {
+    return Open(path, flags, 0, f);
+  }
+
+  int Open(const char *path, int flags, mode_t mode,
+           std::unique_ptr<File> *f) final {
+    int ret = open(path, flags, mode);
+    if (ret < 0) {
+      return errno;
+    }
+    f->reset(new RealFile(ret));
+    return 0;
+  }
+
+  int Mkdir(const char *path, mode_t mode) final {
+    return (mkdir(path, mode) < 0) ? errno : 0;
+  }
+
+  int Rmdir(const char *path) final { return (rmdir(path) < 0) ? errno : 0; }
+
+  int Stat(const char *path, struct stat *buf) final {
+    return (stat(path, buf) < 0) ? errno : 0;
+  }
+
+  int Unlink(const char *path) final { return (unlink(path) < 0) ? errno : 0; }
+};
+
+}  // namespace
+
+Filesystem *GetRealFilesystem() {
+  static Filesystem *real_filesystem = new RealFilesystem;
+  return real_filesystem;
 }
 
 }  // namespace moonfire_nvr

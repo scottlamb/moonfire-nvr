@@ -35,6 +35,7 @@
 
 #include <glog/logging.h>
 #include <gmock/gmock.h>
+#include <re2/stringpiece.h>
 
 namespace moonfire_nvr {
 
@@ -43,7 +44,7 @@ namespace moonfire_nvr {
 std::string PrepareTempDirOrDie(const std::string &test_name);
 
 // Write the given file contents to the given path, or die.
-void WriteFileOrDie(const std::string &path, const std::string &contents);
+void WriteFileOrDie(const std::string &path, re2::StringPiece contents);
 
 // A scoped log sink for testing that the right log messages are sent.
 // Modelled after glog's "mock-log.h", which is not exported.

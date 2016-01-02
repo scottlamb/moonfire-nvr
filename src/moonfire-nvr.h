@@ -46,6 +46,7 @@
 #include <event2/http.h>
 
 #include "config.pb.h"
+#include "filesystem.h"
 #include "ffmpeg.h"
 #include "time.h"
 
@@ -72,6 +73,7 @@ class ShutdownSignal {
 struct Environment {
   WallClock *clock = nullptr;
   VideoSource *video_source = nullptr;
+  Filesystem *fs = nullptr;
 };
 
 // Delete old ".mp4" files within a specified directory, keeping them within a
@@ -88,7 +90,7 @@ class FileManager {
 
   // |short_name| will be prepended to log messages.
   FileManager(const std::string &short_name, const std::string &path,
-              uint64_t byte_limit);
+              uint64_t byte_limit, Environment *env);
   FileManager(const FileManager &) = delete;
   FileManager &operator=(const FileManager &) = delete;
 
@@ -120,6 +122,7 @@ class FileManager {
   const std::string short_name_;
   const std::string path_;
   const uint64_t byte_limit_;
+  Environment *const env_;
 
   mutable std::mutex mu_;
   std::map<std::string, struct stat> files_;
@@ -132,13 +135,14 @@ class FileManager {
 class Stream {
  public:
   Stream(const ShutdownSignal *signal, const moonfire_nvr::Config &config,
-         const Environment *env, const moonfire_nvr::Camera &camera)
+         Environment *const env, const moonfire_nvr::Camera &camera)
       : signal_(signal),
         env_(env),
         camera_path_(config.base_path() + "/" + camera.short_name()),
         rotate_interval_(config.rotate_sec()),
         camera_(camera),
-        manager_(camera_.short_name(), camera_path_, camera.retain_bytes()) {}
+        manager_(camera_.short_name(), camera_path_, camera.retain_bytes(),
+                 env) {}
   Stream(const Stream &) = delete;
   Stream &operator=(const Stream &) = delete;
 

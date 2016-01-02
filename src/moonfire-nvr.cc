@@ -61,15 +61,18 @@ const char kFilenameSuffix[] = ".mp4";
 
 }  // namespace
 FileManager::FileManager(const std::string &short_name, const std::string &path,
-                         uint64_t byte_limit)
-    : short_name_(short_name), path_(path), byte_limit_(byte_limit) {}
+                         uint64_t byte_limit, Environment *env)
+    : short_name_(short_name),
+      path_(path),
+      byte_limit_(byte_limit),
+      env_(env) {}
 
 bool FileManager::Init(std::string *error_message) {
   // Create the directory if it doesn't exist.
   // If the path exists, assume it is a valid directory.
-  if (mkdir(path_.c_str(), 0700) < 0 && errno != EEXIST) {
-    int err = errno;
-    *error_message = StrCat("Unable to create ", path_, ": ", strerror(err));
+  int ret = env_->fs->Mkdir(path_.c_str(), 0700);
+  if (ret != 0 && ret != EEXIST) {
+    *error_message = StrCat("Unable to create ", path_, ": ", strerror(ret));
     return false;
   }
 
@@ -94,7 +97,7 @@ bool FileManager::Init(std::string *error_message) {
     return IterationControl::kContinue;
   };
 
-  if (!DirForEach(path_, file_fn, error_message)) {
+  if (!env_->fs->DirForEach(path_.c_str(), file_fn, error_message)) {
     return false;
   }
 
@@ -115,18 +118,18 @@ bool FileManager::Rotate(std::string *error_message) {
     // won't return prematurely.
     mu_.unlock();
     string fpath = StrCat(path_, "/", filename);
-    if (unlink(fpath.c_str()) == 0) {
+    int ret = env_->fs->Unlink(fpath.c_str());
+    if (ret == 0) {
       LOG(INFO) << short_name_ << ": Deleted " << filename << " to reclaim "
                 << size << " bytes.";
-    } else if (errno == ENOENT) {
+    } else if (ret == ENOENT) {
       // This may have happened due to a racing Rotate() call.
       // In any case, the file is gone, so proceed to mark it as such.
       LOG(INFO) << short_name_ << ": File " << filename
                 << " was already deleted.";
     } else {
-      int err = errno;
       *error_message =
-          StrCat("unlink failed on ", filename, ": ", strerror(err));
+          StrCat("unlink failed on ", filename, ": ", strerror(ret));
 
       return false;
     }
@@ -154,9 +157,9 @@ bool FileManager::AddFile(const std::string &filename,
                           std::string *error_message) {
   struct stat buf;
   string fpath = StrCat(path_, "/", filename);
-  if (lstat(fpath.c_str(), &buf) != 0) {
-    int err = errno;
-    *error_message = StrCat("lstat on ", fpath, " failed: ", strerror(err));
+  int ret = env_->fs->Stat(fpath.c_str(), &buf);
+  if (ret != 0) {
+    *error_message = StrCat("stat on ", fpath, " failed: ", strerror(ret));
     return false;
   }
   VLOG(1) << short_name_ << ": adding file " << filename << " size "
@@ -466,6 +469,7 @@ void Stream::HttpCallbackForFile(evhttp_request *req, const string &filename) {
 Nvr::Nvr() {
   env_.clock = GetRealClock();
   env_.video_source = GetRealVideoSource();
+  env_.fs = GetRealFilesystem();
 }
 
 Nvr::~Nvr() {

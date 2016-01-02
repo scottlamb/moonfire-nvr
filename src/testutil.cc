@@ -34,56 +34,57 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
-
-#include <fstream>
 
 #include <glog/logging.h>
 
 #include "filesystem.h"
+#include "string.h"
 
 namespace moonfire_nvr {
 
 namespace {
 
-bool DeleteChildrenRecursively(const std::string &dirname,
-                               std::string *error_msg) {
+bool DeleteChildrenRecursively(const char *dirname, std::string *error_msg) {
   bool ok = true;
   auto fn = [&dirname, &ok, error_msg](const struct dirent *ent) {
     std::string name(ent->d_name);
-    std::string path = dirname + "/" + name;
+    std::string path = StrCat(dirname, "/", name);
     if (name == "." || name == "..") {
       return IterationControl::kContinue;
     }
     bool is_dir = (ent->d_type == DT_DIR);
     if (ent->d_type == DT_UNKNOWN) {
       struct stat buf;
-      PCHECK(stat(path.c_str(), &buf) == 0) << path;
+      int ret = GetRealFilesystem()->Stat(path.c_str(), &buf);
+      CHECK_EQ(ret, 0) << path << ": " << strerror(ret);
       is_dir = S_ISDIR(buf.st_mode);
     }
     if (is_dir) {
-      ok = ok && DeleteChildrenRecursively(path, error_msg);
+      ok = ok && DeleteChildrenRecursively(path.c_str(), error_msg);
       if (!ok) {
         return IterationControl::kBreak;
       }
-      if (rmdir(path.c_str()) != 0) {
-        *error_msg =
-            std::string("rmdir failed on ") + path + ": " + strerror(errno);
+      int ret = GetRealFilesystem()->Rmdir(path.c_str());
+      if (ret != 0) {
+        *error_msg = StrCat("rmdir failed on ", path, ": ", strerror(ret));
         ok = false;
         return IterationControl::kBreak;
       }
     } else {
-      if (unlink(path.c_str()) != 0) {
-        *error_msg =
-            std::string("unlink failed on ") + path + ": " + strerror(errno);
+      int ret = GetRealFilesystem()->Unlink(path.c_str());
+      if (ret != 0) {
+        *error_msg = StrCat("unlink failed on ", path, ": ", strerror(ret));
         ok = false;
         return IterationControl::kBreak;
       }
     }
     return IterationControl::kContinue;
   };
-  if (!DirForEach(dirname, fn, error_msg)) {
+  if (!GetRealFilesystem()->DirForEach(dirname, fn, error_msg)) {
     return false;
   }
   return ok;
@@ -92,22 +93,27 @@ bool DeleteChildrenRecursively(const std::string &dirname,
 }  // namespace
 
 std::string PrepareTempDirOrDie(const std::string &test_name) {
-  std::string dirname = std::string("/tmp/test.") + test_name;
-  int res = mkdir(dirname.c_str(), 0700);
-  if (res != 0) {
-    int err = errno;
-    CHECK_EQ(err, EEXIST) << "mkdir failed: " << strerror(err);
+  std::string dirname = StrCat("/tmp/test.", test_name);
+  int ret = GetRealFilesystem()->Mkdir(dirname.c_str(), 0700);
+  if (ret != 0) {
+    CHECK_EQ(ret, EEXIST) << "mkdir failed: " << strerror(ret);
     std::string error_msg;
-    CHECK(DeleteChildrenRecursively(dirname, &error_msg)) << error_msg;
+    CHECK(DeleteChildrenRecursively(dirname.c_str(), &error_msg)) << error_msg;
   }
   return dirname;
 }
 
-void WriteFileOrDie(const std::string &path, const std::string &contents) {
-  std::ofstream f(path);
-  f << contents;
-  f.close();
-  CHECK(!f.fail()) << "failed to write: " << path;
+void WriteFileOrDie(const std::string &path, re2::StringPiece contents) {
+  std::unique_ptr<File> f;
+  int ret = GetRealFilesystem()->Open(path.c_str(),
+                                      O_WRONLY | O_CREAT | O_TRUNC, 0600, &f);
+  CHECK_EQ(ret, 0) << "open " << path << ": " << strerror(ret);
+  while (!contents.empty()) {
+    ret = f->Write(&contents);
+    CHECK_EQ(ret, 0) << "write " << path << ": " << strerror(ret);
+  }
+  ret = f->Close();
+  CHECK_EQ(ret, 0) << "close " << path << ": " << strerror(ret);
 }
 
 }  // namespace moonfire_nvr

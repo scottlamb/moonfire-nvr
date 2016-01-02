@@ -73,6 +73,7 @@ class FileManagerTest : public testing::Test {
  protected:
   FileManagerTest() {
     test_dir_ = PrepareTempDirOrDie("moonfire-nvr-file-manager");
+    env_.fs = GetRealFilesystem();
   }
 
   std::vector<std::string> GetFilenames(const FileManager &mgr) {
@@ -83,12 +84,13 @@ class FileManagerTest : public testing::Test {
     return out;
   }
 
+  Environment env_;
   std::string test_dir_;
 };
 
 TEST_F(FileManagerTest, InitWithNoDirectory) {
   std::string subdir = test_dir_ + "/" + "subdir";
-  FileManager manager("foo", subdir, 0);
+  FileManager manager("foo", subdir, 0, &env_);
 
   // Should succeed.
   std::string error_message;
@@ -124,7 +126,7 @@ TEST_F(FileManagerTest, InitAndRotateWithExistingFiles) {
   WriteFileOrDie(test_dir_ + "/2.mp4", "123");
   WriteFileOrDie(test_dir_ + "/3.mp4", "12345");
   WriteFileOrDie(test_dir_ + "/other", "1234567");
-  FileManager manager("foo", test_dir_, 8);
+  FileManager manager("foo", test_dir_, 8, &env_);
 
   // Should succeed.
   std::string error_message;
@@ -145,6 +147,7 @@ class StreamTest : public testing::Test {
     test_dir_ = PrepareTempDirOrDie("moonfire-nvr-stream-copier");
     env_.clock = &clock_;
     env_.video_source = &video_source_;
+    env_.fs = GetRealFilesystem();
     clock_.Sleep({1430006400, 0});  // 2016-04-26 00:00:00 UTC
 
     config_.set_base_path(test_dir_);

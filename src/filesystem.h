@@ -38,8 +38,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <memory>
 #include <functional>
-#include <iostream>
 #include <string>
 
 #include <event2/buffer.h>
@@ -55,14 +55,57 @@ enum class IterationControl {
   kBreak      // indicates the caller should terminate the loop with success.
 };
 
-// Execute |fn| for each directory entry in |dir_path|, stopping early
-// (successfully) if the callback returns IterationControl::kBreak.
-//
-// On success, returns true.
-// On failure, returns false and updates |error_msg|.
-bool DirForEach(const std::string &dir_path,
-                std::function<IterationControl(const dirent *)> fn,
-                std::string *error_msg);
+// Represents an open file. All methods but Close() are thread-safe.
+class File {
+ public:
+  // Close the file, ignoring the result.
+  virtual ~File() {}
+
+  // Close the file, returning 0 on success or errno>0 on failure.
+  // Already closed is considered a success.
+  virtual int Close() = 0;
+
+  // Write to the file, returning 0 on success or errno>0 on failure.
+  // On success, data->remove_prefix will be called with the written bytes.
+  virtual int Write(re2::StringPiece *data) = 0;
+};
+
+// Interface to the local filesystem. There's typically one per program,
+// but it's an abstract class for testability. Thread-safe.
+class Filesystem {
+ public:
+  virtual ~Filesystem() {}
+
+  // Execute |fn| for each directory entry in |dir_path|, stopping early
+  // (successfully) if the callback returns IterationControl::kBreak.
+  //
+  // On success, returns true.
+  // On failure, returns false and updates |error_msg|.
+  virtual bool DirForEach(const char *dir_path,
+                          std::function<IterationControl(const dirent *)> fn,
+                          std::string *error_msg) = 0;
+
+  // open() the specified path, returning 0 on success or errno>0 on failure.
+  // On success, |f| is populated with an open file.
+  virtual int Open(const char *path, int flags, std::unique_ptr<File> *f) = 0;
+  virtual int Open(const char *path, int flags, mode_t mode,
+                   std::unique_ptr<File> *f) = 0;
+
+  // mkdir() the specified path, returning 0 on success or errno>0 on failure.
+  virtual int Mkdir(const char *path, mode_t mode) = 0;
+
+  // rmdir() the specified path, returning 0 on success or errno>0 on failure.
+  virtual int Rmdir(const char *path) = 0;
+
+  // stat() the specified path, returning 0 on success or errno>0 on failure.
+  virtual int Stat(const char *path, struct stat *buf) = 0;
+
+  // unlink() the specified file, returning 0 on success or errno>0 on failure.
+  virtual int Unlink(const char *path) = 0;
+};
+
+// Get the (singleton) real filesystem, which is never deleted.
+Filesystem *GetRealFilesystem();
 
 }  // namespace moonfire_nvr
 
