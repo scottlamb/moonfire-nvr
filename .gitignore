@@ -1,0 +1,11 @@
+*.swp
+build
+debug
+obj-*
+debian/files
+debian/moonfire-nvr.debhelper.log
+debian/moonfire-nvr.postinst.debhelper
+debian/moonfire-nvr.postrm.debhelper
+debian/moonfire-nvr.prerm.debhelper
+debian/moonfire-nvr.substvars
+debian/moonfire-nvr/
