@@ -110,7 +110,7 @@ Alternatively, you can prepare a `.deb` package:
 
 # Configuration
 
-Moonfire NVR expects a configuration file `/etc/moonfire_nvr.conf` (overridable
+Moonfire NVR expects a configuration file `/etc/moonfire-nvr.conf` (overridable
 with the `--config` argument). Currently this file should contain a
 text-format `moonfire_nvr.Config` protocol buffer message; see
 `src/config.protodevel` which describes the meaning of fields. The general
@@ -177,7 +177,8 @@ Moonfire NVR should be run under a dedicated user. This user should own the
 served through an HTTP interface, there's no need for any other user to access
 the files.
 
-    $ sudo adduser --system moonfire-nvr
+    $ sudo addgroup --system moonfire-nvr
+    $ sudo adduser --system moonfire-nvr --group moonfire-nvr
     $ sudo mkdir /var/lib/moonfire_nvr
     $ sudo chown moonfire-nvr:moonfire-nvr /var/lib/moonfire_nvr
     $ sudo chmod 700 /var/lib/moonfire_nvr
