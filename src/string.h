@@ -118,6 +118,10 @@ bool IsWord(const std::string &str);
 // HTML-escape the given UTF-8-encoded string.
 std::string EscapeHtml(const std::string &input);
 
+// Return a hex string for debugging.
+// For example, ToHex("\xde\xad\xbe\xef") returns "de ad be ef".
+std::string ToHex(re2::StringPiece in);
+
 // Wrapper around ::strtol that returns true iff valid and corrects
 // constness.
 bool strto64(const char *str, int base, const char **endptr, int64_t *value);

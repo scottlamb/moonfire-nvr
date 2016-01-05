@@ -92,6 +92,11 @@ TEST(EscapeTest, Simple) {
   EXPECT_EQ("&lt;tag&gt; &amp; text", moonfire_nvr::EscapeHtml("<tag> & text"));
 }
 
+TEST(ToHexTest, Simple) {
+  EXPECT_EQ("", ToHex(""));
+  EXPECT_EQ("12 34 de ad be ef", ToHex("\x12\x34\xde\xad\xbe\xef"));
+}
+
 }  // namespace
 }  // namespace moonfire_nvr
 

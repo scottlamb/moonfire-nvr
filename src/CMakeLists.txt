@@ -39,7 +39,17 @@ set(MOONFIRE_DEPS
     ${PROTOBUF_LIBRARIES}
     ${RE2_LIBRARIES})
 
-add_library(moonfire-nvr-lib moonfire-nvr.cc ffmpeg.cc http.cc string.cc profiler.cc filesystem.cc time.cc ${PROTO_SRCS} ${PROTO_HDRS})
+set(MOONFIRE_NVR_SRCS
+    coding.cc
+    ffmpeg.cc
+    filesystem.cc
+    http.cc
+    moonfire-nvr.cc
+    profiler.cc
+    string.cc
+    time.cc)
+
+add_library(moonfire-nvr-lib ${MOONFIRE_NVR_SRCS} ${PROTO_SRCS} ${PROTO_HDRS})
 target_link_libraries(moonfire-nvr-lib ${MOONFIRE_DEPS})
 
 add_executable(moonfire-nvr moonfire-nvr-main.cc)
@@ -50,7 +60,7 @@ install_programs(/bin FILES moonfire-nvr)
 include_directories(${GTest_INCLUDE_DIR})
 include_directories(${GMock_INCLUDE_DIR})
 
-foreach(test http moonfire-nvr string)
+foreach(test coding http moonfire-nvr string)
   add_executable(${test}-test ${test}-test.cc testutil.cc)
   target_link_libraries(${test}-test GTest GMock moonfire-nvr-lib)
   add_test(NAME ${test}-test

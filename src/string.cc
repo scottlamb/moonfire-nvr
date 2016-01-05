@@ -38,6 +38,15 @@
 
 namespace moonfire_nvr {
 
+namespace {
+
+char HexDigit(unsigned int i) {
+  static char kHexadigits[] = "0123456789abcdef";
+  return (i < 16) ? kHexadigits[i] : 'x';
+}
+
+}  // namespace
+
 namespace internal {
 
 StrCatPiece::StrCatPiece(uint64_t p) {
@@ -101,6 +110,18 @@ std::string EscapeHtml(const std::string &input) {
     }
   }
   return output;
+}
+
+std::string ToHex(re2::StringPiece in) {
+  std::string out;
+  out.reserve(in.size() * 3 + 1);
+  for (int i = 0; i < in.size(); ++i) {
+    if (i > 0) out.push_back(' ');
+    uint8_t byte = in[i];
+    out.push_back(HexDigit(byte >> 4));
+    out.push_back(HexDigit(byte & 0x0F));
+  }
+  return out;
 }
 
 bool strto64(const char *str, int base, const char **endptr, int64_t *value) {
