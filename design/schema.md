@@ -70,13 +70,15 @@ The table below shows cost of processing a single stream, as a percentage of the
 whole processor ((user+sys) time / video duration / CPU cores). **TODO:** try
 different quality settings as well.
 
-  Decode:
-  $ time ffmpeg -y -threads 1 -i input.mp4 \
-                -f null /dev/null
+Decode:
 
-  Combo (Decode + encode with libx264):
-  $ time ffmpeg -y -threads 1 -i input.mp4 \
-                -c:v libx264 -preset ultrafast -threads 1 -f mp4 /dev/null
+    $ time ffmpeg -y -threads 1 -i input.mp4 \
+                  -f null /dev/null
+
+Combo (Decode + encode with libx264):
+
+    $ time ffmpeg -y -threads 1 -i input.mp4 \
+                  -c:v libx264 -preset ultrafast -threads 1 -f mp4 /dev/null
 
 
 | Processor                     | 1080p30 decode | 1080p30 combo | 704x480p10 decode | 704x480p10 combo |
@@ -483,11 +485,11 @@ See also the example below:
 | bytes           |       1000 |      10 |      15 |      12 |    1050 |
 | duration\_delta |         10 |      -1 |       2 |      -1 |       0 |
 | bytes\_delta    |       1000 |      10 |       5 |      -3 |      50 |
-| varint1         |         42 |       3 |       8 |       3 |       1 |
-| varint2         |       2000 |      20 |      10 |       5 |       2 |
-| encoded         | `2a d0 0f` | `03 14` | `08 0a` | `03 05` | `01 02` |
+| varint1         |         41 |       2 |       8 |       3 |       1 |
+| varint2         |       2000 |      20 |      10 |       5 |     100 |
+| encoded         | `29 d0 0f` | `02 14` | `08 0a` | `02 05` | `01 64` |
 
-### <a href="on-demand"></a> On-demand `.mp4` construction
+### <a href="on-demand"></a>On-demand `.mp4` construction
 
 A major goal of this format is to support on-demand serving in various formats,
 including two types of `.mp4` files:
