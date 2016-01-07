@@ -35,12 +35,14 @@ set(MOONFIRE_DEPS
     ${LIBEVENT_LIBRARIES}
     ${GFLAGS_LIBRARIES}
     ${GLOG_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
     ${PROFILER_LIBRARIES}
     ${PROTOBUF_LIBRARIES}
     ${RE2_LIBRARIES})
 
 set(MOONFIRE_NVR_SRCS
     coding.cc
+    crypto.cc
     ffmpeg.cc
     filesystem.cc
     http.cc
@@ -61,7 +63,7 @@ install_programs(/bin FILES moonfire-nvr)
 include_directories(${GTest_INCLUDE_DIR})
 include_directories(${GMock_INCLUDE_DIR})
 
-foreach(test coding http moonfire-nvr recording string)
+foreach(test coding crypto http moonfire-nvr recording string)
   add_executable(${test}-test ${test}-test.cc testutil.cc)
   target_link_libraries(${test}-test GTest GMock moonfire-nvr-lib)
   add_test(NAME ${test}-test
