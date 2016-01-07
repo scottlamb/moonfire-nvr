@@ -109,8 +109,10 @@ void WriteFileOrDie(const std::string &path, re2::StringPiece contents) {
                                       O_WRONLY | O_CREAT | O_TRUNC, 0600, &f);
   CHECK_EQ(ret, 0) << "open " << path << ": " << strerror(ret);
   while (!contents.empty()) {
-    ret = f->Write(&contents);
+    size_t written;
+    ret = f->Write(contents, &written);
     CHECK_EQ(ret, 0) << "write " << path << ": " << strerror(ret);
+    contents.remove_prefix(written);
   }
   ret = f->Close();
   CHECK_EQ(ret, 0) << "close " << path << ": " << strerror(ret);

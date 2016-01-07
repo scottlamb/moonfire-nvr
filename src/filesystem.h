@@ -65,9 +65,15 @@ class File {
   // Already closed is considered a success.
   virtual int Close() = 0;
 
+  // fsync(), returning 0 on success or errno>0 on failure.
+  virtual int Sync() = 0;
+
+  // ftruncate(), returning 0 on success or errno>0 on failure.
+  virtual int Truncate(off_t length) = 0;
+
   // Write to the file, returning 0 on success or errno>0 on failure.
-  // On success, data->remove_prefix will be called with the written bytes.
-  virtual int Write(re2::StringPiece *data) = 0;
+  // On success, |bytes_written| will be updated.
+  virtual int Write(re2::StringPiece data, size_t *bytes_written) = 0;
 };
 
 // Interface to the local filesystem. There's typically one per program,

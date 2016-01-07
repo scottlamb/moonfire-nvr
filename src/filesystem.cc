@@ -79,18 +79,23 @@ class RealFile : public File {
     return 0;
   }
 
-  int Write(re2::StringPiece *data) final {
+  int Sync() final { return (fsync(fd_) < 0) ? errno : 0; }
+
+  int Truncate(off_t length) final {
+    return (ftruncate(fd_, length) < 0) ? errno : 0;
+  }
+
+  int Write(re2::StringPiece data, size_t *bytes_written) final {
     if (fd_ < 0) {
       return EBADF;
     }
     ssize_t ret;
-    while ((ret = write(fd_, data->data(), data->size())) == -1 &&
-           errno == EINTR)
+    while ((ret = write(fd_, data.data(), data.size())) == -1 && errno == EINTR)
       ;
     if (ret < 0) {
       return errno;
     }
-    data->remove_prefix(ret);
+    *bytes_written = static_cast<size_t>(ret);
     return 0;
   }
 
