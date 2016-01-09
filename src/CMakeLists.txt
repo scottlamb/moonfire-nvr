@@ -46,6 +46,7 @@ set(MOONFIRE_NVR_SRCS
     crypto.cc
     ffmpeg.cc
     filesystem.cc
+    h264.cc
     http.cc
     moonfire-nvr.cc
     profiler.cc
@@ -65,7 +66,7 @@ install_programs(/bin FILES moonfire-nvr)
 include_directories(${GTest_INCLUDE_DIR})
 include_directories(${GMock_INCLUDE_DIR})
 
-foreach(test coding crypto http moonfire-nvr recording sqlite string)
+foreach(test coding crypto h264 http moonfire-nvr recording sqlite string)
   add_executable(${test}-test ${test}-test.cc testutil.cc)
   target_link_libraries(${test}-test GTest GMock moonfire-nvr-lib)
   add_test(NAME ${test}-test

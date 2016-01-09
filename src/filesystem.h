@@ -47,13 +47,9 @@
 #include <glog/logging.h>
 #include <re2/stringpiece.h>
 
-namespace moonfire_nvr {
+#include "common.h"
 
-// Return value for *ForEach callbacks.
-enum class IterationControl {
-  kContinue,  // indicates the caller should proceed with the loop.
-  kBreak      // indicates the caller should terminate the loop with success.
-};
+namespace moonfire_nvr {
 
 // Represents an open file. All methods but Close() are thread-safe.
 class File {

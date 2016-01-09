@@ -134,6 +134,16 @@ inline int32_t Unzigzag32(uint32_t in) {
   return (in >> 1) ^ -static_cast<int32_t>(in & 1);
 }
 
+inline void AppendU16(uint16_t in, std::string *out) {
+  uint16_t net = ToNetworkU16(in);
+  out->append(reinterpret_cast<const char *>(&net), sizeof(uint16_t));
+}
+
+inline void AppendU32(uint32_t in, std::string *out) {
+  uint32_t net = ToNetworkU32(in);
+  out->append(reinterpret_cast<const char *>(&net), sizeof(uint32_t));
+}
+
 }  // namespace moonfire_nvr
 
 #endif  // MOONFIRE_NVR_CODING_H
