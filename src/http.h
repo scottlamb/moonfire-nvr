@@ -82,6 +82,13 @@ class EvBuffer {
   bool AddFile(int fd, ev_off_t offset, ev_off_t length,
                std::string *error_message);
 
+  void AddReference(const void *data, size_t datlen,
+                    evbuffer_ref_cleanup_cb cleanupfn, void *cleanupfn_arg) {
+    CHECK_EQ(
+        0, evbuffer_add_reference(buf_, data, datlen, cleanupfn, cleanupfn_arg))
+        << strerror(errno);
+  }
+
  private:
   struct evbuffer *buf_;
 };
@@ -91,6 +98,7 @@ struct ByteRange {
   ByteRange(int64_t begin, int64_t end) : begin(begin), end(end) {}
   int64_t begin = 0;
   int64_t end = 0;  // exclusive.
+  int64_t size() const { return end - begin; }
   bool operator==(const ByteRange &o) const {
     return begin == o.begin && end == o.end;
   }
@@ -105,20 +113,45 @@ inline std::ostream &operator<<(std::ostream &out, const ByteRange &range) {
 void HttpSendError(evhttp_request *req, int http_err, const std::string &prefix,
                    int posix_errno);
 
-class VirtualFile {
+class FileSlice {
+ public:
+  virtual ~FileSlice() {}
+  virtual int64_t size() const = 0;
+  virtual bool AddRange(ByteRange range, EvBuffer *buf,
+                        std::string *error_message) const = 0;
+};
+
+class VirtualFile : public FileSlice {
  public:
   virtual ~VirtualFile() {}
 
   // Return the given property of the file.
-  virtual int64_t size() const = 0;
   virtual time_t last_modified() const = 0;
   virtual std::string etag() const = 0;
   virtual std::string mime_type() const = 0;
   virtual std::string filename() const = 0;  // for logging.
+};
 
-  // Add the given range of the file to the buffer.
-  virtual bool AddRange(ByteRange range, EvBuffer *buf,
-                        std::string *error_message) const = 0;
+// A FileSlice of a pre-defined length which calls a function which fills the
+// slice on demand. The FillerFileSlice is responsible for subsetting.
+class FillerFileSlice : public FileSlice {
+ public:
+  using FillFunction =
+      std::function<bool(std::string *slice, std::string *error_message)>;
+
+  void Init(size_t size, FillFunction fn) {
+    fn_ = fn;
+    size_ = size;
+  }
+
+  int64_t size() const final { return size_; }
+
+  bool AddRange(ByteRange range, EvBuffer *buf,
+                std::string *error_message) const final;
+
+ private:
+  FillFunction fn_;
+  size_t size_;
 };
 
 // Serve an HTTP request |req| from |file|, handling byte range and

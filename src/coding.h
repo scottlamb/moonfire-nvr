@@ -144,6 +144,11 @@ inline void AppendU32(uint32_t in, std::string *out) {
   out->append(reinterpret_cast<const char *>(&net), sizeof(uint32_t));
 }
 
+inline void Append32(int32_t in, std::string *out) {
+  int32_t net = ToNetwork32(in);
+  out->append(reinterpret_cast<const char *>(&net), sizeof(int32_t));
+}
+
 }  // namespace moonfire_nvr
 
 #endif  // MOONFIRE_NVR_CODING_H

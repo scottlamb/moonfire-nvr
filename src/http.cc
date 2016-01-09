@@ -40,6 +40,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <memory>
+
 #include <event2/buffer.h>
 #include <event2/event.h>
 #include <event2/keyvalq_struct.h>
@@ -180,6 +182,26 @@ bool EvBuffer::AddFile(int fd, ev_off_t offset, ev_off_t length,
                             ", length ", length, ": ", strerror(err));
     return false;
   }
+  return true;
+}
+
+bool FillerFileSlice::AddRange(ByteRange range, EvBuffer *buf,
+                               std::string *error_message) const {
+  std::unique_ptr<std::string> s(new std::string);
+  s->reserve(size_);
+  if (!fn_(s.get(), error_message)) {
+    return false;
+  }
+  if (s->size() != size_) {
+    *error_message = StrCat("Expected filled slice to be ", size_,
+                            " bytes; got ", s->size(), " bytes.");
+    return false;
+  }
+  std::string *unowned_s = s.release();
+  buf->AddReference(unowned_s->data() + range.begin,
+                    range.size(), [](const void *, size_t, void *s) {
+                      delete reinterpret_cast<std::string *>(s);
+                    }, unowned_s);
   return true;
 }
 
