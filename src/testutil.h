@@ -46,6 +46,9 @@ std::string PrepareTempDirOrDie(const std::string &test_name);
 // Write the given file contents to the given path, or die.
 void WriteFileOrDie(const std::string &path, re2::StringPiece contents);
 
+// Read the contents of the given path, or die.
+std::string ReadFileOrDie(const std::string &path);
+
 // A scoped log sink for testing that the right log messages are sent.
 // Modelled after glog's "mock-log.h", which is not exported.
 // Use as follows:

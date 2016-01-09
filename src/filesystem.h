@@ -71,6 +71,13 @@ class File {
   // ftruncate(), returning 0 on success or errno>0 on failure.
   virtual int Truncate(off_t length) = 0;
 
+  // read(), returning 0 on success or errno>0 on failure.
+  // On success, |bytes_read| will be updated.
+  virtual int Read(void *buf, size_t count, size_t *bytes_read) = 0;
+
+  // fstat(), returning 0 on success or errno>0 on failure.
+  virtual int Stat(struct stat *buf) = 0;
+
   // Write to the file, returning 0 on success or errno>0 on failure.
   // On success, |bytes_written| will be updated.
   virtual int Write(re2::StringPiece data, size_t *bytes_written) = 0;

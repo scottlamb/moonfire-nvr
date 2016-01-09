@@ -79,6 +79,19 @@ class RealFile : public File {
     return 0;
   }
 
+  int Read(void *buf, size_t size, size_t *bytes_read) final {
+    ssize_t ret;
+    while ((ret = read(fd_, buf, size)) == -1 && errno == EINTR)
+      ;
+    if (ret < 0) {
+      return errno;
+    }
+    *bytes_read = static_cast<size_t>(ret);
+    return 0;
+  }
+
+  int Stat(struct stat *buf) final { return (fstat(fd_, buf) < 0) ? errno : 0; }
+
   int Sync() final { return (fsync(fd_) < 0) ? errno : 0; }
 
   int Truncate(off_t length) final {
@@ -86,9 +99,6 @@ class RealFile : public File {
   }
 
   int Write(re2::StringPiece data, size_t *bytes_written) final {
-    if (fd_ < 0) {
-      return EBADF;
-    }
     ssize_t ret;
     while ((ret = write(fd_, data.data(), data.size())) == -1 && errno == EINTR)
       ;

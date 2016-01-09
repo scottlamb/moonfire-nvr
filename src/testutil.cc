@@ -118,4 +118,24 @@ void WriteFileOrDie(const std::string &path, re2::StringPiece contents) {
   CHECK_EQ(ret, 0) << "close " << path << ": " << strerror(ret);
 }
 
+std::string ReadFileOrDie(const std::string &path) {
+  std::unique_ptr<File> f;
+  int ret = GetRealFilesystem()->Open(path.c_str(), O_RDONLY, &f);
+  CHECK_EQ(ret, 0) << "open " << path << ": " << strerror(ret);
+  struct stat statbuf;
+  ret = f->Stat(&statbuf);
+  CHECK_EQ(ret, 0) << "fstat " << path << ": " << strerror(ret);
+  std::string out(statbuf.st_size, '0');
+  off_t bytes_read_total = 0;
+  size_t bytes_read;
+  while (bytes_read_total < statbuf.st_size) {
+    ret = f->Read(&out[bytes_read_total], statbuf.st_size - bytes_read_total,
+                  &bytes_read);
+    CHECK_EQ(ret, 0) << "read " << path << ": " << strerror(ret);
+    CHECK_GT(bytes_read, 0);
+    bytes_read_total += bytes_read;
+  }
+  return out;
+}
+
 }  // namespace moonfire_nvr
