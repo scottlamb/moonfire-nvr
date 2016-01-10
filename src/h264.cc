@@ -48,8 +48,8 @@ const int kNalUnitPicParameterSet = 8;
 
 // Parse sequence parameter set and picture parameter set from ffmpeg's
 // "extra_data".
-bool ParseExtraData(re2::StringPiece extra_data, std::string *sps,
-                    std::string *pps, std::string *error_message) {
+bool ParseExtraData(re2::StringPiece extra_data, re2::StringPiece *sps,
+                    re2::StringPiece *pps, std::string *error_message) {
   bool ok = true;
   internal::NalUnitFunction fn = [&ok, sps, pps,
                                   error_message](re2::StringPiece nal_unit) {
@@ -57,10 +57,10 @@ bool ParseExtraData(re2::StringPiece extra_data, std::string *sps,
     uint8_t nal_type = nal_unit[0] & 0x1F;  // bottom 5 bits of first byte.
     switch (nal_type) {
       case kNalUnitSeqParameterSet:
-        *sps = nal_unit.as_string();
+        *sps = nal_unit;
         break;
       case kNalUnitPicParameterSet:
-        *pps = nal_unit.as_string();
+        *pps = nal_unit;
         break;
       default:
         *error_message =
@@ -127,8 +127,8 @@ bool DecodeH264AnnexB(re2::StringPiece data, NalUnitFunction process_nal_unit,
 bool GetH264SampleEntry(re2::StringPiece extra_data, uint16_t width,
                         uint16_t height, std::string *out,
                         std::string *error_message) {
-  std::string sps;
-  std::string pps;
+  re2::StringPiece sps;
+  re2::StringPiece pps;
   if (!ParseExtraData(extra_data, &sps, &pps, error_message)) {
     return false;
   }
@@ -137,6 +137,9 @@ bool GetH264SampleEntry(re2::StringPiece extra_data, uint16_t width,
   // Don't panic; they're verified at the end.
   uint32_t avcc_len = 19 + sps.size() + pps.size();
   uint32_t avc1_len = 86 + avcc_len;
+
+  out->clear();
+  out->reserve(avcc_len);
 
   // This is a concatenation of the following boxes/classes.
   // SampleEntry, ISO/IEC 14496-10 section 8.5.2.
