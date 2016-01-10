@@ -205,6 +205,28 @@ bool FillerFileSlice::AddRange(ByteRange range, EvBuffer *buf,
   return true;
 }
 
+bool FileSlices::AddRange(ByteRange range, EvBuffer *buf,
+                          std::string *error_message) const {
+  if (range.begin < 0 || range.begin > range.end || range.end > size_) {
+    *error_message = StrCat("Range ", range.DebugString(),
+                            " not valid for file of size ", size_);
+    return false;
+  }
+  auto it = std::upper_bound(slices_.begin(), slices_.end(), range.begin,
+                             [](int64_t begin, const SliceInfo &info) {
+                               return begin < info.range.end;
+                             });
+  for (; it != slices_.end() && range.end > it->range.begin; ++it) {
+    ByteRange mapped(
+        std::max(INT64_C(0), range.begin - it->range.begin),
+        std::min(range.end - it->range.begin, it->range.end - it->range.begin));
+    if (!it->slice->AddRange(mapped, buf, error_message)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void HttpSendError(evhttp_request *req, int http_err, const std::string &prefix,
                    int posix_err) {
   evhttp_send_error(req, http_err,

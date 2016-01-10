@@ -49,8 +49,20 @@ DECLARE_bool(alsologtostderr);
 using moonfire_nvr::internal::ParseRangeHeader;
 using moonfire_nvr::internal::RangeHeaderType;
 
+using testing::_;
+using testing::AnyNumber;
+using testing::DoAll;
+using testing::Return;
+using testing::SetArgPointee;
+
 namespace moonfire_nvr {
 namespace {
+
+class MockFileSlice : public FileSlice {
+ public:
+  MOCK_CONST_METHOD0(size, int64_t());
+  MOCK_CONST_METHOD3(AddRange, bool(ByteRange, EvBuffer *, std::string *));
+};
 
 TEST(EvBufferTest, AddFileTest) {
   std::string dir = PrepareTempDirOrDie("http");
@@ -70,6 +82,72 @@ TEST(EvBufferTest, AddFileTest) {
   EvBuffer buf2;
   ASSERT_TRUE(buf2.AddFile(in_fd, 0, 0, &error_message)) << error_message;
   EXPECT_EQ(0u, evbuffer_get_length(buf2.get()));
+}
+
+class FileSlicesTest : public testing::Test {
+ protected:
+  FileSlicesTest() {
+    EXPECT_CALL(a_, size()).Times(AnyNumber()).WillRepeatedly(Return(5));
+    EXPECT_CALL(b_, size()).Times(AnyNumber()).WillRepeatedly(Return(13));
+    EXPECT_CALL(c_, size()).Times(AnyNumber()).WillRepeatedly(Return(7));
+    EXPECT_CALL(d_, size()).Times(AnyNumber()).WillRepeatedly(Return(17));
+    EXPECT_CALL(e_, size()).Times(AnyNumber()).WillRepeatedly(Return(19));
+
+    slices_.Append(&a_);
+    slices_.Append(&b_);
+    slices_.Append(&c_);
+    slices_.Append(&d_);
+    slices_.Append(&e_);
+  }
+
+  FileSlices slices_;
+  testing::StrictMock<MockFileSlice> a_;
+  testing::StrictMock<MockFileSlice> b_;
+  testing::StrictMock<MockFileSlice> c_;
+  testing::StrictMock<MockFileSlice> d_;
+  testing::StrictMock<MockFileSlice> e_;
+};
+
+TEST_F(FileSlicesTest, Size) {
+  EXPECT_EQ(5 + 13 + 7 + 17 + 19, slices_.size());
+}
+
+TEST_F(FileSlicesTest, ExactSlice) {
+  // Exactly slice b.
+  std::string error_message;
+  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _)).WillOnce(Return(true));
+  EXPECT_TRUE(slices_.AddRange(ByteRange(5, 18), nullptr, &error_message))
+      << error_message;
+}
+
+TEST_F(FileSlicesTest, Offset) {
+  // Part of slice b, all of slice c, and part of slice d.
+  std::string error_message;
+  EXPECT_CALL(b_, AddRange(ByteRange(12, 13), _, _)).WillOnce(Return(true));
+  EXPECT_CALL(c_, AddRange(ByteRange(0, 7), _, _)).WillOnce(Return(true));
+  EXPECT_CALL(d_, AddRange(ByteRange(0, 1), _, _)).WillOnce(Return(true));
+  EXPECT_TRUE(slices_.AddRange(ByteRange(17, 26), nullptr, &error_message))
+      << error_message;
+}
+
+TEST_F(FileSlicesTest, Everything) {
+  std::string error_message;
+  EXPECT_CALL(a_, AddRange(ByteRange(0, 5), _, _)).WillOnce(Return(true));
+  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _)).WillOnce(Return(true));
+  EXPECT_CALL(c_, AddRange(ByteRange(0, 7), _, _)).WillOnce(Return(true));
+  EXPECT_CALL(d_, AddRange(ByteRange(0, 17), _, _)).WillOnce(Return(true));
+  EXPECT_CALL(e_, AddRange(ByteRange(0, 19), _, _)).WillOnce(Return(true));
+  EXPECT_TRUE(slices_.AddRange(ByteRange(0, 61), nullptr, &error_message))
+      << error_message;
+}
+
+TEST_F(FileSlicesTest, PropagateError) {
+  std::string error_message;
+  EXPECT_CALL(a_, AddRange(ByteRange(0, 5), _, _)).WillOnce(Return(true));
+  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _))
+      .WillOnce(DoAll(SetArgPointee<2>("asdf"), Return(false)));
+  EXPECT_FALSE(slices_.AddRange(ByteRange(0, 61), nullptr, &error_message));
+  EXPECT_EQ("asdf", error_message);
 }
 
 // Test the specific examples enumerated in RFC 2616 section 14.35.1.

@@ -48,6 +48,8 @@
 #include <glog/logging.h>
 #include <re2/stringpiece.h>
 
+#include "string.h"
+
 namespace moonfire_nvr {
 
 // Wrapped version of libevent's "struct evbuffer" which uses RAII and simply
@@ -102,11 +104,11 @@ struct ByteRange {
   bool operator==(const ByteRange &o) const {
     return begin == o.begin && end == o.end;
   }
+  std::string DebugString() const { return StrCat("[", begin, ", ", end, ")"); }
 };
 
 inline std::ostream &operator<<(std::ostream &out, const ByteRange &range) {
-  out << "[" << range.begin << ", " << range.end << ")";
-  return out;
+  return out << range.DebugString();
 }
 
 // Helper for sending HTTP errors based on POSIX error returns.
@@ -152,6 +154,37 @@ class FillerFileSlice : public FileSlice {
  private:
   FillFunction fn_;
   size_t size_;
+};
+
+// A slice composed of other slices.
+class FileSlices : public FileSlice {
+ public:
+  FileSlices() {}
+  FileSlices(const FileSlices &) = delete;
+  FileSlices &operator=(const FileSlices &) = delete;
+
+  // |slice| must outlive the FileSlices.
+  // |slice->size()| should not change after this call.
+  void Append(const FileSlice *slice) {
+    int64_t new_size = size_ + slice->size();
+    slices_.emplace_back(ByteRange(size_, new_size), slice);
+    size_ = new_size;
+  }
+
+  int64_t size() const final { return size_; }
+  bool AddRange(ByteRange range, EvBuffer *buf,
+                std::string *error_message) const final;
+
+ private:
+  struct SliceInfo {
+    SliceInfo(ByteRange range, const FileSlice *slice)
+        : range(range), slice(slice) {}
+    ByteRange range;
+    const FileSlice *slice = nullptr;
+  };
+  int64_t size_ = 0;
+
+  std::vector<SliceInfo> slices_;
 };
 
 // Serve an HTTP request |req| from |file|, handling byte range and
