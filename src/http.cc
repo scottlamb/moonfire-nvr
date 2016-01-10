@@ -58,41 +58,31 @@ class RealFile : public VirtualFile {
  public:
   RealFile(re2::StringPiece mime_type, re2::StringPiece filename,
            const struct stat &statbuf)
-      : mime_type_(mime_type.as_string()),
-        filename_(filename.as_string()),
-        stat_(statbuf) {}
+      : mime_type_(mime_type.as_string()), stat_(statbuf) {
+    slice_.Init(filename, ByteRange(0, statbuf.st_size));
+  }
+
   ~RealFile() final {}
 
   int64_t size() const final { return stat_.st_size; }
   time_t last_modified() const final { return stat_.st_mtime; }
+  std::string mime_type() const final { return mime_type_; }
+  std::string filename() const final { return slice_.filename(); }
+
   std::string etag() const final {
     return StrCat("\"", stat_.st_ino, ":", stat_.st_size, ":",
                   stat_.st_mtim.tv_sec, ":", stat_.st_mtim.tv_nsec, "\"");
   }
-  std::string mime_type() const final { return mime_type_; }
-  std::string filename() const final { return filename_; }
 
   // Add the given range of the file to the buffer.
   bool AddRange(ByteRange range, EvBuffer *buf,
                 std::string *error_message) const final {
-    int fd = open(filename_.c_str(), O_RDONLY);
-    if (fd < 0) {
-      int err = errno;
-      *error_message = StrCat("open: ", strerror(err));
-      return false;
-    }
-    if (!buf->AddFile(fd, range.begin, range.end - range.begin,
-                      error_message)) {
-      close(fd);
-      return false;
-    }
-    // |buf| now owns |fd|.
-    return true;
+    return slice_.AddRange(range, buf, error_message);
   }
 
  private:
+  RealFileSlice slice_;
   const std::string mime_type_;
-  const std::string filename_;
   const struct stat stat_;
 };
 
@@ -202,6 +192,28 @@ bool EvBuffer::AddFile(int fd, ev_off_t offset, ev_off_t length,
   return true;
 }
 
+void RealFileSlice::Init(re2::StringPiece filename, ByteRange range) {
+  filename_ = filename.as_string();
+  range_ = range;
+}
+
+bool RealFileSlice::AddRange(ByteRange range, EvBuffer *buf,
+                             std::string *error_message) const {
+  int fd = open(filename_.c_str(), O_RDONLY);
+  if (fd < 0) {
+    int err = errno;
+    *error_message = StrCat("open: ", strerror(err));
+    return false;
+  }
+  if (!buf->AddFile(fd, range_.begin + range.begin, range.size(),
+                    error_message)) {
+    close(fd);
+    return false;
+  }
+  // |buf| now owns |fd|.
+  return true;
+}
+
 bool FillerFileSlice::AddRange(ByteRange range, EvBuffer *buf,
                                std::string *error_message) const {
   std::unique_ptr<std::string> s(new std::string);
@@ -219,6 +231,19 @@ bool FillerFileSlice::AddRange(ByteRange range, EvBuffer *buf,
                     range.size(), [](const void *, size_t, void *s) {
                       delete reinterpret_cast<std::string *>(s);
                     }, unowned_s);
+  return true;
+}
+
+bool StaticStringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
+                                      std::string *error_message) const {
+  buf->AddReference(piece_.data() + range.begin, range.size(), nullptr,
+                    nullptr);
+  return true;
+}
+
+bool CopyingStringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
+                                       std::string *error_message) const {
+  buf->Add(re2::StringPiece(piece_.data() + range.begin, range.size()));
   return true;
 }
 

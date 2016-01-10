@@ -134,6 +134,22 @@ class VirtualFile : public FileSlice {
   virtual std::string filename() const = 0;  // for logging.
 };
 
+class RealFileSlice : public FileSlice {
+ public:
+  void Init(re2::StringPiece filename, ByteRange range);
+
+  const std::string filename() const { return filename_; }
+
+  int64_t size() const final { return range_.size(); }
+
+  bool AddRange(ByteRange range, EvBuffer *buf,
+                std::string *error_message) const final;
+
+ private:
+  std::string filename_;
+  ByteRange range_;
+};
+
 // A FileSlice of a pre-defined length which calls a function which fills the
 // slice on demand. The FillerFileSlice is responsible for subsetting.
 class FillerFileSlice : public FileSlice {
@@ -154,6 +170,32 @@ class FillerFileSlice : public FileSlice {
  private:
   FillFunction fn_;
   size_t size_;
+};
+
+// A FileSlice backed by in-memory data which lives forever (static data).
+class StaticStringPieceSlice : public FileSlice {
+ public:
+  explicit StaticStringPieceSlice(re2::StringPiece piece) : piece_(piece) {}
+
+  int64_t size() const final { return piece_.size(); }
+  bool AddRange(ByteRange range, EvBuffer *buf,
+                std::string *error_message) const final;
+
+ private:
+  re2::StringPiece piece_;
+};
+
+// A FileSlice backed by in-memory data which should be copied.
+class CopyingStringPieceSlice : public FileSlice {
+ public:
+  explicit CopyingStringPieceSlice(re2::StringPiece piece) : piece_(piece) {}
+
+  int64_t size() const final { return piece_.size(); }
+  bool AddRange(ByteRange range, EvBuffer *buf,
+                std::string *error_message) const final;
+
+ private:
+  re2::StringPiece piece_;
 };
 
 // A slice composed of other slices.
