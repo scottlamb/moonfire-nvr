@@ -176,6 +176,23 @@ bool EvBuffer::AddFile(int fd, ev_off_t offset, ev_off_t length,
     return true;
   }
 
+  if (evbuffer_get_length(buf_) > 0) {
+    // Work around https://github.com/libevent/libevent/issues/306 by using a
+    // fresh buffer for evbuffer_add_file.
+    EvBuffer fresh_buffer;
+    if (!fresh_buffer.AddFile(fd, offset, length, error_message)) {
+      return false;
+    }
+
+    // Crash if evbuffer_add_buffer fails, because the ownership of |fd| has
+    // already been transferred, and it's too confusing to support some
+    // failures in which the caller still owns |fd| and some in which it does
+    // not.
+    CHECK_EQ(0, evbuffer_add_buffer(buf_, fresh_buffer.buf_))
+        << "evbuffer_add_buffer failed: " << strerror(errno);
+    return true;
+  }
+
   if (evbuffer_add_file(buf_, fd, offset, length) != 0) {
     int err = errno;
     *error_message = StrCat("evbuffer_add_file failed with offset ", offset,

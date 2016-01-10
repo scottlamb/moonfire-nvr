@@ -76,12 +76,25 @@ TEST(EvBufferTest, AddFileTest) {
   // Ensure adding the whole file succeeds.
   EvBuffer buf1;
   ASSERT_TRUE(buf1.AddFile(in_fd, 0, 3, &error_message)) << error_message;
+  in_fd = -1;
   EXPECT_EQ(3u, evbuffer_get_length(buf1.get()));
 
   // Ensure adding an empty region succeeds.
   EvBuffer buf2;
   ASSERT_TRUE(buf2.AddFile(in_fd, 0, 0, &error_message)) << error_message;
   EXPECT_EQ(0u, evbuffer_get_length(buf2.get()));
+
+  // Ensure adding part of a file after another string succeeds.
+  in_fd = open(foo_filename.c_str(), O_RDONLY);
+  EvBuffer buf3;
+  buf3.Add("1234");
+  ASSERT_TRUE(buf3.AddFile(in_fd, 1, 2, &error_message)) << error_message;
+  auto size3 = evbuffer_get_length(buf3.get());
+  EXPECT_EQ(6u, size3);
+  std::string buf3_contents = std::string(
+      reinterpret_cast<const char *>(evbuffer_pullup(buf3.get(), size3)),
+      size3);
+  EXPECT_EQ("1234oo", buf3_contents);
 }
 
 class FileSlicesTest : public testing::Test {
