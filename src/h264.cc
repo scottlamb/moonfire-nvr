@@ -139,7 +139,7 @@ bool GetH264SampleEntry(re2::StringPiece extra_data, uint16_t width,
   uint32_t avc1_len = 86 + avcc_len;
 
   out->clear();
-  out->reserve(avcc_len);
+  out->reserve(avc1_len);
 
   // This is a concatenation of the following boxes/classes.
   // SampleEntry, ISO/IEC 14496-10 section 8.5.2.
