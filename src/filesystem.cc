@@ -79,6 +79,20 @@ class RealFile : public File {
     return 0;
   }
 
+  int Open(const char *path, int flags, std::unique_ptr<File> *f) final {
+    return Open(path, flags, 0, f);
+  }
+
+  int Open(const char *path, int flags, mode_t mode,
+           std::unique_ptr<File> *f) final {
+    int ret = openat(fd_, path, flags, mode);
+    if (ret < 0) {
+      return errno;
+    }
+    f->reset(new RealFile(ret));
+    return 0;
+  }
+
   int Read(void *buf, size_t size, size_t *bytes_read) final {
     ssize_t ret;
     while ((ret = read(fd_, buf, size)) == -1 && errno == EINTR)

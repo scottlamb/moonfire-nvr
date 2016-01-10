@@ -36,10 +36,14 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include <glog/logging.h>
 #include <re2/stringpiece.h>
+
+#include "crypto.h"
+#include "filesystem.h"
 
 namespace moonfire_nvr {
 
@@ -123,6 +127,44 @@ class SampleIndexIterator {
   int32_t bytes_nonkey_;
   bool is_key_;
   bool done_;
+};
+
+// Writes a sample file. Can be used repeatedly. Thread-compatible.
+class SampleFileWriter {
+ public:
+  // |parent_dir| must outlive the writer.
+  SampleFileWriter(File *parent_dir);
+  SampleFileWriter(const SampleFileWriter &) = delete;
+  void operator=(const SampleFileWriter &) = delete;
+
+  // PRE: !is_open().
+  bool Open(const char *filename, std::string *error_message);
+
+  // Writes a single packet, returning success.
+  // On failure, the stream should be closed. If Close() returns true, the
+  // file contains the results of all packets up to (but not including) this
+  // one.
+  //
+  // PRE: is_open().
+  bool Write(re2::StringPiece pkt, std::string *error_message);
+
+  // fsync() and close() the stream.
+  // Note the caller is still responsible for fsync()ing the parent stream,
+  // so that operations can be batched.
+  // On success, |sha1| will be filled with the raw SHA-1 hash of the file.
+  // On failure, the file should be considered corrupt and discarded.
+  //
+  // PRE: is_open().
+  bool Close(std::string *sha1, std::string *error_message);
+
+  bool is_open() const { return file_ != nullptr; }
+
+ private:
+  File *parent_dir_;
+  std::unique_ptr<File> file_;
+  std::unique_ptr<Digest> sha1_;
+  int64_t pos_ = 0;
+  bool corrupt_ = false;
 };
 
 }  // namespace moonfire_nvr

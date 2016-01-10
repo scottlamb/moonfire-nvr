@@ -30,6 +30,10 @@
 //
 // recording-test.cc: tests of the recording.h interface.
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <gflags/gflags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -39,7 +43,11 @@
 
 DECLARE_bool(alsologtostderr);
 
+using testing::_;
 using testing::HasSubstr;
+using testing::DoAll;
+using testing::Return;
+using testing::SetArgPointee;
 
 namespace moonfire_nvr {
 namespace {
@@ -117,6 +125,123 @@ TEST(SampleIndexTest, IteratorErrors) {
   it = SampleIndexIterator(non_positive_bytes);
   EXPECT_TRUE(it.has_error());
   EXPECT_THAT(it.error(), HasSubstr("non-positive bytes"));
+}
+
+TEST(SampleFileWriterTest, Simple) {
+  testing::StrictMock<MockFile> parent;
+  auto *f = new testing::StrictMock<MockFile>;
+
+  re2::StringPiece write_1("write 1");
+  re2::StringPiece write_2("write 2");
+
+  EXPECT_CALL(parent, OpenRaw("foo", O_WRONLY | O_EXCL | O_CREAT, 0600, _))
+      .WillOnce(DoAll(SetArgPointee<3>(f), Return(0)));
+  EXPECT_CALL(*f, Write(write_1, _))
+      .WillOnce(DoAll(SetArgPointee<1>(7), Return(0)));
+  EXPECT_CALL(*f, Write(write_2, _))
+      .WillOnce(DoAll(SetArgPointee<1>(7), Return(0)));
+  EXPECT_CALL(*f, Sync()).WillOnce(Return(0));
+  EXPECT_CALL(*f, Close()).WillOnce(Return(0));
+
+  SampleFileWriter writer(&parent);
+  std::string error_message;
+  std::string sha1;
+  ASSERT_TRUE(writer.Open("foo", &error_message)) << error_message;
+  EXPECT_TRUE(writer.Write(write_1, &error_message)) << error_message;
+  EXPECT_TRUE(writer.Write(write_2, &error_message)) << error_message;
+  EXPECT_TRUE(writer.Close(&sha1, &error_message)) << error_message;
+  EXPECT_EQ("6b c3 73 25 b3 6f b5 fd 20 5e 57 28 44 29 e7 57 64 33 86 18",
+            ToHex(sha1));
+}
+
+TEST(SampleFileWriterTest, PartialWriteIsRetried) {
+  testing::StrictMock<MockFile> parent;
+  auto *f = new testing::StrictMock<MockFile>;
+
+  re2::StringPiece write_1("write 1");
+  re2::StringPiece write_2("write 2");
+  re2::StringPiece write_2b(write_2);
+  write_2b.remove_prefix(3);
+
+  EXPECT_CALL(parent, OpenRaw("foo", O_WRONLY | O_EXCL | O_CREAT, 0600, _))
+      .WillOnce(DoAll(SetArgPointee<3>(f), Return(0)));
+  EXPECT_CALL(*f, Write(write_1, _))
+      .WillOnce(DoAll(SetArgPointee<1>(7), Return(0)));
+  EXPECT_CALL(*f, Write(write_2, _))
+      .WillOnce(DoAll(SetArgPointee<1>(3), Return(0)));
+  EXPECT_CALL(*f, Write(write_2b, _))
+      .WillOnce(DoAll(SetArgPointee<1>(4), Return(0)));
+  EXPECT_CALL(*f, Sync()).WillOnce(Return(0));
+  EXPECT_CALL(*f, Close()).WillOnce(Return(0));
+
+  SampleFileWriter writer(&parent);
+  std::string error_message;
+  std::string sha1;
+  ASSERT_TRUE(writer.Open("foo", &error_message)) << error_message;
+  EXPECT_TRUE(writer.Write(write_1, &error_message)) << error_message;
+  EXPECT_TRUE(writer.Write(write_2, &error_message)) << error_message;
+  EXPECT_TRUE(writer.Close(&sha1, &error_message)) << error_message;
+  EXPECT_EQ("6b c3 73 25 b3 6f b5 fd 20 5e 57 28 44 29 e7 57 64 33 86 18",
+            ToHex(sha1));
+}
+
+TEST(SampleFileWriterTest, PartialWriteIsTruncated) {
+  testing::StrictMock<MockFile> parent;
+  auto *f = new testing::StrictMock<MockFile>;
+
+  re2::StringPiece write_1("write 1");
+  re2::StringPiece write_2("write 2");
+  re2::StringPiece write_2b(write_2);
+  write_2b.remove_prefix(3);
+
+  EXPECT_CALL(parent, OpenRaw("foo", O_WRONLY | O_EXCL | O_CREAT, 0600, _))
+      .WillOnce(DoAll(SetArgPointee<3>(f), Return(0)));
+  EXPECT_CALL(*f, Write(write_1, _))
+      .WillOnce(DoAll(SetArgPointee<1>(7), Return(0)));
+  EXPECT_CALL(*f, Write(write_2, _))
+      .WillOnce(DoAll(SetArgPointee<1>(3), Return(0)));
+  EXPECT_CALL(*f, Write(write_2b, _)).WillOnce(Return(ENOSPC));
+  EXPECT_CALL(*f, Truncate(7)).WillOnce(Return(0));
+  EXPECT_CALL(*f, Sync()).WillOnce(Return(0));
+  EXPECT_CALL(*f, Close()).WillOnce(Return(0));
+
+  SampleFileWriter writer(&parent);
+  std::string error_message;
+  std::string sha1;
+  ASSERT_TRUE(writer.Open("foo", &error_message)) << error_message;
+  EXPECT_TRUE(writer.Write(write_1, &error_message)) << error_message;
+  EXPECT_FALSE(writer.Write(write_2, &error_message)) << error_message;
+  EXPECT_TRUE(writer.Close(&sha1, &error_message)) << error_message;
+  EXPECT_EQ("b1 cc ee 33 9b 93 55 87 c0 99 97 a9 ec 8b b2 37 4e 02 b5 d0",
+            ToHex(sha1));
+}
+
+TEST(SampleFileWriterTest, PartialWriteTruncateFailureCausesCloseToFail) {
+  testing::StrictMock<MockFile> parent;
+  auto *f = new testing::StrictMock<MockFile>;
+
+  re2::StringPiece write_1("write 1");
+  re2::StringPiece write_2("write 2");
+  re2::StringPiece write_2b(write_2);
+  write_2b.remove_prefix(3);
+
+  EXPECT_CALL(parent, OpenRaw("foo", O_WRONLY | O_EXCL | O_CREAT, 0600, _))
+      .WillOnce(DoAll(SetArgPointee<3>(f), Return(0)));
+  EXPECT_CALL(*f, Write(write_1, _))
+      .WillOnce(DoAll(SetArgPointee<1>(7), Return(0)));
+  EXPECT_CALL(*f, Write(write_2, _))
+      .WillOnce(DoAll(SetArgPointee<1>(3), Return(0)));
+  EXPECT_CALL(*f, Write(write_2b, _)).WillOnce(Return(EIO));
+  EXPECT_CALL(*f, Truncate(7)).WillOnce(Return(EIO));
+  EXPECT_CALL(*f, Close()).WillOnce(Return(0));
+
+  SampleFileWriter writer(&parent);
+  std::string error_message;
+  std::string sha1;
+  ASSERT_TRUE(writer.Open("foo", &error_message)) << error_message;
+  EXPECT_TRUE(writer.Write(write_1, &error_message)) << error_message;
+  EXPECT_FALSE(writer.Write(write_2, &error_message)) << error_message;
+  EXPECT_FALSE(writer.Close(&sha1, &error_message)) << error_message;
 }
 
 }  // namespace

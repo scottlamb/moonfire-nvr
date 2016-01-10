@@ -32,6 +32,10 @@
 
 #include "recording.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include "coding.h"
 #include "string.h"
 
@@ -115,6 +119,84 @@ void SampleIndexIterator::Clear() {
   bytes_nonkey_ = 0;
   is_key_ = false;
   done_ = true;
+}
+
+SampleFileWriter::SampleFileWriter(File *parent_dir)
+    : parent_dir_(parent_dir), sha1_(Digest::SHA1()) {}
+
+bool SampleFileWriter::Open(const char *filename, std::string *error_message) {
+  if (is_open()) {
+    *error_message = "already open!";
+    return false;
+  }
+  int ret =
+      parent_dir_->Open(filename, O_WRONLY | O_CREAT | O_EXCL, 0600, &file_);
+  if (ret != 0) {
+    *error_message = StrCat("open ", filename, ": ", strerror(ret));
+    return false;
+  }
+  return true;
+}
+
+bool SampleFileWriter::Write(re2::StringPiece pkt, std::string *error_message) {
+  if (!is_open()) {
+    *error_message = "not open!";
+    return false;
+  }
+  auto old_pos = pos_;
+  re2::StringPiece remaining(pkt);
+  while (!remaining.empty()) {
+    size_t written;
+    int write_ret = file_->Write(remaining, &written);
+    if (write_ret != 0) {
+      if (pos_ > old_pos) {
+        int truncate_ret = file_->Truncate(old_pos);
+        if (truncate_ret != 0) {
+          *error_message =
+              StrCat("write failed with: ", strerror(write_ret),
+                     " and ftruncate failed with: ", strerror(truncate_ret));
+          corrupt_ = true;
+          return false;
+        }
+      }
+      *error_message = StrCat("write: ", strerror(write_ret));
+      return false;
+    }
+    remaining.remove_prefix(written);
+    pos_ += written;
+  }
+  sha1_->Update(pkt);
+  return true;
+}
+
+bool SampleFileWriter::Close(std::string *sha1, std::string *error_message) {
+  if (!is_open()) {
+    *error_message = "not open!";
+    return false;
+  }
+
+  if (corrupt_) {
+    *error_message = "File already corrupted.";
+  } else {
+    int ret = file_->Sync();
+    if (ret != 0) {
+      *error_message = StrCat("fsync failed with: ", strerror(ret));
+      corrupt_ = true;
+    }
+  }
+
+  int ret = file_->Close();
+  if (ret != 0 && !corrupt_) {
+    corrupt_ = true;
+    *error_message = StrCat("close failed with: ", strerror(ret));
+  }
+
+  bool ok = !corrupt_;
+  file_.reset();
+  *sha1 = sha1_->Finalize();
+  pos_ = 0;
+  corrupt_ = false;
+  return ok;
 }
 
 }  // namespace moonfire_nvr
