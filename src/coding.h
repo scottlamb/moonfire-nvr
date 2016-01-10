@@ -139,6 +139,11 @@ inline void AppendU16(uint16_t in, std::string *out) {
   out->append(reinterpret_cast<const char *>(&net), sizeof(uint16_t));
 }
 
+inline void Append16(int16_t in, std::string *out) {
+  int16_t net = ToNetwork16(in);
+  out->append(reinterpret_cast<const char *>(&net), sizeof(int16_t));
+}
+
 inline void AppendU32(uint32_t in, std::string *out) {
   uint32_t net = ToNetworkU32(in);
   out->append(reinterpret_cast<const char *>(&net), sizeof(uint32_t));

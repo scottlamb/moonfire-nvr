@@ -66,23 +66,26 @@ TEST(H264Test, DecodeOnly) {
 }
 
 TEST(H264Test, SampleData) {
-  const uint8_t kTestOutput[] = {0x01, 0x4d, 0x00, 0x1f, 0xff, 0xe1, 0x00, 0x17,
-                                 0x67, 0x4d, 0x00, 0x1f, 0x9a, 0x66, 0x02, 0x80,
-                                 0x2d, 0xff, 0x35, 0x01, 0x01, 0x01, 0x40, 0x00,
-                                 0x00, 0xfa, 0x00, 0x00, 0x1d, 0x4c, 0x01, 0x01,
-                                 0x00, 0x04, 0x68, 0xee, 0x3c, 0x80};
+  const char kTestOutput[] =
+      "00 00 00 84 61 76 63 31 00 00 00 00 00 00 00 01 "
+      "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
+      "05 00 02 d0 00 48 00 00 00 48 00 00 00 00 00 00 "
+      "00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
+      "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
+      "00 00 00 18 ff ff 00 00 00 2e 61 76 63 43 01 4d "
+      "00 1f ff e1 00 17 67 4d 00 1f 9a 66 02 80 2d ff "
+      "35 01 01 01 40 00 00 fa 00 00 1d 4c 01 01 00 04 "
+      "68 ee 3c 80";
 
   re2::StringPiece test_input(reinterpret_cast<const char *>(kTestInput),
                               sizeof(kTestInput));
-  re2::StringPiece test_output(reinterpret_cast<const char *>(kTestOutput),
-                               sizeof(kTestOutput));
-  std::string avc_decoder_config;
+  std::string sample_entry;
   std::string error_message;
   ASSERT_TRUE(
-      ParseH264ExtraData(test_input, &avc_decoder_config, &error_message))
+      GetH264SampleEntry(test_input, 1280, 720, &sample_entry, &error_message))
       << error_message;
 
-  EXPECT_EQ(ToHex(test_output), ToHex(avc_decoder_config));
+  EXPECT_EQ(kTestOutput, ToHex(sample_entry));
 }
 
 }  // namespace

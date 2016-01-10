@@ -59,7 +59,7 @@ using NalUnitFunction =
     std::function<IterationControl(re2::StringPiece nal_unit)>;
 
 // Decode a H.264 Annex B byte stream into NAL units.
-// For ParseH264ExtraData; exposed for testing.
+// For GetH264SampleEntry; exposed for testing.
 // Calls |process_nal_unit| for each NAL unit in the byte stream.
 //
 // Note: this won't spot all invalid byte streams. For example, several 0x00s
@@ -70,12 +70,11 @@ bool DecodeH264AnnexB(re2::StringPiece data, NalUnitFunction process_nal_unit,
 
 }  // namespace
 
-// Parse H.264 "extra data" (as supplied by ffmpeg, an Annex B byte stream
-// containing SPS and PPS NAL units). On success, fills |avc_decoder_config|
-// with an AVCDecoderConfigurationRecord as in ISO/IEC 14496-15 section
-// 5.2.4.1.
-bool ParseH264ExtraData(re2::StringPiece extra_data,
-                        std::string *avc_decoder_config,
+// Gets a H.264 sample entry (AVCSampleEntry, which extends
+// VisualSampleEntry), given the "extra_data", width, and height supplied by
+// ffmpeg.
+bool GetH264SampleEntry(re2::StringPiece extra_data, uint16_t width,
+                        uint16_t height, std::string *out,
                         std::string *error_message);
 
 }  // namespace moonfire_nvr
