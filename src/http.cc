@@ -67,7 +67,6 @@ class RealFile : public VirtualFile {
   int64_t size() const final { return stat_.st_size; }
   time_t last_modified() const final { return stat_.st_mtime; }
   std::string mime_type() const final { return mime_type_; }
-  std::string filename() const final { return slice_.filename(); }
 
   std::string etag() const final {
     return StrCat("\"", stat_.st_ino, ":", stat_.st_size, ":",
@@ -317,8 +316,7 @@ void HttpServe(const VirtualFile &file, evhttp_request *req) {
       evhttp_add_header(out_hdrs, "Content-Range", range_hdr.c_str());
       http_status = 416;
       http_status_str = "Range Not Satisfiable";
-      LOG(INFO) << "Replying to non-satisfiable range request for "
-                << file.filename() << ": " << range_hdr;
+      LOG(INFO) << "Replying to non-satisfiable range request: " << range_hdr;
       break;
     }
 
@@ -328,27 +326,26 @@ void HttpServe(const VirtualFile &file, evhttp_request *req) {
         std::string range_hdr = StrCat("bytes ", ranges[0].begin, "-",
                                        ranges[0].end - 1, "/", file.size());
         if (!file.AddRange(ranges[0], &buf, &error_message)) {
-          LOG(ERROR) << "Unable to serve " << file.filename() << " "
-                     << ranges[0] << ": " << error_message;
+          LOG(ERROR) << "Unable to serve range " << ranges[0] << ": "
+                     << error_message;
           return evhttp_send_error(req, HTTP_INTERNAL,
                                    EscapeHtml(error_message).c_str());
         }
         evhttp_add_header(out_hdrs, "Content-Range", range_hdr.c_str());
         http_status = 206;
         http_status_str = "Partial Content";
-        LOG(INFO) << "Replying to range request for " << file.filename();
+        LOG(INFO) << "Replying to range request";
         break;
       }
     // FALLTHROUGH
 
     case internal::RangeHeaderType::kAbsentOrInvalid:
       if (!file.AddRange(ByteRange(0, file.size()), &buf, &error_message)) {
-        LOG(ERROR) << "Unable to serve " << file.filename() << ": "
-                   << error_message;
+        LOG(ERROR) << "Unable to serve file: " << error_message;
         return evhttp_send_error(req, HTTP_INTERNAL,
                                  EscapeHtml(error_message).c_str());
       }
-      LOG(INFO) << "Replying to whole-file request for " << file.filename();
+      LOG(INFO) << "Replying to whole-file request";
       http_status = HTTP_OK;
       http_status_str = "OK";
   }

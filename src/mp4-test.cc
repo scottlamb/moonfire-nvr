@@ -30,13 +30,20 @@
 //
 // mp4_test.cc: tests of the mp4.h interface.
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <gflags/gflags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "ffmpeg.h"
+#include "h264.h"
 #include "http.h"
 #include "mp4.h"
 #include "string.h"
+#include "testutil.h"
 
 DECLARE_bool(alsologtostderr);
 
@@ -144,6 +151,132 @@ TEST(Mp4SampleTablePiecesTest, Stsz) {
   EXPECT_EQ(3, pieces.stsz_entry_count());
   const char kExpectedEntries[] = "00 00 00 04 00 00 00 06 00 00 00 08";
   EXPECT_EQ(kExpectedEntries, ToHex(pieces.stsz_entries()));
+}
+
+class IntegrationTest : public testing::Test {
+ protected:
+  IntegrationTest() {
+    tmpdir_path_ = PrepareTempDirOrDie("mp4-integration-test");
+    int ret =
+        GetRealFilesystem()->Open(tmpdir_path_.c_str(), O_RDONLY, &tmpdir_);
+    CHECK_EQ(0, ret) << strerror(ret);
+  }
+
+  void CopyMp4ToSingleRecording() {
+    std::string error_message;
+    SampleIndexEncoder index;
+    SampleFileWriter writer(tmpdir_.get());
+    recording_.sample_file_path = StrCat(tmpdir_path_, "/clip.sample");
+    if (!writer.Open("clip.sample", &error_message)) {
+      ADD_FAILURE() << "open clip.sample: " << error_message;
+      return;
+    }
+    auto in = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
+                                             &error_message);
+    if (in == nullptr) {
+      ADD_FAILURE() << "open clip.mp4" << error_message;
+      return;
+    }
+
+    video_sample_entry_.width = in->stream()->codec->width;
+    video_sample_entry_.height = in->stream()->codec->height;
+    if (!GetH264SampleEntry(GetExtradata(in.get()), in->stream()->codec->width,
+                            in->stream()->codec->height,
+                            &video_sample_entry_.data, &error_message)) {
+      ADD_FAILURE() << "GetH264SampleEntry: " << error_message;
+      return;
+    }
+
+    while (true) {
+      VideoPacket pkt;
+      if (!in->GetNext(&pkt, &error_message)) {
+        if (!error_message.empty()) {
+          ADD_FAILURE() << "GetNext: " << error_message;
+          return;
+        }
+        break;
+      }
+      if (!writer.Write(GetData(pkt), &error_message)) {
+        ADD_FAILURE() << "Write: " << error_message;
+        return;
+      }
+      index.AddSample(pkt.pkt()->duration, pkt.pkt()->size, pkt.is_key());
+    }
+
+    if (!writer.Close(&recording_.sample_file_sha1, &error_message)) {
+      ADD_FAILURE() << "Close: " << error_message;
+    }
+    recording_.video_index = index.data().as_string();
+  }
+
+  void CopySingleRecordingToNewMp4() {
+    Mp4FileBuilder builder;
+    builder.SetSampleEntry(video_sample_entry_);
+    builder.Append(Recording(recording_), 0,
+                   std::numeric_limits<int32_t>::max());
+    std::string error_message;
+    auto mp4 = builder.Build(&error_message);
+    ASSERT_TRUE(mp4 != nullptr) << error_message;
+    EvBuffer buf;
+    ASSERT_TRUE(mp4->AddRange(ByteRange(0, mp4->size()), &buf, &error_message))
+        << error_message;
+    WriteFileOrDie(StrCat(tmpdir_path_, "/clip.new.mp4"), &buf);
+  }
+
+  void CompareMp4s() {
+    std::string error_message;
+    auto original = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
+                                                   &error_message);
+    ASSERT_TRUE(original != nullptr) << error_message;
+    auto copied = GetRealVideoSource()->OpenFile(
+        StrCat(tmpdir_path_, "/clip.new.mp4"), &error_message);
+    ASSERT_TRUE(copied != nullptr) << error_message;
+
+    EXPECT_EQ(GetExtradata(original.get()), GetExtradata(copied.get()));
+    EXPECT_EQ(original->stream()->codec->width, copied->stream()->codec->width);
+    EXPECT_EQ(original->stream()->codec->height,
+              copied->stream()->codec->height);
+
+    while (true) {
+      VideoPacket original_pkt;
+      VideoPacket copied_pkt;
+
+      bool original_has_next = original->GetNext(&original_pkt, &error_message);
+      ASSERT_TRUE(original_has_next || error_message.empty()) << error_message;
+      bool copied_has_next = copied->GetNext(&copied_pkt, &error_message);
+      ASSERT_TRUE(copied_has_next || error_message.empty()) << error_message;
+      if (!original_has_next && !copied_has_next) {
+        break;
+      }
+      ASSERT_TRUE(original_has_next);
+      ASSERT_TRUE(copied_has_next);
+      EXPECT_EQ(original_pkt.pkt()->pts, copied_pkt.pkt()->pts);
+      EXPECT_EQ(original_pkt.pkt()->duration, copied_pkt.pkt()->duration);
+      EXPECT_EQ(GetData(original_pkt), GetData(copied_pkt));
+    }
+  }
+
+  re2::StringPiece GetExtradata(InputVideoPacketStream *stream) {
+    return re2::StringPiece(
+        reinterpret_cast<const char *>(stream->stream()->codec->extradata),
+        stream->stream()->codec->extradata_size);
+  }
+
+  re2::StringPiece GetData(const VideoPacket &pkt) {
+    return re2::StringPiece(reinterpret_cast<const char *>(pkt.pkt()->data),
+                            pkt.pkt()->size);
+  }
+
+  std::string tmpdir_path_;
+  std::unique_ptr<File> tmpdir_;
+  Recording recording_;
+  VideoSampleEntry video_sample_entry_;
+};
+
+TEST_F(IntegrationTest, RoundTrip) {
+  CopyMp4ToSingleRecording();
+  CopySingleRecordingToNewMp4();
+  CompareMp4s();
 }
 
 }  // namespace

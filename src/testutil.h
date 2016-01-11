@@ -37,6 +37,8 @@
 #include <gmock/gmock.h>
 #include <re2/stringpiece.h>
 
+#include "http.h"
+
 namespace moonfire_nvr {
 
 // Create or empty the given test directory, or die.
@@ -45,6 +47,7 @@ std::string PrepareTempDirOrDie(const std::string &test_name);
 
 // Write the given file contents to the given path, or die.
 void WriteFileOrDie(const std::string &path, re2::StringPiece contents);
+void WriteFileOrDie(const std::string &path, EvBuffer *buf);
 
 // Read the contents of the given path, or die.
 std::string ReadFileOrDie(const std::string &path);

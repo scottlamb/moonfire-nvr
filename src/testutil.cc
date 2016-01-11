@@ -39,6 +39,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <event2/buffer.h>
 #include <glog/logging.h>
 
 #include "filesystem.h"
@@ -116,6 +117,16 @@ void WriteFileOrDie(const std::string &path, re2::StringPiece contents) {
   }
   ret = f->Close();
   CHECK_EQ(ret, 0) << "close " << path << ": " << strerror(ret);
+}
+
+void WriteFileOrDie(const std::string &path, EvBuffer *buf) {
+  int fd = open(path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);
+  PCHECK(fd >= 0) << "open: " << path;
+  size_t buf_len = evbuffer_get_length(buf->get());
+  int written = evbuffer_write(buf->get(), fd);
+  PCHECK(written >= 0 && buf_len == static_cast<size_t>(written))
+      << "buf_len: " << buf_len << ", written: " << written;
+  PCHECK(close(fd) == 0) << "close";
 }
 
 std::string ReadFileOrDie(const std::string &path) {

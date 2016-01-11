@@ -47,6 +47,8 @@
 
 namespace moonfire_nvr {
 
+constexpr uint32_t kTimeUnitsPerSecond = 90000;
+
 // Encodes a sample index.
 class SampleIndexEncoder {
  public:
@@ -165,6 +167,26 @@ class SampleFileWriter {
   std::unique_ptr<Digest> sha1_;
   int64_t pos_ = 0;
   bool corrupt_ = false;
+};
+
+struct VideoSampleEntry {
+  std::string sha1;
+  std::string data;
+  uint16_t width = 0;
+  uint16_t height = 0;
+};
+
+// Various fields from the "recording" table which are useful when viewing
+// recordings.
+struct Recording {
+  int64_t start_time_90k = -1;
+  int64_t end_time_90k = -1;
+  int64_t sample_file_bytes = -1;
+  std::string sample_file_path;
+  std::string sample_file_uuid;
+  std::string sample_file_sha1;
+  std::string video_sample_entry_sha1;
+  std::string video_index;
 };
 
 }  // namespace moonfire_nvr

@@ -36,6 +36,9 @@
 #ifndef MOONFIRE_NVR_MP4_H
 #define MOONFIRE_NVR_MP4_H
 
+#include <memory>
+#include <vector>
+
 #include "recording.h"
 #include "http.h"
 
@@ -118,7 +121,51 @@ class Mp4SampleTablePieces {
   int32_t key_frames_ = 0;
 };
 
+struct Mp4FileSegment {
+  Recording recording;
+  Mp4SampleTablePieces pieces;
+  RealFileSlice sample_file_slice;
+  int32_t rel_start_90k = 0;
+  int32_t rel_end_90k = std::numeric_limits<int32_t>::max();
+};
+
 }  // namespace internal
+
+// Builder for a virtual .mp4 file.
+class Mp4FileBuilder {
+ public:
+  // Append part or all of a recording.
+  // Note that |recording.video_sample_entry_sha1| must be added via
+  // AddSampleEntry.
+  Mp4FileBuilder &Append(Recording &&recording, int32_t rel_start_300ths,
+                         int32_t rel_end_300ths);
+
+  // TODO: support multiple sample entries?
+  Mp4FileBuilder &SetSampleEntry(const VideoSampleEntry &entry);
+
+  // Set if a subtitle track should be added with timestamps.
+  // TODO: unimplemented.
+  Mp4FileBuilder &include_timestamp_subtitle_track(bool);
+
+  // TODO: MPEG-DASH / ISO BMFF Byte Stream Format support.
+
+  // Build the .mp4 file, returning it to the caller.
+  // The Mp4FileBuilder is left in an undefined state; it should not
+  // be used afterward. On error, nullptr is returned, with |error_message|
+  // populated.
+  //
+  // Errors include:
+  // * TODO: width/height mismatch? or is this okay?
+  // * No segments.
+  // * Non-final segment has zero duration of last sample.
+  // * Data error in one of the recording sample indexes.
+  // * Invalid start/end.
+  std::unique_ptr<VirtualFile> Build(std::string *error_message);
+
+ private:
+  std::vector<std::unique_ptr<internal::Mp4FileSegment>> segments_;
+  VideoSampleEntry video_sample_entry_;
+};
 
 }  // namespace moonfire_nvr
 

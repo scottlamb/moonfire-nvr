@@ -73,7 +73,7 @@ create table recording (
 
   sample_file_uuid blob unique not null,
   sample_file_sha1 blob,
-  sample_file_size integer,
+  sample_file_bytes integer,
 
   -- The starting and ending time of the recording, in 90 kHz units since
   -- 1970-01-01 00:00:00 UTC.

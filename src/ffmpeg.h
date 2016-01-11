@@ -72,6 +72,7 @@ class VideoPacket {
   int64_t pts() const { return pkt_.pts; }
 
   AVPacket *pkt() { return &pkt_; }
+  const AVPacket *pkt() const { return &pkt_; }
 
  private:
   AVPacket pkt_;

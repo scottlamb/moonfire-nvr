@@ -131,14 +131,11 @@ class VirtualFile : public FileSlice {
   virtual time_t last_modified() const = 0;
   virtual std::string etag() const = 0;
   virtual std::string mime_type() const = 0;
-  virtual std::string filename() const = 0;  // for logging.
 };
 
 class RealFileSlice : public FileSlice {
  public:
   void Init(re2::StringPiece filename, ByteRange range);
-
-  const std::string filename() const { return filename_; }
 
   int64_t size() const final { return range_.size(); }
 
