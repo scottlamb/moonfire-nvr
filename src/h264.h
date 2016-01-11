@@ -31,15 +31,18 @@
 // h264.h: H.264 decoding. For the most part, Moonfire NVR does not try to
 // understand the video codec. There's one exception. It must construct the
 // .mp4 sample description table, and for AVC, this includes the ISO/IEC
-// 14496-15 section 5.2.4.1 AVCDecoderConfigurationRecord. ffmpeg supplies (as
-// "extra data") an ISO/IEC 14496-10 Annex B byte stream containing SPS
-// (sequence parameter set) and PPS (picture parameter set) NAL units from
-// which this can be constructed.
+// 14496-15 section 5.2.4.1 AVCDecoderConfigurationRecord.
 //
-// ffmpeg of course also has logic for converting "extra data" to the
-// AVCDecoderConfigurationRecord, but unfortunately it is not exposed except
-// through ffmpeg's own generated .mp4 file. Extracting just this part of
-// their .mp4 files would be more trouble than it's worth.
+// When handling a RTSP input source, ffmpeg supplies as "extradata" an
+// ISO/IEC 14496-10 Annex B byte stream containing SPS (sequence parameter
+// set) and PPS (picture parameter set) NAL units from which this can be
+// constructed. ffmpeg of course also has logic for converting "extradata"
+// to the AVCDecoderConfigurationRecord, but unfortunately it is not exposed
+// except through ffmpeg's own generated .mp4 file. Extracting just this part
+// of their .mp4 files would be more trouble than it's worth.
+//
+// Just to make things interesting, when handling a .mp4 file, ffmpeg supplies
+// as "extradata" an AVCDecoderConfiguration.
 
 #ifndef MOONFIRE_NVR_H264_H
 #define MOONFIRE_NVR_H264_H
@@ -71,9 +74,9 @@ bool DecodeH264AnnexB(re2::StringPiece data, NalUnitFunction process_nal_unit,
 }  // namespace
 
 // Gets a H.264 sample entry (AVCSampleEntry, which extends
-// VisualSampleEntry), given the "extra_data", width, and height supplied by
+// VisualSampleEntry), given the "extradata", width, and height supplied by
 // ffmpeg.
-bool GetH264SampleEntry(re2::StringPiece extra_data, uint16_t width,
+bool GetH264SampleEntry(re2::StringPiece extradata, uint16_t width,
                         uint16_t height, std::string *out,
                         std::string *error_message);
 

@@ -48,8 +48,8 @@ const int kNalUnitPicParameterSet = 8;
 
 // Parse sequence parameter set and picture parameter set from ffmpeg's
 // "extra_data".
-bool ParseExtraData(re2::StringPiece extra_data, re2::StringPiece *sps,
-                    re2::StringPiece *pps, std::string *error_message) {
+bool ParseAnnexBExtraData(re2::StringPiece extradata, re2::StringPiece *sps,
+                          re2::StringPiece *pps, std::string *error_message) {
   bool ok = true;
   internal::NalUnitFunction fn = [&ok, sps, pps,
                                   error_message](re2::StringPiece nal_unit) {
@@ -70,7 +70,7 @@ bool ParseExtraData(re2::StringPiece extra_data, re2::StringPiece *sps,
     }
     return IterationControl::kContinue;
   };
-  if (!internal::DecodeH264AnnexB(extra_data, fn, error_message) || !ok) {
+  if (!internal::DecodeH264AnnexB(extradata, fn, error_message) || !ok) {
     return false;
   }
   if (sps->empty() || pps->empty()) {
@@ -92,7 +92,8 @@ bool DecodeH264AnnexB(re2::StringPiece data, NalUnitFunction process_nal_unit,
   static const RE2 kStartCode("(\\x00{2,}\\x01)");
 
   if (!RE2::Consume(&data, kStartCode)) {
-    *error_message = "stream does not start with Annex B start code";
+    *error_message =
+        StrCat("stream does not start with Annex B start code: ", ToHex(data));
     return false;
   }
 
@@ -124,18 +125,27 @@ bool DecodeH264AnnexB(re2::StringPiece data, NalUnitFunction process_nal_unit,
 
 }  // namespace internal
 
-bool GetH264SampleEntry(re2::StringPiece extra_data, uint16_t width,
+bool GetH264SampleEntry(re2::StringPiece extradata, uint16_t width,
                         uint16_t height, std::string *out,
                         std::string *error_message) {
+  uint32_t avcc_len;
   re2::StringPiece sps;
   re2::StringPiece pps;
-  if (!ParseExtraData(extra_data, &sps, &pps, error_message)) {
-    return false;
+  if (extradata.starts_with(re2::StringPiece("\x00\x00\x00\x01", 4)) ||
+      extradata.starts_with(re2::StringPiece("\x00\x00\x01", 3))) {
+    // ffmpeg supplied "extradata" in Annex B format.
+    if (!ParseAnnexBExtraData(extradata, &sps, &pps, error_message)) {
+      return false;
+    }
+
+    // This magic value is checked at the end.
+    avcc_len = 19 + sps.size() + pps.size();
+  } else {
+    // Assume "extradata" holds an AVCDecoderConfiguration.
+    avcc_len = 8 + extradata.size();
   }
 
-  // These match the size of all fields below.
-  // Don't panic; they're verified at the end.
-  uint32_t avcc_len = 19 + sps.size() + pps.size();
+  // This magic value is also checked at the end.
   uint32_t avc1_len = 86 + avcc_len;
 
   out->clear();
@@ -167,42 +177,48 @@ bool GetH264SampleEntry(re2::StringPiece extra_data, uint16_t width,
   AppendU32(avcc_len, out);  // length
   out->append("avcC");       // type
 
-  // AVCDecoderConfiguration, ISO/IEC 14496-15 section 5.2.4.1.
-  // The beginning of the AVCDecoderConfiguration takes a few values from
-  // the SPS (ISO/IEC 14496-10 section 7.3.2.1.1). One caveat: that section
-  // defines the syntax in terms of RBSP, not NAL. The difference is the
-  // escaping of 00 00 01 and 00 00 02; see notes about
-  // "emulation_prevention_three_byte" in ISO/IEC 14496-10 section 7.4.
-  // It looks like 00 is not a valid value of profile_idc, so this distinction
-  // shouldn't be relevant here. And ffmpeg seems to ignore it.
-  out->push_back(1);       // configurationVersion
-  out->push_back(sps[1]);  // profile_idc -> AVCProfileIndication
-  out->push_back(sps[2]);  // ...misc bits... -> profile_compatibility
-  out->push_back(sps[3]);  // level_idc -> AVCLevelIndication
+  if (!sps.empty() && !pps.empty()) {
+    // Create the AVCDecoderConfiguration, ISO/IEC 14496-15 section 5.2.4.1.
+    // The beginning of the AVCDecoderConfiguration takes a few values from
+    // the SPS (ISO/IEC 14496-10 section 7.3.2.1.1). One caveat: that section
+    // defines the syntax in terms of RBSP, not NAL. The difference is the
+    // escaping of 00 00 01 and 00 00 02; see notes about
+    // "emulation_prevention_three_byte" in ISO/IEC 14496-10 section 7.4.
+    // It looks like 00 is not a valid value of profile_idc, so this distinction
+    // shouldn't be relevant here. And ffmpeg seems to ignore it.
+    out->push_back(1);       // configurationVersion
+    out->push_back(sps[1]);  // profile_idc -> AVCProfileIndication
+    out->push_back(sps[2]);  // ...misc bits... -> profile_compatibility
+    out->push_back(sps[3]);  // level_idc -> AVCLevelIndication
 
-  // Hardcode lengthSizeMinusOne to 3. This needs to match what ffmpeg uses
-  // when generating AVCParameterSamples (ISO/IEC 14496-15 section 5.3.2).
-  // There doesn't seem to be a clean way to get this from ffmpeg, but it's
-  // always 3.
-  out->push_back(static_cast<char>(0xff));
+    // Hardcode lengthSizeMinusOne to 3. This needs to match what ffmpeg uses
+    // when generating AVCParameterSamples (ISO/IEC 14496-15 section 5.3.2).
+    // There doesn't seem to be a clean way to get this from ffmpeg, but it's
+    // always 3.
+    out->push_back(static_cast<char>(0xff));
 
-  // Only support one SPS and PPS.
-  // ffmpeg's ff_isom_write_avcc has the same limitation, so it's probably fine.
-  // This next byte is a reserved 0b111 + a 5-bit # of SPSs (1).
-  out->push_back(static_cast<char>(0xe1));
-  AppendU16(sps.size(), out);
-  out->append(sps.data(), sps.size());
-  out->push_back(1);  // # of PPSs.
-  AppendU16(pps.size(), out);
-  out->append(pps.data(), pps.size());
+    // Only support one SPS and PPS.
+    // ffmpeg's ff_isom_write_avcc has the same limitation, so it's probably
+    // fine. This next byte is a reserved 0b111 + a 5-bit # of SPSs (1).
+    out->push_back(static_cast<char>(0xe1));
+    AppendU16(sps.size(), out);
+    out->append(sps.data(), sps.size());
+    out->push_back(1);  // # of PPSs.
+    AppendU16(pps.size(), out);
+    out->append(pps.data(), pps.size());
 
-  if (out->size() - avcc_len_pos != avcc_len) {
-    *error_message =
-        StrCat("internal error: anticipated AVCConfigurationBox length ",
-               avcc_len, ", but was actually ", out->size() - avcc_len_pos,
-               "; sps length ", sps.size(), ", pps length ", pps.size());
-    return false;
+    if (out->size() - avcc_len_pos != avcc_len) {
+      *error_message =
+          StrCat("internal error: anticipated AVCConfigurationBox length ",
+                 avcc_len, ", but was actually ", out->size() - avcc_len_pos,
+                 "; sps length ", sps.size(), ", pps length ", pps.size());
+      return false;
+    }
+
+  } else {
+    out->append(extradata.data(), extradata.size());
   }
+
   if (out->size() - avc1_len_pos != avc1_len) {
     *error_message =
         StrCat("internal error: anticipated AVCSampleEntry length ", avc1_len,
