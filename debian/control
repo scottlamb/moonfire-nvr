@@ -3,7 +3,7 @@ Maintainer: Scott Lamb <slamb@slamb.org>
 Section: video
 Priority: optional
 Standards-Version: 3.9.6.1
-Build-Depends: debhelper (>= 9), dh-systemd, cmake, libprotobuf-dev, libavcodec-dev, libavformat-dev, libevent-dev, libgflags-dev, libgoogle-glog-dev, libgoogle-perftools-dev, libre2-dev, pkgconf, protobuf-compiler
+Build-Depends: debhelper (>= 9), dh-systemd, cmake, libprotobuf-dev, libavcodec-dev, libavformat-dev, libevent-dev, libgflags-dev, libgoogle-glog-dev, libgoogle-perftools-dev, libre2-dev, pkgconf, protobuf-compiler, libuuid-dev, libsqlite3-dev
 
 Package: moonfire-nvr
 Architecture: any

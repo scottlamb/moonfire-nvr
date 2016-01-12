@@ -62,6 +62,7 @@ pkg_check_modules(LIBEVENT REQUIRED libevent)
 pkg_check_modules(GLOG REQUIRED libglog)
 pkg_check_modules(OPENSSL REQUIRED libcrypto)
 pkg_check_modules(SQLITE REQUIRED sqlite3)
+pkg_check_modules(UUID REQUIRED uuid)
 
 # Check if ffmpeg support "stimeout".
 set(CMAKE_REQUIRED_INCLUDES ${FFMPEG_INCLUDES})

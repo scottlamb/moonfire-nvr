@@ -76,6 +76,8 @@ from source. It requires several packages to build:
   This will be automatically downloaded during the build process, so it's
   not necessary to install it beforehand.
 * [re2](https://github.com/google/re2), for parsing with regular expressions.
+* libuuid from (util-linux)[https://en.wikipedia.org/wiki/Util-linux].
+* [SQLite3](https://www.sqlite.org/).
 
 On Ubuntu 15.10 or Raspbian Jessie, the following command will install all
 pre-requisites (see also the `Build-Depends` field in `debian/control`):
@@ -92,6 +94,8 @@ pre-requisites (see also the `Build-Depends` field in `debian/control`):
                    libgoogle-glog-dev \
                    libgoogle-perftools-dev \
                    libre2-dev \
+                   libsqlite3-dev \
+                   libuuid-dev \
                    pkgconf \
                    protobuf-compiler
 

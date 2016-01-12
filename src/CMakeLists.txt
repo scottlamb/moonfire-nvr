@@ -39,7 +39,8 @@ set(MOONFIRE_DEPS
     ${PROFILER_LIBRARIES}
     ${PROTOBUF_LIBRARIES}
     ${RE2_LIBRARIES}
-    ${SQLITE_LIBRARIES})
+    ${SQLITE_LIBRARIES}
+    ${UUID_LIBRARIES})
 
 set(MOONFIRE_NVR_SRCS
     coding.cc
@@ -54,7 +55,8 @@ set(MOONFIRE_NVR_SRCS
     recording.cc
     sqlite.cc
     string.cc
-    time.cc)
+    time.cc
+    uuid.cc)
 
 add_library(moonfire-nvr-lib ${MOONFIRE_NVR_SRCS} ${PROTO_SRCS} ${PROTO_HDRS})
 target_link_libraries(moonfire-nvr-lib ${MOONFIRE_DEPS})
