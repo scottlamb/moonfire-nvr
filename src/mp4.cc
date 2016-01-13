@@ -98,6 +98,12 @@ namespace moonfire_nvr {
 
 namespace {
 
+// This value should be incremented any time a change is made to this file
+// that causes the different bytes to be output for a particular set of
+// Mp4Builder options. Incrementing this value will cause the etag to change
+// as well.
+const char kFormatVersion[] = {0x00};
+
 // ISO/IEC 14496-12 section 4.3, ftyp.
 const char kFtypBox[] = {
     0x00, 0x00, 0x00, 0x20,  // length = 32, sizeof(kFtypBox)
@@ -367,9 +373,11 @@ class Mp4File : public VirtualFile {
     int64_t max_time_90k = 0;
     for (const auto &segment : segments_) {
       duration += segment->pieces.duration_90k();
-      max_time_90k = std::max(max_time_90k, segment->recording.start_time_90k +
-                                                segment->rel_end_90k);
+      int64_t end_90k =
+          segment->recording.start_time_90k + segment->pieces.end_90k();
+      max_time_90k = std::max(max_time_90k, end_90k);
     }
+    last_modified_ = max_time_90k / kTimeUnitsPerSecond;
     auto net_duration = ToNetworkU32(duration);
     auto net_creation_ts = ToNetworkU32(ToIso14496Timestamp(max_time_90k));
 
@@ -378,6 +386,7 @@ class Mp4File : public VirtualFile {
 
     // Add the mdat_ without using CONSTRUCT_BOX.
     // mdat_ is special because it uses largesize rather than size.
+    int64_t size_before_mdat = slices_.size();
     slices_.Append(mdat_.header_slice());
     initial_sample_byte_pos_ = slices_.size();
     for (const auto &segment : segments_) {
@@ -385,12 +394,24 @@ class Mp4File : public VirtualFile {
                                       segment->pieces.sample_pos());
       slices_.Append(&segment->sample_file_slice);
     }
-    mdat_.header().largesize =
-        ToNetworkU64(slices_.size() - initial_sample_byte_pos_);
+    mdat_.header().largesize = ToNetworkU64(slices_.size() - size_before_mdat);
+
+    auto etag_digest = Digest::SHA1();
+    etag_digest->Update(
+        re2::StringPiece(kFormatVersion, sizeof(kFormatVersion)));
+    std::string segment_times;
+    for (const auto &segment : segments_) {
+      segment_times.clear();
+      Append64(segment->pieces.sample_pos().begin, &segment_times);
+      Append64(segment->pieces.sample_pos().end, &segment_times);
+      etag_digest->Update(segment_times);
+      etag_digest->Update(segment->recording.sample_file_sha1);
+    }
+    etag_ = StrCat("\"", ToHex(etag_digest->Finalize()), "\"");
   }
 
-  time_t last_modified() const final { return 0; }  // TODO
-  std::string etag() const final { return ""; }     // TODO
+  time_t last_modified() const final { return last_modified_; }
+  std::string etag() const final { return etag_; }
   std::string mime_type() const final { return "video/mp4"; }
   int64_t size() const final { return slices_.size(); }
   bool AddRange(ByteRange range, EvBuffer *buf,
@@ -458,13 +479,14 @@ class Mp4File : public VirtualFile {
     }
     {
       CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_stsc_);
-      uint32_t stsc_entry_count = 0;
-      for (const auto &segment : segments_) {
-        stsc_entry_count += segment->pieces.stsc_entry_count();
-        slices_.Append(segment->pieces.stsc_entries());
-      }
+      moov_trak_mdia_minf_stbl_stsc_entries_.Init(
+          3 * sizeof(uint32_t) * segments_.size(),
+          [this](std::string *s, std::string *error_message) {
+            return FillStscEntries(s, error_message);
+          });
       moov_trak_mdia_minf_stbl_stsc_.header().entry_count =
-          ToNetwork32(stsc_entry_count);
+          ToNetwork32(segments_.size());
+      slices_.Append(&moov_trak_mdia_minf_stbl_stsc_entries_);
     }
     {
       CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_stsz_);
@@ -499,6 +521,16 @@ class Mp4File : public VirtualFile {
     }
   }
 
+  bool FillStscEntries(std::string *s, std::string *error_message) {
+    uint32_t chunk = 0;
+    for (const auto &segment : segments_) {
+      AppendU32(++chunk, s);
+      AppendU32(segment->pieces.samples(), s);
+      AppendU32(1, s);  // TODO: sample_description_index.
+    }
+    return true;
+  }
+
   bool FillCo64Entries(std::string *s, std::string *error_message) {
     int64_t pos = initial_sample_byte_pos_;
     for (const auto &segment : segments_) {
@@ -512,6 +544,8 @@ class Mp4File : public VirtualFile {
   std::vector<std::unique_ptr<Mp4FileSegment>> segments_;
   VideoSampleEntry video_sample_entry_;
   FileSlices slices_;
+  std::string etag_;
+  time_t last_modified_ = -1;
 
   StaticStringPieceSlice ftyp_;
   Mp4Box<MovieBox> moov_;
@@ -528,6 +562,7 @@ class Mp4File : public VirtualFile {
   CopyingStringPieceSlice moov_trak_mdia_minf_stbl_stsd_entry_;
   Mp4Box<TimeToSampleBoxVersion0> moov_trak_mdia_minf_stbl_stts_;
   Mp4Box<SampleToChunkBoxVersion0> moov_trak_mdia_minf_stbl_stsc_;
+  FillerFileSlice moov_trak_mdia_minf_stbl_stsc_entries_;
   Mp4Box<SampleSizeBoxVersion0> moov_trak_mdia_minf_stbl_stsz_;
   Mp4Box<ChunkLargeOffsetBoxVersion0> moov_trak_mdia_minf_stbl_co64_;
   FillerFileSlice moov_trak_mdia_minf_stbl_co64_entries_;
@@ -596,10 +631,6 @@ bool Mp4SampleTablePieces::Init(re2::StringPiece video_index_blob,
   stss_entries_.Init(sizeof(int32_t) * stss_entry_count(),
                      [this](std::string *s, std::string *error_message) {
                        return FillStssEntries(s, error_message);
-                     });
-  stsc_entries_.Init(3 * sizeof(int32_t) * stsc_entry_count(),
-                     [this](std::string *s, std::string *error_message) {
-                       return FillStscEntries(s, error_message);
                      });
   stsz_entries_.Init(sizeof(int32_t) * stsz_entry_count(),
                      [this](std::string *s, std::string *error_message) {

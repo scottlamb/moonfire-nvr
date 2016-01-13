@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <event2/buffer.h>
 #include <gflags/gflags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -64,6 +65,22 @@ std::string ToHex(const FileSlice *slice, bool pad) {
           reinterpret_cast<const char *>(evbuffer_pullup(buf.get(), size)),
           size),
       pad);
+}
+
+std::string Digest(const FileSlice *slice) {
+  EvBuffer buf;
+  std::string error_message;
+  size_t size = slice->size();
+  CHECK(slice->AddRange(ByteRange(0, size), &buf, &error_message))
+      << error_message;
+  evbuffer_iovec vec;
+  auto digest = Digest::SHA1();
+  while (evbuffer_peek(buf.get(), -1, nullptr, &vec, 1) > 0) {
+    digest->Update(re2::StringPiece(
+        reinterpret_cast<const char *>(vec.iov_base), vec.iov_len));
+    evbuffer_drain(buf.get(), vec.iov_len);
+  }
+  return ::moonfire_nvr::ToHex(digest->Finalize());
 }
 
 TEST(Mp4SampleTablePiecesTest, Stts) {
@@ -121,21 +138,6 @@ TEST(Mp4SampleTablePiecesTest, Stss) {
   EXPECT_EQ(2, pieces.stss_entry_count());
   const char kExpectedSampleNumbers[] = "00 00 00 0a 00 00 00 0c";
   EXPECT_EQ(kExpectedSampleNumbers, ToHex(pieces.stss_entries(), true));
-}
-
-TEST(Mp4SampleTablePiecesTest, Stsc) {
-  SampleIndexEncoder encoder;
-  encoder.AddSample(1, 1, true);
-  encoder.AddSample(1, 1, false);
-  encoder.AddSample(1, 1, true);
-  encoder.AddSample(1, 1, false);
-  Mp4SampleTablePieces pieces;
-  std::string error_message;
-  ASSERT_TRUE(pieces.Init(encoder.data(), 2, 10, 0, 4, &error_message))
-      << error_message;
-  EXPECT_EQ(1, pieces.stsc_entry_count());
-  const char kExpectedEntries[] = "00 00 00 0a 00 00 00 04 00 00 00 02";
-  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stsc_entries(), true));
 }
 
 TEST(Mp4SampleTablePiecesTest, Stsz) {
@@ -210,18 +212,26 @@ class IntegrationTest : public testing::Test {
       ADD_FAILURE() << "Close: " << error_message;
     }
     recording_.video_index = index.data().as_string();
+
+    // Set start time to 2015-04-26 00:00:00 UTC.
+    recording_.start_time_90k = UINT64_C(1430006400) * kTimeUnitsPerSecond;
   }
 
-  void CopySingleRecordingToNewMp4() {
+  std::unique_ptr<VirtualFile> CreateMp4FromSingleRecording() {
     Mp4FileBuilder builder;
     builder.SetSampleEntry(video_sample_entry_);
     builder.Append(Recording(recording_), 0,
                    std::numeric_limits<int32_t>::max());
     std::string error_message;
     auto mp4 = builder.Build(&error_message);
-    ASSERT_TRUE(mp4 != nullptr) << error_message;
+    EXPECT_TRUE(mp4 != nullptr) << error_message;
+    return mp4;
+  }
+
+  void WriteMp4(VirtualFile *f) {
     EvBuffer buf;
-    ASSERT_TRUE(mp4->AddRange(ByteRange(0, mp4->size()), &buf, &error_message))
+    std::string error_message;
+    EXPECT_TRUE(f->AddRange(ByteRange(0, f->size()), &buf, &error_message))
         << error_message;
     WriteFileOrDie(StrCat(tmpdir_path_, "/clip.new.mp4"), &buf);
   }
@@ -272,14 +282,31 @@ class IntegrationTest : public testing::Test {
 
   std::string tmpdir_path_;
   std::unique_ptr<File> tmpdir_;
+  std::string etag_;
   Recording recording_;
   VideoSampleEntry video_sample_entry_;
 };
 
 TEST_F(IntegrationTest, RoundTrip) {
   CopyMp4ToSingleRecording();
-  CopySingleRecordingToNewMp4();
+  auto f = CreateMp4FromSingleRecording();
+  WriteMp4(f.get());
   CompareMp4s();
+}
+
+TEST_F(IntegrationTest, Metadata) {
+  CopyMp4ToSingleRecording();
+  auto f = CreateMp4FromSingleRecording();
+
+  // This test is brittle, which is the point. Any time the digest comparison
+  // here fails, it can be updated, but the etag must change as well!
+  // Otherwise clients may combine ranges from the new format with ranges
+  // from the old format!
+  EXPECT_EQ("1e5331e8371bd97ac3158b3a86494abc87cdc70e", Digest(f.get()));
+  EXPECT_EQ("\"62f5e00a6e1e6dd893add217b1bf7ed7446b8b9d\"", f->etag());
+
+  // 10 seconds later than the segment's start time.
+  EXPECT_EQ(1430006410, f->last_modified());
 }
 
 }  // namespace

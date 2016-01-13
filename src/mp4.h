@@ -81,9 +81,6 @@ class Mp4SampleTablePieces {
   int32_t stss_entry_count() const { return key_frames_; }
   const FileSlice *stss_entries() const { return &stss_entries_; }
 
-  int32_t stsc_entry_count() const { return 1; }
-  const FileSlice *stsc_entries() const { return &stsc_entries_; }
-
   int32_t stsz_entry_count() const { return frames_; }
   const FileSlice *stsz_entries() const { return &stsz_entries_; }
 
@@ -93,6 +90,9 @@ class Mp4SampleTablePieces {
   ByteRange sample_pos() const { return sample_pos_; }
 
   uint64_t duration_90k() const { return actual_end_90k_ - begin_.start_90k(); }
+
+  int32_t start_90k() const { return begin_.start_90k(); }
+  int32_t end_90k() const { return actual_end_90k_; }
 
  private:
   bool FillSttsEntries(std::string *s, std::string *error_message) const;
@@ -110,7 +110,6 @@ class Mp4SampleTablePieces {
 
   FillerFileSlice stts_entries_;
   FillerFileSlice stss_entries_;
-  FillerFileSlice stsc_entries_;
   FillerFileSlice stsz_entries_;
 
   int sample_entry_index_ = -1;
