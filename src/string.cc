@@ -112,11 +112,11 @@ std::string EscapeHtml(const std::string &input) {
   return output;
 }
 
-std::string ToHex(re2::StringPiece in) {
+std::string ToHex(re2::StringPiece in, bool pad) {
   std::string out;
-  out.reserve(in.size() * 3 + 1);
+  out.reserve(in.size() * (2 + pad) + pad);
   for (int i = 0; i < in.size(); ++i) {
-    if (i > 0) out.push_back(' ');
+    if (pad && i > 0) out.push_back(' ');
     uint8_t byte = in[i];
     out.push_back(HexDigit(byte >> 4));
     out.push_back(HexDigit(byte & 0x0F));

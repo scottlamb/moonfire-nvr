@@ -52,15 +52,18 @@ using moonfire_nvr::internal::Mp4SampleTablePieces;
 namespace moonfire_nvr {
 namespace {
 
-std::string ToHex(const FileSlice *slice) {
+std::string ToHex(const FileSlice *slice, bool pad) {
   EvBuffer buf;
   std::string error_message;
   size_t size = slice->size();
   CHECK(slice->AddRange(ByteRange(0, size), &buf, &error_message))
       << error_message;
   CHECK_EQ(size, evbuffer_get_length(buf.get()));
-  return ::moonfire_nvr::ToHex(re2::StringPiece(
-      reinterpret_cast<const char *>(evbuffer_pullup(buf.get(), size)), size));
+  return ::moonfire_nvr::ToHex(
+      re2::StringPiece(
+          reinterpret_cast<const char *>(evbuffer_pullup(buf.get(), size)),
+          size),
+      pad);
 }
 
 TEST(Mp4SampleTablePiecesTest, Stts) {
@@ -81,7 +84,7 @@ TEST(Mp4SampleTablePiecesTest, Stts) {
       "00 00 00 01 00 00 00 02 "
       "00 00 00 01 00 00 00 03 "
       "00 00 00 01 00 00 00 04";
-  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stts_entries()));
+  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stts_entries(), true));
 }
 
 TEST(Mp4SampleTablePiecesTest, SttsAfterSyncSample) {
@@ -102,7 +105,7 @@ TEST(Mp4SampleTablePiecesTest, SttsAfterSyncSample) {
       "00 00 00 01 00 00 00 02 "
       "00 00 00 01 00 00 00 03 "
       "00 00 00 01 00 00 00 04";
-  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stts_entries()));
+  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stts_entries(), true));
 }
 
 TEST(Mp4SampleTablePiecesTest, Stss) {
@@ -117,7 +120,7 @@ TEST(Mp4SampleTablePiecesTest, Stss) {
       << error_message;
   EXPECT_EQ(2, pieces.stss_entry_count());
   const char kExpectedSampleNumbers[] = "00 00 00 0a 00 00 00 0c";
-  EXPECT_EQ(kExpectedSampleNumbers, ToHex(pieces.stss_entries()));
+  EXPECT_EQ(kExpectedSampleNumbers, ToHex(pieces.stss_entries(), true));
 }
 
 TEST(Mp4SampleTablePiecesTest, Stsc) {
@@ -132,7 +135,7 @@ TEST(Mp4SampleTablePiecesTest, Stsc) {
       << error_message;
   EXPECT_EQ(1, pieces.stsc_entry_count());
   const char kExpectedEntries[] = "00 00 00 0a 00 00 00 04 00 00 00 02";
-  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stsc_entries()));
+  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stsc_entries(), true));
 }
 
 TEST(Mp4SampleTablePiecesTest, Stsz) {
@@ -150,7 +153,7 @@ TEST(Mp4SampleTablePiecesTest, Stsz) {
       << error_message;
   EXPECT_EQ(3, pieces.stsz_entry_count());
   const char kExpectedEntries[] = "00 00 00 04 00 00 00 06 00 00 00 08";
-  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stsz_entries()));
+  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stsz_entries(), true));
 }
 
 class IntegrationTest : public testing::Test {

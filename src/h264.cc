@@ -92,8 +92,8 @@ bool DecodeH264AnnexB(re2::StringPiece data, NalUnitFunction process_nal_unit,
   static const RE2 kStartCode("(\\x00{2,}\\x01)");
 
   if (!RE2::Consume(&data, kStartCode)) {
-    *error_message =
-        StrCat("stream does not start with Annex B start code: ", ToHex(data));
+    *error_message = StrCat("stream does not start with Annex B start code: ",
+                            ToHex(data, true));
     return false;
   }
 

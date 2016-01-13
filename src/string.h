@@ -118,9 +118,9 @@ bool IsWord(const std::string &str);
 // HTML-escape the given UTF-8-encoded string.
 std::string EscapeHtml(const std::string &input);
 
-// Return a hex string for debugging.
-// For example, ToHex("\xde\xad\xbe\xef") returns "de ad be ef".
-std::string ToHex(re2::StringPiece in);
+// Return a hex-encoded version of |in|, optionally padding between bytes.
+// For example, ToHex("\xde\xad\xbe\xef", true) returns "de ad be ef".
+std::string ToHex(re2::StringPiece in, bool pad = false);
 
 // Wrapper around ::strtol that returns true iff valid and corrects
 // constness.

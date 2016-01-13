@@ -70,7 +70,7 @@ TEST(H264Test, DecodeOnly) {
   re2::StringPiece test_input(reinterpret_cast<const char *>(kAnnexBTestInput),
                               sizeof(kAnnexBTestInput));
   internal::NalUnitFunction fn = [&nal_units_hexed](re2::StringPiece nal_unit) {
-    nal_units_hexed.push_back(ToHex(nal_unit));
+    nal_units_hexed.push_back(ToHex(nal_unit, true));
     return IterationControl::kContinue;
   };
   std::string error_message;
@@ -91,7 +91,7 @@ TEST(H264Test, SampleDataFromAnnexBExtraData) {
       GetH264SampleEntry(test_input, 1280, 720, &sample_entry, &error_message))
       << error_message;
 
-  EXPECT_EQ(kTestOutput, ToHex(sample_entry));
+  EXPECT_EQ(kTestOutput, ToHex(sample_entry, true));
 }
 
 TEST(H264Test, SampleDataFromAvcDecoderConfigExtraData) {
@@ -104,7 +104,7 @@ TEST(H264Test, SampleDataFromAvcDecoderConfigExtraData) {
       GetH264SampleEntry(test_input, 1280, 720, &sample_entry, &error_message))
       << error_message;
 
-  EXPECT_EQ(kTestOutput, ToHex(sample_entry));
+  EXPECT_EQ(kTestOutput, ToHex(sample_entry, true));
 }
 
 }  // namespace

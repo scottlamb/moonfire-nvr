@@ -87,7 +87,7 @@ TEST_F(SqliteTest, BindAndColumn) {
                   &error_message);
   ASSERT_TRUE(select_stmt != nullptr) << error_message;
   ASSERT_EQ(SQLITE_ROW, select_stmt->Step());
-  EXPECT_EQ(ToHex(blob_piece), ToHex(select_stmt->ColumnBlob(0)));
+  EXPECT_EQ(ToHex(blob_piece, true), ToHex(select_stmt->ColumnBlob(0), true));
   EXPECT_EQ(kText, select_stmt->ColumnText(1).as_string());
   EXPECT_EQ(kInt64, select_stmt->ColumnInt64(2));
   ASSERT_EQ(SQLITE_DONE, select_stmt->Step());

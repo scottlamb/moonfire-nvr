@@ -60,7 +60,7 @@ TEST(SampleIndexTest, EncodeExample) {
   encoder.AddSample(11, 15, false);
   encoder.AddSample(10, 12, false);
   encoder.AddSample(10, 1050, true);
-  ASSERT_EQ("29 d0 0f 02 14 08 0a 02 05 01 64", ToHex(encoder.data()));
+  ASSERT_EQ("29 d0 0f 02 14 08 0a 02 05 01 64", ToHex(encoder.data(), true));
 }
 
 TEST(SampleIndexTest, RoundTrip) {
@@ -150,8 +150,7 @@ TEST(SampleFileWriterTest, Simple) {
   EXPECT_TRUE(writer.Write(write_1, &error_message)) << error_message;
   EXPECT_TRUE(writer.Write(write_2, &error_message)) << error_message;
   EXPECT_TRUE(writer.Close(&sha1, &error_message)) << error_message;
-  EXPECT_EQ("6b c3 73 25 b3 6f b5 fd 20 5e 57 28 44 29 e7 57 64 33 86 18",
-            ToHex(sha1));
+  EXPECT_EQ("6bc37325b36fb5fd205e57284429e75764338618", ToHex(sha1));
 }
 
 TEST(SampleFileWriterTest, PartialWriteIsRetried) {
@@ -181,8 +180,7 @@ TEST(SampleFileWriterTest, PartialWriteIsRetried) {
   EXPECT_TRUE(writer.Write(write_1, &error_message)) << error_message;
   EXPECT_TRUE(writer.Write(write_2, &error_message)) << error_message;
   EXPECT_TRUE(writer.Close(&sha1, &error_message)) << error_message;
-  EXPECT_EQ("6b c3 73 25 b3 6f b5 fd 20 5e 57 28 44 29 e7 57 64 33 86 18",
-            ToHex(sha1));
+  EXPECT_EQ("6bc37325b36fb5fd205e57284429e75764338618", ToHex(sha1));
 }
 
 TEST(SampleFileWriterTest, PartialWriteIsTruncated) {
@@ -212,8 +210,7 @@ TEST(SampleFileWriterTest, PartialWriteIsTruncated) {
   EXPECT_TRUE(writer.Write(write_1, &error_message)) << error_message;
   EXPECT_FALSE(writer.Write(write_2, &error_message)) << error_message;
   EXPECT_TRUE(writer.Close(&sha1, &error_message)) << error_message;
-  EXPECT_EQ("b1 cc ee 33 9b 93 55 87 c0 99 97 a9 ec 8b b2 37 4e 02 b5 d0",
-            ToHex(sha1));
+  EXPECT_EQ("b1ccee339b935587c09997a9ec8bb2374e02b5d0", ToHex(sha1));
 }
 
 TEST(SampleFileWriterTest, PartialWriteTruncateFailureCausesCloseToFail) {

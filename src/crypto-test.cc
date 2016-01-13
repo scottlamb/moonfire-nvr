@@ -45,13 +45,13 @@ namespace {
 
 TEST(DigestTest, Sha1) {
   auto sha1 = Digest::SHA1();
-  EXPECT_EQ("da 39 a3 ee 5e 6b 4b 0d 32 55 bf ef 95 60 18 90 af d8 07 09",
+  EXPECT_EQ("da39a3ee5e6b4b0d3255bfef95601890afd80709",
             ToHex(sha1->Finalize()));
 
   sha1 = Digest::SHA1();
   sha1->Update("hello");
   sha1->Update(" world");
-  EXPECT_EQ("2a ae 6c 35 c9 4f cf b4 15 db e9 5f 40 8b 9c e9 1e e8 46 ed",
+  EXPECT_EQ("2aae6c35c94fcfb415dbe95f408b9ce91ee846ed",
             ToHex(sha1->Finalize()));
 }
 

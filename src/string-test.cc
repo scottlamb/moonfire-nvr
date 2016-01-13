@@ -93,8 +93,10 @@ TEST(EscapeTest, Simple) {
 }
 
 TEST(ToHexTest, Simple) {
-  EXPECT_EQ("", ToHex(""));
-  EXPECT_EQ("12 34 de ad be ef", ToHex("\x12\x34\xde\xad\xbe\xef"));
+  EXPECT_EQ("", ToHex("", false));
+  EXPECT_EQ("", ToHex("", true));
+  EXPECT_EQ("1234deadbeef", ToHex("\x12\x34\xde\xad\xbe\xef", false));
+  EXPECT_EQ("12 34 de ad be ef", ToHex("\x12\x34\xde\xad\xbe\xef", true));
 }
 
 }  // namespace
