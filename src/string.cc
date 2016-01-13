@@ -45,6 +45,15 @@ char HexDigit(unsigned int i) {
   return (i < 16) ? kHexadigits[i] : 'x';
 }
 
+std::string Humanize(std::initializer_list<const re2::StringPiece> prefixes,
+                     float f, float n, re2::StringPiece suffix) {
+  size_t i;
+  for (i = 0; i < prefixes.size() - 1 && n >= f; ++i) n /= f;
+  char buf[64];
+  snprintf(buf, sizeof(buf), "%.1f", n);
+  return StrCat(buf, *(prefixes.begin() + i), suffix);
+}
+
 }  // namespace
 
 namespace internal {
@@ -122,6 +131,18 @@ std::string ToHex(re2::StringPiece in, bool pad) {
     out.push_back(HexDigit(byte & 0x0F));
   }
   return out;
+}
+
+std::string HumanizeWithDecimalPrefix(float n, re2::StringPiece suffix) {
+  static const std::initializer_list<const re2::StringPiece> kPrefixes = {
+      " ", " k", " M", " G", " T", " P", " E"};
+  return Humanize(kPrefixes, 1000., n, suffix);
+}
+
+std::string HumanizeWithBinaryPrefix(float n, re2::StringPiece suffix) {
+  static const std::initializer_list<const re2::StringPiece> kPrefixes = {
+      " ", " Ki", " Mi", " Gi", " Ti", " Pi", " Ei"};
+  return Humanize(kPrefixes, 1024., n, suffix);
 }
 
 bool strto64(const char *str, int base, const char **endptr, int64_t *value) {

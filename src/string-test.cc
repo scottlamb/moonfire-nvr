@@ -99,6 +99,19 @@ TEST(ToHexTest, Simple) {
   EXPECT_EQ("12 34 de ad be ef", ToHex("\x12\x34\xde\xad\xbe\xef", true));
 }
 
+TEST(HumanizeTest, Simple) {
+  EXPECT_EQ("1.0 B", HumanizeWithBinaryPrefix(1.f, "B"));
+  EXPECT_EQ("1.0 KiB", HumanizeWithBinaryPrefix(UINT64_C(1) << 10, "B"));
+  EXPECT_EQ("1.0 EiB", HumanizeWithBinaryPrefix(UINT64_C(1) << 60, "B"));
+  EXPECT_EQ("1.5 EiB", HumanizeWithBinaryPrefix(
+                           (UINT64_C(1) << 60) + (UINT64_C(1) << 59), "B"));
+  EXPECT_EQ("16.0 EiB", HumanizeWithBinaryPrefix(
+                            std::numeric_limits<uint64_t>::max(), "B"));
+
+  EXPECT_EQ("1.0 Mbps", HumanizeWithDecimalPrefix(1e6f, "bps"));
+  EXPECT_EQ("1000.0 Ebps", HumanizeWithDecimalPrefix(1e21, "bps"));
+}
+
 }  // namespace
 }  // namespace moonfire_nvr
 

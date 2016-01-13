@@ -122,6 +122,11 @@ std::string EscapeHtml(const std::string &input);
 // For example, ToHex("\xde\xad\xbe\xef", true) returns "de ad be ef".
 std::string ToHex(re2::StringPiece in, bool pad = false);
 
+// Return a human-friendly approximation of the given non-negative value, using
+// SI (base-10) or IEC (base-2) prefixes.
+std::string HumanizeWithDecimalPrefix(float n, re2::StringPiece suffix);
+std::string HumanizeWithBinaryPrefix(float n, re2::StringPiece suffix);
+
 // Wrapper around ::strtol that returns true iff valid and corrects
 // constness.
 bool strto64(const char *str, int base, const char **endptr, int64_t *value);
