@@ -576,45 +576,57 @@ class Mp4File : public VirtualFile {
 
 namespace internal {
 
-bool Mp4SampleTablePieces::Init(re2::StringPiece video_index_blob,
+bool Mp4SampleTablePieces::Init(const Recording *recording,
                                 int sample_entry_index, int32_t sample_offset,
                                 int32_t start_90k, int32_t end_90k,
                                 std::string *error_message) {
-  video_index_blob_ = video_index_blob;
   sample_entry_index_ = sample_entry_index;
   sample_offset_ = sample_offset;
   desired_end_90k_ = end_90k;
-  SampleIndexIterator it = SampleIndexIterator(video_index_blob_);
-  if (!it.done() && !it.is_key()) {
-    *error_message = "First frame must be a key frame.";
-    return false;
-  }
-  for (; !it.done(); it.Next()) {
-    VLOG(3) << "Processing frame with start " << it.start_90k()
-            << (it.is_key() ? " (key)" : " (non-key)");
-    // Find boundaries.
-    if (it.start_90k() <= start_90k && it.is_key()) {
-      VLOG(3) << "...new start candidate.";
-      begin_ = it;
-      sample_pos_.begin = begin_.pos();
-      frames_ = 0;
-      key_frames_ = 0;
+  SampleIndexIterator it = SampleIndexIterator(recording->video_index);
+  auto recording_duration_90k =
+      recording->end_time_90k - recording->start_time_90k;
+  bool fast_path = start_90k == 0 && end_90k >= recording_duration_90k;
+  if (fast_path) {
+    VLOG(1) << "Fast path, frames=" << recording->video_samples
+            << ", key=" << recording->video_sync_samples;
+    sample_pos_.end = recording->sample_file_bytes;
+    begin_ = it;
+    frames_ = recording->video_samples;
+    key_frames_ = recording->video_sync_samples;
+    actual_end_90k_ = recording_duration_90k;
+  } else {
+    if (!it.done() && !it.is_key()) {
+      *error_message = "First frame must be a key frame.";
+      return false;
     }
-    if (it.start_90k() >= end_90k) {
-      VLOG(3) << "...past end.";
-      break;
-    }
+    for (; !it.done(); it.Next()) {
+      VLOG(3) << "Processing frame with start " << it.start_90k()
+              << (it.is_key() ? " (key)" : " (non-key)");
+      // Find boundaries.
+      if (it.start_90k() <= start_90k && it.is_key()) {
+        VLOG(3) << "...new start candidate.";
+        begin_ = it;
+        sample_pos_.begin = begin_.pos();
+        frames_ = 0;
+        key_frames_ = 0;
+      }
+      if (it.start_90k() >= end_90k) {
+        VLOG(3) << "...past end.";
+        break;
+      }
 
-    // Process this frame.
-    frames_++;
-    if (it.is_key()) {
-      key_frames_++;
-    }
+      // Process this frame.
+      frames_++;
+      if (it.is_key()) {
+        key_frames_++;
+      }
 
-    // This is the current best candidate to end.
-    actual_end_90k_ = it.end_90k();
+      // This is the current best candidate to end.
+      actual_end_90k_ = it.end_90k();
+    }
+    sample_pos_.end = it.pos();
   }
-  sample_pos_.end = it.pos();
   if (it.has_error()) {
     *error_message = it.error();
     return false;
@@ -724,7 +736,7 @@ std::unique_ptr<VirtualFile> Mp4FileBuilder::Build(std::string *error_message) {
       return std::unique_ptr<VirtualFile>();
     }
 
-    if (!segment->pieces.Init(segment->recording.video_index,
+    if (!segment->pieces.Init(&segment->recording,
                               1,  // sample entry index
                               sample_offset, segment->rel_start_90k,
                               segment->rel_end_90k, error_message)) {

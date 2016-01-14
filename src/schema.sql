@@ -81,13 +81,14 @@ create table recording (
   end_time_90k integer,
 
   video_samples integer,
-  video_sample_entry_sha1 blob references visual_sample_entry (sha1),
+  video_sync_samples integer,
+  video_sample_entry_sha1 blob references video_sample_entry (sha1),
   video_index blob
 );
 
 -- A concrete box derived from a ISO/IEC 14496-12 section 8.5.2
 -- VisualSampleEntry box. Describes the codec, width, height, etc.
-create table visual_sample_entry (
+create table video_sample_entry (
   -- A SHA-1 hash of |bytes|.
   sha1 blob primary key,
 

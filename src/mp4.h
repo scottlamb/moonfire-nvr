@@ -55,8 +55,7 @@ class Mp4SampleTablePieces {
   Mp4SampleTablePieces(const Mp4SampleTablePieces &) = delete;
   void operator=(const Mp4SampleTablePieces &) = delete;
 
-  // |video_index_blob|, which must outlive the Mp4SampleTablePieces, should
-  // be the contents of the video_index field for this recording.
+  // |recording| must outlive the Mp4SampleTablePieces.
   //
   // |sample_entry_index| should be the (1-based) index into the "stsd" box
   // of an entry matching this recording's video_sample_entry_sha1. It may
@@ -71,7 +70,7 @@ class Mp4SampleTablePieces {
   // from the last sync sample <= |start_90k| to the last sample with start time
   // <= |end_90k|. TODO: support edit lists and duration trimming to produce
   // the exact correct time range.
-  bool Init(re2::StringPiece video_index_blob, int sample_entry_index,
+  bool Init(const Recording *recording, int sample_entry_index,
             int32_t sample_offset, int32_t start_90k, int32_t end_90k,
             std::string *error_message);
 
@@ -99,8 +98,6 @@ class Mp4SampleTablePieces {
   bool FillStssEntries(std::string *s, std::string *error_message) const;
   bool FillStscEntries(std::string *s, std::string *error_message) const;
   bool FillStszEntries(std::string *s, std::string *error_message) const;
-
-  re2::StringPiece video_index_blob_;
 
   // After Init(), |begin_| will be on the first sample after the start of the
   // range (or it will be done()).

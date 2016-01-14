@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-// mp4_test.cc: tests of the mp4.h interface.
+// mp4-test.cc: tests of the mp4.h interface.
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -83,79 +83,111 @@ std::string Digest(const FileSlice *slice) {
   return ::moonfire_nvr::ToHex(digest->Finalize());
 }
 
-TEST(Mp4SampleTablePiecesTest, Stts) {
+TEST(Mp4SampleTablePiecesTest, AllSyncFrames) {
+  Recording recording;
   SampleIndexEncoder encoder;
+  encoder.Init(&recording, 42);
   for (int i = 1; i <= 5; ++i) {
-    encoder.AddSample(i, 2 * i, true);
+    int64_t sample_duration_90k = 2 * i;
+    int64_t sample_bytes = 3 * i;
+    encoder.AddSample(sample_duration_90k, sample_bytes, true);
   }
 
   Mp4SampleTablePieces pieces;
   std::string error_message;
-  // Time range [1, 1 + 2 + 3 + 4) means the 2nd, 3rd, 4th samples should be
+  // Time range [2, 2 + 4 + 6 + 8) means the 2nd, 3rd, 4th samples should be
   // included.
-  ASSERT_TRUE(
-      pieces.Init(encoder.data(), 2, 10, 1, 1 + 2 + 3 + 4, &error_message))
+  ASSERT_TRUE(pieces.Init(&recording, 2, 10, 2, 2 + 4 + 6 + 8, &error_message))
       << error_message;
+
   EXPECT_EQ(3, pieces.stts_entry_count());
-  const char kExpectedEntries[] =
-      "00 00 00 01 00 00 00 02 "
-      "00 00 00 01 00 00 00 03 "
-      "00 00 00 01 00 00 00 04";
-  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stts_entries(), true));
-}
+  const char kExpectedStts[] =
+      "00 00 00 01 00 00 00 04 "  // run length / timestamps.
+      "00 00 00 01 00 00 00 06 "
+      "00 00 00 01 00 00 00 08";
+  EXPECT_EQ(kExpectedStts, ToHex(pieces.stts_entries(), true));
 
-TEST(Mp4SampleTablePiecesTest, SttsAfterSyncSample) {
-  SampleIndexEncoder encoder;
-  for (int i = 1; i <= 5; ++i) {
-    encoder.AddSample(i, 2 * i, i == 1);
-  }
+  // Initial index "10" as given above.
+  EXPECT_EQ(3, pieces.stss_entry_count());
+  const char kExpectedStss[] = "00 00 00 0a 00 00 00 0b 00 00 00 0c";
+  EXPECT_EQ(kExpectedStss, ToHex(pieces.stss_entries(), true));
 
-  Mp4SampleTablePieces pieces;
-  std::string error_message;
-  // Because only the 1st frame is a sync sample, it will be included also.
-  ASSERT_TRUE(
-      pieces.Init(encoder.data(), 2, 10, 1, 1 + 2 + 3 + 4, &error_message))
-      << error_message;
-  EXPECT_EQ(4, pieces.stts_entry_count());
-  const char kExpectedEntries[] =
-      "00 00 00 01 00 00 00 01 "
-      "00 00 00 01 00 00 00 02 "
-      "00 00 00 01 00 00 00 03 "
-      "00 00 00 01 00 00 00 04";
-  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stts_entries(), true));
-}
-
-TEST(Mp4SampleTablePiecesTest, Stss) {
-  SampleIndexEncoder encoder;
-  encoder.AddSample(1, 1, true);
-  encoder.AddSample(1, 1, false);
-  encoder.AddSample(1, 1, true);
-  encoder.AddSample(1, 1, false);
-  Mp4SampleTablePieces pieces;
-  std::string error_message;
-  ASSERT_TRUE(pieces.Init(encoder.data(), 2, 10, 0, 4, &error_message))
-      << error_message;
-  EXPECT_EQ(2, pieces.stss_entry_count());
-  const char kExpectedSampleNumbers[] = "00 00 00 0a 00 00 00 0c";
-  EXPECT_EQ(kExpectedSampleNumbers, ToHex(pieces.stss_entries(), true));
-}
-
-TEST(Mp4SampleTablePiecesTest, Stsz) {
-  SampleIndexEncoder encoder;
-  for (int i = 1; i <= 5; ++i) {
-    encoder.AddSample(i, 2 * i, true);
-  }
-
-  Mp4SampleTablePieces pieces;
-  std::string error_message;
-  // Time range [1, 1 + 2 + 3 + 4) means the 2nd, 3rd, 4th samples should be
-  // included.
-  ASSERT_TRUE(
-      pieces.Init(encoder.data(), 2, 10, 1, 1 + 2 + 3 + 4, &error_message))
-      << error_message;
   EXPECT_EQ(3, pieces.stsz_entry_count());
-  const char kExpectedEntries[] = "00 00 00 04 00 00 00 06 00 00 00 08";
-  EXPECT_EQ(kExpectedEntries, ToHex(pieces.stsz_entries(), true));
+  const char kExpectedStsz[] = "00 00 00 06 00 00 00 09 00 00 00 0c";
+  EXPECT_EQ(kExpectedStsz, ToHex(pieces.stsz_entries(), true));
+}
+
+TEST(Mp4SampleTablePiecesTest, HalfSyncFrames) {
+  Recording recording;
+  SampleIndexEncoder encoder;
+  encoder.Init(&recording, 42);
+  for (int i = 1; i <= 5; ++i) {
+    int64_t sample_duration_90k = 2 * i;
+    int64_t sample_bytes = 3 * i;
+    encoder.AddSample(sample_duration_90k, sample_bytes, (i % 2) == 1);
+  }
+
+  Mp4SampleTablePieces pieces;
+  std::string error_message;
+  // Time range [2 + 4 + 6, 2 + 4 + 6 + 8) means the 4th samples should be
+  // included. The 3rd gets pulled in also because it is a sync frame and the
+  // 4th is not.
+  ASSERT_TRUE(
+      pieces.Init(&recording, 2, 10, 2 + 4 + 6, 2 + 4 + 6 + 8, &error_message))
+      << error_message;
+
+  EXPECT_EQ(2, pieces.stts_entry_count());
+  const char kExpectedStts[] =
+      "00 00 00 01 00 00 00 06 "
+      "00 00 00 01 00 00 00 08";
+  EXPECT_EQ(kExpectedStts, ToHex(pieces.stts_entries(), true));
+
+  EXPECT_EQ(1, pieces.stss_entry_count());
+  const char kExpectedStss[] = "00 00 00 0a";
+  EXPECT_EQ(kExpectedStss, ToHex(pieces.stss_entries(), true));
+
+  EXPECT_EQ(2, pieces.stsz_entry_count());
+  const char kExpectedStsz[] = "00 00 00 09 00 00 00 0c";
+  EXPECT_EQ(kExpectedStsz, ToHex(pieces.stsz_entries(), true));
+}
+
+TEST(Mp4SampleTablePiecesTest, FastPath) {
+  Recording recording;
+  SampleIndexEncoder encoder;
+  encoder.Init(&recording, 42);
+  for (int i = 1; i <= 5; ++i) {
+    int64_t sample_duration_90k = 2 * i;
+    int64_t sample_bytes = 3 * i;
+    encoder.AddSample(sample_duration_90k, sample_bytes, (i % 2) == 1);
+  }
+  auto total_duration_90k = recording.end_time_90k - recording.start_time_90k;
+
+  Mp4SampleTablePieces pieces;
+  std::string error_message;
+  // Time range [0, end - start) means to pull in everything.
+  // This uses a fast path which can determine the size without examining the
+  // index.
+  ASSERT_TRUE(
+      pieces.Init(&recording, 2, 10, 0, total_duration_90k, &error_message))
+      << error_message;
+
+  EXPECT_EQ(5, pieces.stts_entry_count());
+  const char kExpectedStts[] =
+      "00 00 00 01 00 00 00 02 "
+      "00 00 00 01 00 00 00 04 "
+      "00 00 00 01 00 00 00 06 "
+      "00 00 00 01 00 00 00 08 "
+      "00 00 00 01 00 00 00 0a";
+  EXPECT_EQ(kExpectedStts, ToHex(pieces.stts_entries(), true));
+
+  EXPECT_EQ(3, pieces.stss_entry_count());
+  const char kExpectedStss[] = "00 00 00 0a 00 00 00 0c 00 00 00 0e";
+  EXPECT_EQ(kExpectedStss, ToHex(pieces.stss_entries(), true));
+
+  EXPECT_EQ(5, pieces.stsz_entry_count());
+  const char kExpectedStsz[] =
+      "00 00 00 03 00 00 00 06 00 00 00 09 00 00 00 0c 00 00 00 0f";
+  EXPECT_EQ(kExpectedStsz, ToHex(pieces.stsz_entries(), true));
 }
 
 class IntegrationTest : public testing::Test {
@@ -167,20 +199,24 @@ class IntegrationTest : public testing::Test {
     CHECK_EQ(0, ret) << strerror(ret);
   }
 
-  void CopyMp4ToSingleRecording() {
+  Recording CopyMp4ToSingleRecording() {
     std::string error_message;
+    Recording recording;
     SampleIndexEncoder index;
+
+    // Set start time to 2015-04-26 00:00:00 UTC.
+    index.Init(&recording, UINT64_C(1430006400) * kTimeUnitsPerSecond);
     SampleFileWriter writer(tmpdir_.get());
-    recording_.sample_file_path = StrCat(tmpdir_path_, "/clip.sample");
+    recording.sample_file_path = StrCat(tmpdir_path_, "/clip.sample");
     if (!writer.Open("clip.sample", &error_message)) {
       ADD_FAILURE() << "open clip.sample: " << error_message;
-      return;
+      return recording;
     }
     auto in = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
                                              &error_message);
     if (in == nullptr) {
       ADD_FAILURE() << "open clip.mp4" << error_message;
-      return;
+      return recording;
     }
 
     video_sample_entry_.width = in->stream()->codec->width;
@@ -189,7 +225,7 @@ class IntegrationTest : public testing::Test {
                             in->stream()->codec->height,
                             &video_sample_entry_.data, &error_message)) {
       ADD_FAILURE() << "GetH264SampleEntry: " << error_message;
-      return;
+      return recording;
     }
 
     while (true) {
@@ -197,30 +233,28 @@ class IntegrationTest : public testing::Test {
       if (!in->GetNext(&pkt, &error_message)) {
         if (!error_message.empty()) {
           ADD_FAILURE() << "GetNext: " << error_message;
-          return;
+          return recording;
         }
         break;
       }
       if (!writer.Write(GetData(pkt), &error_message)) {
         ADD_FAILURE() << "Write: " << error_message;
-        return;
+        return recording;
       }
       index.AddSample(pkt.pkt()->duration, pkt.pkt()->size, pkt.is_key());
     }
 
-    if (!writer.Close(&recording_.sample_file_sha1, &error_message)) {
+    if (!writer.Close(&recording.sample_file_sha1, &error_message)) {
       ADD_FAILURE() << "Close: " << error_message;
     }
-    recording_.video_index = index.data().as_string();
-
-    // Set start time to 2015-04-26 00:00:00 UTC.
-    recording_.start_time_90k = UINT64_C(1430006400) * kTimeUnitsPerSecond;
+    return recording;
   }
 
-  std::unique_ptr<VirtualFile> CreateMp4FromSingleRecording() {
+  std::unique_ptr<VirtualFile> CreateMp4FromSingleRecording(
+      const Recording &recording) {
     Mp4FileBuilder builder;
     builder.SetSampleEntry(video_sample_entry_);
-    builder.Append(Recording(recording_), 0,
+    builder.Append(Recording(recording), 0,
                    std::numeric_limits<int32_t>::max());
     std::string error_message;
     auto mp4 = builder.Build(&error_message);
@@ -283,20 +317,25 @@ class IntegrationTest : public testing::Test {
   std::string tmpdir_path_;
   std::unique_ptr<File> tmpdir_;
   std::string etag_;
-  Recording recording_;
   VideoSampleEntry video_sample_entry_;
 };
 
 TEST_F(IntegrationTest, RoundTrip) {
-  CopyMp4ToSingleRecording();
-  auto f = CreateMp4FromSingleRecording();
+  Recording recording = CopyMp4ToSingleRecording();
+  if (HasFailure()) {
+    return;
+  }
+  auto f = CreateMp4FromSingleRecording(recording);
   WriteMp4(f.get());
   CompareMp4s();
 }
 
 TEST_F(IntegrationTest, Metadata) {
-  CopyMp4ToSingleRecording();
-  auto f = CreateMp4FromSingleRecording();
+  Recording recording = CopyMp4ToSingleRecording();
+  if (HasFailure()) {
+    return;
+  }
+  auto f = CreateMp4FromSingleRecording(recording);
 
   // This test is brittle, which is the point. Any time the digest comparison
   // here fails, it can be updated, but the etag must change as well!

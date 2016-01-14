@@ -44,27 +44,45 @@
 
 #include "crypto.h"
 #include "filesystem.h"
+#include "uuid.h"
 
 namespace moonfire_nvr {
 
-constexpr uint32_t kTimeUnitsPerSecond = 90000;
+constexpr int64_t kTimeUnitsPerSecond = 90000;
 
-// Encodes a sample index.
+// Various fields from the "recording" table which are useful when viewing
+// recordings.
+struct Recording {
+  int64_t rowid = -1;
+  std::string sample_file_path;
+  std::string sample_file_sha1;
+  Uuid sample_file_uuid;
+
+  // Fields populated by SampleIndexEncoder.
+  int64_t start_time_90k = -1;
+  int64_t end_time_90k = -1;
+  int64_t sample_file_bytes = -1;
+  int64_t video_samples = -1;
+  int64_t video_sync_samples = -1;
+  std::string video_sample_entry_sha1;
+  std::string video_index;
+};
+
+// Reusable object to encode sample index data to a Recording object.
 class SampleIndexEncoder {
  public:
-  SampleIndexEncoder() { Clear(); }
-  void AddSample(int32_t duration_90k, int32_t bytes, bool is_key);
-  void Clear();
+  SampleIndexEncoder() {}
+  SampleIndexEncoder(const SampleIndexEncoder &) = delete;
+  void operator=(const SampleIndexEncoder &) = delete;
 
-  // Return the current data, which is invalidated by the next call to
-  // AddSample() or Clear().
-  re2::StringPiece data() { return data_; }
+  void Init(Recording *recording, int64_t start_time_90k);
+  void AddSample(int32_t duration_90k, int32_t bytes, bool is_key);
 
  private:
-  std::string data_;
-  int32_t prev_duration_90k_;
-  int32_t prev_bytes_key_;
-  int32_t prev_bytes_nonkey_;
+  Recording *recording_;
+  int32_t prev_duration_90k_ = 0;
+  int32_t prev_bytes_key_ = 0;
+  int32_t prev_bytes_nonkey_ = 0;
 };
 
 // Iterates through an encoded index, decoding on the fly. Copyable.
@@ -174,19 +192,6 @@ struct VideoSampleEntry {
   std::string data;
   uint16_t width = 0;
   uint16_t height = 0;
-};
-
-// Various fields from the "recording" table which are useful when viewing
-// recordings.
-struct Recording {
-  int64_t start_time_90k = -1;
-  int64_t end_time_90k = -1;
-  int64_t sample_file_bytes = -1;
-  std::string sample_file_path;
-  std::string sample_file_uuid;
-  std::string sample_file_sha1;
-  std::string video_sample_entry_sha1;
-  std::string video_index;
 };
 
 }  // namespace moonfire_nvr

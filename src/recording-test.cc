@@ -54,23 +54,33 @@ namespace {
 
 // Example from design/schema.md.
 TEST(SampleIndexTest, EncodeExample) {
+  Recording recording;
   SampleIndexEncoder encoder;
+  encoder.Init(&recording, 1000);
   encoder.AddSample(10, 1000, true);
   encoder.AddSample(9, 10, false);
   encoder.AddSample(11, 15, false);
   encoder.AddSample(10, 12, false);
   encoder.AddSample(10, 1050, true);
-  ASSERT_EQ("29 d0 0f 02 14 08 0a 02 05 01 64", ToHex(encoder.data(), true));
+  EXPECT_EQ("29 d0 0f 02 14 08 0a 02 05 01 64",
+            ToHex(recording.video_index, true));
+  EXPECT_EQ(1000, recording.start_time_90k);
+  EXPECT_EQ(1000 + 10 + 9 + 11 + 10 + 10, recording.end_time_90k);
+  EXPECT_EQ(1000 + 10 + 15 + 12 + 1050, recording.sample_file_bytes);
+  EXPECT_EQ(5, recording.video_samples);
+  EXPECT_EQ(2, recording.video_sync_samples);
 }
 
 TEST(SampleIndexTest, RoundTrip) {
+  Recording recording;
   SampleIndexEncoder encoder;
+  encoder.Init(&recording, 1000);
   encoder.AddSample(10, 30000, true);
   encoder.AddSample(9, 1000, false);
   encoder.AddSample(11, 1100, false);
   encoder.AddSample(18, 31000, true);
 
-  SampleIndexIterator it = SampleIndexIterator(encoder.data());
+  SampleIndexIterator it = SampleIndexIterator(recording.video_index);
   std::string error_message;
   ASSERT_FALSE(it.done()) << it.error();
   EXPECT_EQ(10, it.duration_90k());
