@@ -40,6 +40,7 @@ else()
 endif()
 
 set(CMAKE_CXX_FLAGS "-Wall -Werror -pedantic-errors ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ggdb")
 
 #
 # Dependencies.
