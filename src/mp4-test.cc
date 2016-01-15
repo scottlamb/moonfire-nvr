@@ -70,9 +70,12 @@ std::string ToHex(const FileSlice *slice, bool pad) {
 std::string Digest(const FileSlice *slice) {
   EvBuffer buf;
   std::string error_message;
-  size_t size = slice->size();
-  CHECK(slice->AddRange(ByteRange(0, size), &buf, &error_message))
-      << error_message;
+  ByteRange left(0, slice->size());
+  while (left.size() > 0) {
+    auto ret = slice->AddRange(left, &buf, &error_message);
+    CHECK_GT(ret, 0) << error_message;
+    left.begin += ret;
+  }
   evbuffer_iovec vec;
   auto digest = Digest::SHA1();
   while (evbuffer_peek(buf.get(), -1, nullptr, &vec, 1) > 0) {
@@ -250,7 +253,7 @@ class IntegrationTest : public testing::Test {
     return recording;
   }
 
-  std::unique_ptr<VirtualFile> CreateMp4FromSingleRecording(
+  std::shared_ptr<VirtualFile> CreateMp4FromSingleRecording(
       const Recording &recording) {
     Mp4FileBuilder builder;
     builder.SetSampleEntry(video_sample_entry_);
@@ -265,8 +268,12 @@ class IntegrationTest : public testing::Test {
   void WriteMp4(VirtualFile *f) {
     EvBuffer buf;
     std::string error_message;
-    EXPECT_TRUE(f->AddRange(ByteRange(0, f->size()), &buf, &error_message))
-        << error_message;
+    ByteRange left(0, f->size());
+    while (left.size() > 0) {
+      auto ret = f->AddRange(left, &buf, &error_message);
+      ASSERT_GT(ret, 0) << error_message;
+      left.begin += ret;
+    }
     WriteFileOrDie(StrCat(tmpdir_path_, "/clip.new.mp4"), &buf);
   }
 

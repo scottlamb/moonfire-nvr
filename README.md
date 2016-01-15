@@ -64,9 +64,11 @@ from source. It requires several packages to build:
   along with all versions of the competing project [libav](http://libav.org),
   does not support socket timeouts for RTSP. For reliable reconnections on
   error, it's strongly recommended to use ffmpeg >= 55.1.101.
-* [libevent](http://libevent.org/) 2.x, for the built-in HTTP server.
+* [libevent](http://libevent.org/) 2.1, for the built-in HTTP server.
   (This might be replaced with the more full-featured
   [nghttp2](https://github.com/tatsuhiro-t/nghttp2) in the future.)
+  Unfortunately, the libevent 2.0 bundled with current Debian releases is
+  unsuitable.
 * [protocol buffers](https://developers.google.com/protocol-buffers/),
   currently just for the configuration file.
 * [gflags](http://gflags.github.io/gflags/), for commandline flag parsing.
@@ -79,7 +81,7 @@ from source. It requires several packages to build:
 * libuuid from (util-linux)[https://en.wikipedia.org/wiki/Util-linux].
 * [SQLite3](https://www.sqlite.org/).
 
-On Ubuntu 15.10 or Raspbian Jessie, the following command will install all
+On Ubuntu 15.10 or Raspbian Jessie, the following command will install most
 pre-requisites (see also the `Build-Depends` field in `debian/control`):
 
     $ sudo apt-get install \
@@ -89,15 +91,18 @@ pre-requisites (see also the `Build-Depends` field in `debian/control`):
                    libavcodec-dev \
                    libavformat-dev \
                    libavutil-dev \
-                   libevent-dev \
                    libgflags-dev \
                    libgoogle-glog-dev \
                    libgoogle-perftools-dev \
                    libre2-dev \
                    libsqlite3-dev \
-                   libuuid-dev \
                    pkgconf \
-                   protobuf-compiler
+                   protobuf-compiler \
+                   uuid-dev
+
+libevent 2.1 will have to be installed from source. In the future, this
+dependency may be replaced or support may be added for automatically building
+libevent in-tree to avoid the inconvenience.
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
@@ -107,7 +112,8 @@ Once prerequisites are installed, Moonfire NVR can be built as follows:
     $ make
     $ sudo make install
 
-Alternatively, you can prepare a `.deb` package:
+Alternatively, if you do have a sufficiently new apt-installed libevent
+installed, you may be able to prepare a `.deb` package:
 
     $ sudo apt-get install devscripts dh-systemd
     $ debuild -us -uc

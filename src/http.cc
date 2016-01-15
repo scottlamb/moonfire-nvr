@@ -40,7 +40,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include <memory>
+#include <algorithm>
 
 #include <event2/buffer.h>
 #include <event2/event.h>
@@ -74,8 +74,8 @@ class RealFile : public VirtualFile {
   }
 
   // Add the given range of the file to the buffer.
-  bool AddRange(ByteRange range, EvBuffer *buf,
-                std::string *error_message) const final {
+  int64_t AddRange(ByteRange range, EvBuffer *buf,
+                   std::string *error_message) const final {
     return slice_.AddRange(range, buf, error_message);
   }
 
@@ -84,6 +84,62 @@ class RealFile : public VirtualFile {
   const std::string mime_type_;
   const struct stat stat_;
 };
+
+// An HttpServe call still in progress.
+struct ServeInProgress {
+  ByteRange left;
+  int64_t sent_bytes = 0;
+  std::shared_ptr<VirtualFile> file;
+  evhttp_request *req = nullptr;
+};
+
+void ServeCloseCallback(evhttp_connection *con, void *arg) {
+  std::unique_ptr<ServeInProgress> serve(
+      reinterpret_cast<ServeInProgress *>(arg));
+  LOG(INFO) << serve->req << ": received client abort after sending "
+            << serve->sent_bytes << " bytes; there were " << serve->left.size()
+            << " bytes left.";
+
+  // The call to cancel will guarantee ServeChunkCallback is not called again.
+  evhttp_cancel_request(serve->req);
+}
+
+void ServeChunkCallback(evhttp_connection *con, void *arg) {
+  std::unique_ptr<ServeInProgress> serve(
+      reinterpret_cast<ServeInProgress *>(arg));
+
+  if (serve->left.size() == 0) {
+    LOG(INFO) << serve->req << ": done; sent " << serve->sent_bytes
+              << " bytes.";
+    evhttp_connection_set_closecb(con, nullptr, nullptr);
+    evhttp_send_reply_end(serve->req);
+    return;
+  }
+
+  // Serve more data.
+  EvBuffer buf;
+  std::string error_message;
+  int64_t added = serve->file->AddRange(serve->left, &buf, &error_message);
+  if (added < 0) {
+    // Order is important here: evhttp_cancel_request immediately calls the
+    // close callback, so remove it first to avoid double-freeing |serve|.
+    evhttp_connection_set_closecb(con, nullptr, nullptr);
+    evhttp_cancel_request(serve->req);
+    LOG(ERROR) << serve->req << ": Failed to serve request after sending "
+               << serve->sent_bytes << " bytes (" << serve->left.size()
+               << " bytes left): " << error_message;
+    return;
+  }
+
+  serve->sent_bytes += added;
+  serve->left.begin += added;
+  VLOG(1) << serve->req << ": sending " << added << " bytes (more) data; still "
+          << serve->left.size() << " bytes left";
+  evhttp_send_reply_chunk_with_cb(serve->req, buf.get(), &ServeChunkCallback,
+                                  serve.get());
+  evhttp_send_reply_chunk(serve->req, buf.get());
+  serve.release();
+}
 
 }  // namespace
 
@@ -196,76 +252,97 @@ void RealFileSlice::Init(re2::StringPiece filename, ByteRange range) {
   range_ = range;
 }
 
-bool RealFileSlice::AddRange(ByteRange range, EvBuffer *buf,
-                             std::string *error_message) const {
+int64_t RealFileSlice::AddRange(ByteRange range, EvBuffer *buf,
+                                std::string *error_message) const {
   int fd = open(filename_.c_str(), O_RDONLY);
   if (fd < 0) {
     int err = errno;
-    *error_message = StrCat("open: ", strerror(err));
-    return false;
+    *error_message = StrCat("open ", filename_, ": ", strerror(err));
+    return -1;
   }
   if (!buf->AddFile(fd, range_.begin + range.begin, range.size(),
                     error_message)) {
     close(fd);
-    return false;
+    return -1;
   }
   // |buf| now owns |fd|.
-  return true;
+  return range.size();
 }
 
-bool FillerFileSlice::AddRange(ByteRange range, EvBuffer *buf,
-                               std::string *error_message) const {
+int64_t FillerFileSlice::AddRange(ByteRange range, EvBuffer *buf,
+                                  std::string *error_message) const {
   std::unique_ptr<std::string> s(new std::string);
   s->reserve(size_);
   if (!fn_(s.get(), error_message)) {
-    return false;
+    return 0;
   }
   if (s->size() != size_) {
     *error_message = StrCat("Expected filled slice to be ", size_,
                             " bytes; got ", s->size(), " bytes.");
-    return false;
+    return 0;
   }
   std::string *unowned_s = s.release();
   buf->AddReference(unowned_s->data() + range.begin,
                     range.size(), [](const void *, size_t, void *s) {
                       delete reinterpret_cast<std::string *>(s);
                     }, unowned_s);
-  return true;
+  return range.size();
 }
 
-bool StaticStringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
-                                      std::string *error_message) const {
+int64_t StaticStringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
+                                         std::string *error_message) const {
   buf->AddReference(piece_.data() + range.begin, range.size(), nullptr,
                     nullptr);
-  return true;
+  return range.size();
 }
 
-bool CopyingStringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
-                                       std::string *error_message) const {
+int64_t CopyingStringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
+                                          std::string *error_message) const {
   buf->Add(re2::StringPiece(piece_.data() + range.begin, range.size()));
-  return true;
+  return range.size();
 }
 
-bool FileSlices::AddRange(ByteRange range, EvBuffer *buf,
-                          std::string *error_message) const {
+int64_t FileSlices::AddRange(ByteRange range, EvBuffer *buf,
+                             std::string *error_message) const {
   if (range.begin < 0 || range.begin > range.end || range.end > size_) {
     *error_message = StrCat("Range ", range.DebugString(),
                             " not valid for file of size ", size_);
     return false;
   }
+  int64_t total_bytes_added = 0;
   auto it = std::upper_bound(slices_.begin(), slices_.end(), range.begin,
                              [](int64_t begin, const SliceInfo &info) {
                                return begin < info.range.end;
                              });
   for (; it != slices_.end() && range.end > it->range.begin; ++it) {
+    if (total_bytes_added > 0 && (it->flags & kLazy) != 0) {
+      VLOG(1) << "early return of " << total_bytes_added << "/" << range.size()
+              << " bytes from FileSlices " << this << " because slice "
+              << it->slice << " is lazy.";
+      break;
+    }
     ByteRange mapped(
         std::max(INT64_C(0), range.begin - it->range.begin),
         std::min(range.end - it->range.begin, it->range.end - it->range.begin));
-    if (!it->slice->AddRange(mapped, buf, error_message)) {
-      return false;
+    int64_t slice_bytes_added = it->slice->AddRange(mapped, buf, error_message);
+    total_bytes_added += slice_bytes_added > 0 ? slice_bytes_added : 0;
+    if (slice_bytes_added < 0 && total_bytes_added == 0) {
+      LOG(WARNING) << "early return of " << total_bytes_added << "/"
+                   << range.size() << " bytes from FileSlices " << this
+                   << " due to slice " << it->slice
+                   << " returning error: " << *error_message;
+      return -1;
+    } else if (slice_bytes_added < mapped.size()) {
+      LOG(INFO) << "early return of " << total_bytes_added << "/"
+                << range.size() << " bytes from FileSlices " << this
+                << " due to slice " << it->slice << " returning "
+                << slice_bytes_added << "/" << mapped.size()
+                << " bytes. error_message (maybe populated): "
+                << *error_message;
+      break;
     }
   }
-  return true;
+  return total_bytes_added;
 }
 
 void HttpSendError(evhttp_request *req, int http_err, const std::string &prefix,
@@ -274,7 +351,7 @@ void HttpSendError(evhttp_request *req, int http_err, const std::string &prefix,
                     EscapeHtml(prefix + strerror(posix_err)).c_str());
 }
 
-void HttpServe(const VirtualFile &file, evhttp_request *req) {
+void HttpServe(const std::shared_ptr<VirtualFile> &file, evhttp_request *req) {
   // We could support HEAD, but there's probably no need.
   if (evhttp_request_get_command(req) != EVHTTP_REQ_GET) {
     return evhttp_send_error(req, HTTP_BADMETHOD, "only GET allowed");
@@ -284,7 +361,7 @@ void HttpServe(const VirtualFile &file, evhttp_request *req) {
   struct evkeyvalq *out_hdrs = evhttp_request_get_output_headers(req);
 
   // Construct a Last-Modified: header.
-  time_t last_modified = file.last_modified();
+  time_t last_modified = file->last_modified();
   struct tm last_modified_tm;
   if (gmtime_r(&last_modified, &last_modified_tm) == 0) {
     return HttpSendError(req, HTTP_INTERNAL, "gmtime_r failed: ", errno);
@@ -294,73 +371,83 @@ void HttpServe(const VirtualFile &file, evhttp_request *req) {
                "%a, %d %b %Y %H:%M:%S GMT", &last_modified_tm) == 0) {
     return HttpSendError(req, HTTP_INTERNAL, "strftime failed: ", errno);
   }
-  std::string etag = file.etag();
+  std::string etag = file->etag();
 
   // Ignore the "Range:" header if "If-Range:" specifies an incorrect etag.
   const char *if_range = evhttp_find_header(in_hdrs, "If-Range");
   const char *range_hdr = evhttp_find_header(in_hdrs, "Range");
   if (if_range != nullptr && etag != if_range) {
-    LOG(INFO) << "Ignoring Range: because If-Range: is stale.";
+    LOG(INFO) << req << ": Ignoring Range: because If-Range: is stale.";
     range_hdr = nullptr;
   }
 
   EvBuffer buf;
   std::vector<ByteRange> ranges;
-  auto range_type = internal::ParseRangeHeader(range_hdr, file.size(), &ranges);
+  auto range_type =
+      internal::ParseRangeHeader(range_hdr, file->size(), &ranges);
   std::string error_message;
   int http_status;
   const char *http_status_str;
+  ByteRange left;
   switch (range_type) {
     case internal::RangeHeaderType::kNotSatisfiable: {
-      std::string range_hdr = StrCat("bytes */", file.size());
+      std::string range_hdr = StrCat("bytes */", file->size());
       evhttp_add_header(out_hdrs, "Content-Range", range_hdr.c_str());
       http_status = 416;
       http_status_str = "Range Not Satisfiable";
-      LOG(INFO) << "Replying to non-satisfiable range request: " << range_hdr;
+      LOG(INFO) << req
+                << ": Replying to non-satisfiable range request: " << range_hdr;
       break;
     }
 
     case internal::RangeHeaderType::kSatisfiable:
       // We only support the simpler single-range case for now.
+      // A multi-range request just serves the whole file via the fallthrough.
       if (ranges.size() == 1) {
         std::string range_hdr = StrCat("bytes ", ranges[0].begin, "-",
-                                       ranges[0].end - 1, "/", file.size());
-        if (!file.AddRange(ranges[0], &buf, &error_message)) {
-          LOG(ERROR) << "Unable to serve range " << ranges[0] << ": "
-                     << error_message;
-          return evhttp_send_error(req, HTTP_INTERNAL,
-                                   EscapeHtml(error_message).c_str());
-        }
+                                       ranges[0].end - 1, "/", file->size());
+        left = ranges[0];
         evhttp_add_header(out_hdrs, "Content-Range", range_hdr.c_str());
         http_status = 206;
         http_status_str = "Partial Content";
-        LOG(INFO) << "Replying to range request";
+        LOG(INFO) << req << ": URI " << evhttp_request_get_uri(req)
+                  << ": client requested byte range " << left
+                  << " (total file size " << file->size() << ")";
         break;
       }
     // FALLTHROUGH
 
-    case internal::RangeHeaderType::kAbsentOrInvalid:
-      if (!file.AddRange(ByteRange(0, file.size()), &buf, &error_message)) {
-        LOG(ERROR) << "Unable to serve file: " << error_message;
-        return evhttp_send_error(req, HTTP_INTERNAL,
-                                 EscapeHtml(error_message).c_str());
-      }
-      LOG(INFO) << "Replying to whole-file request";
+    case internal::RangeHeaderType::kAbsentOrInvalid: {
+      left = ByteRange(0, file->size());
+      LOG(INFO) << req << ": URI " << evhttp_request_get_uri(req)
+                << ": Client requested whole file of size " << file->size();
       http_status = HTTP_OK;
       http_status_str = "OK";
+    }
   }
 
-  // Successful reply ready; add common headers and send.
-  evhttp_add_header(out_hdrs, "Content-Type", file.mime_type().c_str());
+  // Successful reply started; add common headers and send.
+  evhttp_add_header(out_hdrs, "Content-Length", StrCat(left.size()).c_str());
+  evhttp_add_header(out_hdrs, "Content-Type", file->mime_type().c_str());
   evhttp_add_header(out_hdrs, "Accept-Ranges", "bytes");
   evhttp_add_header(out_hdrs, "Last-Modified", last_modified_str);
   evhttp_add_header(out_hdrs, "ETag", etag.c_str());
-  evhttp_send_reply(req, http_status, http_status_str, buf.get());
+  evhttp_send_reply_start(req, http_status, http_status_str);
+
+  ServeInProgress *serve = new ServeInProgress;
+  serve->file = file;
+  serve->left = left;
+  serve->req = req;
+  evhttp_connection *con = evhttp_request_get_connection(req);
+  evhttp_connection_set_closecb(con, &ServeCloseCallback, serve);
+  return ServeChunkCallback(con, serve);
 }
 
 void HttpServeFile(evhttp_request *req, const std::string &mime_type,
                    const std::string &filename, const struct stat &statbuf) {
-  return HttpServe(RealFile(mime_type, filename, statbuf), req);
+  return HttpServe(
+      std::shared_ptr<VirtualFile>(new RealFile(mime_type, filename, statbuf)),
+      req);
 }
 
 }  // namespace moonfire_nvr

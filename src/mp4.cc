@@ -392,7 +392,7 @@ class Mp4File : public VirtualFile {
     for (const auto &segment : segments_) {
       segment->sample_file_slice.Init(segment->recording.sample_file_path,
                                       segment->pieces.sample_pos());
-      slices_.Append(&segment->sample_file_slice);
+      slices_.Append(&segment->sample_file_slice, FileSlices::kLazy);
     }
     mdat_.header().largesize = ToNetworkU64(slices_.size() - size_before_mdat);
 
@@ -414,8 +414,8 @@ class Mp4File : public VirtualFile {
   std::string etag() const final { return etag_; }
   std::string mime_type() const final { return "video/mp4"; }
   int64_t size() const final { return slices_.size(); }
-  bool AddRange(ByteRange range, EvBuffer *buf,
-                std::string *error_message) const final {
+  int64_t AddRange(ByteRange range, EvBuffer *buf,
+                   std::string *error_message) const final {
     return slices_.AddRange(range, buf, error_message);
   }
 
@@ -724,7 +724,7 @@ Mp4FileBuilder &Mp4FileBuilder::SetSampleEntry(const VideoSampleEntry &entry) {
   return *this;
 }
 
-std::unique_ptr<VirtualFile> Mp4FileBuilder::Build(std::string *error_message) {
+std::shared_ptr<VirtualFile> Mp4FileBuilder::Build(std::string *error_message) {
   int32_t sample_offset = 1;
   for (auto &segment : segments_) {
     if (segment->recording.video_sample_entry_sha1 !=
@@ -733,24 +733,24 @@ std::unique_ptr<VirtualFile> Mp4FileBuilder::Build(std::string *error_message) {
           StrCat("inconsistent video sample entries. builder has: ",
                  ToHex(video_sample_entry_.sha1), ", segment has: ",
                  ToHex(segment->recording.video_sample_entry_sha1));
-      return std::unique_ptr<VirtualFile>();
+      return std::shared_ptr<VirtualFile>();
     }
 
     if (!segment->pieces.Init(&segment->recording,
                               1,  // sample entry index
                               sample_offset, segment->rel_start_90k,
                               segment->rel_end_90k, error_message)) {
-      return std::unique_ptr<VirtualFile>();
+      return std::shared_ptr<VirtualFile>();
     }
     sample_offset += segment->pieces.samples();
   }
 
   if (segments_.empty()) {
     *error_message = "Can't construct empty .mp4";
-    return std::unique_ptr<VirtualFile>();
+    return std::shared_ptr<VirtualFile>();
   }
 
-  return std::unique_ptr<VirtualFile>(
+  return std::shared_ptr<VirtualFile>(
       new Mp4File(std::move(segments_), std::move(video_sample_entry_)));
 }
 

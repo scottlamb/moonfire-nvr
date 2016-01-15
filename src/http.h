@@ -41,6 +41,7 @@
 
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <string>
 
 #include <event2/buffer.h>
@@ -118,9 +119,17 @@ void HttpSendError(evhttp_request *req, int http_err, const std::string &prefix,
 class FileSlice {
  public:
   virtual ~FileSlice() {}
+
   virtual int64_t size() const = 0;
-  virtual bool AddRange(ByteRange range, EvBuffer *buf,
-                        std::string *error_message) const = 0;
+
+  // Add some to all of the given non-empty |range| to |buf|.
+  // Returns the number of bytes added, or < 0 on error.
+  // On error, |error_message| should be populated. (|error_message| may also be
+  // populated if 0 <= return value < range.size(), such as if one of a
+  // FileSlices object's failed. However, it's safe to simply retry such
+  // partial failures later.)
+  virtual int64_t AddRange(ByteRange range, EvBuffer *buf,
+                           std::string *error_message) const = 0;
 };
 
 class VirtualFile : public FileSlice {
@@ -139,8 +148,8 @@ class RealFileSlice : public FileSlice {
 
   int64_t size() const final { return range_.size(); }
 
-  bool AddRange(ByteRange range, EvBuffer *buf,
-                std::string *error_message) const final;
+  int64_t AddRange(ByteRange range, EvBuffer *buf,
+                   std::string *error_message) const final;
 
  private:
   std::string filename_;
@@ -161,8 +170,8 @@ class FillerFileSlice : public FileSlice {
 
   int64_t size() const final { return size_; }
 
-  bool AddRange(ByteRange range, EvBuffer *buf,
-                std::string *error_message) const final;
+  int64_t AddRange(ByteRange range, EvBuffer *buf,
+                   std::string *error_message) const final;
 
  private:
   FillFunction fn_;
@@ -175,8 +184,8 @@ class StaticStringPieceSlice : public FileSlice {
   explicit StaticStringPieceSlice(re2::StringPiece piece) : piece_(piece) {}
 
   int64_t size() const final { return piece_.size(); }
-  bool AddRange(ByteRange range, EvBuffer *buf,
-                std::string *error_message) const final;
+  int64_t AddRange(ByteRange range, EvBuffer *buf,
+                   std::string *error_message) const final;
 
  private:
   re2::StringPiece piece_;
@@ -188,8 +197,8 @@ class CopyingStringPieceSlice : public FileSlice {
   explicit CopyingStringPieceSlice(re2::StringPiece piece) : piece_(piece) {}
 
   int64_t size() const final { return piece_.size(); }
-  bool AddRange(ByteRange range, EvBuffer *buf,
-                std::string *error_message) const final;
+  int64_t AddRange(ByteRange range, EvBuffer *buf,
+                   std::string *error_message) const final;
 
  private:
   re2::StringPiece piece_;
@@ -204,22 +213,35 @@ class FileSlices : public FileSlice {
 
   // |slice| must outlive the FileSlices.
   // |slice->size()| should not change after this call.
-  void Append(const FileSlice *slice) {
+  // |flags| should be a bitmask of Flags values below.
+  void Append(const FileSlice *slice, int flags = 0) {
     int64_t new_size = size_ + slice->size();
-    slices_.emplace_back(ByteRange(size_, new_size), slice);
+    slices_.emplace_back(ByteRange(size_, new_size), slice, flags);
     size_ = new_size;
   }
 
   int64_t size() const final { return size_; }
-  bool AddRange(ByteRange range, EvBuffer *buf,
-                std::string *error_message) const final;
+  int64_t AddRange(ByteRange range, EvBuffer *buf,
+                   std::string *error_message) const final;
+
+  enum Flags {
+    // kLazy, as an argument to Append, instructs the FileSlices to append
+    // this slice in AddRange only if it is the first slice in the requested
+    // range. Otherwise it returns early, expecting HttpServe to call AddRange
+    // again after the earlier ranges have been sent. This is useful if it is
+    // expensive to have the given slice pending. In particular, it is useful
+    // when serving many file slices on 32-bit machines to avoid exhausting
+    // the address space with too many memory mappings.
+    kLazy = 1
+  };
 
  private:
   struct SliceInfo {
-    SliceInfo(ByteRange range, const FileSlice *slice)
-        : range(range), slice(slice) {}
+    SliceInfo(ByteRange range, const FileSlice *slice, int flags)
+        : range(range), slice(slice), flags(flags) {}
     ByteRange range;
     const FileSlice *slice = nullptr;
+    int flags;
   };
   int64_t size_ = 0;
 
@@ -237,7 +259,7 @@ class FileSlices : public FileSlice {
 // problematic, this interface may change to take advantage of
 // evbuffer_add_cb, adding buffers incrementally, and some mechanism will be
 // added to guarantee VirtualFile objects outlive the HTTP requests they serve.
-void HttpServe(const VirtualFile &file, evhttp_request *req);
+void HttpServe(const std::shared_ptr<VirtualFile> &file, evhttp_request *req);
 
 // Serve a file over HTTP. Expects the caller to supply a sanitized |filename|
 // (rather than taking it straight from the path specified in |req|).

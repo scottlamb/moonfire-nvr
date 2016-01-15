@@ -156,7 +156,7 @@ class Mp4FileBuilder {
   // * Non-final segment has zero duration of last sample.
   // * Data error in one of the recording sample indexes.
   // * Invalid start/end.
-  std::unique_ptr<VirtualFile> Build(std::string *error_message);
+  std::shared_ptr<VirtualFile> Build(std::string *error_message);
 
  private:
   std::vector<std::unique_ptr<internal::Mp4FileSegment>> segments_;

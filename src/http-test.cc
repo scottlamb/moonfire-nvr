@@ -61,7 +61,7 @@ namespace {
 class MockFileSlice : public FileSlice {
  public:
   MOCK_CONST_METHOD0(size, int64_t());
-  MOCK_CONST_METHOD3(AddRange, bool(ByteRange, EvBuffer *, std::string *));
+  MOCK_CONST_METHOD3(AddRange, int64_t(ByteRange, EvBuffer *, std::string *));
 };
 
 TEST(EvBufferTest, AddFileTest) {
@@ -99,18 +99,18 @@ TEST(EvBufferTest, AddFileTest) {
 
 class FileSlicesTest : public testing::Test {
  protected:
-  FileSlicesTest() {
+  void Init(int flags) {
     EXPECT_CALL(a_, size()).Times(AnyNumber()).WillRepeatedly(Return(5));
     EXPECT_CALL(b_, size()).Times(AnyNumber()).WillRepeatedly(Return(13));
     EXPECT_CALL(c_, size()).Times(AnyNumber()).WillRepeatedly(Return(7));
     EXPECT_CALL(d_, size()).Times(AnyNumber()).WillRepeatedly(Return(17));
     EXPECT_CALL(e_, size()).Times(AnyNumber()).WillRepeatedly(Return(19));
 
-    slices_.Append(&a_);
-    slices_.Append(&b_);
-    slices_.Append(&c_);
-    slices_.Append(&d_);
-    slices_.Append(&e_);
+    slices_.Append(&a_, flags);
+    slices_.Append(&b_, flags);
+    slices_.Append(&c_, flags);
+    slices_.Append(&d_, flags);
+    slices_.Append(&e_, flags);
   }
 
   FileSlices slices_;
@@ -122,44 +122,79 @@ class FileSlicesTest : public testing::Test {
 };
 
 TEST_F(FileSlicesTest, Size) {
+  Init(0);
   EXPECT_EQ(5 + 13 + 7 + 17 + 19, slices_.size());
 }
 
 TEST_F(FileSlicesTest, ExactSlice) {
   // Exactly slice b.
+  Init(0);
   std::string error_message;
-  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _)).WillOnce(Return(true));
-  EXPECT_TRUE(slices_.AddRange(ByteRange(5, 18), nullptr, &error_message))
+  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _)).WillOnce(Return(13));
+  EXPECT_EQ(13, slices_.AddRange(ByteRange(5, 18), nullptr, &error_message))
       << error_message;
 }
 
 TEST_F(FileSlicesTest, Offset) {
   // Part of slice b, all of slice c, and part of slice d.
+  Init(0);
   std::string error_message;
-  EXPECT_CALL(b_, AddRange(ByteRange(12, 13), _, _)).WillOnce(Return(true));
-  EXPECT_CALL(c_, AddRange(ByteRange(0, 7), _, _)).WillOnce(Return(true));
-  EXPECT_CALL(d_, AddRange(ByteRange(0, 1), _, _)).WillOnce(Return(true));
-  EXPECT_TRUE(slices_.AddRange(ByteRange(17, 26), nullptr, &error_message))
+  EXPECT_CALL(b_, AddRange(ByteRange(12, 13), _, _)).WillOnce(Return(1));
+  EXPECT_CALL(c_, AddRange(ByteRange(0, 7), _, _)).WillOnce(Return(7));
+  EXPECT_CALL(d_, AddRange(ByteRange(0, 1), _, _)).WillOnce(Return(1));
+  EXPECT_EQ(9, slices_.AddRange(ByteRange(17, 26), nullptr, &error_message))
       << error_message;
 }
 
 TEST_F(FileSlicesTest, Everything) {
+  Init(0);
   std::string error_message;
-  EXPECT_CALL(a_, AddRange(ByteRange(0, 5), _, _)).WillOnce(Return(true));
-  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _)).WillOnce(Return(true));
-  EXPECT_CALL(c_, AddRange(ByteRange(0, 7), _, _)).WillOnce(Return(true));
-  EXPECT_CALL(d_, AddRange(ByteRange(0, 17), _, _)).WillOnce(Return(true));
-  EXPECT_CALL(e_, AddRange(ByteRange(0, 19), _, _)).WillOnce(Return(true));
-  EXPECT_TRUE(slices_.AddRange(ByteRange(0, 61), nullptr, &error_message))
+  EXPECT_CALL(a_, AddRange(ByteRange(0, 5), _, _)).WillOnce(Return(5));
+  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _)).WillOnce(Return(13));
+  EXPECT_CALL(c_, AddRange(ByteRange(0, 7), _, _)).WillOnce(Return(7));
+  EXPECT_CALL(d_, AddRange(ByteRange(0, 17), _, _)).WillOnce(Return(17));
+  EXPECT_CALL(e_, AddRange(ByteRange(0, 19), _, _)).WillOnce(Return(19));
+  EXPECT_EQ(61, slices_.AddRange(ByteRange(0, 61), nullptr, &error_message))
+      << error_message;
+}
+
+TEST_F(FileSlicesTest, Lazy) {
+  Init(FileSlices::kLazy);
+  std::string error_message;
+  EXPECT_CALL(a_, AddRange(ByteRange(0, 5), _, _)).WillOnce(Return(5));
+  EXPECT_EQ(5, slices_.AddRange(ByteRange(0, 61), nullptr, &error_message))
+      << error_message;
+  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _)).WillOnce(Return(13));
+  EXPECT_EQ(13, slices_.AddRange(ByteRange(5, 61), nullptr, &error_message))
+      << error_message;
+  EXPECT_CALL(c_, AddRange(ByteRange(0, 7), _, _)).WillOnce(Return(7));
+  EXPECT_EQ(7, slices_.AddRange(ByteRange(18, 61), nullptr, &error_message))
+      << error_message;
+  EXPECT_CALL(d_, AddRange(ByteRange(0, 17), _, _)).WillOnce(Return(17));
+  EXPECT_EQ(17, slices_.AddRange(ByteRange(25, 61), nullptr, &error_message))
+      << error_message;
+  EXPECT_CALL(e_, AddRange(ByteRange(0, 19), _, _)).WillOnce(Return(19));
+  EXPECT_EQ(19, slices_.AddRange(ByteRange(42, 61), nullptr, &error_message))
+      << error_message;
+}
+
+TEST_F(FileSlicesTest, SliceWithPartialReturn) {
+  Init(0);
+  std::string error_message;
+  EXPECT_CALL(a_, AddRange(ByteRange(0, 5), _, _)).WillOnce(Return(5));
+  EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _)).WillOnce(Return(1));
+  EXPECT_EQ(6, slices_.AddRange(ByteRange(0, 61), nullptr, &error_message))
       << error_message;
 }
 
 TEST_F(FileSlicesTest, PropagateError) {
+  Init(0);
   std::string error_message;
-  EXPECT_CALL(a_, AddRange(ByteRange(0, 5), _, _)).WillOnce(Return(true));
+  EXPECT_CALL(a_, AddRange(ByteRange(0, 5), _, _)).WillOnce(Return(5));
   EXPECT_CALL(b_, AddRange(ByteRange(0, 13), _, _))
-      .WillOnce(DoAll(SetArgPointee<2>("asdf"), Return(false)));
-  EXPECT_FALSE(slices_.AddRange(ByteRange(0, 61), nullptr, &error_message));
+      .WillRepeatedly(DoAll(SetArgPointee<2>("asdf"), Return(-1)));
+  EXPECT_EQ(5, slices_.AddRange(ByteRange(0, 61), nullptr, &error_message));
+  EXPECT_EQ(-1, slices_.AddRange(ByteRange(5, 61), nullptr, &error_message));
   EXPECT_EQ("asdf", error_message);
 }
 
@@ -240,6 +275,13 @@ TEST(RangeHeaderTest, AbsentOrInvalid) {
   EXPECT_EQ(RangeHeaderType::kAbsentOrInvalid,
             ParseRangeHeader("bytes=-", 10000, &ranges));
 }
+
+// TODO: test HttpServe itself!
+// Currently the testing is manual. Three important cases:
+// * HTTP request succeeds
+// * client aborts (as in hitting ctrl-C in curl during a long request)
+// * the VirtualFile returns error (say, by chmod u-r on the file backing
+//   a RealFileSlice)
 
 }  // namespace
 }  // namespace moonfire_nvr
