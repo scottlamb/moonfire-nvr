@@ -49,15 +49,19 @@ namespace {
 class SqliteTest : public testing::Test {
  protected:
   SqliteTest() {
+    tmpdir_ = PrepareTempDirOrDie("sqlite-test");
+
     std::string error_message;
-    CHECK(db_.Open(":memory:", SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-                   &error_message))
+    CHECK(db_.Open(StrCat(tmpdir_, "/db").c_str(),
+                   SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, &error_message))
         << error_message;
 
     std::string create_sql = ReadFileOrDie("../src/schema.sql");
-    CHECK(RunStatements(&db_, create_sql, &error_message)) << error_message;
+    DatabaseContext ctx(&db_);
+    CHECK(RunStatements(&ctx, create_sql, &error_message)) << error_message;
   }
 
+  std::string tmpdir_;
   Database db_;
 };
 
@@ -66,31 +70,33 @@ TEST_F(SqliteTest, JustCreate) {}
 TEST_F(SqliteTest, BindAndColumn) {
   std::string error_message;
   auto insert_stmt = db_.Prepare(
-      "insert into camera (uuid, short_name, retain_bytes) "
-      "values (?, ?, ?)",
+      "insert into camera (uuid,  short_name,  retain_bytes) "
+      "            values (:uuid, :short_name, :retain_bytes)",
       nullptr, &error_message);
-  ASSERT_TRUE(insert_stmt != nullptr) << error_message;
+  ASSERT_TRUE(insert_stmt.valid()) << error_message;
   const char kBlob[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
                         0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
   re2::StringPiece blob_piece = re2::StringPiece(kBlob, sizeof(kBlob));
   const char kText[] = "foo";
   const int64_t kInt64 = INT64_C(0xdeadbeeffeedface);
-  ASSERT_TRUE(insert_stmt->BindBlob(1, blob_piece, &error_message))
-      << error_message;
-  ASSERT_TRUE(insert_stmt->BindText(2, kText, &error_message)) << error_message;
-  ASSERT_TRUE(insert_stmt->BindInt64(3, kInt64, &error_message))
-      << error_message;
-  ASSERT_EQ(SQLITE_DONE, insert_stmt->Step());
 
-  auto select_stmt =
-      db_.Prepare("select uuid, short_name, retain_bytes from camera", nullptr,
-                  &error_message);
-  ASSERT_TRUE(select_stmt != nullptr) << error_message;
-  ASSERT_EQ(SQLITE_ROW, select_stmt->Step());
-  EXPECT_EQ(ToHex(blob_piece, true), ToHex(select_stmt->ColumnBlob(0), true));
-  EXPECT_EQ(kText, select_stmt->ColumnText(1).as_string());
-  EXPECT_EQ(kInt64, select_stmt->ColumnInt64(2));
-  ASSERT_EQ(SQLITE_DONE, select_stmt->Step());
+  DatabaseContext ctx(&db_);
+  {
+    auto run = ctx.Borrow(&insert_stmt);
+    run.BindBlob(1, blob_piece);
+    run.BindText(2, kText);
+    run.BindInt64(3, kInt64);
+    ASSERT_EQ(SQLITE_DONE, run.Step()) << run.error_message();
+  }
+
+  {
+    auto run = ctx.UseOnce("select uuid, short_name, retain_bytes from camera");
+    ASSERT_EQ(SQLITE_ROW, run.Step()) << run.error_message();
+    EXPECT_EQ(ToHex(blob_piece, true), ToHex(run.ColumnBlob(0), true));
+    EXPECT_EQ(kText, run.ColumnText(1).as_string());
+    EXPECT_EQ(kInt64, run.ColumnInt64(2));
+    ASSERT_EQ(SQLITE_DONE, run.Step()) << run.error_message();
+  }
 }
 
 }  // namespace

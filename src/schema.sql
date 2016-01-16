@@ -31,6 +31,8 @@
 -- schema.sql: SQLite3 database schema for Moonfire NVR.
 -- See also design/schema.md.
 
+pragma journal_mode = wal;
+
 create table camera (
   id integer primary key,
   uuid blob unique not null,
