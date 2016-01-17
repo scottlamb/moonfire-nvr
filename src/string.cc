@@ -145,6 +145,41 @@ std::string HumanizeWithBinaryPrefix(float n, re2::StringPiece suffix) {
   return Humanize(kPrefixes, 1024., n, suffix);
 }
 
+std::string HumanizeDuration(int64_t seconds) {
+  static const int64_t kMinuteInSeconds = 60;
+  static const int64_t kHourInSeconds = 60 * kMinuteInSeconds;
+  static const int64_t kDayInSeconds = 24 * kHourInSeconds;
+  int64_t days = seconds / kDayInSeconds;
+  seconds %= kDayInSeconds;
+  int64_t hours = seconds / kHourInSeconds;
+  seconds %= kHourInSeconds;
+  int64_t minutes = seconds / kMinuteInSeconds;
+  seconds %= kMinuteInSeconds;
+  std::string out;
+  if (days > 0) {
+    out.append(StrCat(days, days == 1 ? " day" : " days"));
+  }
+  if (hours > 0) {
+    if (!out.empty()) {
+      out.append(" ");
+    }
+    out.append(StrCat(hours, hours == 1 ? " hour" : " hours"));
+  }
+  if (minutes > 0) {
+    if (!out.empty()) {
+      out.append(" ");
+    }
+    out.append(StrCat(minutes, minutes == 1 ? " minute" : " minutes"));
+  }
+  if (seconds > 0 || out.empty()) {
+    if (!out.empty()) {
+      out.append(" ");
+    }
+    out.append(StrCat(seconds, seconds == 1 ? " second" : " seconds"));
+  }
+  return out;
+}
+
 bool strto64(const char *str, int base, const char **endptr, int64_t *value) {
   static_assert(sizeof(int64_t) == sizeof(long long int),
                 "unknown memory model");

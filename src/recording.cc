@@ -211,4 +211,15 @@ bool SampleFileWriter::Close(std::string *sha1, std::string *error_message) {
   return ok;
 }
 
+std::string PrettyTimestamp(int64_t ts_90k) {
+  struct tm mytm;
+  memset(&mytm, 0, sizeof(mytm));
+  time_t ts = ts_90k / kTimeUnitsPerSecond;
+  localtime_r(&ts, &mytm);
+  const size_t kTimeBufLen = 50;
+  char tmbuf[kTimeBufLen];
+  strftime(tmbuf, kTimeBufLen, "%a, %d %b %Y %H:%M:%S %Z", &mytm);
+  return tmbuf;
+}
+
 }  // namespace moonfire_nvr

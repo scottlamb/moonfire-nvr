@@ -49,6 +49,7 @@ set(MOONFIRE_NVR_SRCS
     filesystem.cc
     h264.cc
     http.cc
+    moonfire-db.cc
     moonfire-nvr.cc
     mp4.cc
     profiler.cc
@@ -56,7 +57,8 @@ set(MOONFIRE_NVR_SRCS
     sqlite.cc
     string.cc
     time.cc
-    uuid.cc)
+    uuid.cc
+    web.cc)
 
 add_library(moonfire-nvr-lib ${MOONFIRE_NVR_SRCS} ${PROTO_SRCS} ${PROTO_HDRS})
 target_link_libraries(moonfire-nvr-lib ${MOONFIRE_DEPS})

@@ -194,6 +194,8 @@ struct VideoSampleEntry {
   uint16_t height = 0;
 };
 
+std::string PrettyTimestamp(int64_t ts_90k);
+
 }  // namespace moonfire_nvr
 
 #endif  // MOONFIRE_NVR_RECORDING_H

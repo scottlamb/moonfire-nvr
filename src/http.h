@@ -62,7 +62,7 @@ class QueryParameters {
   // Caller should check ok() afterward.
   QueryParameters(const char *uri) {
     TAILQ_INIT(&me_);
-    ok_ = evhttp_parse_query_str(uri, &me_) == 0;
+    ok_ = evhttp_parse_query(uri, &me_) == 0;
   }
   QueryParameters(const QueryParameters &) = delete;
   void operator=(const QueryParameters &) = delete;

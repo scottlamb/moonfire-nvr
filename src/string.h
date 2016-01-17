@@ -127,6 +127,8 @@ std::string ToHex(re2::StringPiece in, bool pad = false);
 std::string HumanizeWithDecimalPrefix(float n, re2::StringPiece suffix);
 std::string HumanizeWithBinaryPrefix(float n, re2::StringPiece suffix);
 
+std::string HumanizeDuration(int64_t sec);
+
 // Wrapper around ::strtoll that returns true iff valid and corrects
 // constness. Returns false if |str| is null.
 bool strto64(const char *str, int base, const char **endptr, int64_t *value);
