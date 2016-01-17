@@ -45,7 +45,6 @@
 
 #include <event2/buffer.h>
 #include <event2/event.h>
-#include <event2/keyvalq_struct.h>
 #include <event2/http.h>
 #include <gperftools/profiler.h>
 #include <glog/logging.h>
@@ -112,12 +111,10 @@ void StartProfileCallback(struct evhttp_request *req, void *arg) {
                              "Profiling already in progress");
   }
   struct timeval timeout = {0, 0};
-  struct evkeyvalq query_options;
-  evhttp_parse_query(evhttp_request_get_uri(req), &query_options);
-  const char *seconds_value = evhttp_find_header(&query_options, "seconds");
+  QueryParameters params(evhttp_request_get_uri(req));
+  const char *seconds_value = params.Get("seconds");
   timeout.tv_sec =
       seconds_value == nullptr ? kDefaultProfileSeconds : atoi(seconds_value);
-  evhttp_clear_headers(&query_options);
   if (timeout.tv_sec <= 0) {
     return evhttp_send_error(req, HTTP_BADREQUEST, "invalid seconds");
   }

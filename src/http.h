@@ -36,6 +36,7 @@
 
 #include <dirent.h>
 #include <stdarg.h>
+#include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -45,6 +46,7 @@
 #include <string>
 
 #include <event2/buffer.h>
+#include <event2/keyvalq_struct.h>
 #include <event2/http.h>
 #include <glog/logging.h>
 #include <re2/stringpiece.h>
@@ -52,6 +54,30 @@
 #include "string.h"
 
 namespace moonfire_nvr {
+
+// Single-use object to represent a set of HTTP query parameters.
+class QueryParameters {
+ public:
+  // Parse parameters from the given URI.
+  // Caller should check ok() afterward.
+  QueryParameters(const char *uri) {
+    TAILQ_INIT(&me_);
+    ok_ = evhttp_parse_query_str(uri, &me_) == 0;
+  }
+  QueryParameters(const QueryParameters &) = delete;
+  void operator=(const QueryParameters &) = delete;
+
+  ~QueryParameters() { evhttp_clear_headers(&me_); }
+
+  bool ok() const { return ok_; }
+  const char *Get(const char *param) const {
+    return evhttp_find_header(&me_, param);
+  }
+
+ private:
+  struct evkeyvalq me_;
+  bool ok_ = false;
+};
 
 // Wrapped version of libevent's "struct evbuffer" which uses RAII and simply
 // aborts the process if allocations fail. (Moonfire NVR is intended to run on
