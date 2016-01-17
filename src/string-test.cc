@@ -112,6 +112,16 @@ TEST(HumanizeTest, Simple) {
   EXPECT_EQ("1000.0 Ebps", HumanizeWithDecimalPrefix(1e21, "bps"));
 }
 
+TEST(AtoiTest, Simple) {
+  int64_t out;
+  EXPECT_TRUE(Atoi64("1234", 10, &out));
+  EXPECT_EQ(1234, out);
+  EXPECT_FALSE(Atoi64(nullptr, 10, &out));
+  EXPECT_FALSE(Atoi64("", 10, &out));
+  EXPECT_FALSE(Atoi64("asdf", 10, &out));
+  EXPECT_FALSE(Atoi64("1234asdf", 10, &out));
+}
+
 }  // namespace
 }  // namespace moonfire_nvr
 

@@ -148,9 +148,17 @@ std::string HumanizeWithBinaryPrefix(float n, re2::StringPiece suffix) {
 bool strto64(const char *str, int base, const char **endptr, int64_t *value) {
   static_assert(sizeof(int64_t) == sizeof(long long int),
                 "unknown memory model");
+  if (str == nullptr) {
+    return false;
+  }
   errno = 0;
   *value = ::strtoll(str, const_cast<char **>(endptr), base);
   return *endptr != str && errno == 0;
+}
+
+bool Atoi64(const char *str, int base, int64_t *value) {
+  const char *endptr;
+  return strto64(str, base, &endptr, value) && *endptr == '\0';
 }
 
 }  // namespace moonfire_nvr
