@@ -123,6 +123,12 @@ class MoonfireDatabase {
       std::function<IterationControl(const ListCameraRecordingsRow &)>,
       std::string *error_message);
 
+  bool ListMp4Recordings(
+      int64_t camera_id, int64_t start_time_90k, int64_t end_time_90k,
+      std::function<IterationControl(Recording &, const VideoSampleEntry &)>
+          row_cb,
+      std::string *error_message);
+
   std::shared_ptr<VirtualFile> BuildMp4(int64_t camera_id,
                                         int64_t start_time_90k,
                                         int64_t end_time_90k,

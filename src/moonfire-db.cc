@@ -112,7 +112,7 @@ bool MoonfireDatabase::Init(std::string *error_message) {
     return false;
   }
 
-  build_mp4_query_ = db_->Prepare(
+  std::string build_mp4_sql = StrCat(
       R"(
       select
         recording.rowid,
@@ -134,11 +134,14 @@ bool MoonfireDatabase::Init(std::string *error_message) {
       where
         recording.status = 1 and
         camera_id = :camera_id and
+        recording.start_time_90k > :start_time_90k - )",
+      kMaxRecordingDuration, " and\n",
+      R"(
         recording.start_time_90k < :end_time_90k and
         recording.end_time_90k > :start_time_90k
       order by
-        recording.start_time_90k;)",
-      nullptr, error_message);
+        recording.start_time_90k;)");
+  build_mp4_query_ = db_->Prepare(build_mp4_sql, nullptr, error_message);
   if (!build_mp4_query_.valid()) {
     return false;
   }
@@ -230,6 +233,56 @@ bool MoonfireDatabase::ListCameraRecordings(
   return true;
 }
 
+bool MoonfireDatabase::ListMp4Recordings(
+    int64_t camera_id, int64_t start_time_90k, int64_t end_time_90k,
+    std::function<IterationControl(Recording &, const VideoSampleEntry &)>
+        row_cb,
+    std::string *error_message) {
+  VLOG(1) << "...(1/4): Waiting for database lock";
+  DatabaseContext ctx(db_);
+  VLOG(1) << "...(2/4): Querying database";
+  auto run = ctx.Borrow(&build_mp4_query_);
+  run.BindInt64(":camera_id", camera_id);
+  run.BindInt64(":end_time_90k", end_time_90k);
+  run.BindInt64(":start_time_90k", start_time_90k);
+  Recording recording;
+  VideoSampleEntry sample_entry;
+  while (run.Step() == SQLITE_ROW) {
+    recording.rowid = run.ColumnInt64(0);
+    recording.start_time_90k = run.ColumnInt64(1);
+    recording.end_time_90k = run.ColumnInt64(2);
+    recording.sample_file_bytes = run.ColumnInt64(3);
+    if (!recording.sample_file_uuid.ParseBinary(run.ColumnBlob(4))) {
+      *error_message =
+          StrCat("recording ", recording.rowid, " has unparseable uuid ",
+                 ToHex(run.ColumnBlob(4)));
+      return false;
+    }
+    recording.sample_file_path =
+        StrCat("/home/slamb/new-moonfire/sample/",
+               recording.sample_file_uuid.UnparseText());
+    recording.sample_file_sha1 = run.ColumnBlob(5).as_string();
+    recording.video_sample_entry_sha1 = run.ColumnBlob(6).as_string();
+    recording.video_index = run.ColumnBlob(7).as_string();
+    recording.video_samples = run.ColumnInt64(8);
+    recording.video_sync_samples = run.ColumnInt64(9);
+
+    if (recording.video_sample_entry_sha1 != sample_entry.sha1) {
+      sample_entry.sha1 = run.ColumnBlob(6).as_string();
+      sample_entry.data = run.ColumnBlob(10).as_string();
+      sample_entry.width = run.ColumnInt64(11);
+      sample_entry.height = run.ColumnInt64(12);
+    }
+
+    row_cb(recording, sample_entry);
+  }
+  if (run.status() != SQLITE_DONE && run.status() != SQLITE_ROW) {
+    *error_message = StrCat("sqlite query failed: ", run.error_message());
+    return false;
+  }
+  return true;
+}
+
 std::shared_ptr<VirtualFile> MoonfireDatabase::BuildMp4(
     int64_t camera_id, int64_t start_time_90k, int64_t end_time_90k,
     std::string *error_message) {
@@ -239,81 +292,51 @@ std::shared_ptr<VirtualFile> MoonfireDatabase::BuildMp4(
 
   Mp4FileBuilder builder;
   int64_t next_row_start_time_90k = start_time_90k;
-  VideoSampleEntry sample_entry;
   int64_t rows = 0;
-  {
-    VLOG(1) << "...(1/4): Waiting for database lock";
-    DatabaseContext ctx(db_);
-    VLOG(1) << "...(2/4): Querying database";
-    auto run = ctx.Borrow(&build_mp4_query_);
-    run.BindInt64(":camera_id", camera_id);
-    run.BindInt64(":end_time_90k", end_time_90k);
-    run.BindInt64(":start_time_90k", start_time_90k);
-    Recording recording;
-    while (run.Step() == SQLITE_ROW) {
-      recording.rowid = run.ColumnInt64(0);
-      VLOG(2) << "row: " << recording.rowid;
-      recording.start_time_90k = run.ColumnInt64(1);
-      recording.end_time_90k = run.ColumnInt64(2);
-      recording.sample_file_bytes = run.ColumnInt64(3);
-      if (!recording.sample_file_uuid.ParseBinary(run.ColumnBlob(4))) {
-        *error_message =
-            StrCat("recording ", recording.rowid, " has unparseable uuid ",
-                   ToHex(run.ColumnBlob(4)));
-        return false;
-      }
-      recording.sample_file_path =
-          StrCat("/home/slamb/new-moonfire/sample/",
-                 recording.sample_file_uuid.UnparseText());
-      recording.sample_file_sha1 = run.ColumnBlob(5).as_string();
-      recording.video_sample_entry_sha1 = run.ColumnBlob(6).as_string();
-      recording.video_index = run.ColumnBlob(7).as_string();
-      recording.video_samples = run.ColumnInt64(8);
-      recording.video_sync_samples = run.ColumnInt64(9);
-
-      if (rows == 0 && recording.start_time_90k != next_row_start_time_90k) {
-        *error_message =
-            StrCat("recording starts late: ",
-                   PrettyTimestamp(recording.start_time_90k), " (",
-                   recording.start_time_90k, ") rather than requested: ",
-                   PrettyTimestamp(start_time_90k), " (", start_time_90k, ")");
-        return false;
-      } else if (recording.start_time_90k != next_row_start_time_90k) {
-        *error_message =
-            StrCat("gap/overlap in recording: ",
-                   PrettyTimestamp(next_row_start_time_90k), " (",
-                   next_row_start_time_90k, ") to: ",
-                   PrettyTimestamp(recording.start_time_90k), " (",
-                   recording.start_time_90k, ") before row ", rows);
-        return false;
-      }
-
-      next_row_start_time_90k = recording.end_time_90k;
-
-      if (rows > 0 && recording.video_sample_entry_sha1 != sample_entry.sha1) {
-        *error_message =
-            StrCat("inconsistent video sample entries: this recording has ",
-                   ToHex(recording.video_sample_entry_sha1), ", previous had ",
-                   ToHex(sample_entry.sha1));
-        return false;
-      } else if (rows == 0) {
-        sample_entry.sha1 = run.ColumnBlob(6).as_string();
-        sample_entry.data = run.ColumnBlob(10).as_string();
-        sample_entry.width = run.ColumnInt64(11);
-        sample_entry.height = run.ColumnInt64(12);
-        builder.SetSampleEntry(sample_entry);
-      }
-
-      // TODO: correct bounds within recording.
-      // Currently this can return too much data.
-      builder.Append(std::move(recording), 0,
-                     std::numeric_limits<int32_t>::max());
-      ++rows;
+  bool ok = true;
+  auto row_cb = [&](Recording &recording,
+                    const VideoSampleEntry &sample_entry) {
+    if (rows == 0 && recording.start_time_90k != next_row_start_time_90k) {
+      *error_message = StrCat(
+          "recording starts late: ", PrettyTimestamp(recording.start_time_90k),
+          " (", recording.start_time_90k, ") rather than requested: ",
+          PrettyTimestamp(start_time_90k), " (", start_time_90k, ")");
+      ok = false;
+      return IterationControl::kBreak;
+    } else if (recording.start_time_90k != next_row_start_time_90k) {
+      *error_message = StrCat("gap/overlap in recording: ",
+                              PrettyTimestamp(next_row_start_time_90k), " (",
+                              next_row_start_time_90k, ") to: ",
+                              PrettyTimestamp(recording.start_time_90k), " (",
+                              recording.start_time_90k, ") before row ", rows);
+      ok = false;
+      return IterationControl::kBreak;
     }
-    if (run.status() != SQLITE_DONE) {
-      *error_message = StrCat("sqlite query failed: ", run.error_message());
-      return false;
+
+    next_row_start_time_90k = recording.end_time_90k;
+
+    if (rows > 0 && recording.video_sample_entry_sha1 != sample_entry.sha1) {
+      *error_message =
+          StrCat("inconsistent video sample entries: this recording has ",
+                 ToHex(recording.video_sample_entry_sha1), ", previous had ",
+                 ToHex(sample_entry.sha1));
+      ok = false;
+      return IterationControl::kBreak;
+    } else if (rows == 0) {
+      builder.SetSampleEntry(sample_entry);
     }
+
+    // TODO: correct bounds within recording.
+    // Currently this can return too much data.
+    builder.Append(std::move(recording), 0,
+                   std::numeric_limits<int32_t>::max());
+    ++rows;
+    return IterationControl::kContinue;
+  };
+  if (!ok ||
+      !ListMp4Recordings(camera_id, start_time_90k, end_time_90k, row_cb,
+                         error_message)) {
+    return false;
   }
   if (rows == 0) {
     *error_message = StrCat("no recordings in range");

@@ -88,6 +88,8 @@ create table recording (
   video_index blob
 );
 
+create index recording_start_time_90k on recording (start_time_90k);
+
 -- A concrete box derived from a ISO/IEC 14496-12 section 8.5.2
 -- VisualSampleEntry box. Describes the codec, width, height, etc.
 create table video_sample_entry (

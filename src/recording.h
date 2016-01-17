@@ -50,6 +50,14 @@ namespace moonfire_nvr {
 
 constexpr int64_t kTimeUnitsPerSecond = 90000;
 
+// Recordings are never longer than this (5 minutes).
+// Having such a limit dramatically speeds up some SQL queries.
+// This limit should be more than the normal rotation time,
+// as recording doesn't happen until the next key frame.
+// 5 minutes is generously more than 1 minute, but still sufficient to
+// allow the optimization to be useful.
+constexpr int64_t kMaxRecordingDuration = 5 * 60 * kTimeUnitsPerSecond;
+
 // Various fields from the "recording" table which are useful when viewing
 // recordings.
 struct Recording {
