@@ -62,34 +62,35 @@ void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
       "<table>\n");
   auto row_cb = [&](const ListCamerasRow &row) {
     auto seconds =
-        (row.max_recording_end_time_90k - row.min_recording_start_time_90k) /
-        kTimeUnitsPerSecond;
+        (row.max_end_time_90k - row.min_start_time_90k) / kTimeUnitsPerSecond;
+    std::string min_start_time_90k =
+        row.min_start_time_90k == -1 ? std::string("n/a")
+                                     : PrettyTimestamp(row.min_start_time_90k);
+    std::string max_end_time_90k = row.max_end_time_90k == -1
+                                       ? std::string("n/a")
+                                       : PrettyTimestamp(row.max_end_time_90k);
     buf.AddPrintf(
-        "<tr class=header><td colspan=2><a href=\"/camera?id=%" PRId64
-        "\">%s</a></td></tr>\n"
+        "<tr class=header><td colspan=2><a href=\"/camera?uuid=%s\">%s</a>"
+        "</td></tr>\n"
         "<tr><td>description</td><td>%s</td></tr>\n"
         "<tr><td>space</td><td>%s / %s (%.1f%%)</td></tr>\n"
         "<tr><td>uuid</td><td>%s</td></tr>\n"
         "<tr><td>oldest recording</td><td>%s</td></tr>\n"
         "<tr><td>newest recording</td><td>%s</td></tr>\n"
         "<tr><td>total duration</td><td>%s</td></tr>\n",
-        row.id, EscapeHtml(row.short_name).c_str(),
+        row.uuid.UnparseText().c_str(), EscapeHtml(row.short_name).c_str(),
         EscapeHtml(row.description).c_str(),
         EscapeHtml(HumanizeWithBinaryPrefix(row.total_sample_file_bytes, "B"))
             .c_str(),
         EscapeHtml(HumanizeWithBinaryPrefix(row.retain_bytes, "B")).c_str(),
         100.f * row.total_sample_file_bytes / row.retain_bytes,
         EscapeHtml(row.uuid.UnparseText()).c_str(),
-        EscapeHtml(PrettyTimestamp(row.min_recording_start_time_90k)).c_str(),
-        EscapeHtml(PrettyTimestamp(row.max_recording_end_time_90k)).c_str(),
+        EscapeHtml(min_start_time_90k).c_str(),
+        EscapeHtml(max_end_time_90k).c_str(),
         EscapeHtml(HumanizeDuration(seconds)).c_str());
     return IterationControl::kContinue;
   };
-  std::string error_message;
-  if (!this_->mdb_->ListCameras(row_cb, &error_message)) {
-    return evhttp_send_error(req, HTTP_INTERNAL,
-                             EscapeHtml(error_message).c_str());
-  }
+  this_->mdb_->ListCameras(row_cb);
   buf.Add(
       "</table>\n"
       "</body>\n"
@@ -100,19 +101,15 @@ void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
 void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
   auto *this_ = reinterpret_cast<WebInterface *>(arg);
 
-  int64_t camera_id;
+  Uuid camera_uuid;
   QueryParameters params(evhttp_request_get_uri(req));
-  if (!params.ok() || !Atoi64(params.Get("id"), 10, &camera_id)) {
+  if (!params.ok() || !camera_uuid.ParseText(params.Get("uuid"))) {
     return evhttp_send_error(req, HTTP_BADREQUEST, "bad query parameters");
   }
 
   GetCameraRow camera_row;
-  std::string error_message;
-  if (!this_->mdb_->GetCamera(camera_id, &camera_row, &error_message)) {
-    // TODO: more nuanced error here, such as HTTP_NOTFOUND where appropriate.
-    return evhttp_send_error(
-        req, HTTP_INTERNAL,
-        StrCat("sqlite query failed: ", EscapeHtml(error_message)).c_str());
+  if (!this_->mdb_->GetCamera(camera_uuid, &camera_row)) {
+    return evhttp_send_error(req, HTTP_NOTFOUND, "no such camera");
   }
 
   EvBuffer buf;
@@ -151,11 +148,12 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
                                       aggregated.start_time_90k) /
                    kTimeUnitsPerSecond;
     buf.AddPrintf(
-        "<tr><td><a href=\"/view.mp4?camera_id=%" PRId64
-        "&start_time_90k=%" PRId64 "&end_time_90k=%" PRId64
+        "<tr><td><a href=\"/view.mp4?camera_uuid=%s&start_time_90k=%" PRId64
+        "&end_time_90k=%" PRId64
         "\">%s</a></td><td>%s</td><td>%dx%d</td>"
         "<td>%.0f</td><td>%s</td><td>%s</td></tr>\n",
-        camera_id, aggregated.start_time_90k, aggregated.end_time_90k,
+        camera_uuid.UnparseText().c_str(), aggregated.start_time_90k,
+        aggregated.end_time_90k,
         PrettyTimestamp(aggregated.start_time_90k).c_str(),
         PrettyTimestamp(aggregated.end_time_90k).c_str(),
         static_cast<int>(aggregated.width), static_cast<int>(aggregated.height),
@@ -169,10 +167,10 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
   auto handle_sql_row = [&](const ListCameraRecordingsRow &row) {
     auto new_duration_90k = row.end_time_90k - aggregated.start_time_90k;
     if (row.video_sample_entry_sha1 == aggregated.video_sample_entry_sha1 &&
-        row.start_time_90k == aggregated.end_time_90k &&
+        row.end_time_90k == aggregated.start_time_90k &&
         new_duration_90k < kForceSplitDuration90k) {
       // Append to current .mp4.
-      aggregated.end_time_90k = row.end_time_90k;
+      aggregated.start_time_90k = row.start_time_90k;
       aggregated.video_samples += row.video_samples;
       aggregated.sample_file_bytes += row.sample_file_bytes;
     } else {
@@ -182,7 +180,11 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
     }
     return IterationControl::kContinue;
   };
-  if (!this_->mdb_->ListCameraRecordings(camera_id, handle_sql_row,
+  int64_t start_time_90k = 0;
+  int64_t end_time_90k = std::numeric_limits<int64_t>::max();
+  std::string error_message;
+  if (!this_->mdb_->ListCameraRecordings(camera_uuid, start_time_90k,
+                                         end_time_90k, handle_sql_row,
                                          &error_message)) {
     return evhttp_send_error(
         req, HTTP_INTERNAL,
@@ -198,11 +200,11 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
 void WebInterface::HandleMp4View(evhttp_request *req, void *arg) {
   auto *this_ = reinterpret_cast<WebInterface *>(arg);
 
-  int64_t camera_id;
+  Uuid camera_uuid;
   int64_t start_time_90k;
   int64_t end_time_90k;
   QueryParameters params(evhttp_request_get_uri(req));
-  if (!params.ok() || !Atoi64(params.Get("camera_id"), 10, &camera_id) ||
+  if (!params.ok() || !camera_uuid.ParseText(params.Get("camera_uuid")) ||
       !Atoi64(params.Get("start_time_90k"), 10, &start_time_90k) ||
       !Atoi64(params.Get("end_time_90k"), 10, &end_time_90k) ||
       start_time_90k < 0 || start_time_90k >= end_time_90k) {
@@ -210,7 +212,7 @@ void WebInterface::HandleMp4View(evhttp_request *req, void *arg) {
   }
 
   std::string error_message;
-  auto file = this_->mdb_->BuildMp4(camera_id, start_time_90k, end_time_90k,
+  auto file = this_->mdb_->BuildMp4(camera_uuid, start_time_90k, end_time_90k,
                                     &error_message);
   if (file == nullptr) {
     // TODO: more nuanced HTTP status codes.

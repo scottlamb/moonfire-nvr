@@ -78,7 +78,7 @@ TEST_F(SqliteTest, BindAndColumn) {
                         0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
   re2::StringPiece blob_piece = re2::StringPiece(kBlob, sizeof(kBlob));
   const char kText[] = "foo";
-  const int64_t kInt64 = INT64_C(0xdeadbeeffeedface);
+  const int64_t kInt64 = INT64_C(0xbeeffeedface);
 
   DatabaseContext ctx(&db_);
   {

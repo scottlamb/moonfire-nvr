@@ -31,14 +31,14 @@
 -- schema.sql: SQLite3 database schema for Moonfire NVR.
 -- See also design/schema.md.
 
-pragma journal_mode = wal;
+--pragma journal_mode = wal;
 
 create table camera (
   id integer primary key,
-  uuid blob unique not null,
+  uuid blob unique,-- not null check (length(uuid) = 16),
 
   -- A short name of the camera, used in log messages.
-  short_name text not null,
+  short_name text,-- not null,
 
   -- A short description of the camera.
   description text,
@@ -63,45 +63,70 @@ create table camera (
 
   -- The number of bytes of video to retain, excluding the currently-recording
   -- file. Older files will be deleted as necessary to stay within this limit.
-  retain_bytes integer
+  retain_bytes integer not null check (retain_bytes >= 0)
 );
 
--- A single, typically 60-second, recorded segment of video.
+-- Each row represents a single completed recorded segment of video.
+-- Recordings are typically ~60 seconds; never more than 5 minutes.
 create table recording (
   id integer primary key,
   camera_id integer references camera (id) not null,
 
-  status integer not null,  -- 0 (WRITING), 1 (WRITTEN), or 2 (DELETING)
+  sample_file_bytes integer not null check (sample_file_bytes > 0),
 
-  sample_file_uuid blob unique not null,
-  sample_file_sha1 blob,
-  sample_file_bytes integer,
-
-  -- The starting and ending time of the recording, in 90 kHz units since
+  -- The starting time of the recording, in 90 kHz units since
   -- 1970-01-01 00:00:00 UTC.
-  start_time_90k integer not null,
-  end_time_90k integer,
+  start_time_90k integer not null check (start_time_90k > 0),
 
-  video_samples integer,
-  video_sync_samples integer,
-  video_sample_entry_sha1 blob references video_sample_entry (sha1),
-  video_index blob
+  -- The duration of the recording, in 90 kHz units.
+  duration_90k integer not null
+      check (duration_90k >= 0 and duration_90k < 5*60*90000),
+
+  video_samples integer not null check (video_samples > 0),
+  video_sync_samples integer not null check (video_samples > 0),
+  video_sample_entry_id integer references video_sample_entry (id),
+
+  sample_file_uuid blob not null check (length(sample_file_uuid) = 16),
+  sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
+  video_index blob not null check (length(video_index) > 0)
 );
 
-create index recording_start_time_90k on recording (start_time_90k);
+create index recording_cover on recording (
+  -- Typical queries use "where camera_id = ? order by start_time_90k (desc)?".
+  camera_id,
+  start_time_90k,
+
+  -- These fields are not used for ordering; they cover most queries so
+  -- that only database verification and actual viewing of recordings need
+  -- to consult the underlying row.
+  duration_90k,
+  video_samples,
+  video_sample_entry_id,
+  sample_file_bytes
+);
+
+-- Files in the sample file directory which may be present but should simply be
+-- discarded on startup. (Recordings which were never completed or have been
+-- marked for completion.)
+create table reserved_sample_files (
+  uuid blob primary key check (length(uuid) = 16),
+  state integer not null  -- 0 (writing) or 1 (deleted)
+) without rowid;
 
 -- A concrete box derived from a ISO/IEC 14496-12 section 8.5.2
 -- VisualSampleEntry box. Describes the codec, width, height, etc.
 create table video_sample_entry (
+  id integer primary key,
+
   -- A SHA-1 hash of |bytes|.
-  sha1 blob primary key,
+  sha1 blob unique not null check (length(sha1) = 20),
 
   -- The width and height in pixels; must match values within
   -- |sample_entry_bytes|.
-  width integer,
-  height integer,
+  width integer not null check (width > 0),
+  height integer not null check (height > 0),
 
-  -- A serialized SampleEntry box, including the leading length and box
-  -- type (avcC in the case of H.264).
-  bytes blob
+  -- The serialized box, including the leading length and box type (avcC in
+  -- the case of H.264).
+  data blob not null check (length(data) > 86)
 );

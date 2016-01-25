@@ -88,7 +88,8 @@ bool DatabaseContext::BeginTransaction(std::string *error_message) {
   sqlite3_step(db_->begin_transaction_.me_);
   int ret = sqlite3_reset(db_->begin_transaction_.me_);
   if (ret != SQLITE_OK) {
-    *error_message = sqlite3_errstr(ret);
+    *error_message =
+        StrCat("begin transaction: ", sqlite3_errstr(ret), " (", ret, ")");
     return false;
   }
   transaction_open_ = true;
@@ -103,7 +104,8 @@ bool DatabaseContext::CommitTransaction(std::string *error_message) {
   sqlite3_step(db_->commit_transaction_.me_);
   int ret = sqlite3_reset(db_->commit_transaction_.me_);
   if (ret != SQLITE_OK) {
-    *error_message = sqlite3_errstr(ret);
+    *error_message =
+        StrCat("commit transaction: ", sqlite3_errstr(ret), " (", ret, ")");
     return false;
   }
   transaction_open_ = false;
@@ -118,7 +120,8 @@ void DatabaseContext::RollbackTransaction() {
   sqlite3_step(db_->rollback_transaction_.me_);
   int ret = sqlite3_reset(db_->rollback_transaction_.me_);
   if (ret != SQLITE_OK) {
-    LOG(WARNING) << this << ": rollback failed: " << sqlite3_errstr(ret);
+    LOG(WARNING) << this << ": rollback failed: " << sqlite3_errstr(ret) << " ("
+                 << ret << ")";
     return;
   }
   transaction_open_ = false;
@@ -137,26 +140,36 @@ RunningStatement DatabaseContext::UseOnce(re2::StringPiece sql) {
 RunningStatement::RunningStatement(Statement *statement,
                                    const std::string &deferred_error,
                                    bool owns_statement)
-    : statement_(statement),
-      error_message_(deferred_error),
-      owns_statement_(owns_statement) {
-  CHECK(!statement->borrowed_) << "Statement already borrowed!";
-  statement->borrowed_ = true;
+    : error_message_(deferred_error), owns_statement_(owns_statement) {
+  if (statement != nullptr && statement->valid()) {
+    CHECK(!statement->borrowed_) << "Statement already borrowed!";
+    statement->borrowed_ = true;
+    statement_ = statement;
+  } else if (error_message_.empty()) {
+    error_message_ = "invalid statement";
+  }
+
   if (!error_message_.empty()) {
     status_ = SQLITE_MISUSE;
-  } else if (statement == nullptr) {
-    status_ = SQLITE_MISUSE;
-    error_message_ = "invalid statement";
   }
 }
 
+RunningStatement::RunningStatement(RunningStatement &&o) {
+  statement_ = o.statement_;
+  status_ = o.status_;
+  owns_statement_ = o.owns_statement_;
+  o.statement_ = nullptr;
+}
+
 RunningStatement::~RunningStatement() {
-  CHECK(statement_->borrowed_) << "Statement no longer borrowed!";
-  sqlite3_reset(statement_->me_);
-  sqlite3_clear_bindings(statement_->me_);
-  statement_->borrowed_ = false;
-  if (owns_statement_) {
-    delete statement_;
+  if (statement_ != nullptr) {
+    CHECK(statement_->borrowed_) << "Statement no longer borrowed!";
+    sqlite3_clear_bindings(statement_->me_);
+    sqlite3_reset(statement_->me_);
+    statement_->borrowed_ = false;
+    if (owns_statement_) {
+      delete statement_;
+    }
   }
 }
 
@@ -168,7 +181,7 @@ void RunningStatement::BindBlob(int param, re2::StringPiece value) {
                                 value.size(), SQLITE_TRANSIENT);
   if (status_ != SQLITE_OK) {
     error_message_ = StrCat("Unable to bind parameter ", param, ": ",
-                            sqlite3_errstr(status_));
+                            sqlite3_errstr(status_), " (", status_, ")");
   }
 }
 
@@ -186,7 +199,7 @@ void RunningStatement::BindBlob(const char *name, re2::StringPiece value) {
                                 value.size(), SQLITE_TRANSIENT);
   if (status_ != SQLITE_OK) {
     error_message_ = StrCat("Unable to bind parameter ", name, ": ",
-                            sqlite3_errstr(status_));
+                            sqlite3_errstr(status_), " (", status_, ")");
   }
 }
 
@@ -197,7 +210,7 @@ void RunningStatement::BindInt64(int param, int64_t value) {
   status_ = sqlite3_bind_int64(statement_->me_, param, value);
   if (status_ != SQLITE_OK) {
     error_message_ = StrCat("Unable to bind parameter ", param, ": ",
-                            sqlite3_errstr(status_));
+                            sqlite3_errstr(status_), " (", status_, ")");
   }
 }
 
@@ -214,7 +227,7 @@ void RunningStatement::BindInt64(const char *name, int64_t value) {
   status_ = sqlite3_bind_int64(statement_->me_, param, value);
   if (status_ != SQLITE_OK) {
     error_message_ = StrCat("Unable to bind parameter ", name, ": ",
-                            sqlite3_errstr(status_));
+                            sqlite3_errstr(status_), " (", status_, ")");
   }
 }
 
@@ -226,7 +239,7 @@ void RunningStatement::BindText(int param, re2::StringPiece value) {
                                 value.size(), SQLITE_TRANSIENT, SQLITE_UTF8);
   if (status_ != SQLITE_OK) {
     error_message_ = StrCat("Unable to bind parameter ", param, ": ",
-                            sqlite3_errstr(status_));
+                            sqlite3_errstr(status_), " (", status_, ")");
   }
 }
 
@@ -243,7 +256,7 @@ void RunningStatement::BindText(const char *name, re2::StringPiece value) {
                                 value.size(), SQLITE_TRANSIENT, SQLITE_UTF8);
   if (status_ != SQLITE_OK) {
     error_message_ = StrCat("Unable to bind parameter ", name, ": ",
-                            sqlite3_errstr(status_));
+                            sqlite3_errstr(status_), " (", status_, ")");
   }
 }
 
@@ -252,7 +265,8 @@ int RunningStatement::Step() {
     return status_;
   }
   status_ = sqlite3_step(statement_->me_);
-  error_message_ = sqlite3_errstr(status_);
+  error_message_ =
+      StrCat("step: ", sqlite3_errstr(status_), " (", status_, ")");
   return status_;
 }
 
@@ -291,7 +305,8 @@ bool Database::Open(const char *filename, int flags,
   std::call_once(global_setup, &GlobalSetup);
   int ret = sqlite3_open_v2(filename, &me_, flags, nullptr);
   if (ret != SQLITE_OK) {
-    *error_message = sqlite3_errstr(ret);
+    *error_message =
+        StrCat("open ", filename, ": ", sqlite3_errstr(ret), " (", ret, ")");
     return false;
   }
 
@@ -299,8 +314,8 @@ bool Database::Open(const char *filename, int flags,
   if (ret != SQLITE_OK) {
     sqlite3_close(me_);
     me_ = nullptr;
-    *error_message =
-        StrCat("while enabling extended result codes: ", sqlite3_errstr(ret));
+    *error_message = StrCat("while enabling extended result codes: ",
+                            sqlite3_errstr(ret), " (", ret, ")");
     return false;
   }
 
@@ -331,8 +346,8 @@ bool Database::Open(const char *filename, int flags,
   if (ret != SQLITE_DONE) {
     sqlite3_close(me_);
     me_ = nullptr;
-    *error_message =
-        StrCat("while enabling foreign keys: ", sqlite3_errstr(ret));
+    *error_message = StrCat("while enabling foreign keys: ",
+                            sqlite3_errstr(ret), " (", ret, ")");
     return false;
   }
 
@@ -346,7 +361,7 @@ Statement Database::Prepare(re2::StringPiece sql, size_t *used,
   int err =
       sqlite3_prepare_v2(me_, sql.data(), sql.size(), &statement.me_, &tail);
   if (err != SQLITE_OK) {
-    *error_message = sqlite3_errstr(err);
+    *error_message = StrCat("prepare: ", sqlite3_errstr(err), " (", err, ")");
     return statement;
   }
   if (used != nullptr) {

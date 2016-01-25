@@ -727,12 +727,11 @@ Mp4FileBuilder &Mp4FileBuilder::SetSampleEntry(const VideoSampleEntry &entry) {
 std::shared_ptr<VirtualFile> Mp4FileBuilder::Build(std::string *error_message) {
   int32_t sample_offset = 1;
   for (auto &segment : segments_) {
-    if (segment->recording.video_sample_entry_sha1 !=
-        video_sample_entry_.sha1) {
-      *error_message =
-          StrCat("inconsistent video sample entries. builder has: ",
-                 ToHex(video_sample_entry_.sha1), ", segment has: ",
-                 ToHex(segment->recording.video_sample_entry_sha1));
+    if (segment->recording.video_sample_entry_id != video_sample_entry_.id) {
+      *error_message = StrCat(
+          "inconsistent video sample entries. builder has: ",
+          video_sample_entry_.id, " (sha1 ", ToHex(video_sample_entry_.sha1),
+          ", segment has: ", segment->recording.video_sample_entry_id);
       return std::shared_ptr<VirtualFile>();
     }
 

@@ -61,6 +61,8 @@ class Uuid {
   bool operator==(const Uuid &) const;
   bool operator<(const Uuid &) const;
 
+  bool is_null() const { return uuid_is_null(me_); }
+
  private:
   friend class RealUuidGenerator;
   uuid_t me_;

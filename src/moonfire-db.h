@@ -32,18 +32,30 @@
 // Currently focused on stuff needed by WebInterface to build a HTML or JSON
 // interface.
 //
-// Performance note: camera-level operations do a sequential scan through
-// essentially the entire database. This is unacceptable for full-sized
-// databases; it will have to be measured and improved. Ideas:
+// This caches data in RAM, making the assumption that only one process is
+// accessing the database at a time. (TODO: enforce with flock or some such.)
+// Performance and efficiency notes:
 //
-// * separate the video index blob from the rest of the recording row,
-//   as it's expected to be 10X-100X larger than everything else and not
-//   necessary for these operations.
-// * paged results + SQL indexes (but this may only help so much, as it'd be
-//   useful to at least see what days have recordings in one go).
-// * keep aggregates, either in-memory or as denormalized data in the camera
-//   table. Likely integrating with the recording system, although triggers
-//   may also be possible.
+// * several query operations here feature row callbacks. The callback is
+//   invoked with the database lock. Thus, the caller mustn't perform database
+//   operations or other long-running operations.
+//
+// * startup may be slow, as it scans the entire index for the recording
+//   table. This seems acceptable.
+//
+// * the operations used for web file serving should return results with
+//   acceptable latency.
+//
+// * however, the database lock may be held for longer than is acceptable for
+//   the critical path of recording frames. It may be necessary to preallocate
+//   sample file uuids and such to avoid this.
+//
+// * the caller may need to perform several different types of write
+//   operations in a row. It might be worth creating an interface for batching
+//   these inside a transaction, to reduce latency and SSD write cycles. The
+//   pre-commit and post-commit logic of each operation would have to be
+//   pulled apart, with the latter being called by this wrapper class on
+//   commit of the overall transaction.
 
 #ifndef MOONFIRE_NVR_MOONFIRE_DB_H
 #define MOONFIRE_NVR_MOONFIRE_DB_H
@@ -51,6 +63,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "common.h"
 #include "http.h"
@@ -62,28 +75,32 @@ namespace moonfire_nvr {
 
 // For use with MoonfireDatabase::ListCameras.
 struct ListCamerasRow {
-  int64_t id = -1;
   Uuid uuid;
   std::string short_name;
   std::string description;
   int64_t retain_bytes = -1;
 
-  // Aggregates summarizing completed (status=1) recordings.
-  int64_t min_recording_start_time_90k = -1;
-  int64_t max_recording_end_time_90k = -1;
-  int64_t total_recording_duration_90k = -1;
+  // Aggregates summarizing completed recordings.
+  int64_t min_start_time_90k = -1;
+  int64_t max_end_time_90k = -1;
+  int64_t total_duration_90k = -1;
   int64_t total_sample_file_bytes = -1;
 };
 
 // For use with MoonfireDatabase::GetCamera.
-// This is the same information as in ListCamerasRow minus the stuff
-// that's calculable from ListCameraRecordingsRow, which the camera details
-// webpage also grabs.
+// This includes everything in ListCamerasRow. In the future, it will include
+// more data. Likely, that will mean a list of calendar days (in the system
+// time zone) in which there is any data.
 struct GetCameraRow {
-  int64_t retain_bytes = -1;
-  Uuid uuid;
   std::string short_name;
   std::string description;
+  int64_t retain_bytes = -1;
+  int64_t min_start_time_90k = -1;
+  int64_t max_end_time_90k = -1;
+  int64_t total_duration_90k = -1;
+  int64_t total_sample_file_bytes = -1;
+
+  // TODO: std::vector<std::string> days;  // keys: YYYY-mm-dd.
 };
 
 // For use with MoonfireDatabase::ListCameraRecordings.
@@ -93,53 +110,137 @@ struct ListCameraRecordingsRow {
   int64_t end_time_90k = -1;
   int64_t video_samples = -1;
   int64_t sample_file_bytes = -1;
-  std::string video_sample_entry_sha1;
 
   // Joined from the video_sample_entry table.
-  int64_t width = -1;
-  int64_t height = -1;
+  // |video_sample_entry_sha1| is valid as long as the MoonfireDatabase.
+  re2::StringPiece video_sample_entry_sha1;
+  uint16_t width = 0;
+  uint16_t height = 0;
 };
 
+// For use with MoonfireDatabase::ListOldestSampleFiles.
+struct ListOldestSampleFilesRow {
+  int64_t camera_id = -1;
+  int64_t recording_id = -1;
+  Uuid sample_file_uuid;
+  int64_t duration_90k = -1;
+  int64_t sample_file_bytes = -1;
+};
+
+// Thread-safe after Init.
+// (Uses a DatabaseContext for locking.)
 class MoonfireDatabase {
  public:
-  explicit MoonfireDatabase(Database *db) : db_(db) {}
+  MoonfireDatabase() {}
   MoonfireDatabase(const MoonfireDatabase &) = delete;
   void operator=(const MoonfireDatabase &) = delete;
 
-  bool Init(std::string *error_message);
+  // |db| must outlive the MoonfireDatabase.
+  bool Init(Database *db, std::string *error_message);
 
   // List all cameras in the system, ordered by short name.
-  // Holds database lock; callback should be quick.
-  bool ListCameras(std::function<IterationControl(const ListCamerasRow &)> cb,
-                   std::string *error_message);
+  void ListCameras(std::function<IterationControl(const ListCamerasRow &)> cb);
 
-  bool GetCamera(int64_t camera_id, GetCameraRow *row,
-                 std::string *error_message);
+  // Get a single camera.
+  // Return true iff the camera exists.
+  bool GetCamera(Uuid camera_uuid, GetCameraRow *row);
 
-  // List all recordings associated with a camera, ordered by start time..
-  // Holds database lock; callback should be quick.
+  // List all recordings associated with a camera, descending by end time.
   bool ListCameraRecordings(
-      int64_t camera_id,
+      Uuid camera_uuid, int64_t start_time_90k, int64_t end_time_90k,
       std::function<IterationControl(const ListCameraRecordingsRow &)>,
       std::string *error_message);
 
   bool ListMp4Recordings(
-      int64_t camera_id, int64_t start_time_90k, int64_t end_time_90k,
+      Uuid camera_uuid, int64_t start_time_90k, int64_t end_time_90k,
       std::function<IterationControl(Recording &, const VideoSampleEntry &)>
           row_cb,
       std::string *error_message);
 
-  std::shared_ptr<VirtualFile> BuildMp4(int64_t camera_id,
+  // TODO: more nuanced error code for HTTP.
+  // TODO: this should move somewhere that has access to the
+  // currently-writing Recording as well.
+  std::shared_ptr<VirtualFile> BuildMp4(Uuid camera_uuid,
                                         int64_t start_time_90k,
                                         int64_t end_time_90k,
                                         std::string *error_message);
 
+  bool ListReservedSampleFiles(std::vector<Uuid> *reserved,
+                               std::string *error_message);
+
+  // Reserve |n| new sample file uuids.
+  // Returns an empty vector on error.
+  std::vector<Uuid> ReserveSampleFiles(int n, std::string *error_message);
+
+  // Insert a video sample entry if not already inserted.
+  // On success, |entry->id| is filled in with the id of a freshly-created or
+  // existing row.
+  bool InsertVideoSampleEntry(VideoSampleEntry *entry,
+                              std::string *error_message);
+
+  // Insert a new recording.
+  // The uuid must have been already reserved with ReserveSampleFileUuid above.
+  // On success, |recording->id| is filled in.
+  bool InsertRecording(Recording *recording, std::string *error_message);
+
+  // List sample files, starting from the oldest.
+  // The caller is expected to supply a |row_cb| that returns kBreak when
+  // enough have been listed.
+  bool ListOldestSampleFiles(
+      Uuid camera_uuid,
+      std::function<IterationControl(const ListOldestSampleFilesRow &)> row_cb,
+      std::string *error_message);
+
+  // Delete recording rows, moving their sample file uuids to the deleting
+  // state.
+  bool DeleteRecordings(const std::vector<ListOldestSampleFilesRow> &rows,
+                        std::string *error_message);
+
+  // Mark a set of sample files as deleted.
+  // This shouldn't be called until the files have been unlinke()ed and the
+  // parent directory fsync()ed.
+  // Returns error if any sample files are not in the deleting state.
+  bool MarkSampleFilesDeleted(const std::vector<Uuid> &uuids,
+                              std::string *error_message);
+
  private:
-  Database *const db_;
-  Statement list_cameras_query_;
-  Statement get_camera_query_;
-  Statement list_camera_recordings_query_;
-  Statement build_mp4_query_;
+  struct CameraData {
+    // Cached values of the matching fields from the camera row.
+    int64_t id = -1;
+    std::string short_name;
+    std::string description;
+    int64_t retain_bytes = -1;
+
+    // Aggregates of all recordings associated with the camera.
+    int64_t min_start_time_90k = -1;
+    int64_t max_end_time_90k = -1;
+    int64_t total_sample_file_bytes = -1;
+    int64_t total_duration_90k = -1;
+  };
+
+  enum class ReservationState { kWriting = 0, kDeleting = 1 };
+
+  // Efficiently (re-)compute the bounds of recorded time for a given camera.
+  bool ComputeCameraRecordingBounds(DatabaseContext *ctx, int64_t camera_id,
+                                    int64_t *min_start_time_90k,
+                                    int64_t *max_end_time_90k,
+                                    std::string *error_message);
+
+  Database *db_ = nullptr;
+  Statement list_camera_recordings_stmt_;
+  Statement build_mp4_stmt_;
+  Statement insert_reservation_stmt_;
+  Statement delete_reservation_stmt_;
+  Statement insert_video_sample_entry_stmt_;
+  Statement insert_recording_stmt_;
+  Statement list_oldest_sample_files_stmt_;
+  Statement delete_recording_stmt_;
+  Statement camera_min_start_stmt_;
+  Statement camera_max_start_stmt_;
+
+  std::map<Uuid, CameraData> cameras_by_uuid_;
+  std::map<int64_t, CameraData *> cameras_by_id_;
+  std::map<int64_t, VideoSampleEntry> video_sample_entries_;
 };
 
 }  // namespace moonfire_nvr

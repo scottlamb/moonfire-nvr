@@ -66,6 +66,10 @@ inline struct timespec SecToTimespec(double sec) {
   return {static_cast<time_t>(intpart), static_cast<long>(fractpart * kNanos)};
 }
 
+inline double TimespecToSec(struct timespec t) {
+  return t.tv_sec + static_cast<double>(t.tv_nsec) / kNanos;
+}
+
 // Returns the real wall clock, which will never be deleted.
 WallClock *GetRealClock();
 

@@ -141,7 +141,7 @@ class Database {
 // }
 class RunningStatement {
  public:
-  RunningStatement(RunningStatement &&) = default;
+  RunningStatement(RunningStatement &&o);
 
   // Reset/unbind/return the statement for the next use (in the case of
   // Borrow) or delete it (in the case of UseOnce).

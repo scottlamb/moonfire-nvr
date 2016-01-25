@@ -55,16 +55,19 @@ constexpr int64_t kTimeUnitsPerSecond = 90000;
 // This limit should be more than the normal rotation time,
 // as recording doesn't happen until the next key frame.
 // 5 minutes is generously more than 1 minute, but still sufficient to
-// allow the optimization to be useful.
+// allow the optimization to be useful. This value must match the CHECK
+// constraint on duration_90k in schema.sql.
 constexpr int64_t kMaxRecordingDuration = 5 * 60 * kTimeUnitsPerSecond;
 
 // Various fields from the "recording" table which are useful when viewing
 // recordings.
 struct Recording {
-  int64_t rowid = -1;
+  int64_t id = -1;
+  int64_t camera_id = -1;
   std::string sample_file_path;
   std::string sample_file_sha1;
   Uuid sample_file_uuid;
+  int64_t video_sample_entry_id = -1;
 
   // Fields populated by SampleIndexEncoder.
   int64_t start_time_90k = -1;
@@ -72,7 +75,6 @@ struct Recording {
   int64_t sample_file_bytes = -1;
   int64_t video_samples = -1;
   int64_t video_sync_samples = -1;
-  std::string video_sample_entry_sha1;
   std::string video_index;
 };
 
@@ -196,6 +198,7 @@ class SampleFileWriter {
 };
 
 struct VideoSampleEntry {
+  int64_t id = -1;
   std::string sha1;
   std::string data;
   uint16_t width = 0;

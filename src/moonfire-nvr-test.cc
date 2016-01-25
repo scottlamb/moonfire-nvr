@@ -148,7 +148,7 @@ class StreamTest : public testing::Test {
     env_.clock = &clock_;
     env_.video_source = &video_source_;
     env_.fs = GetRealFilesystem();
-    clock_.Sleep({1430006400, 0});  // 2016-04-26 00:00:00 UTC
+    clock_.Sleep({1430006400, 0});  // 2015-04-26 00:00:00 UTC
 
     config_.set_base_path(test_dir_);
     config_.set_rotate_sec(5);
