@@ -138,7 +138,7 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
   // aggregated .mp4 files of up to kForceSplitDuration90k each, provided
   // there is no gap or change in video parameters between recordings.
   static const int64_t kForceSplitDuration90k =
-      4 * 60 * 60 * kTimeUnitsPerSecond;
+      60 * 60 * kTimeUnitsPerSecond;
   ListCameraRecordingsRow aggregated;
   auto maybe_finish_html_row = [&]() {
     if (aggregated.start_time_90k == -1) {
@@ -165,7 +165,7 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
             .c_str());
   };
   auto handle_sql_row = [&](const ListCameraRecordingsRow &row) {
-    auto new_duration_90k = row.end_time_90k - aggregated.start_time_90k;
+    auto new_duration_90k = aggregated.end_time_90k - row.start_time_90k;
     if (row.video_sample_entry_sha1 == aggregated.video_sample_entry_sha1 &&
         row.end_time_90k == aggregated.start_time_90k &&
         new_duration_90k < kForceSplitDuration90k) {
