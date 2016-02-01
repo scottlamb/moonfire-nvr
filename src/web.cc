@@ -61,8 +61,7 @@ void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
       "<body>\n"
       "<table>\n");
   auto row_cb = [&](const ListCamerasRow &row) {
-    auto seconds =
-        (row.max_end_time_90k - row.min_start_time_90k) / kTimeUnitsPerSecond;
+    auto seconds = row.total_duration_90k / kTimeUnitsPerSecond;
     std::string min_start_time_90k =
         row.min_start_time_90k == -1 ? std::string("n/a")
                                      : PrettyTimestamp(row.min_start_time_90k);
