@@ -28,15 +28,16 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
-find_package(Threads REQUIRED)
+PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS config.protodevel)
+
 set(MOONFIRE_DEPS
-    ${CMAKE_THREAD_LIBS_INIT}
     ${FFMPEG_LIBRARIES}
     ${LIBEVENT_LIBRARIES}
     ${GFLAGS_LIBRARIES}
     ${GLOG_LIBRARIES}
     ${OPENSSL_LIBRARIES}
     ${PROFILER_LIBRARIES}
+    ${PROTOBUF_LIBRARIES}
     ${RE2_LIBRARIES}
     ${SQLITE_LIBRARIES}
     ${UUID_LIBRARIES})
@@ -59,7 +60,7 @@ set(MOONFIRE_NVR_SRCS
     uuid.cc
     web.cc)
 
-add_library(moonfire-nvr-lib ${MOONFIRE_NVR_SRCS})
+add_library(moonfire-nvr-lib ${MOONFIRE_NVR_SRCS} ${PROTO_SRCS} ${PROTO_HDRS})
 target_link_libraries(moonfire-nvr-lib ${MOONFIRE_DEPS})
 
 add_executable(moonfire-nvr moonfire-nvr-main.cc)

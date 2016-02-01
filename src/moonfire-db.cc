@@ -59,11 +59,6 @@ bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
           camera.uuid,
           camera.short_name,
           camera.description,
-          camera.host,
-          camera.username,
-          camera.password,
-          camera.main_rtsp_path,
-          camera.sub_rtsp_path,
           camera.retain_bytes,
           min(recording.start_time_90k),
           max(recording.start_time_90k + recording.duration_90k),
@@ -85,26 +80,21 @@ bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
       Uuid uuid;
       if (!uuid.ParseBinary(list_cameras_run.ColumnBlob(1))) {
         *error_message =
-            StrCat("bad uuid ", ToHex(list_cameras_run.ColumnBlob(1)),
+            StrCat("bad uuid ", ToHex(list_cameras_run.ColumnBlob(2)),
                    " for camera id ", data.id);
         return false;
       }
       data.short_name = list_cameras_run.ColumnText(2).as_string();
       data.description = list_cameras_run.ColumnText(3).as_string();
-      data.host = list_cameras_run.ColumnText(4).as_string();
-      data.username = list_cameras_run.ColumnText(5).as_string();
-      data.password = list_cameras_run.ColumnText(6).as_string();
-      data.main_rtsp_path = list_cameras_run.ColumnText(7).as_string();
-      data.sub_rtsp_path = list_cameras_run.ColumnText(8).as_string();
-      data.retain_bytes = list_cameras_run.ColumnInt64(9);
-      data.min_start_time_90k = list_cameras_run.ColumnType(10) == SQLITE_NULL
+      data.retain_bytes = list_cameras_run.ColumnInt64(4);
+      data.min_start_time_90k = list_cameras_run.ColumnType(5) == SQLITE_NULL
                                     ? -1
-                                    : list_cameras_run.ColumnInt64(10);
-      data.max_end_time_90k = list_cameras_run.ColumnType(11) == SQLITE_NULL
+                                    : list_cameras_run.ColumnInt64(5);
+      data.max_end_time_90k = list_cameras_run.ColumnType(6) == SQLITE_NULL
                                   ? -1
-                                  : list_cameras_run.ColumnInt64(11);
-      data.total_duration_90k = list_cameras_run.ColumnInt64(12);
-      data.total_sample_file_bytes = list_cameras_run.ColumnInt64(13);
+                                  : list_cameras_run.ColumnInt64(6);
+      data.total_duration_90k = list_cameras_run.ColumnInt64(7);
+      data.total_sample_file_bytes = list_cameras_run.ColumnInt64(8);
 
       auto ret = cameras_by_uuid_.insert(std::make_pair(uuid, data));
       if (!ret.second) {
@@ -317,15 +307,9 @@ void MoonfireDatabase::ListCameras(
   DatabaseContext ctx(db_);
   ListCamerasRow row;
   for (const auto &entry : cameras_by_uuid_) {
-    row.id = entry.second.id;
     row.uuid = entry.first;
     row.short_name = entry.second.short_name;
     row.description = entry.second.description;
-    row.host = entry.second.host;
-    row.username = entry.second.username;
-    row.password = entry.second.password;
-    row.main_rtsp_path = entry.second.main_rtsp_path;
-    row.sub_rtsp_path = entry.second.sub_rtsp_path;
     row.retain_bytes = entry.second.retain_bytes;
     row.min_start_time_90k = entry.second.min_start_time_90k;
     row.max_end_time_90k = entry.second.max_end_time_90k;
@@ -563,10 +547,11 @@ std::vector<Uuid> MoonfireDatabase::ReserveSampleFiles(
   if (n == 0) {
     return std::vector<Uuid>();
   }
+  auto *gen = GetRealUuidGenerator();
   std::vector<Uuid> uuids;
   uuids.reserve(n);
   for (int i = 0; i < n; ++i) {
-    uuids.push_back(GetRealUuidGenerator->Generate());
+    uuids.push_back(gen->Generate());
   }
   DatabaseContext ctx(db_);
   if (!ctx.BeginTransaction(error_message)) {
@@ -616,10 +601,7 @@ bool MoonfireDatabase::InsertVideoSampleEntry(VideoSampleEntry *entry,
   insert_run.BindInt64(":height", entry->height);
   insert_run.BindBlob(":data", entry->data);
   if (insert_run.Step() != SQLITE_DONE) {
-    *error_message =
-        StrCat("insert video sample entry: ", insert_run.error_message(),
-               ": sha1=", ToHex(entry->sha1), ", dimensions=", entry->width,
-               "x", entry->height, ", data=", ToHex(entry->data));
+    *error_message = insert_run.error_message();
     return false;
   }
   entry->id = ctx.last_insert_rowid();
@@ -678,19 +660,7 @@ bool MoonfireDatabase::InsertRecording(Recording *recording,
   insert_run.BindBlob(":sample_file_sha1", recording->sample_file_sha1);
   insert_run.BindBlob(":video_index", recording->video_index);
   if (insert_run.Step() != SQLITE_DONE) {
-    LOG(ERROR) << "insert_run failed: " << insert_run.error_message()
-               << ", camera_id=" << recording->camera_id
-               << ", sample_file_bytes=" << recording->sample_file_bytes
-               << ", start_time_90k=" << recording->start_time_90k
-               << ", duration_90k="
-               << recording->end_time_90k - recording->start_time_90k
-               << ", video_samples=" << recording->video_samples
-               << ", video_sync_samples=" << recording->video_sync_samples
-               << ", video_sample_entry_id=" << recording->video_sample_entry_id
-               << ", sample_file_uuid="
-               << recording->sample_file_uuid.UnparseText()
-               << ", sample_file_sha1=" << ToHex(recording->sample_file_sha1)
-               << ", video_index length " << recording->video_index.size();
+    LOG(ERROR) << "insert_run failed: " << insert_run.error_message();
     *error_message = insert_run.error_message();
     ctx.RollbackTransaction();
     return false;

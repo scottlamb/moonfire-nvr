@@ -75,15 +75,9 @@ namespace moonfire_nvr {
 
 // For use with MoonfireDatabase::ListCameras.
 struct ListCamerasRow {
-  int64_t id = -1;
   Uuid uuid;
   std::string short_name;
   std::string description;
-  std::string host;
-  std::string username;
-  std::string password;
-  std::string main_rtsp_path;
-  std::string sub_rtsp_path;
   int64_t retain_bytes = -1;
 
   // Aggregates summarizing completed recordings.
@@ -215,11 +209,6 @@ class MoonfireDatabase {
     int64_t id = -1;
     std::string short_name;
     std::string description;
-    std::string host;
-    std::string username;
-    std::string password;
-    std::string main_rtsp_path;
-    std::string sub_rtsp_path;
     int64_t retain_bytes = -1;
 
     // Aggregates of all recordings associated with the camera.
@@ -237,7 +226,7 @@ class MoonfireDatabase {
                                     int64_t *max_end_time_90k,
                                     std::string *error_message);
 
-  Environment *env_ = nullptr;
+  Database *db_ = nullptr;
   Statement list_camera_recordings_stmt_;
   Statement build_mp4_stmt_;
   Statement insert_reservation_stmt_;
