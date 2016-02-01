@@ -136,8 +136,7 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
   // Rather than listing each 60-second recording, generate a HTML row for
   // aggregated .mp4 files of up to kForceSplitDuration90k each, provided
   // there is no gap or change in video parameters between recordings.
-  static const int64_t kForceSplitDuration90k =
-      60 * 60 * kTimeUnitsPerSecond;
+  static const int64_t kForceSplitDuration90k = 60 * 60 * kTimeUnitsPerSecond;
   ListCameraRecordingsRow aggregated;
   auto maybe_finish_html_row = [&]() {
     if (aggregated.start_time_90k == -1) {
