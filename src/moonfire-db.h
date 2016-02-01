@@ -75,9 +75,15 @@ namespace moonfire_nvr {
 
 // For use with MoonfireDatabase::ListCameras.
 struct ListCamerasRow {
+  int64_t id = -1;
   Uuid uuid;
   std::string short_name;
   std::string description;
+  std::string host;
+  std::string username;
+  std::string password;
+  std::string main_rtsp_path;
+  std::string sub_rtsp_path;
   int64_t retain_bytes = -1;
 
   // Aggregates summarizing completed recordings.
@@ -201,6 +207,11 @@ class MoonfireDatabase {
     int64_t id = -1;
     std::string short_name;
     std::string description;
+    std::string host;
+    std::string username;
+    std::string password;
+    std::string main_rtsp_path;
+    std::string sub_rtsp_path;
     int64_t retain_bytes = -1;
 
     // Aggregates of all recordings associated with the camera.

@@ -67,12 +67,20 @@ class MoonfireDbTest : public testing::Test {
     DatabaseContext ctx(&db_);
     auto run = ctx.UseOnce(
         R"(
-        insert into camera (uuid,  short_name,  retain_bytes)
-                    values (:uuid, :short_name, :retain_bytes);
+        insert into camera (uuid,  short_name,  host,  username,  password,
+                            main_rtsp_path,  sub_rtsp_path,  retain_bytes)
+                    values (:uuid, :short_name, :host, :username, :password,
+                            :main_rtsp_path, :sub_rtsp_path, :retain_bytes);
         )");
     run.BindBlob(":uuid", uuid.binary_view());
     run.BindText(":short_name", short_name);
+    run.BindText(":host", "test-camera");
+    run.BindText(":username", "foo");
+    run.BindText(":password", "bar");
+    run.BindText(":main_rtsp_path", "/main");
+    run.BindText(":sub_rtsp_path", "/sub");
     run.BindInt64(":retain_bytes", 42);
+    CHECK_EQ(SQLITE_DONE, run.Step()) << run.error_message();
     if (run.Step() != SQLITE_DONE) {
       ADD_FAILURE() << run.error_message();
       return -1;
@@ -85,6 +93,12 @@ class MoonfireDbTest : public testing::Test {
     mdb_->ListCameras([&](const ListCamerasRow &row) {
       ++rows;
       EXPECT_EQ(camera_uuid, row.uuid);
+      EXPECT_EQ("test-camera", row.host);
+      EXPECT_EQ("foo", row.username);
+      EXPECT_EQ("bar", row.password);
+      EXPECT_EQ("/main", row.main_rtsp_path);
+      EXPECT_EQ("/sub", row.sub_rtsp_path);
+      EXPECT_EQ(42, row.retain_bytes);
       EXPECT_EQ(-1, row.min_start_time_90k);
       EXPECT_EQ(-1, row.max_end_time_90k);
       EXPECT_EQ(0, row.total_duration_90k);
