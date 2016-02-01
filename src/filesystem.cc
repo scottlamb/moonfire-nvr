@@ -79,8 +79,21 @@ class RealFile : public File {
     return 0;
   }
 
+  int Open(const char *path, int flags, int *fd) final {
+    return Open(path, flags, 0, fd);
+  }
+
   int Open(const char *path, int flags, std::unique_ptr<File> *f) final {
     return Open(path, flags, 0, f);
+  }
+
+  int Open(const char *path, int flags, mode_t mode, int *fd) final {
+    int ret = openat(fd_, path, flags, mode);
+    if (ret < 0) {
+      return errno;
+    }
+    *fd = ret;
+    return 0;
   }
 
   int Open(const char *path, int flags, mode_t mode,

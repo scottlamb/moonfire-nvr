@@ -197,8 +197,8 @@ class IntegrationTest : public testing::Test {
  protected:
   IntegrationTest() {
     tmpdir_path_ = PrepareTempDirOrDie("mp4-integration-test");
-    int ret =
-        GetRealFilesystem()->Open(tmpdir_path_.c_str(), O_RDONLY, &tmpdir_);
+    int ret = GetRealFilesystem()->Open(tmpdir_path_.c_str(),
+                                        O_RDONLY | O_DIRECTORY, &tmpdir_);
     CHECK_EQ(0, ret) << strerror(ret);
   }
 
@@ -210,9 +210,9 @@ class IntegrationTest : public testing::Test {
     // Set start time to 2015-04-26 00:00:00 UTC.
     index.Init(&recording, UINT64_C(1430006400) * kTimeUnitsPerSecond);
     SampleFileWriter writer(tmpdir_.get());
-    recording.sample_file_path = StrCat(tmpdir_path_, "/clip.sample");
-    if (!writer.Open("clip.sample", &error_message)) {
-      ADD_FAILURE() << "open clip.sample: " << error_message;
+    std::string filename = recording.sample_file_uuid.UnparseText();
+    if (!writer.Open(filename.c_str(), &error_message)) {
+      ADD_FAILURE() << "open " << filename << ": " << error_message;
       return recording;
     }
     auto in = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
@@ -255,7 +255,7 @@ class IntegrationTest : public testing::Test {
 
   std::shared_ptr<VirtualFile> CreateMp4FromSingleRecording(
       const Recording &recording) {
-    Mp4FileBuilder builder;
+    Mp4FileBuilder builder(tmpdir_.get());
     builder.SetSampleEntry(video_sample_entry_);
     builder.Append(Recording(recording), 0,
                    std::numeric_limits<int32_t>::max());

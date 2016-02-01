@@ -185,7 +185,8 @@ class Stream {
   const int32_t rotate_interval_;
   const moonfire_nvr::Camera camera_;
 
-  FileManager manager_;  // thread-safe.
+  FileManager manager_;               // thread-safe.
+  std::unique_ptr<File> camera_dir_;  // thread-safe.
 
   //
   // State below is used only by the thread in Run().

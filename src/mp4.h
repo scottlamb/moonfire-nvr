@@ -130,6 +130,13 @@ struct Mp4FileSegment {
 // Builder for a virtual .mp4 file.
 class Mp4FileBuilder {
  public:
+  // |sample_file_dir| must outlive the Mp4FileBuilder and the returned
+  // VirtualFile.
+  explicit Mp4FileBuilder(File *sample_file_dir)
+      : sample_file_dir_(sample_file_dir) {}
+  Mp4FileBuilder(const Mp4FileBuilder &) = delete;
+  void operator=(const Mp4FileBuilder &) = delete;
+
   // Append part or all of a recording.
   // Note that |recording.video_sample_entry_sha1| must be added via
   // AddSampleEntry.
@@ -159,6 +166,7 @@ class Mp4FileBuilder {
   std::shared_ptr<VirtualFile> Build(std::string *error_message);
 
  private:
+  File *sample_file_dir_;
   std::vector<std::unique_ptr<internal::Mp4FileSegment>> segments_;
   VideoSampleEntry video_sample_entry_;
 };

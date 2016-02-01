@@ -63,7 +63,9 @@ class File {
   virtual int Close() = 0;
 
   // openat(), returning 0 on success or errno>0 on failure.
+  virtual int Open(const char *path, int flags, int *fd) = 0;
   virtual int Open(const char *path, int flags, std::unique_ptr<File> *f) = 0;
+  virtual int Open(const char *path, int flags, mode_t mode, int *fd) = 0;
   virtual int Open(const char *path, int flags, mode_t mode,
                    std::unique_ptr<File> *f) = 0;
 
@@ -89,8 +91,8 @@ class MockFile : public File {
  public:
   MOCK_METHOD0(Close, int());
 
-  // Open is wrapped here because gmock's SetArgPointee doesn't work well with
-  // std::unique_ptr.
+  // The std::unique_ptr<File> variants of Open are wrapped here because gmock's
+  // SetArgPointee doesn't work well with std::unique_ptr.
 
   int Open(const char *path, int flags, std::unique_ptr<File> *f) final {
     File *f_tmp = nullptr;
@@ -107,6 +109,8 @@ class MockFile : public File {
     return ret;
   }
 
+  MOCK_METHOD3(Open, int(const char *, int, int *));
+  MOCK_METHOD4(Open, int(const char *, int, mode_t, int *));
   MOCK_METHOD3(OpenRaw, int(const char *, int, File **));
   MOCK_METHOD4(OpenRaw, int(const char *, int, mode_t, File **));
   MOCK_METHOD3(Read, int(void *, size_t, size_t *));

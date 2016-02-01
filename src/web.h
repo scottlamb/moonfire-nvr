@@ -59,7 +59,9 @@ namespace moonfire_nvr {
 
 class WebInterface {
  public:
-  explicit WebInterface(MoonfireDatabase *mdb) : mdb_(mdb) {}
+  // |mdb| and |sample_file_dir| must outlive the WebInterface.
+  WebInterface(MoonfireDatabase *mdb, File *sample_file_dir)
+      : mdb_(mdb), sample_file_dir_(sample_file_dir) {}
   WebInterface(const WebInterface &) = delete;
   void operator=(const WebInterface &) = delete;
 
@@ -70,7 +72,14 @@ class WebInterface {
   static void HandleCameraDetail(evhttp_request *req, void *arg);
   static void HandleMp4View(evhttp_request *req, void *arg);
 
+  // TODO: more nuanced error code for HTTP.
+  std::shared_ptr<VirtualFile> BuildMp4(Uuid camera_uuid,
+                                        int64_t start_time_90k,
+                                        int64_t end_time_90k,
+                                        std::string *error_message);
+
   MoonfireDatabase *const mdb_;
+  File *const sample_file_dir_;
 };
 
 }  // namespace moonfire_nvr

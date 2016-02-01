@@ -157,14 +157,6 @@ class MoonfireDatabase {
           row_cb,
       std::string *error_message);
 
-  // TODO: more nuanced error code for HTTP.
-  // TODO: this should move somewhere that has access to the
-  // currently-writing Recording as well.
-  std::shared_ptr<VirtualFile> BuildMp4(Uuid camera_uuid,
-                                        int64_t start_time_90k,
-                                        int64_t end_time_90k,
-                                        std::string *error_message);
-
   bool ListReservedSampleFiles(std::vector<Uuid> *reserved,
                                std::string *error_message);
 

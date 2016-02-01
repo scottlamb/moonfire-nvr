@@ -414,9 +414,6 @@ bool MoonfireDatabase::ListMp4Recordings(
                  ToHex(run.ColumnBlob(4)));
       return false;
     }
-    recording.sample_file_path =
-        StrCat("/home/slamb/new-moonfire/sample/",
-               recording.sample_file_uuid.UnparseText());
     recording.sample_file_sha1 = run.ColumnBlob(5).as_string();
     recording.video_index = run.ColumnBlob(6).as_string();
     recording.video_samples = run.ColumnInt64(7);
@@ -461,85 +458,6 @@ bool MoonfireDatabase::ListReservedSampleFiles(std::vector<Uuid> *reserved,
     return false;
   }
   return true;
-}
-
-std::shared_ptr<VirtualFile> MoonfireDatabase::BuildMp4(
-    Uuid camera_uuid, int64_t start_time_90k, int64_t end_time_90k,
-    std::string *error_message) {
-  LOG(INFO) << "Building mp4 for camera: " << camera_uuid.UnparseText()
-            << ", start_time_90k: " << start_time_90k
-            << ", end_time_90k: " << end_time_90k;
-
-  Mp4FileBuilder builder;
-  int64_t next_row_start_time_90k = start_time_90k;
-  int64_t rows = 0;
-  bool ok = true;
-  auto row_cb = [&](Recording &recording,
-                    const VideoSampleEntry &sample_entry) {
-    if (rows == 0 && recording.start_time_90k != next_row_start_time_90k) {
-      *error_message = StrCat(
-          "recording starts late: ", PrettyTimestamp(recording.start_time_90k),
-          " (", recording.start_time_90k, ") rather than requested: ",
-          PrettyTimestamp(start_time_90k), " (", start_time_90k, ")");
-      ok = false;
-      return IterationControl::kBreak;
-    } else if (recording.start_time_90k != next_row_start_time_90k) {
-      *error_message = StrCat("gap/overlap in recording: ",
-                              PrettyTimestamp(next_row_start_time_90k), " (",
-                              next_row_start_time_90k, ") to: ",
-                              PrettyTimestamp(recording.start_time_90k), " (",
-                              recording.start_time_90k, ") before row ", rows);
-      ok = false;
-      return IterationControl::kBreak;
-    }
-
-    next_row_start_time_90k = recording.end_time_90k;
-
-    if (rows > 0 && recording.video_sample_entry_id != sample_entry.id) {
-      *error_message =
-          StrCat("inconsistent video sample entries: this recording has id ",
-                 recording.video_sample_entry_id, " previous had ",
-                 sample_entry.id, " (sha1 ", ToHex(sample_entry.sha1), ")");
-      ok = false;
-      return IterationControl::kBreak;
-    } else if (rows == 0) {
-      builder.SetSampleEntry(sample_entry);
-    }
-
-    // TODO: correct bounds within recording.
-    // Currently this can return too much data.
-    builder.Append(std::move(recording), 0,
-                   std::numeric_limits<int32_t>::max());
-    ++rows;
-    return IterationControl::kContinue;
-  };
-  if (!ok ||
-      !ListMp4Recordings(camera_uuid, start_time_90k, end_time_90k, row_cb,
-                         error_message)) {
-    return false;
-  }
-  if (rows == 0) {
-    *error_message = StrCat("no recordings in range");
-    return false;
-  }
-  if (next_row_start_time_90k != end_time_90k) {
-    *error_message = StrCat("recording ends early: ",
-                            PrettyTimestamp(next_row_start_time_90k), " (",
-                            next_row_start_time_90k, "), not requested: ",
-                            PrettyTimestamp(end_time_90k), " (", end_time_90k,
-                            ") after ", rows, " rows");
-    return false;
-  }
-
-  VLOG(1) << "...(3/4) building VirtualFile from " << rows << " recordings.";
-  auto file = builder.Build(error_message);
-  if (file == nullptr) {
-    return false;
-  }
-
-  VLOG(1) << "...(4/4) success, " << file->size() << " bytes, etag "
-          << file->etag();
-  return file;
 }
 
 std::vector<Uuid> MoonfireDatabase::ReserveSampleFiles(

@@ -55,10 +55,10 @@ namespace {
 
 class RealFile : public VirtualFile {
  public:
-  RealFile(re2::StringPiece mime_type, re2::StringPiece filename,
+  RealFile(re2::StringPiece mime_type, File *dir, re2::StringPiece filename,
            const struct stat &statbuf)
       : mime_type_(mime_type.as_string()), stat_(statbuf) {
-    slice_.Init(filename, ByteRange(0, statbuf.st_size));
+    slice_.Init(dir, filename, ByteRange(0, statbuf.st_size));
   }
 
   ~RealFile() final {}
@@ -246,17 +246,19 @@ bool EvBuffer::AddFile(int fd, ev_off_t offset, ev_off_t length,
   return true;
 }
 
-void RealFileSlice::Init(re2::StringPiece filename, ByteRange range) {
+void RealFileSlice::Init(File *dir, re2::StringPiece filename,
+                         ByteRange range) {
+  dir_ = dir;
   filename_ = filename.as_string();
   range_ = range;
 }
 
 int64_t RealFileSlice::AddRange(ByteRange range, EvBuffer *buf,
                                 std::string *error_message) const {
-  int fd = open(filename_.c_str(), O_RDONLY);
-  if (fd < 0) {
-    int err = errno;
-    *error_message = StrCat("open ", filename_, ": ", strerror(err));
+  int fd;
+  int ret = dir_->Open(filename_.c_str(), O_RDONLY, &fd);
+  if (ret != 0) {
+    *error_message = StrCat("open ", filename_, ": ", strerror(ret));
     return -1;
   }
   if (!buf->AddFile(fd, range_.begin + range.begin, range.size(),
@@ -442,11 +444,11 @@ void HttpServe(const std::shared_ptr<VirtualFile> &file, evhttp_request *req) {
   return ServeChunkCallback(con, serve);
 }
 
-void HttpServeFile(evhttp_request *req, const std::string &mime_type,
+void HttpServeFile(evhttp_request *req, const std::string &mime_type, File *dir,
                    const std::string &filename, const struct stat &statbuf) {
-  return HttpServe(
-      std::shared_ptr<VirtualFile>(new RealFile(mime_type, filename, statbuf)),
-      req);
+  return HttpServe(std::shared_ptr<VirtualFile>(
+                       new RealFile(mime_type, dir, filename, statbuf)),
+                   req);
 }
 
 }  // namespace moonfire_nvr

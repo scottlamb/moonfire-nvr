@@ -51,6 +51,7 @@
 #include <glog/logging.h>
 #include <re2/stringpiece.h>
 
+#include "filesystem.h"
 #include "string.h"
 
 namespace moonfire_nvr {
@@ -170,7 +171,8 @@ class VirtualFile : public FileSlice {
 
 class RealFileSlice : public FileSlice {
  public:
-  void Init(re2::StringPiece filename, ByteRange range);
+  // |dir| must outlive the RealFileSlice.
+  void Init(File *dir, re2::StringPiece filename, ByteRange range);
 
   int64_t size() const final { return range_.size(); }
 
@@ -178,6 +180,7 @@ class RealFileSlice : public FileSlice {
                    std::string *error_message) const final;
 
  private:
+  File *dir_;
   std::string filename_;
   ByteRange range_;
 };
@@ -289,7 +292,7 @@ void HttpServe(const std::shared_ptr<VirtualFile> &file, evhttp_request *req);
 
 // Serve a file over HTTP. Expects the caller to supply a sanitized |filename|
 // (rather than taking it straight from the path specified in |req|).
-void HttpServeFile(evhttp_request *req, const std::string &mime_type,
+void HttpServeFile(evhttp_request *req, const std::string &mime_type, File *dir,
                    const std::string &filename, const struct stat &statbuf);
 
 namespace internal {

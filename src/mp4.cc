@@ -360,9 +360,11 @@ class ScopedMp4Box {
 // * mdat (media data container)
 class Mp4File : public VirtualFile {
  public:
-  Mp4File(std::vector<std::unique_ptr<Mp4FileSegment>> segments,
+  Mp4File(File *sample_file_dir,
+          std::vector<std::unique_ptr<Mp4FileSegment>> segments,
           VideoSampleEntry &&video_sample_entry)
-      : segments_(std::move(segments)),
+      : sample_file_dir_(sample_file_dir),
+        segments_(std::move(segments)),
         video_sample_entry_(std::move(video_sample_entry)),
         ftyp_(re2::StringPiece(kFtypBox, sizeof(kFtypBox))),
         moov_trak_mdia_hdlr_(re2::StringPiece(kHdlrBox, sizeof(kHdlrBox))),
@@ -390,8 +392,9 @@ class Mp4File : public VirtualFile {
     slices_.Append(mdat_.header_slice());
     initial_sample_byte_pos_ = slices_.size();
     for (const auto &segment : segments_) {
-      segment->sample_file_slice.Init(segment->recording.sample_file_path,
-                                      segment->pieces.sample_pos());
+      segment->sample_file_slice.Init(
+          sample_file_dir_, segment->recording.sample_file_uuid.UnparseText(),
+          segment->pieces.sample_pos());
       slices_.Append(&segment->sample_file_slice, FileSlices::kLazy);
     }
     mdat_.header().largesize = ToNetworkU64(slices_.size() - size_before_mdat);
@@ -541,6 +544,7 @@ class Mp4File : public VirtualFile {
   }
 
   int64_t initial_sample_byte_pos_ = 0;
+  File *sample_file_dir_ = nullptr;
   std::vector<std::unique_ptr<Mp4FileSegment>> segments_;
   VideoSampleEntry video_sample_entry_;
   FileSlices slices_;
@@ -749,8 +753,8 @@ std::shared_ptr<VirtualFile> Mp4FileBuilder::Build(std::string *error_message) {
     return std::shared_ptr<VirtualFile>();
   }
 
-  return std::shared_ptr<VirtualFile>(
-      new Mp4File(std::move(segments_), std::move(video_sample_entry_)));
+  return std::shared_ptr<VirtualFile>(new Mp4File(
+      sample_file_dir_, std::move(segments_), std::move(video_sample_entry_)));
 }
 
 }  // namespace moonfire_nvr

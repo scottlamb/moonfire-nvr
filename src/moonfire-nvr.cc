@@ -205,7 +205,19 @@ bool Stream::Init(std::string *error_message) {
     return false;
   }
 
-  return manager_.Init(error_message);
+  if (!manager_.Init(error_message)) {
+    return false;
+  }
+
+  int ret = env_->fs->Open(camera_path_.c_str(), O_RDONLY | O_DIRECTORY,
+                           &camera_dir_);
+  if (ret != 0) {
+    *error_message =
+        StrCat("Unable to open ", camera_path_, ": ", strerror(ret));
+    return false;
+  }
+
+  return true;
 }
 
 // Call from dedicated thread. Runs until shutdown requested.
@@ -463,7 +475,7 @@ void Stream::HttpCallbackForFile(evhttp_request *req, const string &filename) {
   if (!manager_.Lookup(filename, &s)) {
     return evhttp_send_error(req, HTTP_NOTFOUND, "File not found.");
   }
-  HttpServeFile(req, "video/mp4", StrCat(camera_path_, "/", filename), s);
+  HttpServeFile(req, "video/mp4", camera_dir_.get(), filename, s);
 }
 
 Nvr::Nvr() {

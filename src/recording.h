@@ -64,7 +64,6 @@ constexpr int64_t kMaxRecordingDuration = 5 * 60 * kTimeUnitsPerSecond;
 struct Recording {
   int64_t id = -1;
   int64_t camera_id = -1;
-  std::string sample_file_path;
   std::string sample_file_sha1;
   Uuid sample_file_uuid;
   int64_t video_sample_entry_id = -1;
