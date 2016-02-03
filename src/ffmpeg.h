@@ -46,6 +46,7 @@
 #include <string>
 
 #include <glog/logging.h>
+#include <re2/stringpiece.h>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -74,6 +75,11 @@ class VideoPacket {
   AVPacket *pkt() { return &pkt_; }
   const AVPacket *pkt() const { return &pkt_; }
 
+  re2::StringPiece data() {
+    return re2::StringPiece(reinterpret_cast<const char *>(pkt_.data),
+                            pkt_.size);
+  }
+
  private:
   AVPacket pkt_;
 };
@@ -99,6 +105,12 @@ class InputVideoPacketStream {
 
   // Returns the video stream.
   virtual const AVStream *stream() const = 0;
+
+  re2::StringPiece extradata() const {
+    return re2::StringPiece(
+        reinterpret_cast<const char *>(stream()->codec->extradata),
+        stream()->codec->extradata_size);
+  }
 };
 
 // A class which opens streams.

@@ -29,20 +29,16 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 // h264.h: H.264 decoding. For the most part, Moonfire NVR does not try to
-// understand the video codec. There's one exception. It must construct the
-// .mp4 sample description table, and for AVC, this includes the ISO/IEC
-// 14496-15 section 5.2.4.1 AVCDecoderConfigurationRecord.
+// understand the video codec. However, H.264 has two byte stream encodings:
+// ISO/IEC 14496-10 Annex B, and ISO/IEC 14496-15 AVC access units.
+// When streaming from RTSP, ffmpeg supplies the former. We need the latter
+// to stick into .mp4 files. This file manages the conversion, both for
+// the ffmpeg "extra data" (which should become the ISO/IEC 14496-15
+// section 5.2.4.1 AVCDecoderConfigurationRecord) and the actual samples.
 //
-// When handling a RTSP input source, ffmpeg supplies as "extradata" an
-// ISO/IEC 14496-10 Annex B byte stream containing SPS (sequence parameter
-// set) and PPS (picture parameter set) NAL units from which this can be
-// constructed. ffmpeg of course also has logic for converting "extradata"
-// to the AVCDecoderConfigurationRecord, but unfortunately it is not exposed
-// except through ffmpeg's own generated .mp4 file. Extracting just this part
-// of their .mp4 files would be more trouble than it's worth.
-//
-// Just to make things interesting, when handling a .mp4 file, ffmpeg supplies
-// as "extradata" an AVCDecoderConfiguration.
+// ffmpeg of course has logic to do the same thing, but unfortunately it is
+// not exposed except through ffmpeg's own generated .mp4 file. Extracting
+// just this part of their .mp4 files would be more trouble than it's worth.
 
 #ifndef MOONFIRE_NVR_H264_H
 #define MOONFIRE_NVR_H264_H
@@ -76,9 +72,12 @@ bool DecodeH264AnnexB(re2::StringPiece data, NalUnitFunction process_nal_unit,
 // Gets a H.264 sample entry (AVCSampleEntry, which extends
 // VisualSampleEntry), given the "extradata", width, and height supplied by
 // ffmpeg.
-bool GetH264SampleEntry(re2::StringPiece extradata, uint16_t width,
-                        uint16_t height, std::string *out,
-                        std::string *error_message);
+bool ParseExtraData(re2::StringPiece extradata, uint16_t width, uint16_t height,
+                    std::string *sample_entry, bool *need_transform,
+                    std::string *error_message);
+
+bool TransformSampleData(re2::StringPiece annexb_sample,
+                         std::string *avc_sample, std::string *error_message);
 
 }  // namespace moonfire_nvr
 

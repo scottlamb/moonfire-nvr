@@ -82,29 +82,63 @@ TEST(H264Test, DecodeOnly) {
                                    "68 ee 3c 80"));
 }
 
-TEST(H264Test, SampleDataFromAnnexBExtraData) {
+TEST(H264Test, SampleEntryFromAnnexBExtraData) {
   re2::StringPiece test_input(reinterpret_cast<const char *>(kAnnexBTestInput),
                               sizeof(kAnnexBTestInput));
   std::string sample_entry;
   std::string error_message;
-  ASSERT_TRUE(
-      GetH264SampleEntry(test_input, 1280, 720, &sample_entry, &error_message))
+  bool need_transform;
+  ASSERT_TRUE(ParseExtraData(test_input, 1280, 720, &sample_entry,
+                             &need_transform, &error_message))
       << error_message;
 
   EXPECT_EQ(kTestOutput, ToHex(sample_entry, true));
+  EXPECT_TRUE(need_transform);
 }
 
-TEST(H264Test, SampleDataFromAvcDecoderConfigExtraData) {
+TEST(H264Test, SampleEntryFromAvcDecoderConfigExtraData) {
   re2::StringPiece test_input(
       reinterpret_cast<const char *>(kAvcDecoderConfigTestInput),
       sizeof(kAvcDecoderConfigTestInput));
   std::string sample_entry;
   std::string error_message;
-  ASSERT_TRUE(
-      GetH264SampleEntry(test_input, 1280, 720, &sample_entry, &error_message))
+  bool need_transform;
+  ASSERT_TRUE(ParseExtraData(test_input, 1280, 720, &sample_entry,
+                             &need_transform, &error_message))
       << error_message;
 
   EXPECT_EQ(kTestOutput, ToHex(sample_entry, true));
+  EXPECT_FALSE(need_transform);
+}
+
+TEST(H264Test, TransformSampleEntry) {
+  const uint8_t kInput[] = {
+      0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x00, 0x1f, 0x9a, 0x66,
+      0x02, 0x80, 0x2d, 0xff, 0x35, 0x01, 0x01, 0x01, 0x40, 0x00,
+      0x00, 0xfa, 0x00, 0x00, 0x1d, 0x4c, 0x01,
+
+      0x00, 0x00, 0x00, 0x01, 0x68, 0xee, 0x3c, 0x80,
+
+      0x00, 0x00, 0x00, 0x01, 0x06, 0x06, 0x01, 0xc4, 0x80,
+
+      0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x80, 0x10, 0x00, 0x08,
+      0x7f, 0x00, 0x5d, 0x27, 0xb5, 0xc1, 0xff, 0x8c, 0xd6, 0x35,
+      // (truncated)
+  };
+  const char kExpectedOutput[] =
+      "00 00 00 17 "
+      "67 4d 00 1f 9a 66 02 80 2d ff 35 01 01 01 40 00 00 fa 00 00 1d 4c 01 "
+      "00 00 00 04 68 ee 3c 80 "
+      "00 00 00 05 06 06 01 c4 80 "
+      "00 00 00 10 "
+      "65 88 80 10 00 08 7f 00 5d 27 b5 c1 ff 8c d6 35";
+  re2::StringPiece input(reinterpret_cast<const char *>(kInput),
+                         sizeof(kInput));
+  std::string out;
+  std::string error_message;
+  ASSERT_TRUE(TransformSampleData(input, &out, &error_message))
+      << error_message;
+  EXPECT_EQ(kExpectedOutput, ToHex(out, true));
 }
 
 }  // namespace

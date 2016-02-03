@@ -224,12 +224,14 @@ class IntegrationTest : public testing::Test {
 
     video_sample_entry_.width = in->stream()->codec->width;
     video_sample_entry_.height = in->stream()->codec->height;
-    if (!GetH264SampleEntry(GetExtradata(in.get()), in->stream()->codec->width,
-                            in->stream()->codec->height,
-                            &video_sample_entry_.data, &error_message)) {
+    bool need_transform;
+    if (!ParseExtraData(in->extradata(), in->stream()->codec->width,
+                        in->stream()->codec->height, &video_sample_entry_.data,
+                        &need_transform, &error_message)) {
       ADD_FAILURE() << "GetH264SampleEntry: " << error_message;
       return recording;
     }
+    EXPECT_FALSE(need_transform);
 
     while (true) {
       VideoPacket pkt;
@@ -286,7 +288,7 @@ class IntegrationTest : public testing::Test {
         StrCat(tmpdir_path_, "/clip.new.mp4"), &error_message);
     ASSERT_TRUE(copied != nullptr) << error_message;
 
-    EXPECT_EQ(GetExtradata(original.get()), GetExtradata(copied.get()));
+    EXPECT_EQ(original->extradata(), copied->extradata());
     EXPECT_EQ(original->stream()->codec->width, copied->stream()->codec->width);
     EXPECT_EQ(original->stream()->codec->height,
               copied->stream()->codec->height);
@@ -308,12 +310,6 @@ class IntegrationTest : public testing::Test {
       EXPECT_EQ(original_pkt.pkt()->duration, copied_pkt.pkt()->duration);
       EXPECT_EQ(GetData(original_pkt), GetData(copied_pkt));
     }
-  }
-
-  re2::StringPiece GetExtradata(InputVideoPacketStream *stream) {
-    return re2::StringPiece(
-        reinterpret_cast<const char *>(stream->stream()->codec->extradata),
-        stream->stream()->codec->extradata_size);
   }
 
   re2::StringPiece GetData(const VideoPacket &pkt) {
