@@ -201,6 +201,12 @@ class MoonfireDatabase {
   bool MarkSampleFilesDeleted(const std::vector<Uuid> &uuids,
                               std::string *error_message);
 
+  // Replace the default real UUID generator with the supplied one.
+  // Exposed only for testing; not thread-safe.
+  void SetUuidGeneratorForTesting(UuidGenerator *uuidgen) {
+    uuidgen_ = uuidgen;
+  }
+
  private:
   struct CameraData {
     // Cached values of the matching fields from the camera row.
@@ -230,6 +236,7 @@ class MoonfireDatabase {
                                     std::string *error_message);
 
   Database *db_ = nullptr;
+  UuidGenerator *uuidgen_ = GetRealUuidGenerator();
   Statement list_camera_recordings_stmt_;
   Statement build_mp4_stmt_;
   Statement insert_reservation_stmt_;

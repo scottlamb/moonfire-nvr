@@ -193,7 +193,7 @@ class RealInputVideoPacketStream : public InputVideoPacketStream {
                 << "; only interested in " << stream_index_;
         continue;
       }
-      VLOG(2) << "Read packet with pts=" << pkt->pkt()->pts
+      VLOG(3) << "Read packet with pts=" << pkt->pkt()->pts
               << ", dts=" << pkt->pkt()->dts << ", key=" << pkt->is_key();
       return true;
     }
@@ -229,6 +229,8 @@ class RealVideoSource : public VideoSource {
     std::unique_ptr<InputVideoPacketStream> stream;
     Dictionary open_options;
     if (!open_options.Set("rtsp_transport", "tcp", error_message) ||
+        // https://trac.ffmpeg.org/ticket/5018 workaround attempt.
+        !open_options.Set("probesize", "262144", error_message) ||
         !open_options.Set("user-agent", "moonfire-nvr", error_message) ||
         // 10-second socket timeout, in microseconds.
         !open_options.Set("stimeout", "10000000", error_message)) {
@@ -305,121 +307,6 @@ class RealVideoSource : public VideoSource {
 };
 
 }  // namespace
-
-bool OutputVideoPacketStream::OpenFile(const std::string &filename,
-                                       const InputVideoPacketStream &input,
-                                       std::string *error_message) {
-  CHECK(ctx_ == nullptr) << ": already open.";
-  CHECK(stream_ == nullptr);
-
-  if ((ctx_ = avformat_alloc_context()) == nullptr) {
-    *error_message = "avformat_alloc_context failed.";
-    return false;
-  }
-
-  ctx_->oformat = av_guess_format(nullptr, filename.c_str(), nullptr);
-  if (ctx_->oformat == nullptr) {
-    *error_message =
-        StrCat("Can't find output format for filename: ", filename.c_str());
-    avformat_free_context(ctx_);
-    ctx_ = nullptr;
-    return false;
-  }
-
-  int ret = avio_open2(&ctx_->pb, filename.c_str(), AVIO_FLAG_WRITE, nullptr,
-                       nullptr);
-  if (ret < 0) {
-    avformat_free_context(ctx_);
-    ctx_ = nullptr;
-    *error_message = AvError2Str("avio_open2", ret);
-    return false;
-  }
-  stream_ = avformat_new_stream(ctx_, input.stream()->codec->codec);
-  if (stream_ == nullptr) {
-    avformat_free_context(ctx_);
-    ctx_ = nullptr;
-    unlink(filename.c_str());
-    *error_message = AvError2Str("avformat_new_stream", ret);
-    return false;
-  }
-  stream_->time_base = input.stream()->time_base;
-  ret = avcodec_copy_context(stream_->codec, input.stream()->codec);
-  if (ret != 0) {
-    avformat_free_context(ctx_);
-    ctx_ = nullptr;
-    stream_ = nullptr;
-    unlink(filename.c_str());
-    *error_message = AvError2Str("avcodec_copy_context", ret);
-    return false;
-  }
-  stream_->codec->codec_tag = 0;
-  if ((ctx_->oformat->flags & AVFMT_GLOBALHEADER) != 0) {
-    stream_->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-  }
-
-  ret = avformat_write_header(ctx_, nullptr);
-  if (ret != 0) {
-    avformat_free_context(ctx_);
-    ctx_ = nullptr;
-    stream_ = nullptr;
-    unlink(filename.c_str());
-    *error_message = AvError2Str("avformat_write_header", ret);
-    return false;
-  }
-  frames_written_ = 0;
-  key_frames_written_ = 0;
-  return true;
-}
-
-bool OutputVideoPacketStream::Write(VideoPacket *pkt,
-                                    std::string *error_message) {
-#if 0
-  if (pkt->pkt()->pts < min_next_pts_ || pkt->pkt()->dts < min_next_dts_) {
-    *error_message = StrCat("refusing to write non-increasing pts/dts, pts=",
-                            pkt->pkt()->pts, " vs min ", min_next_pts_, " dts=",
-                            pkt->pkt()->dts, " vs min ", min_next_dts_);
-    return false;
-  }
-  min_next_pts_ = pkt->pkt()->pts + 1;
-  min_next_dts_ = pkt->pkt()->dts + 1;
-#endif
-  VLOG(2) << "Writing packet with pts=" << pkt->pkt()->pts
-          << " dts=" << pkt->pkt()->dts << ", key=" << pkt->is_key();
-  int ret = av_write_frame(ctx_, pkt->pkt());
-  if (ret < 0) {
-    *error_message = AvError2Str("av_write_frame", ret);
-    return false;
-  }
-  ++frames_written_;
-  if (pkt->is_key()) {
-    key_frames_written_++;
-  }
-  return true;
-}
-
-void OutputVideoPacketStream::Close() {
-  if (ctx_ == nullptr) {
-    CHECK(stream_ == nullptr);
-    return;
-  }
-
-  int ret = av_write_trailer(ctx_);
-  if (ret != 0) {
-    LOG(WARNING) << AvError2Str("av_write_trailer", ret);
-  }
-
-  ret = avio_closep(&ctx_->pb);
-  if (ret != 0) {
-    LOG(WARNING) << AvError2Str("avio_closep", ret);
-  }
-  avformat_free_context(ctx_);
-  ctx_ = nullptr;
-  stream_ = nullptr;
-  frames_written_ = -1;
-  key_frames_written_ = -1;
-  min_next_pts_ = std::numeric_limits<int64_t>::min();
-  min_next_dts_ = std::numeric_limits<int64_t>::min();
-}
 
 VideoSource *GetRealVideoSource() {
   static auto *real_video_source = new RealVideoSource;  // never deleted.

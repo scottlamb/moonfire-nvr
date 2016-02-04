@@ -290,11 +290,6 @@ class FileSlices : public FileSlice {
 // added to guarantee VirtualFile objects outlive the HTTP requests they serve.
 void HttpServe(const std::shared_ptr<VirtualFile> &file, evhttp_request *req);
 
-// Serve a file over HTTP. Expects the caller to supply a sanitized |filename|
-// (rather than taking it straight from the path specified in |req|).
-void HttpServeFile(evhttp_request *req, const std::string &mime_type, File *dir,
-                   const std::string &filename, const struct stat &statbuf);
-
 namespace internal {
 
 // Value to represent result of parsing HTTP 1.1 "Range:" header.

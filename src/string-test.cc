@@ -68,24 +68,6 @@ TEST(JoinTest, Simple) {
       Join(std::initializer_list<re2::StringPiece>({"a", "b", "c"}), ","));
 }
 
-TEST(IsWordTest, Simple) {
-  EXPECT_TRUE(IsWord(""));
-  EXPECT_TRUE(IsWord("0123456789"));
-  EXPECT_TRUE(IsWord("abcdefghijklmnopqrstuvwxyz"));
-  EXPECT_TRUE(IsWord("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
-  EXPECT_TRUE(IsWord("_"));
-
-  EXPECT_TRUE(IsWord("4bJ_"));
-
-  EXPECT_FALSE(IsWord("/"));
-  EXPECT_FALSE(IsWord("abc/"));
-  EXPECT_FALSE(IsWord(" "));
-  EXPECT_FALSE(IsWord("@"));
-  EXPECT_FALSE(IsWord("["));
-  EXPECT_FALSE(IsWord("`"));
-  EXPECT_FALSE(IsWord("{"));
-}
-
 TEST(EscapeTest, Simple) {
   EXPECT_EQ("", moonfire_nvr::EscapeHtml(""));
   EXPECT_EQ("no special chars", moonfire_nvr::EscapeHtml("no special chars"));

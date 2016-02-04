@@ -44,16 +44,21 @@
 #include <event2/event_struct.h>
 #include <event2/http.h>
 #include <gflags/gflags.h>
-#include <google/protobuf/io/zero_copy_stream_impl.h>
-#include <google/protobuf/text_format.h>
 #include <glog/logging.h>
 
-#include "config.pb.h"
 #include "ffmpeg.h"
 #include "profiler.h"
+#include "moonfire-db.h"
 #include "moonfire-nvr.h"
+#include "sqlite.h"
+#include "string.h"
+#include "web.h"
 
-DEFINE_string(config, "/etc/moonfire-nvr.conf", "Path to configuration file.");
+using moonfire_nvr::StrCat;
+
+DEFINE_int32(http_port, 0, "");
+DEFINE_string(db_dir, "", "");
+DEFINE_string(sample_file_dir, "", "");
 
 namespace {
 
@@ -81,22 +86,6 @@ void EventLogCallback(int severity, const char* msg) {
   google::LogMessage("libevent", 0, glog_level).stream() << msg;
 }
 
-bool LoadConfiguration(const std::string& filename,
-                       moonfire_nvr::Config* config) {
-  int fd = open(filename.c_str(), O_RDONLY);
-  if (fd == -1) {
-    PLOG(ERROR) << "can't open " << filename;
-    return false;
-  }
-  google::protobuf::io::FileInputStream file(fd);
-  file.SetCloseOnDelete(true);
-  // TODO(slamb): report more specific errors via an ErrorCollector.
-  if (!google::protobuf::TextFormat::Parse(&file, config)) {
-    LOG(ERROR) << "can't parse " << filename;
-  }
-  return true;
-}
-
 // Called on SIGTERM or SIGINT.
 void SignalCallback(evutil_socket_t, short, void*) {
   event_base_loopexit(base, nullptr);
@@ -108,42 +97,80 @@ void FlushLogsCallback(evutil_socket_t, short, void* ev) {
            event_add(reinterpret_cast<struct event*>(ev), &kLogFlushInterval));
 }
 
-void HttpCallback(evhttp_request* req, void* arg) {
-  auto* nvr = reinterpret_cast<moonfire_nvr::Nvr*>(arg);
-  nvr->HttpCallback(req);
-}
-
 }  // namespace
 
+// Note that main never returns; it calls exit on either success or failure.
+// This avoids the need to design an orderly shutdown for all dependencies,
+// instead letting the OS clean up memory allocations en masse. State may be
+// allocated in whatever way is most convenient: on the stack, in a unique_ptr
+// (that may never go out of scope), or as a bare pointer that is never
+// deleted.
 int main(int argc, char** argv) {
-  GOOGLE_PROTOBUF_VERIFY_VERSION;
   google::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
   google::InstallFailureSignalHandler();
   signal(SIGPIPE, SIG_IGN);
 
-  moonfire_nvr::Config config;
-  if (!LoadConfiguration(FLAGS_config, &config)) {
+  if (FLAGS_sample_file_dir.empty()) {
+    LOG(ERROR) << "--sample_file_dir must be specified; exiting.";
     exit(1);
   }
+
+  if (FLAGS_db_dir.empty()) {
+    LOG(ERROR) << "--db_dir must be specified; exiting.";
+    exit(1);
+  }
+
+  if (FLAGS_http_port == 0) {
+    LOG(ERROR) << "--http_port must be specified; exiting.";
+    exit(1);
+  }
+
+  moonfire_nvr::Environment env;
+  env.clock = moonfire_nvr::GetRealClock();
+  env.video_source = moonfire_nvr::GetRealVideoSource();
+
+  std::unique_ptr<moonfire_nvr::File> sample_file_dir;
+  int ret = moonfire_nvr::GetRealFilesystem()->Open(
+      FLAGS_sample_file_dir.c_str(), O_DIRECTORY | O_RDONLY, &sample_file_dir);
+  if (ret != 0) {
+    LOG(ERROR) << "Unable to open --sample_file_dir=" << FLAGS_sample_file_dir
+               << ": " << strerror(ret) << "; exiting.";
+    exit(1);
+  }
+  env.sample_file_dir = sample_file_dir.release();
+
+  moonfire_nvr::Database db;
+  std::string error_msg;
+  std::string db_path = StrCat(FLAGS_db_dir, "/db");
+  if (!db.Open(db_path.c_str(), SQLITE_OPEN_READWRITE, &error_msg)) {
+    LOG(ERROR) << error_msg << "; exiting.";
+    exit(1);
+  }
+
+  moonfire_nvr::MoonfireDatabase mdb;
+  CHECK(mdb.Init(&db, &error_msg)) << error_msg;
+  env.mdb = &mdb;
+
+  moonfire_nvr::WebInterface web(&env);
 
   event_set_log_callback(&EventLogCallback);
   LOG(INFO) << "libevent: compiled with version " << LIBEVENT_VERSION
             << ", running with version " << event_get_version();
   base = CHECK_NOTNULL(event_base_new());
 
-  std::unique_ptr<moonfire_nvr::Nvr> nvr(new moonfire_nvr::Nvr);
-  std::string error_msg;
-  if (!nvr->Init(config, &error_msg)) {
-    LOG(ERROR) << "Unable to initialize: " << error_msg;
+  std::unique_ptr<moonfire_nvr::Nvr> nvr(new moonfire_nvr::Nvr(&env));
+  if (!nvr->Init(&error_msg)) {
+    LOG(ERROR) << "Unable to initialize: " << error_msg << "; exiting.";
     exit(1);
   }
 
   evhttp* http = CHECK_NOTNULL(evhttp_new(base));
   moonfire_nvr::RegisterProfiler(base, http);
-  evhttp_set_gencb(http, &HttpCallback, nvr.get());
-  if (evhttp_bind_socket(http, "0.0.0.0", config.http_port()) != 0) {
-    LOG(ERROR) << "Unable to bind to port " << config.http_port();
+  web.Register(http);
+  if (evhttp_bind_socket(http, "0.0.0.0", FLAGS_http_port) != 0) {
+    LOG(ERROR) << "Unable to bind to --http_port=" << FLAGS_http_port
+               << "; exiting.";
     exit(1);
   }
 

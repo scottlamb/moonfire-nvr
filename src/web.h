@@ -53,15 +53,14 @@
 #include <event2/http.h>
 
 #include "moonfire-db.h"
+#include "moonfire-nvr.h"
 #include "http.h"
 
 namespace moonfire_nvr {
 
 class WebInterface {
  public:
-  // |mdb| and |sample_file_dir| must outlive the WebInterface.
-  WebInterface(MoonfireDatabase *mdb, File *sample_file_dir)
-      : mdb_(mdb), sample_file_dir_(sample_file_dir) {}
+  explicit WebInterface(Environment *env) : env_(env) {}
   WebInterface(const WebInterface &) = delete;
   void operator=(const WebInterface &) = delete;
 
@@ -78,8 +77,7 @@ class WebInterface {
                                         int64_t end_time_90k,
                                         std::string *error_message);
 
-  MoonfireDatabase *const mdb_;
-  File *const sample_file_dir_;
+  Environment *const env_;
 };
 
 }  // namespace moonfire_nvr

@@ -112,9 +112,6 @@ std::string Join(const Container &pieces, re2::StringPiece separator) {
   return out;
 }
 
-// Return true if every character in |str| is in [A-Za-z0-9_].
-bool IsWord(const std::string &str);
-
 // HTML-escape the given UTF-8-encoded string.
 std::string EscapeHtml(const std::string &input);
 

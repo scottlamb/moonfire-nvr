@@ -53,6 +53,7 @@ void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
       "<html>\n"
       "<head>\n"
       "<title>Camera list</title>\n"
+      "<meta http-equiv=\"Content-Language\" content=\"en\">\n"
       "<style type=\"text/css\">\n"
       ".header { background-color: #ddd; }\n"
       "td { padding-right: 3em; }\n"
@@ -89,7 +90,7 @@ void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
         EscapeHtml(HumanizeDuration(seconds)).c_str());
     return IterationControl::kContinue;
   };
-  this_->mdb_->ListCameras(row_cb);
+  this_->env_->mdb->ListCameras(row_cb);
   buf.Add(
       "</table>\n"
       "</body>\n"
@@ -107,7 +108,7 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
   }
 
   GetCameraRow camera_row;
-  if (!this_->mdb_->GetCamera(camera_uuid, &camera_row)) {
+  if (!this_->env_->mdb->GetCamera(camera_uuid, &camera_row)) {
     return evhttp_send_error(req, HTTP_NOTFOUND, "no such camera");
   }
 
@@ -117,6 +118,7 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
       "<html>\n"
       "<head>\n"
       "<title>%s recordings</title>\n"
+      "<meta http-equiv=\"Content-Language\" content=\"en\">\n"
       "<style type=\"text/css\">\n"
       "tr:not(:first-child):hover { background-color: #ddd; }\n"
       "th, td { padding: 0.5ex 1.5em; text-align: right; }\n"
@@ -181,9 +183,9 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
   int64_t start_time_90k = 0;
   int64_t end_time_90k = std::numeric_limits<int64_t>::max();
   std::string error_message;
-  if (!this_->mdb_->ListCameraRecordings(camera_uuid, start_time_90k,
-                                         end_time_90k, handle_sql_row,
-                                         &error_message)) {
+  if (!this_->env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
+                                              end_time_90k, handle_sql_row,
+                                              &error_message)) {
     return evhttp_send_error(
         req, HTTP_INTERNAL,
         StrCat("sqlite query failed: ", EscapeHtml(error_message)).c_str());
@@ -214,6 +216,7 @@ void WebInterface::HandleMp4View(evhttp_request *req, void *arg) {
                               &error_message);
   if (file == nullptr) {
     // TODO: more nuanced HTTP status codes.
+    LOG(WARNING) << "BuildMp4 failed: " << error_message;
     return evhttp_send_error(req, HTTP_INTERNAL,
                              EscapeHtml(error_message).c_str());
   }
@@ -228,7 +231,7 @@ std::shared_ptr<VirtualFile> WebInterface::BuildMp4(
             << ", start_time_90k: " << start_time_90k
             << ", end_time_90k: " << end_time_90k;
 
-  Mp4FileBuilder builder(sample_file_dir_);
+  Mp4FileBuilder builder(env_->sample_file_dir);
   int64_t next_row_start_time_90k = start_time_90k;
   int64_t rows = 0;
   bool ok = true;
@@ -271,9 +274,9 @@ std::shared_ptr<VirtualFile> WebInterface::BuildMp4(
     ++rows;
     return IterationControl::kContinue;
   };
-  if (!ok ||
-      !mdb_->ListMp4Recordings(camera_uuid, start_time_90k, end_time_90k,
-                               row_cb, error_message)) {
+  if (!env_->mdb->ListMp4Recordings(camera_uuid, start_time_90k, end_time_90k,
+                                    row_cb, error_message) ||
+      !ok) {
     return false;
   }
   if (rows == 0) {

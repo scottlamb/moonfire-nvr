@@ -45,8 +45,8 @@
 
 #include <event2/http.h>
 
-#include "config.pb.h"
 #include "filesystem.h"
+#include "moonfire-db.h"
 #include "ffmpeg.h"
 #include "time.h"
 
@@ -69,124 +69,53 @@ class ShutdownSignal {
   std::atomic_bool shutdown_{false};
 };
 
-// Environment for streams to use. This is supplied for testability.
+// The Nvr's environment. This is supplied for testability.
 struct Environment {
   WallClock *clock = nullptr;
   VideoSource *video_source = nullptr;
-  Filesystem *fs = nullptr;
-};
-
-// Delete old ".mp4" files within a specified directory, keeping them within a
-// byte limit. In particular, "old" means "lexographically smaller filename".
-// Thread-safe.
-//
-// On startup, FileManager reads the directory and stats every matching file.
-// Afterward, it assumes that (1) it is informed of every added file and (2)
-// files are deleted only through calls to Rotate.
-class FileManager {
- public:
-  using FileCallback = std::function<void(const std::string &filename,
-                                          const struct stat &statbuf)>;
-
-  // |short_name| will be prepended to log messages.
-  FileManager(const std::string &short_name, const std::string &path,
-              uint64_t byte_limit, Environment *env);
-  FileManager(const FileManager &) = delete;
-  FileManager &operator=(const FileManager &) = delete;
-
-  // Initialize the FileManager by examining existing directory contents.
-  // Create the directory if necessary.
-  bool Init(std::string *error_message);
-
-  // Delete files to go back within the byte limit if necessary.
-  bool Rotate(std::string *error_message);
-
-  // Note that a file has been added. This may bring the FileManager over the
-  // byte limit; no files will be deleted immediately.
-  bool AddFile(const std::string &filename, std::string *error_message);
-
-  // Call |fn| for each file, while holding the lock.
-  void ForEachFile(FileCallback) const;
-
-  // Look up a file.
-  // If |filename| is known to the manager, returns true and fills |statbuf|.
-  // Otherwise returns false.
-  bool Lookup(const std::string &filename, struct stat *statbuf) const;
-
-  int64_t total_bytes() const {
-    std::lock_guard<std::mutex> lock(mu_);
-    return total_bytes_;
-  }
-
- private:
-  const std::string short_name_;
-  const std::string path_;
-  const uint64_t byte_limit_;
-  Environment *const env_;
-
-  mutable std::mutex mu_;
-  std::map<std::string, struct stat> files_;
-  uint64_t total_bytes_ = 0;  // total bytes of all |files_|.
+  File *sample_file_dir = nullptr;
+  MoonfireDatabase *mdb = nullptr;
 };
 
 // A single video stream, currently always a camera's "main" (as opposed to
 // "sub") stream. Methods are thread-compatible rather than thread-safe; the
-// Nvr should call Init + Run in a dedicated thread.
+// Nvr should call Run in a dedicated thread.
 class Stream {
  public:
-  Stream(const ShutdownSignal *signal, const moonfire_nvr::Config &config,
-         Environment *const env, const moonfire_nvr::Camera &camera)
+  Stream(const ShutdownSignal *signal, Environment *const env,
+         const moonfire_nvr::ListCamerasRow &row, int rotate_offset_sec,
+         int rotate_interval_sec)
       : signal_(signal),
         env_(env),
-        camera_path_(config.base_path() + "/" + camera.short_name()),
-        rotate_interval_(config.rotate_sec()),
-        camera_(camera),
-        manager_(camera_.short_name(), camera_path_, camera.retain_bytes(),
-                 env) {}
+        row_(row),
+        rotate_offset_sec_(rotate_offset_sec),
+        rotate_interval_sec_(rotate_interval_sec),
+        writer_(env->sample_file_dir) {}
   Stream(const Stream &) = delete;
   Stream &operator=(const Stream &) = delete;
-
-  // Call once on startup, before Run().
-  bool Init(std::string *error_message);
-
-  const std::string &camera_name() const { return camera_.short_name(); }
-  const std::string &camera_description() const {
-    return camera_.description();
-  }
 
   // Call from dedicated thread. Runs until shutdown requested.
   void Run();
 
-  // Handle HTTP requests which have been pre-determined to be for the
-  // directory view of this stream or a particular file, respectively.
-  // Thread-safe.
-  void HttpCallbackForDirectory(evhttp_request *req);
-  void HttpCallbackForFile(evhttp_request *req, const std::string &filename);
-
-  std::vector<std::string> GetFilesForTesting();
-
  private:
   enum ProcessPacketsResult { kInputError, kOutputError, kStopped };
 
-  const std::string &short_name() const { return camera_.short_name(); }
-
   ProcessPacketsResult ProcessPackets(std::string *error_message);
   bool OpenInput(std::string *error_message);
-  void CloseOutput();
-  std::string MakeOutputFilename();
+
+  // |pts| should be the relative pts within this output segment if closing
+  // due to normal rotation, or -1 if closing abruptly.
+  void CloseOutput(int64_t pts);
+
   bool OpenOutput(std::string *error_message);
-  bool RotateFiles();
-  bool Stat(const std::string &filename, struct stat *file,
-            std::string *error_message);
+  bool RotateFiles(std::string *error_message);
+  void TryUnlink();
 
   const ShutdownSignal *signal_;
   const Environment *env_;
-  const std::string camera_path_;
-  const int32_t rotate_interval_;
-  const moonfire_nvr::Camera camera_;
-
-  FileManager manager_;               // thread-safe.
-  std::unique_ptr<File> camera_dir_;  // thread-safe.
+  ListCamerasRow row_;
+  const int rotate_offset_sec_;
+  const int rotate_interval_sec_;
 
   //
   // State below is used only by the thread in Run().
@@ -196,20 +125,41 @@ class Stream {
   int64_t min_next_pts_ = std::numeric_limits<int64_t>::min();
   bool seen_key_frame_ = false;
 
+  // need_transform_ indicates if TransformSampleData will need to be called
+  // on each video sample.
+  bool need_transform_ = false;
+
+  VideoSampleEntry entry_;
+  std::string transform_tmp_;
+  std::vector<Uuid> uuids_to_unlink_;
+  std::vector<Uuid> uuids_to_mark_deleted_;
+
   // Current output segment.
-  moonfire_nvr::OutputVideoPacketStream out_;
+  Recording recording_;
+  moonfire_nvr::SampleFileWriter writer_;
+  SampleIndexEncoder index_;
   time_t rotate_time_ = 0;  // rotate when frame_realtime_ >= rotate_time_.
-  std::string out_file_;    // current output filename.
+
+  // start_pts_ is the pts of the first frame included in the current output.
   int64_t start_pts_ = -1;
 
-  // Packet-to-packet state.
+  // start_localtime_90k_ is the local system's time since epoch (in 90k units)
+  // to match start_pts_.
+  int64_t start_localtime_90k_ = -1;
+
+  // These fields describe a packet which has been written to the
+  // sample file but (because the duration is not yet known) has not been
+  // added to the index.
+  int32_t prev_pkt_start_time_90k_ = -1;
+  int32_t prev_pkt_bytes_ = -1;
+  bool prev_pkt_key_ = false;
   struct timespec frame_realtime_ = {0, 0};
 };
 
 // The main network video recorder, which manages a collection of streams.
 class Nvr {
  public:
-  Nvr();
+  explicit Nvr(Environment *env) : env_(env) {}
   Nvr(const Nvr &) = delete;
   Nvr &operator=(const Nvr &) = delete;
 
@@ -221,16 +171,12 @@ class Nvr {
   // Initialize the NVR. Call before any other operation.
   // Verifies configuration and starts background threads to capture/rotate
   // streams.
-  bool Init(const moonfire_nvr::Config &config, std::string *error_msg);
-
-  // Handle an HTTP request.
-  void HttpCallback(evhttp_request *req);
+  bool Init(std::string *error_msg);
 
  private:
   void HttpCallbackForTopLevel(evhttp_request *req);
 
-  Environment env_;
-  moonfire_nvr::Config config_;
+  Environment *const env_;
   std::vector<std::unique_ptr<Stream>> streams_;
   std::vector<std::thread> stream_threads_;
   ShutdownSignal signal_;

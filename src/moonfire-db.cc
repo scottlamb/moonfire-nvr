@@ -239,11 +239,12 @@ bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
   insert_recording_stmt_ = db_->Prepare(
       R"(
       insert into recording (camera_id, sample_file_bytes, start_time_90k,
-                             duration_90k, video_samples, video_sync_samples,
-                             video_sample_entry_id, sample_file_uuid,
-                             sample_file_sha1, video_index)
+                             duration_90k, local_time_delta_90k, video_samples,
+                             video_sync_samples, video_sample_entry_id,
+                             sample_file_uuid, sample_file_sha1, video_index)
                      values (:camera_id, :sample_file_bytes, :start_time_90k,
-                             :duration_90k, :video_samples, :video_sync_samples,
+                             :duration_90k, :local_time_delta_90k,
+                             :video_samples, :video_sync_samples,
                              :video_sample_entry_id, :sample_file_uuid,
                              :sample_file_sha1, :video_index);
       )",
@@ -481,11 +482,10 @@ std::vector<Uuid> MoonfireDatabase::ReserveSampleFiles(
   if (n == 0) {
     return std::vector<Uuid>();
   }
-  auto *gen = GetRealUuidGenerator();
   std::vector<Uuid> uuids;
   uuids.reserve(n);
   for (int i = 0; i < n; ++i) {
-    uuids.push_back(gen->Generate());
+    uuids.push_back(uuidgen_->Generate());
   }
   DatabaseContext ctx(db_);
   if (!ctx.BeginTransaction(error_message)) {
@@ -535,7 +535,10 @@ bool MoonfireDatabase::InsertVideoSampleEntry(VideoSampleEntry *entry,
   insert_run.BindInt64(":height", entry->height);
   insert_run.BindBlob(":data", entry->data);
   if (insert_run.Step() != SQLITE_DONE) {
-    *error_message = insert_run.error_message();
+    *error_message =
+        StrCat("insert video sample entry: ", insert_run.error_message(),
+               ": sha1=", ToHex(entry->sha1), ", dimensions=", entry->width,
+               "x", entry->height, ", data=", ToHex(entry->data));
     return false;
   }
   entry->id = ctx.last_insert_rowid();
@@ -550,10 +553,10 @@ bool MoonfireDatabase::InsertRecording(Recording *recording,
     *error_message = StrCat("recording already has id ", recording->id);
     return false;
   }
-  if (recording->end_time_90k <= recording->start_time_90k) {
+  if (recording->end_time_90k < recording->start_time_90k) {
     *error_message =
-        StrCat("end time ", recording->end_time_90k,
-               " must be greater than start time ", recording->start_time_90k);
+        StrCat("end time ", recording->end_time_90k, " must be >= start time ",
+               recording->start_time_90k);
     return false;
   }
   DatabaseContext ctx(db_);
@@ -585,6 +588,8 @@ bool MoonfireDatabase::InsertRecording(Recording *recording,
   insert_run.BindInt64(":start_time_90k", recording->start_time_90k);
   insert_run.BindInt64(":duration_90k",
                        recording->end_time_90k - recording->start_time_90k);
+  insert_run.BindInt64(":local_time_delta_90k",
+                       recording->local_time_90k - recording->start_time_90k);
   insert_run.BindInt64(":video_samples", recording->video_samples);
   insert_run.BindInt64(":video_sync_samples", recording->video_sync_samples);
   insert_run.BindInt64(":video_sample_entry_id",
@@ -594,8 +599,20 @@ bool MoonfireDatabase::InsertRecording(Recording *recording,
   insert_run.BindBlob(":sample_file_sha1", recording->sample_file_sha1);
   insert_run.BindBlob(":video_index", recording->video_index);
   if (insert_run.Step() != SQLITE_DONE) {
-    LOG(ERROR) << "insert_run failed: " << insert_run.error_message();
-    *error_message = insert_run.error_message();
+    *error_message =
+        StrCat("insert failed: ", insert_run.error_message(), ", camera_id=",
+               recording->camera_id, ", sample_file_bytes=",
+               recording->sample_file_bytes, ", start_time_90k=",
+               recording->start_time_90k, ", duration_90k=",
+               recording->end_time_90k - recording->start_time_90k,
+               ", local_time_delta_90k=",
+               recording->local_time_90k - recording->start_time_90k,
+               ", video_samples=", recording->video_samples,
+               ", video_sync_samples=", recording->video_sync_samples,
+               ", video_sample_entry_id=", recording->video_sample_entry_id,
+               ", sample_file_uuid=", recording->sample_file_uuid.UnparseText(),
+               ", sample_file_sha1=", ToHex(recording->sample_file_sha1),
+               ", video_index length ", recording->video_index.size());
     ctx.RollbackTransaction();
     return false;
   }

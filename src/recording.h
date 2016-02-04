@@ -65,8 +65,10 @@ struct Recording {
   int64_t id = -1;
   int64_t camera_id = -1;
   std::string sample_file_sha1;
+  std::string sample_file_path;
   Uuid sample_file_uuid;
   int64_t video_sample_entry_id = -1;
+  int64_t local_time_90k = -1;
 
   // Fields populated by SampleIndexEncoder.
   int64_t start_time_90k = -1;
@@ -205,6 +207,11 @@ struct VideoSampleEntry {
 };
 
 std::string PrettyTimestamp(int64_t ts_90k);
+
+inline int64_t To90k(const struct timespec &ts) {
+  return (ts.tv_sec * kTimeUnitsPerSecond) +
+         (ts.tv_nsec * kTimeUnitsPerSecond / 1000000000);
+}
 
 }  // namespace moonfire_nvr
 

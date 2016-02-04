@@ -53,37 +53,6 @@ namespace moonfire_nvr {
 
 namespace {
 
-class RealFile : public VirtualFile {
- public:
-  RealFile(re2::StringPiece mime_type, File *dir, re2::StringPiece filename,
-           const struct stat &statbuf)
-      : mime_type_(mime_type.as_string()), stat_(statbuf) {
-    slice_.Init(dir, filename, ByteRange(0, statbuf.st_size));
-  }
-
-  ~RealFile() final {}
-
-  int64_t size() const final { return stat_.st_size; }
-  time_t last_modified() const final { return stat_.st_mtime; }
-  std::string mime_type() const final { return mime_type_; }
-
-  std::string etag() const final {
-    return StrCat("\"", stat_.st_ino, ":", stat_.st_size, ":",
-                  stat_.st_mtim.tv_sec, ":", stat_.st_mtim.tv_nsec, "\"");
-  }
-
-  // Add the given range of the file to the buffer.
-  int64_t AddRange(ByteRange range, EvBuffer *buf,
-                   std::string *error_message) const final {
-    return slice_.AddRange(range, buf, error_message);
-  }
-
- private:
-  RealFileSlice slice_;
-  const std::string mime_type_;
-  const struct stat stat_;
-};
-
 // An HttpServe call still in progress.
 struct ServeInProgress {
   ByteRange left;
@@ -442,13 +411,6 @@ void HttpServe(const std::shared_ptr<VirtualFile> &file, evhttp_request *req) {
   evhttp_connection *con = evhttp_request_get_connection(req);
   evhttp_connection_set_closecb(con, &ServeCloseCallback, serve);
   return ServeChunkCallback(con, serve);
-}
-
-void HttpServeFile(evhttp_request *req, const std::string &mime_type, File *dir,
-                   const std::string &filename, const struct stat &statbuf) {
-  return HttpServe(std::shared_ptr<VirtualFile>(
-                       new RealFile(mime_type, dir, filename, statbuf)),
-                   req);
 }
 
 }  // namespace moonfire_nvr

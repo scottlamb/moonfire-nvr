@@ -46,8 +46,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ggdb")
 # Dependencies.
 #
 
-# https://cmake.org/cmake/help/v3.0/module/FindProtobuf.html
-find_package(Protobuf REQUIRED)
+find_package(Threads REQUIRED)
 
 # https://gflags.github.io/gflags/#cmake mentions a cmake module, but at
 # least on Ubuntu 15.10, libgflags-dev does not include it. There's no
@@ -95,7 +94,6 @@ endif()
 enable_testing()
 
 # http://www.kaizou.org/2014/11/gtest-cmake/
-find_package(Threads REQUIRED)
 include(ExternalProject)
 ExternalProject_Add(
     GMockProject

@@ -34,6 +34,7 @@
 #ifndef MOONFIRE_NVR_UUID_H
 #define MOONFIRE_NVR_UUID_H
 
+#include <gmock/gmock.h>
 #include <re2/stringpiece.h>
 #include <uuid/uuid.h>
 
@@ -72,6 +73,11 @@ class UuidGenerator {
  public:
   virtual ~UuidGenerator() {}
   virtual Uuid Generate() = 0;
+};
+
+class MockUuidGenerator : public UuidGenerator {
+ public:
+  MOCK_METHOD0(Generate, Uuid());
 };
 
 UuidGenerator *GetRealUuidGenerator();

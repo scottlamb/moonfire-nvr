@@ -1,4 +1,4 @@
-// This file is part of Moonfire NVR, a security camera digital video recorder.
+// This file is part of Moonfire NVR, a security camera network video recorder.
 // Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
@@ -29,6 +29,29 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 // moonfire-nvr.cc: implementation of moonfire-nvr.h.
+//
+// Caveats:
+//
+// Currently the recording thread blocks while a just-finished recording
+// is synced to disk and written to the database, which can be 250+ ms.
+// Likewise when recordings are being deleted. It would be better to hand
+// off to a separate syncer thread, only blocking the recording when there
+// would otherwise be insufficient disk space.
+//
+// This also commits to the SQLite database potentially several times per
+// minute per camera:
+//
+// 1. (rarely) to get a new video sample entry id
+// 2. to reserve a new uuid
+// 3. to move uuids planned for deletion from "recording" to
+//    "reserved_sample_Files"
+// 4. to mark those uuids as deleted
+// 5. to insert the new recording
+//
+// These could be combined into a single batch per minute per camera or even
+// per minute by doing some operations sooner (such as reserving the next
+// minute's uuid when inserting the previous minute's recording) and some
+// later (such as marking uuids as deleted).
 
 #define _BSD_SOURCE  // for timegm(3).
 
@@ -48,177 +71,21 @@
 #include <re2/re2.h>
 
 #include "filesystem.h"
+#include "h264.h"
 #include "http.h"
+#include "recording.h"
 #include "string.h"
 #include "time.h"
 
 using std::string;
 
 namespace moonfire_nvr {
+
 namespace {
 
-const char kFilenameSuffix[] = ".mp4";
+const int kRotateIntervalSec = 60;
 
 }  // namespace
-FileManager::FileManager(const std::string &short_name, const std::string &path,
-                         uint64_t byte_limit, Environment *env)
-    : short_name_(short_name),
-      path_(path),
-      byte_limit_(byte_limit),
-      env_(env) {}
-
-bool FileManager::Init(std::string *error_message) {
-  // Create the directory if it doesn't exist.
-  // If the path exists, assume it is a valid directory.
-  int ret = env_->fs->Mkdir(path_.c_str(), 0700);
-  if (ret != 0 && ret != EEXIST) {
-    *error_message = StrCat("Unable to create ", path_, ": ", strerror(ret));
-    return false;
-  }
-
-  bool ok = true;
-
-  auto file_fn = [this, &ok, error_message](const dirent *ent) {
-    string filename(ent->d_name);
-    if (ent->d_type != DT_REG) {
-      VLOG(1) << short_name_ << ": Ignoring non-plain file " << filename;
-      return IterationControl::kContinue;
-    }
-    if (!re2::StringPiece(filename).ends_with(kFilenameSuffix)) {
-      VLOG(1) << short_name_ << ": Ignoring non-matching file " << filename
-              << " of size " << ent->d_reclen;
-      return IterationControl::kContinue;
-    }
-
-    if (!AddFile(filename, error_message)) {
-      ok = false;
-      return IterationControl::kBreak;  // no point in doing more.
-    }
-    return IterationControl::kContinue;
-  };
-
-  if (!env_->fs->DirForEach(path_.c_str(), file_fn, error_message)) {
-    return false;
-  }
-
-  return ok;
-}
-
-bool FileManager::Rotate(std::string *error_message) {
-  mu_.lock();
-  while (total_bytes_ > byte_limit_) {
-    CHECK(!files_.empty()) << "total_bytes_=" << total_bytes_
-                           << " vs retain=" << byte_limit_;
-    auto it = files_.begin();
-    const string filename = it->first;
-    int64_t size = it->second.st_size;
-
-    // Release the lock while doing (potentially slow) I/O.
-    // Don't mark the file as deleted yet, so that a simultaneous Rotate() call
-    // won't return prematurely.
-    mu_.unlock();
-    string fpath = StrCat(path_, "/", filename);
-    int ret = env_->fs->Unlink(fpath.c_str());
-    if (ret == 0) {
-      LOG(INFO) << short_name_ << ": Deleted " << filename << " to reclaim "
-                << size << " bytes.";
-    } else if (ret == ENOENT) {
-      // This may have happened due to a racing Rotate() call.
-      // In any case, the file is gone, so proceed to mark it as such.
-      LOG(INFO) << short_name_ << ": File " << filename
-                << " was already deleted.";
-    } else {
-      *error_message =
-          StrCat("unlink failed on ", filename, ": ", strerror(ret));
-
-      return false;
-    }
-
-    // Note that the file has been deleted.
-    mu_.lock();
-    if (!files_.empty()) {
-      it = files_.begin();
-      if (it->first == filename) {
-        size = it->second.st_size;
-        files_.erase(it);
-        CHECK_GE(total_bytes_, size);
-        total_bytes_ -= size;
-      }
-    }
-  }
-  int64_t total_bytes_copy = total_bytes_;
-  mu_.unlock();
-  LOG(INFO) << short_name_ << ": Path " << path_ << " total size is "
-            << total_bytes_copy << ", within limit of " << byte_limit_;
-  return true;
-}
-
-bool FileManager::AddFile(const std::string &filename,
-                          std::string *error_message) {
-  struct stat buf;
-  string fpath = StrCat(path_, "/", filename);
-  int ret = env_->fs->Stat(fpath.c_str(), &buf);
-  if (ret != 0) {
-    *error_message = StrCat("stat on ", fpath, " failed: ", strerror(ret));
-    return false;
-  }
-  VLOG(1) << short_name_ << ": adding file " << filename << " size "
-          << buf.st_size;
-  std::lock_guard<std::mutex> lock(mu_);
-  CHECK_GE(buf.st_size, 0) << fpath;
-  uint64_t size = buf.st_size;
-  if (!files_.emplace(filename, std::move(buf)).second) {
-    *error_message = StrCat("filename ", filename, " already present.");
-    return false;
-  }
-  total_bytes_ += size;
-  return true;
-}
-
-void FileManager::ForEachFile(FileManager::FileCallback fn) const {
-  std::lock_guard<std::mutex> lock(mu_);
-  for (const auto &f : files_) {
-    fn(f.first, f.second);
-  }
-}
-
-bool FileManager::Lookup(const std::string &filename,
-                         struct stat *statbuf) const {
-  std::lock_guard<std::mutex> lock(mu_);
-  const auto it = files_.find(filename);
-  if (it != files_.end()) {
-    *statbuf = it->second;
-    return true;
-  }
-  return false;
-}
-
-bool Stream::Init(std::string *error_message) {
-  // Validate configuration.
-  if (!IsWord(camera_.short_name())) {
-    *error_message = StrCat("Camera name ", camera_.short_name(), " invalid.");
-    return false;
-  }
-  if (rotate_interval_ <= 0) {
-    *error_message = StrCat("Rotate interval for ", camera_.short_name(),
-                            " must be positive.");
-    return false;
-  }
-
-  if (!manager_.Init(error_message)) {
-    return false;
-  }
-
-  int ret = env_->fs->Open(camera_path_.c_str(), O_RDONLY | O_DIRECTORY,
-                           &camera_dir_);
-  if (ret != 0) {
-    *error_message =
-        StrCat("Unable to open ", camera_path_, ": ", strerror(ret));
-    return false;
-  }
-
-  return true;
-}
 
 // Call from dedicated thread. Runs until shutdown requested.
 void Stream::Run() {
@@ -226,47 +93,48 @@ void Stream::Run() {
 
   // Do an initial rotation so that if retain_bytes has been reduced, the
   // bulk deletion happens now, rather than while an input stream is open.
-  if (!manager_.Rotate(&error_message)) {
-    LOG(WARNING) << short_name()
+  if (!RotateFiles(&error_message)) {
+    LOG(WARNING) << row_.short_name
                  << ": initial rotation failed: " << error_message;
   }
 
   while (!signal_->ShouldShutdown()) {
     if (in_ == nullptr && !OpenInput(&error_message)) {
-      LOG(WARNING) << short_name()
+      LOG(WARNING) << row_.short_name
                    << ": Failed to open input; sleeping before retrying: "
                    << error_message;
       env_->clock->Sleep({1, 0});
       continue;
     }
 
-    LOG(INFO) << short_name() << ": Calling ProcessPackets.";
+    LOG(INFO) << row_.short_name << ": Calling ProcessPackets.";
     ProcessPacketsResult res = ProcessPackets(&error_message);
     if (res == kInputError) {
-      CloseOutput();
+      CloseOutput(-1);
       in_.reset();
-      LOG(WARNING) << short_name()
+      start_localtime_90k_ = -1;
+      LOG(WARNING) << row_.short_name
                    << ": Input error; sleeping before retrying: "
                    << error_message;
       env_->clock->Sleep({1, 0});
       continue;
     } else if (res == kOutputError) {
-      CloseOutput();
-      LOG(WARNING) << short_name()
+      CloseOutput(-1);
+      LOG(WARNING) << row_.short_name
                    << ": Output error; sleeping before retrying: "
                    << error_message;
       env_->clock->Sleep({1, 0});
       continue;
     }
   }
-  CloseOutput();
+  CloseOutput(-1);
 }
 
 Stream::ProcessPacketsResult Stream::ProcessPackets(
     std::string *error_message) {
   moonfire_nvr::VideoPacket pkt;
   CHECK(in_ != nullptr);
-  CHECK(!out_.is_open());
+  CHECK(!writer_.is_open());
   while (!signal_->ShouldShutdown()) {
     if (!in_->GetNext(&pkt, error_message)) {
       if (error_message->empty()) {
@@ -300,19 +168,13 @@ Stream::ProcessPacketsResult Stream::ProcessPackets(
 
     frame_realtime_ = env_->clock->Now();
 
-    if (out_.is_open() && frame_realtime_.tv_sec >= rotate_time_ &&
+    if (writer_.is_open() && frame_realtime_.tv_sec >= rotate_time_ &&
         pkt.is_key()) {
-      LOG(INFO) << short_name() << ": Reached rotation time; closing "
-                << out_file_ << ".";
-      VLOG(2) << short_name() << ": (Rotation time=" << rotate_time_
-              << " vs current time=" << frame_realtime_.tv_sec << ")";
-      out_.Close();
-
-      if (!manager_.AddFile(out_file_, error_message)) {
-        return kOutputError;
-      }
-    } else if (out_.is_open()) {
-      VLOG(2) << short_name() << ": Rotation time=" << rotate_time_
+      LOG(INFO) << row_.short_name << ": Reached rotation time; closing "
+                << recording_.sample_file_uuid.UnparseText() << ".";
+      CloseOutput(pkt.pkt()->pts - start_pts_);
+    } else if (writer_.is_open()) {
+      VLOG(3) << row_.short_name << ": Rotation time=" << rotate_time_
               << " vs current time=" << frame_realtime_.tv_sec;
     }
 
@@ -323,165 +185,242 @@ Stream::ProcessPacketsResult Stream::ProcessPackets(
       seen_key_frame_ = true;
     }
 
-    if (!out_.is_open()) {
+    if (!writer_.is_open()) {
       start_pts_ = pkt.pts();
       if (!OpenOutput(error_message)) {
         return kOutputError;
       }
       rotate_time_ = frame_realtime_.tv_sec -
-                     (frame_realtime_.tv_sec % rotate_interval_) +
-                     rotate_interval_;
+                     (frame_realtime_.tv_sec % rotate_interval_sec_) +
+                     rotate_offset_sec_;
+      if (rotate_time_ <= frame_realtime_.tv_sec) {
+        rotate_time_ += rotate_interval_sec_;
+      }
     }
 
-    // In the output stream, the pts and dts should start at 0.
-    pkt.pkt()->pts -= start_pts_;
-    pkt.pkt()->dts -= start_pts_;
-
-    // The input's byte position and stream index aren't relevant to the
-    // output.
-    pkt.pkt()->pos = -1;
-    pkt.pkt()->stream_index = 0;
-
-    if (!out_.Write(&pkt, error_message)) {
+    auto start_time_90k = pkt.pkt()->pts - start_pts_;
+    if (prev_pkt_start_time_90k_ != -1) {
+      index_.AddSample(start_time_90k - prev_pkt_start_time_90k_,
+                       prev_pkt_bytes_, prev_pkt_key_);
+    }
+    re2::StringPiece data = pkt.data();
+    if (need_transform_) {
+      if (!TransformSampleData(data, &transform_tmp_, error_message)) {
+        return kInputError;
+      }
+      data = transform_tmp_;
+    }
+    if (!writer_.Write(data, error_message)) {
       return kOutputError;
     }
+    prev_pkt_start_time_90k_ = start_time_90k;
+    prev_pkt_bytes_ = data.size();
+    prev_pkt_key_ = pkt.is_key();
   }
   return kStopped;
 }
 
 bool Stream::OpenInput(std::string *error_message) {
   CHECK(in_ == nullptr);
-  string url = StrCat("rtsp://", camera_.user(), ":", camera_.password(), "@",
-                      camera_.host(), camera_.main_rtsp_path());
-  string redacted_url = StrCat("rtsp://", camera_.user(), ":redacted@",
-                               camera_.host(), camera_.main_rtsp_path());
-  LOG(INFO) << short_name() << ": Opening input: " << redacted_url;
+  string url = StrCat("rtsp://", row_.username, ":", row_.password, "@",
+                      row_.host, row_.main_rtsp_path);
+  string redacted_url = StrCat("rtsp://", row_.username, ":redacted@",
+                               row_.host, row_.main_rtsp_path);
+  LOG(INFO) << row_.short_name << ": Opening input: " << redacted_url;
   in_ = env_->video_source->OpenRtsp(url, error_message);
   min_next_pts_ = std::numeric_limits<int64_t>::min();
   seen_key_frame_ = false;
-  return in_ != nullptr;
-}
-
-void Stream::CloseOutput() {
-  out_.Close();
-  // TODO: should know if the file was written or not.
-  std::string error_message;
-  if (!manager_.AddFile(out_file_, &error_message)) {
-    VLOG(1) << short_name() << ": AddFile on recently closed output file "
-            << out_file_ << "failed; the file may never have been written: "
-            << error_message;
-  }
-}
-
-std::string Stream::MakeOutputFilename() {
-  const size_t kTimeBufLen = sizeof("YYYYmmDDHHMMSS");
-  char formatted_time[kTimeBufLen];
-  struct tm mytm;
-  gmtime_r(&frame_realtime_.tv_sec, &mytm);
-  strftime(formatted_time, kTimeBufLen, "%Y%m%d%H%M%S", &mytm);
-  return StrCat(formatted_time, "_", camera_.short_name(), kFilenameSuffix);
-}
-
-bool Stream::OpenOutput(std::string *error_message) {
-  if (!manager_.Rotate(error_message)) {
+  if (in_ == nullptr) {
     return false;
   }
-  CHECK(!out_.is_open());
-  string filename = MakeOutputFilename();
-  if (!out_.OpenFile(StrCat(camera_path_, "/", filename), *in_,
-                     error_message)) {
+
+  // The time base should match the 90kHz frequency specified in RFC 3551
+  // section 5.
+  if (in_->stream()->time_base.num != 1 ||
+      in_->stream()->time_base.den != kTimeUnitsPerSecond) {
+    *error_message =
+        StrCat("unexpected time base ", in_->stream()->time_base.num, "/",
+               in_->stream()->time_base.den);
     return false;
   }
-  LOG(INFO) << short_name() << ": Opened output " << filename
-            << ", using start_pts=" << start_pts_
-            << ", input timebase=" << in_->stream()->time_base.num << "/"
-            << in_->stream()->time_base.den
-            << ", output timebase=" << out_.time_base().num << "/"
-            << out_.time_base().den;
-  out_file_ = std::move(filename);
+
+  // width and height must fix into 16-bit ints for MP4 encoding.
+  int max_dimension = std::numeric_limits<uint16_t>::max();
+  if (in_->stream()->codec->width > max_dimension ||
+      in_->stream()->codec->height > max_dimension) {
+    *error_message =
+        StrCat("input dimensions ", in_->stream()->codec->width, "x",
+               in_->stream()->codec->height, " are too large.");
+    return false;
+  }
+  entry_.id = -1;
+  entry_.width = in_->stream()->codec->width;
+  entry_.height = in_->stream()->codec->height;
+  re2::StringPiece extradata = in_->extradata();
+  if (!ParseExtraData(extradata, entry_.width, entry_.height, &entry_.data,
+                      &need_transform_, error_message)) {
+    in_.reset();
+    return false;
+  }
+  auto sha1 = Digest::SHA1();
+  sha1->Update(entry_.data);
+  entry_.sha1 = sha1->Finalize();
+  if (!env_->mdb->InsertVideoSampleEntry(&entry_, error_message)) {
+    in_.reset();
+    return false;
+  }
   return true;
 }
 
-void Stream::HttpCallbackForDirectory(evhttp_request *req) {
-  EvBuffer buf;
-  buf.AddPrintf(
-      "<!DOCTYPE html>\n"
-      "<html>\n"
-      "<head>\n"
-      "<title>%s camera recordings</title>\n"
-      "<style type=\"text/css\">\n"
-      "th, td { text-align: left; padding-right: 3em; }\n"
-      ".filename { font: 90%% monospace; }\n"
-      "</style>\n"
-      "</head>\n"
-      "<body>\n"
-      "<h1>%s camera recordings</h1>\n"
-      "<p>%s</p>\n"
-      "<table>\n"
-      "<tr><th>Filename</th><th>Start</th><th>End</th></tr>\n",
-      // short_name passed IsWord(); there's no need to escape it.
-      camera_.short_name().c_str(), camera_.short_name().c_str(),
-      EscapeHtml(camera_.description()).c_str());
-  manager_.ForEachFile(
-      [&buf](const std::string &filename, const struct stat &statbuf) {
-        // Attempt to make a pretty version of the timestamp embedded in the
-        // filename: with separators and in the local time zone. If this fails,
-        // just leave it blank.
-        string pretty_start_time;
-        struct tm mytm;
-        memset(&mytm, 0, sizeof(mytm));
-        const size_t kTimeBufLen = 50;
-        char tmbuf[kTimeBufLen];
-        static const RE2 kFilenameRe(
-            //    YYYY      mm        DD        HH        MM        SS
-            "^([0-9]{4})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})_");
-        if (RE2::PartialMatch(filename, kFilenameRe, &mytm.tm_year,
-                              &mytm.tm_mon, &mytm.tm_mday, &mytm.tm_hour,
-                              &mytm.tm_min, &mytm.tm_sec)) {
-          mytm.tm_year -= 1900;
-          mytm.tm_mon--;
-          time_t start = timegm(&mytm);
-          localtime_r(&start, &mytm);
-          strftime(tmbuf, kTimeBufLen, "%a, %d %b %Y %H:%M:%S %Z", &mytm);
-          pretty_start_time = tmbuf;
-        }
-        string pretty_end_time;
-        localtime_r(&statbuf.st_mtime, &mytm);
-        strftime(tmbuf, kTimeBufLen, "%a, %d %b %Y %H:%M:%S %Z", &mytm);
-        pretty_end_time = tmbuf;
-
-        buf.AddPrintf(
-            "<tr><td class=\"filename\"><a href=\"%s\">%s</td>"
-            "<td>%s</td><td>%s</td></tr>\n",
-            filename.c_str(), filename.c_str(),
-            EscapeHtml(pretty_start_time).c_str(),
-            EscapeHtml(pretty_end_time).c_str());
-      });
-  buf.AddPrintf("</table>\n</html>\n");
-  evhttp_send_reply(req, HTTP_OK, "OK", buf.get());
-}
-
-std::vector<std::string> Stream::GetFilesForTesting() {
-  std::vector<std::string> files;
-  manager_.ForEachFile(
-      [&files](const std::string &filename, const struct stat &statbuf) {
-        files.push_back(filename);
-      });
-  return files;
-}
-
-void Stream::HttpCallbackForFile(evhttp_request *req, const string &filename) {
-  struct stat s;
-  if (!manager_.Lookup(filename, &s)) {
-    return evhttp_send_error(req, HTTP_NOTFOUND, "File not found.");
+void Stream::CloseOutput(int64_t pts) {
+  if (!writer_.is_open()) {
+    return;
   }
-  HttpServeFile(req, "video/mp4", camera_dir_.get(), filename, s);
+  std::string error_message;
+  if (prev_pkt_start_time_90k_ != -1) {
+    int64_t duration_90k = pts - prev_pkt_start_time_90k_;
+    index_.AddSample(duration_90k > 0 ? duration_90k : 0, prev_pkt_bytes_,
+                     prev_pkt_key_);
+  }
+  if (!writer_.Close(&recording_.sample_file_sha1, &error_message)) {
+    LOG(ERROR) << row_.short_name << ": Closing output "
+               << recording_.sample_file_uuid.UnparseText()
+               << " failed with error: " << error_message;
+    uuids_to_unlink_.push_back(recording_.sample_file_uuid);
+    TryUnlink();
+    return;
+  }
+  int ret = env_->sample_file_dir->Sync();
+  if (ret != 0) {
+    LOG(ERROR) << row_.short_name
+               << ": Unable to sync sample file dir after writing "
+               << recording_.sample_file_uuid.UnparseText() << ": "
+               << strerror(ret);
+    uuids_to_unlink_.push_back(recording_.sample_file_uuid);
+    TryUnlink();
+    return;
+  }
+  if (!env_->mdb->InsertRecording(&recording_, &error_message)) {
+    LOG(ERROR) << row_.short_name << ": Unable to insert recording "
+               << recording_.sample_file_uuid.UnparseText() << ": "
+               << error_message;
+    uuids_to_unlink_.push_back(recording_.sample_file_uuid);
+    TryUnlink();
+    return;
+  }
+  row_.total_sample_file_bytes += recording_.sample_file_bytes;
+  VLOG(1) << row_.short_name << ": ...wrote "
+          << recording_.sample_file_uuid.UnparseText() << "; usage now "
+          << HumanizeWithBinaryPrefix(row_.total_sample_file_bytes, "B");
 }
 
-Nvr::Nvr() {
-  env_.clock = GetRealClock();
-  env_.video_source = GetRealVideoSource();
-  env_.fs = GetRealFilesystem();
+void Stream::TryUnlink() {
+  std::vector<Uuid> still_not_unlinked;
+  for (const auto &uuid : uuids_to_unlink_) {
+    std::string text = uuid.UnparseText();
+    int ret = env_->sample_file_dir->Unlink(text.c_str());
+    if (ret == ENOENT) {
+      LOG(WARNING) << row_.short_name << ": Sample file " << text
+                   << " already deleted!";
+    } else if (ret != 0) {
+      LOG(WARNING) << row_.short_name << ": Unable to unlink " << text << ": "
+                   << strerror(ret);
+      still_not_unlinked.push_back(uuid);
+      continue;
+    }
+    uuids_to_mark_deleted_.push_back(uuid);
+  }
+  uuids_to_unlink_ = std::move(still_not_unlinked);
+}
+
+bool Stream::OpenOutput(std::string *error_message) {
+  int64_t frame_localtime_90k = To90k(frame_realtime_);
+  if (start_localtime_90k_ == -1) {
+    start_localtime_90k_ = frame_localtime_90k - start_pts_;
+  }
+  if (!RotateFiles(error_message)) {
+    return false;
+  }
+  std::vector<Uuid> reserved = env_->mdb->ReserveSampleFiles(1, error_message);
+  if (reserved.size() != 1) {
+    return false;
+  }
+  CHECK(!writer_.is_open());
+  string filename = reserved[0].UnparseText();
+  recording_.id = -1;
+  recording_.camera_id = row_.id;
+  recording_.sample_file_uuid = reserved[0];
+  recording_.video_sample_entry_id = entry_.id;
+  recording_.local_time_90k = frame_localtime_90k;
+  index_.Init(&recording_, start_localtime_90k_ + start_pts_);
+  if (!writer_.Open(filename.c_str(), error_message)) {
+    return false;
+  }
+  prev_pkt_start_time_90k_ = -1;
+  prev_pkt_bytes_ = -1;
+  prev_pkt_key_ = false;
+  LOG(INFO) << row_.short_name << ": Opened output " << filename
+            << ", using start_pts=" << start_pts_
+            << ", input timebase=" << in_->stream()->time_base.num << "/"
+            << in_->stream()->time_base.den;
+  return true;
+}
+
+bool Stream::RotateFiles(std::string *error_message) {
+  int64_t bytes_needed = row_.total_sample_file_bytes - row_.retain_bytes;
+  int64_t bytes_to_delete = 0;
+  if (bytes_needed <= 0) {
+    VLOG(1) << row_.short_name << ": have remaining quota of "
+            << HumanizeWithBinaryPrefix(-bytes_needed, "B");
+    return true;
+  }
+  LOG(INFO) << row_.short_name << ": need to delete "
+            << HumanizeWithBinaryPrefix(bytes_needed, "B");
+  std::vector<ListOldestSampleFilesRow> to_delete;
+  auto row_cb = [&](const ListOldestSampleFilesRow &row) {
+    bytes_needed -= row.sample_file_bytes;
+    bytes_to_delete += row.sample_file_bytes;
+    to_delete.push_back(row);
+    return bytes_needed < 0 ? IterationControl::kBreak
+                            : IterationControl::kContinue;
+  };
+  if (!env_->mdb->ListOldestSampleFiles(row_.uuid, row_cb, error_message)) {
+    return false;
+  }
+  if (bytes_needed > 0) {
+    *error_message =
+        StrCat("couldn't find enough files to delete; ",
+               HumanizeWithBinaryPrefix(bytes_needed, "B"), " left.");
+    return false;
+  }
+  if (!env_->mdb->DeleteRecordings(to_delete, error_message)) {
+    return false;
+  }
+  for (const auto &to_delete_row : to_delete) {
+    uuids_to_unlink_.push_back(to_delete_row.sample_file_uuid);
+  }
+  row_.total_sample_file_bytes -= bytes_to_delete;
+  TryUnlink();
+  if (!uuids_to_unlink_.empty()) {
+    *error_message =
+        StrCat("failed to unlink ", uuids_to_unlink_.size(), " files.");
+    return false;
+  }
+  int ret = env_->sample_file_dir->Sync();
+  if (ret != 0) {
+    *error_message = StrCat("fsync sample directory: ", strerror(ret));
+    return false;
+  }
+  if (!env_->mdb->MarkSampleFilesDeleted(uuids_to_mark_deleted_,
+                                         error_message)) {
+    *error_message = StrCat("unable to mark ", uuids_to_mark_deleted_.size(),
+                            " sample files as deleted");
+    return false;
+  }
+  uuids_to_mark_deleted_.clear();
+  VLOG(1) << row_.short_name << ": ...deleted successfully; usage now "
+          << HumanizeWithBinaryPrefix(row_.total_sample_file_bytes, "B");
+  return true;
 }
 
 Nvr::~Nvr() {
@@ -489,79 +428,35 @@ Nvr::~Nvr() {
   for (auto &thread : stream_threads_) {
     thread.join();
   }
+  // TODO: cleanup reservations?
 }
 
-bool Nvr::Init(const moonfire_nvr::Config &config, std::string *error_msg) {
-  if (config.base_path().empty()) {
-    *error_msg = "base_path must be configured.";
+bool Nvr::Init(std::string *error_msg) {
+  std::vector<Uuid> all_reserved;
+  if (!env_->mdb->ListReservedSampleFiles(&all_reserved, error_msg)) {
     return false;
   }
-
-  for (const auto &camera : config.camera()) {
-    streams_.emplace_back(new Stream(&signal_, config, &env_, camera));
-    if (!streams_.back()->Init(error_msg)) {
-      return false;
+  for (const auto &reserved : all_reserved) {
+    int ret = env_->sample_file_dir->Unlink(reserved.UnparseText().c_str());
+    if (ret != 0 && ret != ENOENT) {
+      LOG(WARNING) << "Unable to remove reserved sample file: "
+                   << reserved.UnparseText();
     }
   }
-  for (auto &stream : streams_) {
-    stream_threads_.emplace_back([&stream]() { stream->Run(); });
-  }
+
+  std::vector<ListCamerasRow> cameras;
+  env_->mdb->ListCameras([&](const ListCamerasRow &row) {
+    cameras.push_back(row);
+    return IterationControl::kContinue;
+  });
+  for (size_t i = 0; i < cameras.size(); ++i) {
+    int rotate_offset_sec = kRotateIntervalSec * i / cameras.size();
+    auto *stream = new Stream(&signal_, env_, cameras[i], rotate_offset_sec,
+                              kRotateIntervalSec);
+    streams_.emplace_back(stream);
+    stream_threads_.emplace_back([stream]() { stream->Run(); });
+  };
   return true;
-}
-
-void Nvr::HttpCallback(evhttp_request *req) {
-  if (evhttp_request_get_command(req) != EVHTTP_REQ_GET) {
-    return evhttp_send_error(req, HTTP_BADMETHOD, "only GET allowed");
-  }
-
-  evhttp_uri *uri = evhttp_uri_parse(evhttp_request_get_uri(req));
-  if (uri == nullptr || evhttp_uri_get_path(uri) == nullptr) {
-    return evhttp_send_error(req, HTTP_INTERNAL, "Failed to parse URI.");
-  }
-
-  std::string uri_path = evhttp_uri_get_path(uri);
-  evhttp_uri_free(uri);
-  uri = nullptr;
-
-  if (uri_path == "/") {
-    return HttpCallbackForTopLevel(req);
-  } else if (!re2::StringPiece(uri_path).starts_with("/c/")) {
-    return evhttp_send_error(req, HTTP_NOTFOUND, "Not found.");
-  }
-  size_t camera_name_start = strlen("/c/");
-  size_t next_slash = uri_path.find('/', camera_name_start);
-  if (next_slash == std::string::npos) {
-    CHECK_EQ(0, evhttp_add_header(evhttp_request_get_output_headers(req),
-                                  "Location", StrCat(uri_path, "/").c_str()));
-    return evhttp_send_reply(req, HTTP_MOVEPERM, "OK", EvBuffer().get());
-  }
-  re2::StringPiece camera_name =
-      uri_path.substr(camera_name_start, next_slash - camera_name_start);
-  for (const auto &stream : streams_) {
-    if (stream->camera_name() == camera_name) {
-      if (uri_path.size() == next_slash + 1) {
-        return stream->HttpCallbackForDirectory(req);
-      } else {
-        return stream->HttpCallbackForFile(req,
-                                           uri_path.substr(next_slash + 1));
-      }
-    }
-  }
-  return evhttp_send_error(req, HTTP_NOTFOUND, "No such camera.");
-}
-
-void Nvr::HttpCallbackForTopLevel(evhttp_request *req) {
-  EvBuffer buf;
-  buf.Add("<ul>\n");
-  for (const auto &stream : streams_) {
-    // Camera name passed IsWord; there's no need to escape it.
-    const string &name = stream->camera_name();
-    string escaped_description = EscapeHtml(stream->camera_description());
-    buf.AddPrintf("<li><a href=\"/c/%s/\">%s</a>: %s</li>\n", name.c_str(),
-                  name.c_str(), escaped_description.c_str());
-  }
-  buf.Add("</ul>\n");
-  return evhttp_send_reply(req, HTTP_OK, "OK", buf.get());
 }
 
 }  // namespace moonfire_nvr

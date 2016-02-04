@@ -30,6 +30,10 @@
 //
 // moonfire-nvr-test.cc: tests of the moonfire-nvr.cc interface.
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <gflags/gflags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -69,97 +73,58 @@ class MockVideoSource : public VideoSource {
                InputVideoPacketStream *(const std::string &, std::string *));
 };
 
-class FileManagerTest : public testing::Test {
- protected:
-  FileManagerTest() {
-    test_dir_ = PrepareTempDirOrDie("moonfire-nvr-file-manager");
-    env_.fs = GetRealFilesystem();
-  }
-
-  std::vector<std::string> GetFilenames(const FileManager &mgr) {
-    std::vector<std::string> out;
-    mgr.ForEachFile([&out](const std::string &f, const struct stat &) {
-      out.push_back(f);
-    });
-    return out;
-  }
-
-  Environment env_;
-  std::string test_dir_;
-};
-
-TEST_F(FileManagerTest, InitWithNoDirectory) {
-  std::string subdir = test_dir_ + "/" + "subdir";
-  FileManager manager("foo", subdir, 0, &env_);
-
-  // Should succeed.
-  std::string error_message;
-  EXPECT_TRUE(manager.Init(&error_message)) << error_message;
-
-  // Should create the directory.
-  struct stat buf;
-  ASSERT_EQ(0, lstat(subdir.c_str(), &buf)) << strerror(errno);
-  EXPECT_TRUE(S_ISDIR(buf.st_mode));
-
-  // Should report empty.
-  EXPECT_EQ(0, manager.total_bytes());
-  EXPECT_THAT(GetFilenames(manager), testing::ElementsAre());
-
-  // Adding files: nonexistent, simple, out of order.
-  EXPECT_FALSE(manager.AddFile("nonexistent.mp4", &error_message));
-  WriteFileOrDie(subdir + "/1.mp4", "1");
-  WriteFileOrDie(subdir + "/2.mp4", "123");
-  EXPECT_TRUE(manager.AddFile("2.mp4", &error_message)) << error_message;
-  EXPECT_EQ(3, manager.total_bytes());
-  EXPECT_THAT(GetFilenames(manager), testing::ElementsAre("2.mp4"));
-  EXPECT_TRUE(manager.AddFile("1.mp4", &error_message)) << error_message;
-  EXPECT_EQ(4, manager.total_bytes());
-  EXPECT_THAT(GetFilenames(manager), testing::ElementsAre("1.mp4", "2.mp4"));
-
-  EXPECT_TRUE(manager.Rotate(&error_message)) << error_message;
-  EXPECT_EQ(0, manager.total_bytes());
-  EXPECT_THAT(GetFilenames(manager), testing::ElementsAre());
-}
-
-TEST_F(FileManagerTest, InitAndRotateWithExistingFiles) {
-  WriteFileOrDie(test_dir_ + "/1.mp4", "1");
-  WriteFileOrDie(test_dir_ + "/2.mp4", "123");
-  WriteFileOrDie(test_dir_ + "/3.mp4", "12345");
-  WriteFileOrDie(test_dir_ + "/other", "1234567");
-  FileManager manager("foo", test_dir_, 8, &env_);
-
-  // Should succeed.
-  std::string error_message;
-  EXPECT_TRUE(manager.Init(&error_message)) << error_message;
-
-  EXPECT_THAT(GetFilenames(manager),
-              testing::ElementsAre("1.mp4", "2.mp4", "3.mp4"));
-  EXPECT_EQ(1 + 3 + 5, manager.total_bytes());
-
-  EXPECT_TRUE(manager.Rotate(&error_message)) << error_message;
-  EXPECT_THAT(GetFilenames(manager), testing::ElementsAre("2.mp4", "3.mp4"));
-  EXPECT_EQ(8, manager.total_bytes());
-}
-
 class StreamTest : public testing::Test {
  public:
   StreamTest() {
+    std::string error_message;
     test_dir_ = PrepareTempDirOrDie("moonfire-nvr-stream-copier");
     env_.clock = &clock_;
     env_.video_source = &video_source_;
-    env_.fs = GetRealFilesystem();
+    int ret = moonfire_nvr::GetRealFilesystem()->Open(
+        test_dir_.c_str(), O_DIRECTORY | O_RDONLY, &sample_file_dir_);
+    CHECK_EQ(0, ret) << "open: " << strerror(ret);
+    env_.sample_file_dir = sample_file_dir_.get();
+
+    CHECK(db_.Open(StrCat(test_dir_, "/db").c_str(),
+                   SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, &error_message))
+        << error_message;
+    std::string create_sql = ReadFileOrDie("../src/schema.sql");
+    {
+      DatabaseContext ctx(&db_);
+      CHECK(RunStatements(&ctx, create_sql, &error_message)) << error_message;
+      auto run = ctx.UseOnce(
+          R"(
+          insert into camera (uuid,  short_name,  host,  username,  password,
+                              main_rtsp_path,  sub_rtsp_path,  retain_bytes)
+                      values (:uuid, :short_name, :host, :username, :password,
+                              :main_rtsp_path, :sub_rtsp_path, :retain_bytes);
+          )");
+      run.BindBlob(":uuid", GetRealUuidGenerator()->Generate().binary_view());
+      run.BindText(":short_name", "test");
+      run.BindText(":host", "test-camera");
+      run.BindText(":username", "foo");
+      run.BindText(":password", "bar");
+      run.BindText(":main_rtsp_path", "/main");
+      run.BindText(":sub_rtsp_path", "/sub");
+      run.BindInt64(":retain_bytes", 1000000);
+      CHECK_EQ(SQLITE_DONE, run.Step()) << run.error_message();
+    }
+    mdb_.SetUuidGeneratorForTesting(&uuidgen_);
+    CHECK(mdb_.Init(&db_, &error_message)) << error_message;
+    env_.mdb = &mdb_;
+
+    ListCamerasRow row;
+    int n_rows = 0;
+    mdb_.ListCameras([&row, &n_rows](const ListCamerasRow &some_row) {
+      ++n_rows;
+      row = some_row;
+      return IterationControl::kContinue;
+    });
+    CHECK_EQ(1, n_rows);
+
     clock_.Sleep({1430006400, 0});  // 2015-04-26 00:00:00 UTC
 
-    config_.set_base_path(test_dir_);
-    config_.set_rotate_sec(5);
-    auto *camera = config_.add_camera();
-    camera->set_short_name("test");
-    camera->set_host("test-camera");
-    camera->set_user("foo");
-    camera->set_password("bar");
-    camera->set_main_rtsp_path("/main");
-    camera->set_sub_rtsp_path("/sub");
-    camera->set_retain_bytes(1000000);
+    stream_.reset(new Stream(&signal_, &env_, row, 0, 5));
   }
 
   // A function to use in OpenRtspRaw invocations which shuts down the stream
@@ -188,6 +153,7 @@ class StreamTest : public testing::Test {
     }
   };
 
+#if 0
   std::vector<Frame> GetFrames(const std::string &path) {
     std::vector<Frame> frames;
     std::string error_message;
@@ -204,13 +170,39 @@ class StreamTest : public testing::Test {
     EXPECT_EQ("", error_message);
     return frames;
   }
+#else
+  std::vector<Frame> GetFrames(const re2::StringPiece uuid_text) {
+    std::vector<Frame> frames;
+    Uuid uuid;
+    if (!uuid.ParseText(uuid_text)) {
+      ADD_FAILURE() << "unparseable: " << uuid_text;
+      return frames;
+    }
+    DatabaseContext ctx(&db_);
+    auto run = ctx.UseOnce(
+        "select video_index from recording where sample_file_uuid = :uuid;");
+    run.BindBlob(":uuid", uuid.binary_view());
+    if (run.Step() != SQLITE_ROW) {
+      ADD_FAILURE() << run.error_message();
+      return frames;
+    }
+    for (SampleIndexIterator it(run.ColumnBlob(0)); !it.done(); it.Next()) {
+      frames.push_back(Frame(it.is_key(), it.start_90k(), it.duration_90k()));
+    }
+    return frames;
+  }
+#endif
 
+  MockUuidGenerator uuidgen_;
   ShutdownSignal signal_;
-  Config config_;
   SimulatedClock clock_;
   testing::StrictMock<MockVideoSource> video_source_;
+  Database db_;
+  MoonfireDatabase mdb_;
+  std::unique_ptr<moonfire_nvr::File> sample_file_dir_;
   Environment env_;
   std::string test_dir_;
+  std::unique_ptr<Stream> stream_;
 };
 
 class ProxyingInputVideoPacketStream : public InputVideoPacketStream {
@@ -266,9 +258,7 @@ class ProxyingInputVideoPacketStream : public InputVideoPacketStream {
 };
 
 TEST_F(StreamTest, Basic) {
-  Stream stream(&signal_, config_, &env_, config_.camera(0));
   std::string error_message;
-  ASSERT_TRUE(stream.Init(&error_message)) << error_message;
 
   // This is a ~1 fps test video with a timebase of 90 kHz.
   auto in_stream = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
@@ -280,19 +270,23 @@ TEST_F(StreamTest, Basic) {
   // The starting pts of the input should be irrelevant.
   proxy_stream->set_ts_offset(180000, std::numeric_limits<int>::max());
 
+  Uuid uuid1;
+  ASSERT_TRUE(uuid1.ParseText("00000000-0000-0000-0000-000000000001"));
+  Uuid uuid2;
+  ASSERT_TRUE(uuid2.ParseText("00000000-0000-0000-0000-000000000002"));
+  EXPECT_CALL(uuidgen_, Generate())
+      .WillOnce(Return(uuid1))
+      .WillOnce(Return(uuid2));
+
   EXPECT_CALL(video_source_, OpenRtspRaw("rtsp://foo:bar@test-camera/main", _))
       .WillOnce(Return(proxy_stream))
       .WillOnce(Invoke(this, &StreamTest::Shutdown));
-  stream.Run();
-
+  stream_->Run();
   // Compare frame-by-frame.
   // Note below that while the rotation is scheduled to happen near 5-second
   // boundaries (such as 2016-04-26 00:00:05), it gets deferred until the next
   // key frame, which in this case is 00:00:07.
-  EXPECT_THAT(stream.GetFilesForTesting(),
-              testing::ElementsAre("20150426000000_test.mp4",
-                                   "20150426000007_test.mp4"));
-  EXPECT_THAT(GetFrames("20150426000000_test.mp4"),
+  EXPECT_THAT(GetFrames("00000000-0000-0000-0000-000000000001"),
               testing::ElementsAre(
                   Frame(true, 0, 90379), Frame(false, 90379, 89884),
                   Frame(false, 180263, 89749), Frame(false, 270012, 89981),
@@ -300,22 +294,14 @@ TEST_F(StreamTest, Basic) {
                   Frame(false, 450048,
                         89967),  // pts_time 5.000533, past rotation time.
                   Frame(false, 540015, 90021),
-                  Frame(false, 630036,
-                        90000)));  // XXX: duration=89958 would be better!
+                  Frame(false, 630036, 89958)));
   EXPECT_THAT(
-      GetFrames("20150426000007_test.mp4"),
-      testing::ElementsAre(Frame(true, 0, 90011), Frame(false, 90011, 90000)));
-  // Note that the final "90000" duration is ffmpeg's estimate based on frame
-  // rate. For non-final packets, the correct duration gets written based on
-  // the next packet's timestamp. The same currently applies to the first
-  // written segment---it uses an estimated time, not the real time until the
-  // next packet. This probably should be fixed...
+      GetFrames("00000000-0000-0000-0000-000000000002"),
+      testing::ElementsAre(Frame(true, 0, 90011), Frame(false, 90011, 0)));
 }
 
 TEST_F(StreamTest, NonIncreasingTimestamp) {
-  Stream stream(&signal_, config_, &env_, config_.camera(0));
   std::string error_message;
-  ASSERT_TRUE(stream.Init(&error_message)) << error_message;
   auto in_stream = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
                                                   &error_message);
   ASSERT_TRUE(in_stream != nullptr) << error_message;
@@ -326,29 +312,28 @@ TEST_F(StreamTest, NonIncreasingTimestamp) {
       .WillOnce(Return(proxy_stream))
       .WillOnce(Invoke(this, &StreamTest::Shutdown));
 
+  Uuid uuid1;
+  ASSERT_TRUE(uuid1.ParseText("00000000-0000-0000-0000-000000000001"));
+  EXPECT_CALL(uuidgen_, Generate()).WillOnce(Return(uuid1));
+
   {
     ScopedMockLog log;
     EXPECT_CALL(log, Log(_, _, _)).Times(AnyNumber());
     EXPECT_CALL(log,
                 Log(_, _, HasSubstr("Rejecting non-increasing pts=90379")));
     log.Start();
-    stream.Run();
+    stream_->Run();
   }
 
   // The output file should still be added to the file manager, with the one
-  // packet that made it.
-  EXPECT_THAT(stream.GetFilesForTesting(),
-              testing::ElementsAre("20150426000000_test.mp4"));
-  EXPECT_THAT(
-      GetFrames("20150426000000_test.mp4"),
-      testing::ElementsAre(Frame(true, 0, 90000)));  // estimated duration.
+  // packet that made it. The final packet on input error will have 0
+  // duration.
+  EXPECT_THAT(GetFrames("00000000-0000-0000-0000-000000000001"),
+              testing::ElementsAre(Frame(true, 0, 0)));
 }
 
 TEST_F(StreamTest, RetryOnInputError) {
-  Stream stream(&signal_, config_, &env_, config_.camera(0));
   std::string error_message;
-  ASSERT_TRUE(stream.Init(&error_message)) << error_message;
-
   auto in_stream_1 = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
                                                     &error_message);
   ASSERT_TRUE(in_stream_1 != nullptr) << error_message;
@@ -367,22 +352,25 @@ TEST_F(StreamTest, RetryOnInputError) {
       .WillOnce(Return(proxy_stream_1))
       .WillOnce(Return(proxy_stream_2))
       .WillOnce(Invoke(this, &StreamTest::Shutdown));
-  stream.Run();
+
+  Uuid uuid1;
+  ASSERT_TRUE(uuid1.ParseText("00000000-0000-0000-0000-000000000001"));
+  Uuid uuid2;
+  ASSERT_TRUE(uuid2.ParseText("00000000-0000-0000-0000-000000000002"));
+  EXPECT_CALL(uuidgen_, Generate())
+      .WillOnce(Return(uuid1))
+      .WillOnce(Return(uuid2));
+  stream_->Run();
 
   // Each attempt should have resulted in a file with one packet.
-  EXPECT_THAT(stream.GetFilesForTesting(),
-              testing::ElementsAre("20150426000000_test.mp4",
-                                   "20150426000001_test.mp4"));
-  EXPECT_THAT(GetFrames("20150426000000_test.mp4"),
-              testing::ElementsAre(Frame(true, 0, 90000)));
-  EXPECT_THAT(GetFrames("20150426000001_test.mp4"),
-              testing::ElementsAre(Frame(true, 0, 90000)));
+  EXPECT_THAT(GetFrames("00000000-0000-0000-0000-000000000001"),
+              testing::ElementsAre(Frame(true, 0, 0)));
+  EXPECT_THAT(GetFrames("00000000-0000-0000-0000-000000000002"),
+              testing::ElementsAre(Frame(true, 0, 0)));
 }
 
 TEST_F(StreamTest, DiscardInitialNonKeyFrames) {
-  Stream stream(&signal_, config_, &env_, config_.camera(0));
   std::string error_message;
-  ASSERT_TRUE(stream.Init(&error_message)) << error_message;
   auto in_stream = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
                                                   &error_message);
   ASSERT_TRUE(in_stream != nullptr) << error_message;
@@ -396,28 +384,32 @@ TEST_F(StreamTest, DiscardInitialNonKeyFrames) {
   EXPECT_CALL(video_source_, OpenRtspRaw("rtsp://foo:bar@test-camera/main", _))
       .WillOnce(Return(proxy_stream))
       .WillOnce(Invoke(this, &StreamTest::Shutdown));
-  stream.Run();
+
+  Uuid uuid1;
+  ASSERT_TRUE(uuid1.ParseText("00000000-0000-0000-0000-000000000001"));
+  Uuid uuid2;
+  ASSERT_TRUE(uuid2.ParseText("00000000-0000-0000-0000-000000000002"));
+  EXPECT_CALL(uuidgen_, Generate())
+      .WillOnce(Return(uuid1))
+      .WillOnce(Return(uuid2));
+  stream_->Run();
 
   // Skipped: initial key frame packet (duration 90379)
   // Ignored: duration 89884, 89749, 89981 (total pts time: 2.99571... sec)
   // Thus, the first output file should start at 00:00:02.
-  EXPECT_THAT(stream.GetFilesForTesting(),
-              testing::ElementsAre("20150426000002_test.mp4",
-                                   "20150426000006_test.mp4"));
   EXPECT_THAT(
-      GetFrames("20150426000002_test.mp4"),
+      GetFrames("00000000-0000-0000-0000-000000000001"),
       testing::ElementsAre(
           Frame(true, 0, 90055),
           Frame(false, 90055, 89967),  // pts_time 5.000533, past rotation time.
-          Frame(false, 180022, 90021),
-          Frame(false, 270043,
-                90000)));  // XXX: duration=89958 would be better!
+          Frame(false, 180022, 90021), Frame(false, 270043, 89958)));
   EXPECT_THAT(
-      GetFrames("20150426000006_test.mp4"),
-      testing::ElementsAre(Frame(true, 0, 90011), Frame(false, 90011, 90000)));
+      GetFrames("00000000-0000-0000-0000-000000000002"),
+      testing::ElementsAre(Frame(true, 0, 90011), Frame(false, 90011, 0)));
 }
 
 // TODO: test output stream error (on open, writing packet, closing).
+// TODO: test rotation!
 
 }  // namespace
 }  // namespace moonfire_nvr

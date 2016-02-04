@@ -1,7 +1,7 @@
 # Moonfire NVR Storage Schema
 
-Status: **draft, planned**. The current schema is more basic: a bunch of
-.mp4 files written through ffmpeg, named for the camera and start time.
+Status: **current**. This is largely implemented; there is optimization and
+testing work left to do.
 
 ## Objective
 
@@ -139,8 +139,6 @@ Each recording is stored in two places:
   associated with the segment, including the sample-by-sample contents of the
   MPEG-4 `stbl` box. At 30 fps, a row is expected to require roughly 4 KB of
   storage (2 bytes per sample, plus some fixed overhead).
-  **TODO:** more efficient to split each row in two, putting the blob in a
-  separate table? not every access needs the blob.
 
 Putting the metadata on flash means metadata operations can be fast
 (sub-millisecond random access, with parallelism) and do not take precious
@@ -231,11 +229,12 @@ Because a major part of the recording state is outside the SQL database, care
 must be taken to guarantee consistency and durability. Moonfire NVR maintains
 three invariants about sample files:
 
-1. `recording` table rows in the `WRITTEN` state have sample files on disk
+1. `recording` table rows have sample files on disk
    (named by the given UUID) with the indicated size and SHA-1 hash.
-2. There are no sample files without a corresponding `recording` table row.
-3. After an orderly shutdown of Moonfire NVR, all rows are in the `WRITTEN`
-   state, even if there have been previous crashes.
+2. There are no sample files without a corresponding `recording` or
+   `reserved_sample_files` table row referencing their UUID.
+3. After an orderly shutdown of Moonfire NVR, there are no
+   `reserved_sample_files` rows, even if there have been previous crashes.
 
 The first invariant provides certainty that a recording is properly stored. It
 would be prohibitively expensive to verify hashes on demand (when listing or
@@ -261,38 +260,37 @@ instead. One file could be mistaken for another on database vs directory
 mismatch. With UUIDs, this is impossible: by design they can be assumed to be
 universally unique, so two distinct recordings will never share a UUID.
 
-To maintain these invariants, a row in the `recording` table is in one of three
-states: `WRITING`, `WRITTEN, and `DELETING`. These are updated through
-the following procedures:
+These invariants are updated through the following procedure:
 
 *Create a recording:*
 
-1. Insert a `recording` row, in state `WRITING`.
+1. Insert a `reserved_sample_files` row, in state `WRITING`.
 2. Write the sample file, aborting if `open(..., O\_WRONLY|O\_CREATE|O\_EXCL)`
    fails with `EEXIST`. (This would indicate a non-unique UUID, a serious
    defect.)
 3. `fsync()` the sample file.
 4. `fsync()` the sample file directory.
-5. Update the `recording` row from state `WRITING` to state `WRITTEN`,
+5. Replace the `reserved_sample_files` row with a `recording` row,
    marking its size and SHA-1 hash in the process.
 
 *Delete a recording:*
 
-1. Update the `recording` row from state `WRITTEN` to state `DELETING`.
+1. Replace the `recording` row with a `reserved_sample_files` row in state
+   `DELETED`.
 2. `unlink()` the sample file, warning on `ENOENT`. (This would indicate
    invariant #2 is false.)
 3. `fsync()` the sample file directory.
-4. Delete the `recording` row.
+4. Delete the `reserved_sample_files` row.
 
 *Startup (crash recovery):*
 
 1. Acquire a lock to guarantee this is the only Moonfire NVR process running
    against the given database. This lock is not released until program shutdown.
-2. Query `recordings` table for rows with status `WRITING` or `DELETING`.
+2. Query `reserved_sample_files` table.
 3. `unlink()` all the sample files associated with rows returned by #2,
    ignoring `ENOENT`.
 4. `fsync()` the samples directory.
-5. Delete the rows returned by #2 from the `recordings` table.
+5. Delete the rows returned by #2 from the `reserved_sample_files` table.
 
 The procedures can be batched: while for a given recording, the steps must be
 strictly ordered, multiple recordings can be proceeding through the steps
@@ -310,14 +308,15 @@ such that the first directory in which a recording is found must have a
 complete copy (and subsequent directories' copies may be partial/corrupt).
 
 It'd also be possible to conserve some partial recordings. Moonfire NVR could,
-as a recording is written, update its row to reflect the latest sample tables,
-size, and hash fields while keeping status `WRITING`. On startup, the file
-would be truncated to match and then status updated to `WRITTEN`.  The file
-would either have to be synced prior to each update (to guarantee it is at
-least as new as the row) or multiple checkpoints would be kept, using the last
-one with a correct hash (if any) on a best-effort basis. However, this may not
-be worth the complexity; it's simpler to just keep recording time short enough
-that losing partial recordings is not a problem.
+as a recording is written, record the latest sample tables,
+size, and hash fields without marking the recording as fully written. On
+startup, the file would be truncated to match and then the recording marked
+as fully written. The file would either have to be synced prior to each update
+(to guarantee it is at least as new as the row) or multiple checkpoints would
+be kept, using the last one with a correct hash (if any) on a best-effort
+basis. However, this may not be worth the complexity; it's simpler to just
+keep recording time short enough that losing partial recordings is not a
+problem.
 
 ### Verifying invariants
 
@@ -364,24 +363,25 @@ in the background at low priority.
 
 ### Recording table
 
+The snippet below is a illustrative excerpt of the SQLite schema; see
+`schema.sql` for the authoritative, up-to-date version.
+
     -- A single, typically 60-second, recorded segment of video.
     create table recording (
       id integer primary key,
       camera_id integer references camera (id) not null,
 
-      status integer not null,  -- 0 (WRITING), 1 (WRITTEN), or 2 (DELETING)
-
       sample_file_uuid blob unique not null,
       sample_file_sha1 blob,
       sample_file_size integer,
 
-      -- The starting and ending time of the recording, in 90 kHz units since
+      -- The starting time and duration of the recording, in 90 kHz units since
       -- 1970-01-01 00:00:00 UTC.
       start_time_90k integer not null,
-      end_time_90k integer,
+      duration_90k integer,
 
       video_samples integer,
-      video_sample_entry_sha1 blob references visual_sample_entry (sha1),
+      video_sample_entry_id blob references visual_sample_entry (id),
       video_index blob,
 
       ...
@@ -400,7 +400,7 @@ in the background at low priority.
 
       -- A serialized SampleEntry box, including the leading length and box
       -- type (avcC in the case of H.264).
-      bytes blob
+      data blob
     );
 
 As mentioned by the `start_time_90k` field above, recordings use a 90 kHz time
@@ -507,7 +507,7 @@ to store metadata and the simple, consistent format of sample indexes.
 
 ### Copyright
 
-This file is part of Moonfire NVR, a security camera digital video recorder.
+This file is part of Moonfire NVR, a security camera network video recorder.
 Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
 
 This program is free software: you can redistribute it and/or modify
@@ -546,6 +546,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 [wdpurple]: http://www.wdc.com/en/products/products.aspx?id=1210
 [wd20eurs]: http://www.wdc.com/wdproducts/library/SpecSheet/ENG/2879-701250.pdf
 [seeker]: http://www.linuxinsight.com/how_fast_is_your_disk.html
+[rfc-3551]: https://www.ietf.org/rfc/rfc3551.txt
+[hikvision-sr]: http://www.cctvforum.com/viewtopic.php?f=19&t=44534
 [iso-14496-12]: http://www.iso.org/iso/home/store/catalogue_ics/catalogue_detail_ics.htm?csnumber=68960
 [sqlite3]: https://www.sqlite.org/
 [sqlite3-wal]: https://www.sqlite.org/wal.html

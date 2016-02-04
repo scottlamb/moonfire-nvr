@@ -75,12 +75,21 @@ create table recording (
   sample_file_bytes integer not null check (sample_file_bytes > 0),
 
   -- The starting time of the recording, in 90 kHz units since
-  -- 1970-01-01 00:00:00 UTC.
+  -- 1970-01-01 00:00:00 UTC. Currently on initial connection, this is taken
+  -- from the local system time; on subsequent recordings, it exactly
+  -- matches the previous recording's end time.
   start_time_90k integer not null check (start_time_90k > 0),
 
   -- The duration of the recording, in 90 kHz units.
   duration_90k integer not null
       check (duration_90k >= 0 and duration_90k < 5*60*90000),
+
+  -- The number of 90 kHz units the local system time is ahead of the
+  -- recording; negative numbers indicate the local system time is behind
+  -- the recording. Large values would indicate that the local time has jumped
+  -- during recording or that the local time and camera time frequencies do
+  -- not match.
+  local_time_delta_90k integer not null,
 
   video_samples integer not null check (video_samples > 0),
   video_sync_samples integer not null check (video_samples > 0),

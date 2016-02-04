@@ -90,16 +90,6 @@ StrCatPiece::StrCatPiece(int64_t p) {
 
 }  // namespace internal
 
-bool IsWord(const std::string &str) {
-  for (char c : str) {
-    if (!(('0' <= c && c <= '9') || ('A' <= c && c <= 'Z') ||
-          ('a' <= c && c <= 'z') || c == '_')) {
-      return false;
-    }
-  }
-  return true;
-}
-
 std::string EscapeHtml(const std::string &input) {
   std::string output;
   output.reserve(input.size());

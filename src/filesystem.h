@@ -82,6 +82,9 @@ class File {
   // ftruncate(), returning 0 on success or errno>0 on failure.
   virtual int Truncate(off_t length) = 0;
 
+  // unlink() the specified file, returning 0 on success or errno>0 on failure.
+  virtual int Unlink(const char *path) = 0;
+
   // Write to the file, returning 0 on success or errno>0 on failure.
   // On success, |bytes_written| will be updated.
   virtual int Write(re2::StringPiece data, size_t *bytes_written) = 0;
@@ -116,8 +119,9 @@ class MockFile : public File {
   MOCK_METHOD3(Read, int(void *, size_t, size_t *));
   MOCK_METHOD1(Stat, int(struct stat *));
   MOCK_METHOD0(Sync, int());
-  MOCK_METHOD2(Write, int(re2::StringPiece, size_t *));
   MOCK_METHOD1(Truncate, int(off_t));
+  MOCK_METHOD1(Unlink, int(const char *));
+  MOCK_METHOD2(Write, int(re2::StringPiece, size_t *));
 };
 
 // Interface to the local filesystem. There's typically one per program,

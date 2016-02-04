@@ -125,6 +125,10 @@ class RealFile : public File {
     return (ftruncate(fd_, length) < 0) ? errno : 0;
   }
 
+  int Unlink(const char *pathname) {
+    return unlinkat(fd_, pathname, 0) != 0 ? errno : 0;
+  }
+
   int Write(re2::StringPiece data, size_t *bytes_written) final {
     ssize_t ret;
     while ((ret = write(fd_, data.data(), data.size())) == -1 && errno == EINTR)

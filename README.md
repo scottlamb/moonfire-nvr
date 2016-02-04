@@ -69,8 +69,6 @@ from source. It requires several packages to build:
   [nghttp2](https://github.com/tatsuhiro-t/nghttp2) in the future.)
   Unfortunately, the libevent 2.0 bundled with current Debian releases is
   unsuitable.
-* [protocol buffers](https://developers.google.com/protocol-buffers/),
-  currently just for the configuration file.
 * [gflags](http://gflags.github.io/gflags/), for commandline flag parsing.
 * [glog](https://github.com/google/glog), for debug logging.
 * [gperftools](https://github.com/gperftools/gperftools), for debugging.
@@ -87,7 +85,6 @@ pre-requisites (see also the `Build-Depends` field in `debian/control`):
     $ sudo apt-get install \
                    build-essential \
                    cmake \
-                   libprotobuf-dev \
                    libavcodec-dev \
                    libavformat-dev \
                    libavutil-dev \
@@ -97,7 +94,6 @@ pre-requisites (see also the `Build-Depends` field in `debian/control`):
                    libre2-dev \
                    libsqlite3-dev \
                    pkgconf \
-                   protobuf-compiler \
                    uuid-dev
 
 libevent 2.1 will have to be installed from source. In the future, this
@@ -118,82 +114,63 @@ installed, you may be able to prepare a `.deb` package:
     $ sudo apt-get install devscripts dh-systemd
     $ debuild -us -uc
 
-# Configuration
+# Installation
 
-Moonfire NVR expects a configuration file `/etc/moonfire-nvr.conf` (overridable
-with the `--config` argument). Currently this file should contain a
-text-format `moonfire_nvr.Config` protocol buffer message; see
-`src/config.protodevel` which describes the meaning of fields. The general
-syntax is as in the example below: `field: value` for simple fields, or
-(`field < ... >`) for "message" fields. It supports line-based comments
-starting with #.
+Moonfire NVR should be run under a dedicated user. It keeps two kinds of
+state:
 
-    base_path: "/var/lib/moonfire_nvr"
-    rotate_sec: 600
-    http_port: 8080
+* a SQLite3 database, typically <1 GiB. It should be stored on flash if
+  available.
+* the "sample file directory", which holds the actual samples/frames of H.264
+  video. This should be quite large and typically is stored on a hard drive.
 
-    camera <
-      short_name: "back_west"
-      host: "192.168.1.101:554"
-      user: "admin"
-      password: "12345"
-      main_rtsp_path: "/Streaming/Channels/1"
-      sub_rtsp_path: "/Streaming/Channels/2"
-      retain_bytes: 52428800  # 50 MiB
-    >
-    camera <
-      short_name: "back_east"
-      host: "192.168.1.102:554"
-      user: "admin"
-      password: "12345"
-      main_rtsp_path: "/Streaming/Channels/1"
-      sub_rtsp_path: "/Streaming/Channels/2"
-      retain_bytes: 52428800  # 50 MiB
-    >
+Both are intended to be accessed only by Moonfire NVR itself. However, the
+interface for adding new cameras is not yet written, so you will have to
+manually create the database and insert cameras with the `sqlite3` commandline
+tool prior to starting Moonfire NVR.
 
-The example configuration above does the following:
-
-* streams the `main_rtsp_path` from both cameras, reconnecting on errors, and
-  writing 10-minute segments of video to subdirectories of
-  `/var/lib/surveillance/`. (The `sub_rtsp_path` field is not used yet.)
-* deletes old files to stay within the 50 MiB limit for each camera, excluding
-  the video file currently being written.
-* writes human-readable debug logs to `/tmp/moonfire_nvr.INFO`.
-* runs an HTTP server on the port 8080 (try
-  [`http://localhost:8080/`](http://localhost:8080/) which allows streaming the
-  video. Note: Moonfire NVR does not yet support authentication or SSL, so
-  this webserver should not be directly exposed to the Internet.
-
-When configuring Moonfire NVR, it may be helpful to replicate its basic
-functionality with the `ffmpeg` commandline tool. The command below is roughly
-equivalent to the configuration for `back_west` above.
+Before setting up a camera, it may be helpful to test settings with the
+`ffmpeg` commandline tool:
 
     $ ffmpeg \
           -i "rtsp://admin:12345@192.168.1.101:554/Streaming/Channels/1" \
           -c copy \
           -map 0:0 \
+          -rtsp_transport tcp \
           -flags:v +global_header \
-          -bsf:v dump_extra \
-          -f segment \
-          -segment_time 600 \
-          -use_strftime 1 \
-          -segment_format mp4 \
-          %Y%m%d%H%M%S-back_west.mp4
+          test.mp4
 
-# Installation
-
-Moonfire NVR should be run under a dedicated user. This user should own the
-`base_path` directory mentioned in the configuration file. Because video is
-served through an HTTP interface, there's no need for any other user to access
-the files.
+Once you have a working `ffmpeg` commandline, set up Moonfire NVR as follows:
 
     $ sudo addgroup --system moonfire-nvr
-    $ sudo adduser --system moonfire-nvr --group moonfire-nvr
-    $ sudo mkdir /var/lib/moonfire_nvr
-    $ sudo chown moonfire-nvr:moonfire-nvr /var/lib/moonfire_nvr
-    $ sudo chmod 700 /var/lib/moonfire_nvr
+    $ sudo adduser --system moonfire-nvr --home /var/lib/moonfire-nvr
+    $ sudo mkdir /var/lib/moonfire-nvr
+    $ sudo -u moonfire-nvr -H mkdir db sample
+    $ uuidgen | sed -e 's/-//g'
+    b47f48706d91414591cd6c931bf836b4
+    $ sudo -u moonfire-nvr sqlite3 db/db
+    sqlite3> .read path/to/schema.sql
+    sqlite3> insert into camera (
+        ...>     uuid, short_name, description, host, username, password,
+        ...>     main_rtsp_path, sub_rtsp_path, retain_bytes) values (
+        ...>     X'b47f48706d91414591cd6c931bf836b4', 'driveway',
+        ...>     'Longer description of this camera', '192.168.1.101',
+        ...>     'admin', '12345', '/Streaming/Channels/1',
+        ...>     '/Streaming/Channels/2', 104857600);
+    sqlite3> ^D
 
-It can be run as a systemd service. Create
+See the schema SQL file's comments for more information. Note that the sum of
+`retain_bytes` for all cameras should be somewhat less than the available
+bytes on the sample file directory's filesystem, as the currently-writing
+sample files are not included in this sum. Be sure also to subtract out the
+filesystem's reserve for root (typically 5%).
+
+If a dedicated hard drive is available, set up the mount point:
+
+    $ sudo vim /etc/fstab
+    $ sudo mount /var/lib/moonfire-nvr/sample
+
+Moonfire NVR can be run as a systemd service. Create
 `/etc/systemd/system/moonfire-nvr.service`:
 
     [Unit]
@@ -201,7 +178,10 @@ It can be run as a systemd service. Create
     After=network-online.target
 
     [Service]
-    ExecStart=/usr/local/bin/moonfire_nvr
+    ExecStart=/usr/local/bin/moonfire-nvr \
+        --sample_file_dir=/var/lib/moonfire-nvr/sample \
+        --db_dir=/var/lib/moonfire-nvr/db \
+        --http_port=8080
     Type=simple
     User=moonfire-nvr
     Nice=-20
@@ -212,6 +192,9 @@ It can be run as a systemd service. Create
 
     [Install]
     WantedBy=multi-user.target
+
+Note that the HTTP port currently has no authentication; it should not be
+directly exposed to the Internet.
 
 Complete the installation through `systemctl` commands:
 
@@ -225,7 +208,7 @@ documentation for more information. The [manual
 pages](http://www.freedesktop.org/software/systemd/man/) for `systemd.service`
 and `systemctl` may be of particular interest.
 
-While Moonfire NVR is running, logs will be written to `/tmp/moonfire_nvr.INFO`.
+While Moonfire NVR is running, logs will be written to `/tmp/moonfire-nvr.INFO`.
 
 # <a name="help"></a> Getting help and getting involved
 

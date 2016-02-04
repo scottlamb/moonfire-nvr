@@ -144,34 +144,6 @@ class VideoSource {
 // Returns a VideoSource for production use, which will never be deleted.
 VideoSource *GetRealVideoSource();
 
-class OutputVideoPacketStream {
- public:
-  OutputVideoPacketStream() {}
-  OutputVideoPacketStream(const OutputVideoPacketStream &) = delete;
-  OutputVideoPacketStream &operator=(const OutputVideoPacketStream &) = delete;
-
-  ~OutputVideoPacketStream() { Close(); }
-
-  bool OpenFile(const std::string &filename,
-                const InputVideoPacketStream &input,
-                std::string *error_message);
-
-  bool Write(VideoPacket *pkt, std::string *error_message);
-
-  void Close();
-
-  bool is_open() const { return ctx_ != nullptr; }
-  AVRational time_base() const { return stream_->time_base; }
-
- private:
-  int64_t key_frames_written_ = -1;
-  int64_t frames_written_ = -1;
-  int64_t min_next_dts_ = std::numeric_limits<int64_t>::min();
-  int64_t min_next_pts_ = std::numeric_limits<int64_t>::min();
-  AVFormatContext *ctx_ = nullptr;  // owned.
-  AVStream *stream_ = nullptr;      // ctx_ owns.
-};
-
 }  // namespace moonfire_nvr
 
 #endif  // MOONFIRE_NVR_FFMPEG_H
