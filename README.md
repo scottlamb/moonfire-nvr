@@ -47,7 +47,7 @@ make this possible:
 
 See the [github page](https://github.com/scottlamb/moonfire-nvr) (in case
 you're not reading this text there already). You can download the bleeding
-edge version from the commandline via git:
+edge version from the command line via git:
 
     $ git clone https://github.com/scottlamb/moonfire-nvr.git
 
@@ -69,7 +69,7 @@ from source. It requires several packages to build:
   [nghttp2](https://github.com/tatsuhiro-t/nghttp2) in the future.)
   Unfortunately, the libevent 2.0 bundled with current Debian releases is
   unsuitable.
-* [gflags](http://gflags.github.io/gflags/), for commandline flag parsing.
+* [gflags](http://gflags.github.io/gflags/), for command line flag parsing.
 * [glog](https://github.com/google/glog), for debug logging.
 * [gperftools](https://github.com/gperftools/gperftools), for debugging.
 * [googletest](https://github.com/google/googletest), for automated testing.
@@ -92,13 +92,49 @@ pre-requisites (see also the `Build-Depends` field in `debian/control`):
                    libgoogle-glog-dev \
                    libgoogle-perftools-dev \
                    libre2-dev \
+                   sqlite3 \
                    libsqlite3-dev \
                    pkgconf \
+                   uuid-runtime \
                    uuid-dev
 
 libevent 2.1 will have to be installed from source. In the future, this
 dependency may be replaced or support may be added for automatically building
 libevent in-tree to avoid the inconvenience.
+
+uuid-runtime is only necessary if you wish to use the uuid command to generate
+uuids for your cameras (see below). If you obtain them elsewhere, you can skip this
+package.
+
+You can continue to follow the build/install instructions below for a manual
+build and install, or alternatively you can run the prep script called `prep.sh`.
+
+    $ cd moonfire-nvr
+    $ ./prep.sh
+
+The script will take the following command line options, should you need them:
+
+* `-E`: Forcibly purge all existing libevent packages. You would only do this
+        if there is some apparent conflict (see remarks about building libevent
+        from source).
+* `-f`: Force a build even if the binary appears to be installed. This can be useful
+        on repeat builds.
+* `-S`: Skip updating and installing dependencies through apt-get. This too can be
+        useful on repeated builds.
+
+You can edit variables at the start of the script to influence names and
+directories, but defaults should suffice in most cases. For details refer to
+the script itself. We will mention just one option, needed when you follow the
+suggestion to separate database and samples between flash storage and a hard disk.
+If you have the hard disk mounted on, lets say `/media/nvr`, and you want to
+store the video samples inside a directory named `samples` there, you would set:
+
+    SAMPLES_DIR=/media/nvr/samples
+
+The script will perform all necessary steps to leave you with a fully built,
+installed moonfire-nvr binary and (running) system service. The only thing
+you'll have to do manually is add your camera configuration(s) to the database.
+For instructions, you can skip to "[Camera configuration and hard disk mounting](#camera)".
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
@@ -114,23 +150,43 @@ installed, you may be able to prepare a `.deb` package:
     $ sudo apt-get install devscripts dh-systemd
     $ debuild -us -uc
 
-# Installation
+# Further configuration
 
 Moonfire NVR should be run under a dedicated user. It keeps two kinds of
 state:
 
-* a SQLite3 database, typically <1 GiB. It should be stored on flash if
+* a SQLite database, typically <1 GiB. It should be stored on flash if
   available.
 * the "sample file directory", which holds the actual samples/frames of H.264
   video. This should be quite large and typically is stored on a hard drive.
 
 Both are intended to be accessed only by Moonfire NVR itself. However, the
 interface for adding new cameras is not yet written, so you will have to
-manually create the database and insert cameras with the `sqlite3` commandline
+manually create the database and insert cameras with the `sqlite3` command line
 tool prior to starting Moonfire NVR.
 
+Manual commands would look something like this:
+
+    $ sudo addgroup --system moonfire-nvr
+    $ sudo adduser --system moonfire-nvr --home /var/lib/moonfire-nvr
+    $ sudo mkdir /var/lib/moonfire-nvr
+    $ sudo -u moonfire-nvr -H mkdir db sample
+    $ sudo -u moonfire-nvr sqlite3 ~moonfire-nvr/db/db < path/to/schema.sql
+
+## <a name="cameras"></a>Camera configuration and hard drive mounting
+
+If a dedicated hard drive is available, set up the mount point:
+
+    $ sudo vim /etc/fstab
+    $ sudo mount /var/lib/moonfire-nvr/sample
+
+Once setup is complete, it is time to add camera configurations to the
+database.  However, the interface for adding new cameras is not yet written,
+so you will have to manually insert cameras configurations with the `sqlite3`
+command line tool prior to starting Moonfire NVR.
+
 Before setting up a camera, it may be helpful to test settings with the
-`ffmpeg` commandline tool:
+`ffmpeg` command line tool:
 
     $ ffmpeg \
           -i "rtsp://admin:12345@192.168.1.101:554/Streaming/Channels/1" \
@@ -140,16 +196,21 @@ Before setting up a camera, it may be helpful to test settings with the
           -flags:v +global_header \
           test.mp4
 
-Once you have a working `ffmpeg` commandline, set up Moonfire NVR as follows:
+Once you have a working `ffmpeg` command line, insert the camera config as
+follows.  See the schema SQL file's comments for more information.
+Note that the sum of `retain_bytes` for all cameras combined should be
+somewhat less than the available bytes on the sample file directory's
+filesystem, as the currently-writing sample files are not included in
+this sum. Be sure also to subtract out the filesystem's reserve for root
+(typically 5%).
 
-    $ sudo addgroup --system moonfire-nvr
-    $ sudo adduser --system moonfire-nvr --home /var/lib/moonfire-nvr
-    $ sudo mkdir /var/lib/moonfire-nvr
-    $ sudo -u moonfire-nvr -H mkdir db sample
+In the following example, we generate a uuid which is then later used
+to uniquely identify this camera. Thus, you will generate a new one for
+each camera you insert using this method.
+
     $ uuidgen | sed -e 's/-//g'
     b47f48706d91414591cd6c931bf836b4
-    $ sudo -u moonfire-nvr sqlite3 db/db
-    sqlite3> .read path/to/schema.sql
+    $ sudo -u moonfire-nvr sqlite3 ~moonfire-nvr/db/db
     sqlite3> insert into camera (
         ...>     uuid, short_name, description, host, username, password,
         ...>     main_rtsp_path, sub_rtsp_path, retain_bytes) values (
@@ -159,18 +220,10 @@ Once you have a working `ffmpeg` commandline, set up Moonfire NVR as follows:
         ...>     '/Streaming/Channels/2', 104857600);
     sqlite3> ^D
 
-See the schema SQL file's comments for more information. Note that the sum of
-`retain_bytes` for all cameras should be somewhat less than the available
-bytes on the sample file directory's filesystem, as the currently-writing
-sample files are not included in this sum. Be sure also to subtract out the
-filesystem's reserve for root (typically 5%).
+## System Service
 
-If a dedicated hard drive is available, set up the mount point:
-
-    $ sudo vim /etc/fstab
-    $ sudo mount /var/lib/moonfire-nvr/sample
-
-Moonfire NVR can be run as a systemd service. Create
+Moonfire NVR can be run as a systemd service. If you used `prep.sh` this has
+been done for you. If not, Create
 `/etc/systemd/system/moonfire-nvr.service`:
 
     [Unit]
@@ -208,7 +261,12 @@ documentation for more information. The [manual
 pages](http://www.freedesktop.org/software/systemd/man/) for `systemd.service`
 and `systemctl` may be of particular interest.
 
+# Troubleshooting
+
 While Moonfire NVR is running, logs will be written to `/tmp/moonfire-nvr.INFO`.
+Also available will be `/tmp/moonfire-nvr.WARNING` and `/tmp/moonfire-nvr.ERROR`.
+These latter to contain only warning or more serious messages, respectively only
+error messages.
 
 # <a name="help"></a> Getting help and getting involved
 
