@@ -134,6 +134,9 @@ store the video samples inside a directory named `samples` there, you would set:
 The script will perform all necessary steps to leave you with a fully built,
 installed moonfire-nvr binary and (running) system service. The only thing
 you'll have to do manually is add your camera configuration(s) to the database.
+Alternatively, before running the script, you can create a file named `cameras.sql`
+in the same directory as the `prep.sh` script and it will be automatically
+included for you.
 For instructions, you can skip to "[Camera configuration and hard disk mounting](#camera)".
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
@@ -219,6 +222,43 @@ each camera you insert using this method.
         ...>     'admin', '12345', '/Streaming/Channels/1',
         ...>     '/Streaming/Channels/2', 104857600);
     sqlite3> ^D
+
+### Using automatic camera configuration inclusion with `prep.sh`
+
+Not withstanding the instructions above, you can also prepare a file named
+`cameras.sql` before you run the `prep.sh` script. The format of this file
+should be something like in the example below for two cameras (SQL gives you
+lots of freedom in the use of blank space and newlines, so this is formatted
+for easy reading, and editing, and does not have to be altered in formatting,
+but can if you wish and know what you are doing):
+
+    insert into camera (
+    		uuid,
+    		short_name, description,
+    		host, username, password,
+    		main_rtsp_path, sub_rtsp_path,
+    		retain_bytes
+    	)
+    	values
+    	(
+    		X'1c944181b8074b8083eb579c8e194451',
+    		'Front Left', 'Front Left Driveway',
+    		'192.168.1.41',
+    		'admin', 'secret',
+    		'/Streaming/Channels/1', '/Streaming/Channels/2',
+    		346870912000
+    	),
+    	(
+    		X'da5921f493ac4279aafe68e69e174026',
+    		'Front Right', 'Front Right Driveway',
+    		'192.168.1.42',
+    		'admin', 'secret',
+    		'/Streaming/Channels/1', '/Streaming/Channels/2',
+    		346870912000
+    	);
+
+You'll still have to find the correct rtsp paths, usernames and passwords, and
+set retained byte counts, as explained above.
 
 ## System Service
 
