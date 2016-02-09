@@ -59,6 +59,8 @@ set(MOONFIRE_NVR_SRCS
     uuid.cc
     web.cc)
 
+link_directories(${LIBEVENT_LIBRARY_DIRS})
+
 add_library(moonfire-nvr-lib ${MOONFIRE_NVR_SRCS} ${PROTO_SRCS} ${PROTO_HDRS})
 target_link_libraries(moonfire-nvr-lib ${MOONFIRE_DEPS})
 
@@ -84,7 +86,7 @@ set(MOONFIRE_NVR_TESTS
 
 foreach(test ${MOONFIRE_NVR_TESTS})
   add_executable(${test}-test ${test}-test.cc testutil.cc)
-  target_link_libraries(${test}-test GTest GMock moonfire-nvr-lib)
+  target_link_libraries(${test}-test GTest GMock moonfire-nvr-lib )
   add_test(NAME ${test}-test
            COMMAND ${test}-test
            WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

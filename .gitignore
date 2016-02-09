@@ -2,6 +2,7 @@
 build
 debug
 obj-*
+cameras.sql
 debian/files
 debian/moonfire-nvr.debhelper.log
 debian/moonfire-nvr.postinst.debhelper
