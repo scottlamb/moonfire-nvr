@@ -148,6 +148,7 @@ if [ "${SKIP_APT:-0}" != 1 ]; then
 		libgflags-dev \
 		libgoogle-glog-dev \
 		libgoogle-perftools-dev \
+		libjsoncpp-dev \
 		libre2-dev \
 		sqlite3 \
 		libsqlite3-dev \

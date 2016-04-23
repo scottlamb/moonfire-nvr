@@ -28,15 +28,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-// web.h: web (HTTP/HTML) interface to the SQLite-based recording schema.
-// Currently, during the transition from the old bunch-of-.mp4-files schema to
-// the SQLite-based schema, it's convenient for this to be a separate class
-// that interacts with the recording system only through the SQLite database
-// and filesystem. In fact, the only advantage of being in-process is that it
-// shares the same database mutex and avoids hitting SQLITE_BUSY.
+// web.h: web (HTTP/HTML/JSON) interface to the SQLite-based recording schema.
+// See design/api.md for a description of the JSON API.
 //
-// In the future, the interface will be reworked for tighter integration to
-// support more features:
+// In the future, the interface will be reworked for tighter integration with
+// the recording system to support more features:
 //
 // * including the recording currently being written in the web interface
 // * subscribing to changes
@@ -67,9 +63,14 @@ class WebInterface {
   void Register(evhttp *http);
 
  private:
-  static void HandleCameraList(evhttp_request *req, void *arg);
-  static void HandleCameraDetail(evhttp_request *req, void *arg);
-  static void HandleMp4View(evhttp_request *req, void *arg);
+  static void DispatchHttpRequest(evhttp_request *req, void *arg);
+
+  void HandleHtmlCameraList(evhttp_request *req);
+  void HandleJsonCameraList(evhttp_request *req);
+  void HandleHtmlCameraDetail(evhttp_request *req, Uuid camera_uuid);
+  void HandleJsonCameraDetail(evhttp_request *req, Uuid camera_uuid);
+  void HandleJsonCameraRecordings(evhttp_request *req, Uuid camera_uuid);
+  void HandleMp4View(evhttp_request *req, Uuid camera_uuid);
 
   // TODO: more nuanced error code for HTTP.
   std::shared_ptr<VirtualFile> BuildMp4(Uuid camera_uuid,

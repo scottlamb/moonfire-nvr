@@ -33,20 +33,77 @@
 #include "web.h"
 
 #include <glog/logging.h>
+#include <json/value.h>
+#include <json/writer.h>
+#include <re2/re2.h>
 
 #include "recording.h"
 #include "string.h"
 
 namespace moonfire_nvr {
 
-void WebInterface::Register(evhttp *http) {
-  evhttp_set_cb(http, "/", &WebInterface::HandleCameraList, this);
-  evhttp_set_cb(http, "/camera", &WebInterface::HandleCameraDetail, this);
-  evhttp_set_cb(http, "/view.mp4", &WebInterface::HandleMp4View, this);
+namespace {
+
+static const char kJsonMimeType[] = "application/json";
+
+void ReplyWithJson(evhttp_request *req, const Json::Value &value) {
+  EvBuffer buf;
+  buf.Add(Json::writeString(Json::StreamWriterBuilder(), value));
+  evhttp_add_header(evhttp_request_get_output_headers(req), "Content-Type",
+                    kJsonMimeType);
+  evhttp_send_reply(req, HTTP_OK, "OK", buf.get());
 }
 
-void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
+// RE2::Arg::Parser for uuids.
+bool ParseUuid(const char *str, int n, void *dest) {
+  auto *uuid = reinterpret_cast<Uuid *>(dest);
+  return uuid->ParseText(re2::StringPiece(str, n));
+}
+
+}  // namespace
+
+void WebInterface::Register(evhttp *http) {
+  evhttp_set_gencb(http, &WebInterface::DispatchHttpRequest, this);
+}
+
+void WebInterface::DispatchHttpRequest(evhttp_request *req, void *arg) {
+  static const RE2 kCameraUri("/cameras/([^/]+)/");
+  static const RE2 kCameraRecordingsUri("/cameras/([^/]+)/recordings");
+  static const RE2 kCameraViewUri("/cameras/([^/]+)/view.mp4");
+
+  re2::StringPiece accept =
+      evhttp_find_header(evhttp_request_get_input_headers(req), "Accept");
+  bool json = accept == kJsonMimeType;
+
   auto *this_ = reinterpret_cast<WebInterface *>(arg);
+  const evhttp_uri *uri = evhttp_request_get_evhttp_uri(req);
+  re2::StringPiece path = evhttp_uri_get_path(uri);
+  Uuid camera_uuid;
+  RE2::Arg camera_uuid_arg(&camera_uuid, &ParseUuid);
+  if (path == "/" || path == "/cameras/") {
+    if (json) {
+      this_->HandleJsonCameraList(req);
+    } else {
+      this_->HandleHtmlCameraList(req);
+    }
+  } else if (RE2::FullMatch(path, kCameraUri, camera_uuid_arg)) {
+    if (json) {
+      this_->HandleJsonCameraDetail(req, camera_uuid);
+    } else {
+      this_->HandleHtmlCameraDetail(req, camera_uuid);
+    }
+  } else if (RE2::FullMatch(path, kCameraRecordingsUri, camera_uuid_arg)) {
+    // The HTML version includes this in the top-level camera view.
+    // So only support JSON at this URI.
+    this_->HandleJsonCameraRecordings(req, camera_uuid);
+  } else if (RE2::FullMatch(path, kCameraViewUri, camera_uuid_arg)) {
+    this_->HandleMp4View(req, camera_uuid);
+  } else {
+    evhttp_send_error(req, HTTP_NOTFOUND, "path not understood");
+  }
+}
+
+void WebInterface::HandleHtmlCameraList(evhttp_request *req) {
   EvBuffer buf;
   buf.Add(
       "<!DOCTYPE html>\n"
@@ -70,7 +127,7 @@ void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
                                        ? std::string("n/a")
                                        : PrettyTimestamp(row.max_end_time_90k);
     buf.AddPrintf(
-        "<tr class=header><td colspan=2><a href=\"/camera?uuid=%s\">%s</a>"
+        "<tr class=header><td colspan=2><a href=\"/cameras/%s/\">%s</a>"
         "</td></tr>\n"
         "<tr><td>description</td><td>%s</td></tr>\n"
         "<tr><td>space</td><td>%s / %s (%.1f%%)</td></tr>\n"
@@ -90,7 +147,7 @@ void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
         EscapeHtml(HumanizeDuration(seconds)).c_str());
     return IterationControl::kContinue;
   };
-  this_->env_->mdb->ListCameras(row_cb);
+  env_->mdb->ListCameras(row_cb);
   buf.Add(
       "</table>\n"
       "</body>\n"
@@ -98,17 +155,37 @@ void WebInterface::HandleCameraList(evhttp_request *req, void *arg) {
   evhttp_send_reply(req, HTTP_OK, "OK", buf.get());
 }
 
-void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
-  auto *this_ = reinterpret_cast<WebInterface *>(arg);
+void WebInterface::HandleJsonCameraList(evhttp_request *req) {
+  Json::Value cameras(Json::arrayValue);
+  auto row_cb = [&](const ListCamerasRow &row) {
+    Json::Value camera(Json::objectValue);
+    camera["uuid"] = row.uuid.UnparseText();
+    camera["short_name"] = row.short_name;
+    camera["description"] = row.description;
+    camera["retain_bytes"] = static_cast<Json::Int64>(row.retain_bytes);
+    camera["total_duration_90k"] =
+        static_cast<Json::Int64>(row.total_duration_90k);
+    camera["total_sample_file_bytes"] =
+        static_cast<Json::Int64>(row.total_sample_file_bytes);
+    if (row.min_start_time_90k != -1) {
+      camera["min_start_time_90k"] =
+          static_cast<Json::Int64>(row.min_start_time_90k);
+    }
+    if (row.max_end_time_90k != -1) {
+      camera["max_end_time_90k"] =
+          static_cast<Json::Int64>(row.max_end_time_90k);
+    }
+    cameras.append(camera);
+    return IterationControl::kContinue;
+  };
+  env_->mdb->ListCameras(row_cb);
+  ReplyWithJson(req, cameras);
+}
 
-  Uuid camera_uuid;
-  QueryParameters params(evhttp_request_get_uri(req));
-  if (!params.ok() || !camera_uuid.ParseText(params.Get("uuid"))) {
-    return evhttp_send_error(req, HTTP_BADREQUEST, "bad query parameters");
-  }
-
+void WebInterface::HandleHtmlCameraDetail(evhttp_request *req,
+                                          Uuid camera_uuid) {
   GetCameraRow camera_row;
-  if (!this_->env_->mdb->GetCamera(camera_uuid, &camera_row)) {
+  if (!env_->mdb->GetCamera(camera_uuid, &camera_row)) {
     return evhttp_send_error(req, HTTP_NOTFOUND, "no such camera");
   }
 
@@ -148,12 +225,11 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
                                       aggregated.start_time_90k) /
                    kTimeUnitsPerSecond;
     buf.AddPrintf(
-        "<tr><td><a href=\"/view.mp4?camera_uuid=%s&start_time_90k=%" PRId64
+        "<tr><td><a href=\"view.mp4?start_time_90k=%" PRId64
         "&end_time_90k=%" PRId64
         "\">%s</a></td><td>%s</td><td>%dx%d</td>"
         "<td>%.0f</td><td>%s</td><td>%s</td></tr>\n",
-        camera_uuid.UnparseText().c_str(), aggregated.start_time_90k,
-        aggregated.end_time_90k,
+        aggregated.start_time_90k, aggregated.end_time_90k,
         PrettyTimestamp(aggregated.start_time_90k).c_str(),
         PrettyTimestamp(aggregated.end_time_90k).c_str(),
         static_cast<int>(aggregated.width), static_cast<int>(aggregated.height),
@@ -183,9 +259,9 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
   int64_t start_time_90k = 0;
   int64_t end_time_90k = std::numeric_limits<int64_t>::max();
   std::string error_message;
-  if (!this_->env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
-                                              end_time_90k, handle_sql_row,
-                                              &error_message)) {
+  if (!env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
+                                       end_time_90k, handle_sql_row,
+                                       &error_message)) {
     return evhttp_send_error(
         req, HTTP_INTERNAL,
         StrCat("sqlite query failed: ", EscapeHtml(error_message)).c_str());
@@ -197,14 +273,78 @@ void WebInterface::HandleCameraDetail(evhttp_request *req, void *arg) {
   evhttp_send_reply(req, HTTP_OK, "OK", buf.get());
 }
 
-void WebInterface::HandleMp4View(evhttp_request *req, void *arg) {
-  auto *this_ = reinterpret_cast<WebInterface *>(arg);
+void WebInterface::HandleJsonCameraDetail(evhttp_request *req,
+                                          Uuid camera_uuid) {
+  GetCameraRow camera_row;
+  if (!env_->mdb->GetCamera(camera_uuid, &camera_row)) {
+    return evhttp_send_error(req, HTTP_NOTFOUND, "no such camera");
+  }
 
-  Uuid camera_uuid;
+  Json::Value camera(Json::objectValue);
+  camera["short_name"] = camera_row.short_name;
+  camera["description"] = camera_row.description;
+  camera["retain_bytes"] = static_cast<Json::Int64>(camera_row.retain_bytes);
+  camera["total_duration_90k"] =
+      static_cast<Json::Int64>(camera_row.total_duration_90k);
+  camera["total_sample_file_bytes"] =
+      static_cast<Json::Int64>(camera_row.total_sample_file_bytes);
+  if (camera_row.min_start_time_90k != -1) {
+    camera["min_start_time_90k"] =
+        static_cast<Json::Int64>(camera_row.min_start_time_90k);
+  }
+  if (camera_row.max_end_time_90k != -1) {
+    camera["max_end_time_90k"] =
+        static_cast<Json::Int64>(camera_row.max_end_time_90k);
+  }
+
+  // TODO(slamb): include list of calendar days with data.
+  ReplyWithJson(req, camera);
+}
+
+void WebInterface::HandleJsonCameraRecordings(evhttp_request *req,
+                                              Uuid camera_uuid) {
+  GetCameraRow camera_row;
+  if (!env_->mdb->GetCamera(camera_uuid, &camera_row)) {
+    return evhttp_send_error(req, HTTP_NOTFOUND, "no such camera");
+  }
+
+  // TODO(slamb): paging support.
+
+  Json::Value recordings(Json::arrayValue);
+  auto handle_row = [&](const ListCameraRecordingsRow &row) {
+    Json::Value recording(Json::objectValue);
+    recording["end_time_90k"] = static_cast<Json::Int64>(row.end_time_90k);
+    recording["start_time_90k"] = static_cast<Json::Int64>(row.start_time_90k);
+    recording["video_samples"] = static_cast<Json::Int64>(row.video_samples);
+    recording["sample_file_bytes"] =
+        static_cast<Json::Int64>(row.sample_file_bytes);
+    recording["video_sample_entry_sha1"] = ToHex(row.video_sample_entry_sha1);
+    recording["video_sample_entry_width"] = row.width;
+    recording["video_sample_entry_height"] = row.height;
+    recordings.append(recording);
+    return IterationControl::kContinue;
+  };
+  int64_t start_time_90k = 0;
+  int64_t end_time_90k = std::numeric_limits<int64_t>::max();
+  std::string error_message;
+  if (!env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
+                                       end_time_90k, handle_row,
+                                       &error_message)) {
+    return evhttp_send_error(
+        req, HTTP_INTERNAL,
+        StrCat("sqlite query failed: ", EscapeHtml(error_message)).c_str());
+  }
+
+  Json::Value response(Json::objectValue);
+  response["recordings"] = recordings;
+  ReplyWithJson(req, response);
+}
+
+void WebInterface::HandleMp4View(evhttp_request *req, Uuid camera_uuid) {
   int64_t start_time_90k;
   int64_t end_time_90k;
   QueryParameters params(evhttp_request_get_uri(req));
-  if (!params.ok() || !camera_uuid.ParseText(params.Get("camera_uuid")) ||
+  if (!params.ok() ||
       !Atoi64(params.Get("start_time_90k"), 10, &start_time_90k) ||
       !Atoi64(params.Get("end_time_90k"), 10, &end_time_90k) ||
       start_time_90k < 0 || start_time_90k >= end_time_90k) {
@@ -212,8 +352,8 @@ void WebInterface::HandleMp4View(evhttp_request *req, void *arg) {
   }
 
   std::string error_message;
-  auto file = this_->BuildMp4(camera_uuid, start_time_90k, end_time_90k,
-                              &error_message);
+  auto file =
+      BuildMp4(camera_uuid, start_time_90k, end_time_90k, &error_message);
   if (file == nullptr) {
     // TODO: more nuanced HTTP status codes.
     LOG(WARNING) << "BuildMp4 failed: " << error_message;

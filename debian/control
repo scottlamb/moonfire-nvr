@@ -3,10 +3,20 @@ Maintainer: Scott Lamb <slamb@slamb.org>
 Section: video
 Priority: optional
 Standards-Version: 3.9.6.1
-Build-Depends: debhelper (>= 9), dh-systemd, cmake, libprotobuf-dev, libavcodec-dev, libavformat-dev, libevent-dev (>= 2.1), libgflags-dev, libgoogle-glog-dev, libgoogle-perftools-dev, libre2-dev, pkgconf, protobuf-compiler, uuid-dev, libsqlite3-dev
-
+Build-Depends: cmake,
+               libavcodec-dev,
+               libavformat-dev,
+               libavutil-dev,
+               libgflags-dev,
+               libgoogle-glog-dev,
+               libgoogle-perftools-dev,
+               libjsoncpp-dev,
+               libre2-dev,
+               libsqlite3-dev,
+               pkgconf,
+               uuid-dev
 Package: moonfire-nvr
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, adduser
+Depends: ${shlibs:Depends}, ${misc:Depends}, adduser, sqlite3, uuid-runtime
 Description: security camera network video recorder
  moonfire-nvr records video files from IP security cameras.

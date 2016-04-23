@@ -91,6 +91,7 @@ pre-requisites (see also the `Build-Depends` field in `debian/control`):
                    libgflags-dev \
                    libgoogle-glog-dev \
                    libgoogle-perftools-dev \
+                   libjsoncpp-dev \
                    libre2-dev \
                    sqlite3 \
                    libsqlite3-dev \

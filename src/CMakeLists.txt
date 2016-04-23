@@ -28,13 +28,15 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${JSONCPP_INCLUDE_DIRS})
 
 set(MOONFIRE_DEPS
     ${CMAKE_THREAD_LIBS_INIT}
     ${FFMPEG_LIBRARIES}
-    ${LIBEVENT_LIBRARIES}
     ${GFLAGS_LIBRARIES}
     ${GLOG_LIBRARIES}
+    ${JSONCPP_LIBRARIES}
+    ${LIBEVENT_LIBRARIES}
     ${OPENSSL_LIBRARIES}
     ${PROFILER_LIBRARIES}
     ${RE2_LIBRARIES}
