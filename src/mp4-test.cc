@@ -256,11 +256,12 @@ class IntegrationTest : public testing::Test {
   }
 
   std::shared_ptr<VirtualFile> CreateMp4FromSingleRecording(
-      const Recording &recording) {
+      const Recording &recording, bool include_ts) {
     Mp4FileBuilder builder(tmpdir_.get());
     builder.SetSampleEntry(video_sample_entry_);
     builder.Append(Recording(recording), 0,
                    std::numeric_limits<int32_t>::max());
+    builder.include_timestamp_subtitle_track(include_ts);
     std::string error_message;
     auto mp4 = builder.Build(&error_message);
     EXPECT_TRUE(mp4 != nullptr) << error_message;
@@ -328,7 +329,17 @@ TEST_F(IntegrationTest, RoundTrip) {
   if (HasFailure()) {
     return;
   }
-  auto f = CreateMp4FromSingleRecording(recording);
+  auto f = CreateMp4FromSingleRecording(recording, false);
+  WriteMp4(f.get());
+  CompareMp4s();
+}
+
+TEST_F(IntegrationTest, RoundTripWithSubtitle) {
+  Recording recording = CopyMp4ToSingleRecording();
+  if (HasFailure()) {
+    return;
+  }
+  auto f = CreateMp4FromSingleRecording(recording, true);
   WriteMp4(f.get());
   CompareMp4s();
 }
@@ -338,7 +349,7 @@ TEST_F(IntegrationTest, Metadata) {
   if (HasFailure()) {
     return;
   }
-  auto f = CreateMp4FromSingleRecording(recording);
+  auto f = CreateMp4FromSingleRecording(recording, false);
 
   // This test is brittle, which is the point. Any time the digest comparison
   // here fails, it can be updated, but the etag must change as well!

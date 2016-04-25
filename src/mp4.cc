@@ -42,7 +42,7 @@
 //    the interest of simplicity and efficiency when there is only one useful
 //    value for all the fields in the box, including its length.
 //
-//    These slices are represented using the StaticStringPieceSlice class.
+//    These slices are represented using the StringPieceSlice class.
 //
 // 2. a box's fixed-length fields. In some cases a slice represents the entire
 //    contents of a FullBox type; in others a slice represents only the
@@ -98,6 +98,10 @@ namespace moonfire_nvr {
 
 namespace {
 
+// strftime template for subtitles. Must be a constant length declared below.
+const char kSubtitleTemplate[] = "%Y-%m-%d %H:%M:%S %z";
+const size_t kSubtitleLength = strlen("2015-07-02 17:10:00 -0700");
+
 // This value should be incremented any time a change is made to this file
 // that causes the different bytes to be output for a particular set of
 // Mp4Builder options. Incrementing this value will cause the etag to change
@@ -140,8 +144,29 @@ const char kVmhdAndDinfBoxes[] = {
     0x00, 0x00, 0x00, 0x01,  // version=0, flags=self-contained
 };
 
+// Likewise, nmhd + dinf boxes, as used for subtitles.
+const char kNmhdAndDinfBoxes[] = {
+    // A nmhd box; the "graphicsmode" and "opcolor" values don't have any
+    // meaningful use.
+    0x00, 0x00, 0x00, 0x0c,  // length == sizeof(kNmhdBox)
+    'n', 'm', 'h', 'd',      // type = vmhd, ISO/IEC 14496-12 section 12.1.2.
+    0x00, 0x00, 0x00, 0x01,  // version + flags(1)
+
+    // A dinf box suitable for a "self-contained" .mp4 file (no URL/URN
+    // references to external data).
+    0x00, 0x00, 0x00, 0x24,  // length == sizeof(kDinfBox)
+    'd', 'i', 'n', 'f',      // type = dinf, ISO/IEC 14496-12 section 8.7.1.
+    0x00, 0x00, 0x00, 0x1c,  // length
+    'd', 'r', 'e', 'f',      // type = dref, ISO/IEC 14496-12 section 8.7.2.
+    0x00, 0x00, 0x00, 0x00,  // version and flags
+    0x00, 0x00, 0x00, 0x01,  // entry_count
+    0x00, 0x00, 0x00, 0x0c,  // length
+    'u', 'r', 'l', ' ',      // type = url, ISO/IEC 14496-12 section 8.7.2.
+    0x00, 0x00, 0x00, 0x01,  // version=0, flags=self-contained
+};
+
 // A hdlr box suitable for a video track.
-const char kHdlrBox[] = {
+const char kVideoHdlrBox[] = {
     0x00, 0x00, 0x00, 0x21,  // length == sizeof(kHdlrBox)
     'h',  'd',  'l',  'r',   // type == hdlr, ISO/IEC 14496-12 section 8.4.3.
     0x00, 0x00, 0x00, 0x00,  // version + flags
@@ -152,6 +177,60 @@ const char kHdlrBox[] = {
     0x00, 0x00, 0x00, 0x00,  // reserved[2]
     0x00,                    // name, zero-terminated (empty)
 };
+
+// A hdlr box suitable for a subtitle track.
+const char kSubtitleHdlrBox[] = {
+    0x00, 0x00, 0x00, 0x21,  // length == sizeof(kHdlrBox)
+    'h',  'd',  'l',  'r',   // type == hdlr, ISO/IEC 14496-12 section 8.4.3.
+    0x00, 0x00, 0x00, 0x00,  // version + flags
+    0x00, 0x00, 0x00, 0x00,  // pre_defined
+    's',  'b',  't',  'l',   // handler = sbtl
+    0x00, 0x00, 0x00, 0x00,  // reserved[0]
+    0x00, 0x00, 0x00, 0x00,  // reserved[1]
+    0x00, 0x00, 0x00, 0x00,  // reserved[2]
+    0x00,                    // name, zero-terminated (empty)
+};
+
+// A stsd box suitable for timestamp subtitles.
+const char kSubtitleStsdBox[] = {
+    0x00, 0x00, 0x00, 0x54,  // length
+    's', 't', 's', 'd',      // type == stsd, ISO/IEC 14496-12 section 8.5.2.
+    0x00, 0x00, 0x00, 0x00,  // version + flags
+    0x00, 0x00, 0x00, 0x01,  // entry_count == 1
+
+    // SampleEntry, ISO/IEC 14496-12 section 8.5.2.2.
+    0x00, 0x00, 0x00, 0x44,  // length
+    't', 'x', '3', 'g',      // type == tx3g, 3GPP TS 26.245 section 5.16.
+    0x00, 0x00, 0x00, 0x00,  // reserved
+    0x00, 0x00, 0x00, 0x01,  // reserved, data_reference_index == 1
+
+    // TextSampleEntry
+    0x00, 0x00, 0x00, 0x00,  // displayFlags == none
+    0x00,                    // horizontal-justification == left
+    0x00,                    // vertical-justification == top
+    0x00, 0x00, 0x00, 0x00,  // background-color-rgba == transparent
+
+    // TextSampleEntry.BoxRecord
+    0x00, 0x00,  // top
+    0x00, 0x00,  // left
+    0x00, 0x00,  // bottom
+    0x00, 0x00,  // right
+
+    // TextSampleEntry.StyleRecord
+    0x00, 0x00,      // startChar
+    0x00, 0x00,      // endChar
+    0x00, 0x01,      // font-ID
+    0x00,            // face-style-flags
+    0x12,            // font-size == 18 px
+    ~0, ~0, ~0, ~0,  // text-color-rgba == opaque white
+
+    // TextSampleEntry.FontTableBox
+    0x00, 0x00, 0x00, 0x16,  // length
+    'f', 't', 'a', 'b',      // type == ftab, section 5.16
+    0x00, 0x01,              // entry-count == 1
+    0x00, 0x01,              // font-ID == 1
+    0x09,                    // font-name-length == 9
+    'M', 'o', 'n', 'o', 's', 'p', 'a', 'c', 'e'};
 
 // Convert from 90kHz units since 1970-01-01 00:00:00 UTC to
 // seconds since 1904-01-01 00:00:00 UTC.
@@ -195,7 +274,7 @@ struct TrackHeaderBoxVersion0 {  // ISO/IEC 14496-12 section 8.3.2, tkhd.
   uint32_t size = NET_UINT32_C(0);
   const char type[4] = {'t', 'k', 'h', 'd'};
   // flags 7 = track_enabled | track_in_movie | track_in_preview
-  const uint32_t version_and_flags = NET_UINT32_C(7);
+  uint32_t version_and_flags = NET_UINT32_C(7);
   uint32_t creation_time = NET_UINT32_C(0);
   uint32_t modification_time = NET_UINT32_C(0);
   uint32_t track_id = NET_UINT32_C(0);
@@ -206,7 +285,7 @@ struct TrackHeaderBoxVersion0 {  // ISO/IEC 14496-12 section 8.3.2, tkhd.
   const uint16_t alternate_group = NET_UINT16_C(0);
   const uint16_t volume = NET_UINT16_C(0);
   const uint16_t reserved3 = NET_UINT16_C(0);
-  const int32_t matrix[9] = {
+  int32_t matrix[9] = {
       NET_INT32_C(0x00010000), NET_INT32_C(0), NET_INT32_C(0), NET_INT32_C(0),
       NET_INT32_C(0x00010000), NET_INT32_C(0), NET_INT32_C(0), NET_INT32_C(0),
       NET_INT32_C(0x40000000)};
@@ -304,7 +383,7 @@ class Mp4Box {
 
  private:
   Header header_;
-  CopyingStringPieceSlice header_slice_;
+  StringPieceSlice header_slice_;
 };
 
 // Helper for adding a mp4 box which calculates the header's size field.
@@ -339,10 +418,12 @@ class ScopedMp4Box {
 
 // .mp4 file, constructed from boxes arranged in the order suggested by
 // ISO/IEC 14496-12 section 6.2.3 (see Table 1):
+//
 // * ftyp (file type and compatibility)
 // * moov (container for all the metadata)
 // ** mvhd (movie header, overall declarations)
-// ** trak (container for an individual track or stream)
+//
+// ** trak (video: container for an individual track or stream)
 // *** tkhd (track header, overall information about the track)
 // *** mdia (container for the media information in a track)
 // **** mdhd (media header, overall information about the media)
@@ -357,34 +438,64 @@ class ScopedMp4Box {
 // ***** stsz (samples sizes (framing))
 // ***** co64 (64-bit chunk offset)
 // ***** stss (sync sample table)
+//
+// ** trak (subtitle: container for an individual track or stream)
+// *** tkhd (track header, overall information about the track)
+// *** mdia (container for the media information in a track)
+// **** mdhd (media header, overall information about the media)
+// *** minf (media information container)
+// **** nmhd (null media header, overall information)
+// **** dinf (data information box, container)
+// ***** dref (data reference box, declares source(s) of media data in track)
+// **** stbl (sample table box, container for the time/space map)
+// ***** stsd (sample descriptions (codec types, initilization etc.)
+// ***** stts ((decoding) time-to-sample)
+// ***** stsc (sample-to-chunk, partial data-offset information)
+// ***** stsz (samples sizes (framing))
+// ***** co64 (64-bit chunk offset)
+//
 // * mdat (media data container)
 class Mp4File : public VirtualFile {
  public:
   Mp4File(File *sample_file_dir,
           std::vector<std::unique_ptr<Mp4FileSegment>> segments,
-          VideoSampleEntry &&video_sample_entry)
+          VideoSampleEntry &&video_sample_entry,
+          bool include_timestamp_subtitle_track)
       : sample_file_dir_(sample_file_dir),
         segments_(std::move(segments)),
         video_sample_entry_(std::move(video_sample_entry)),
         ftyp_(re2::StringPiece(kFtypBox, sizeof(kFtypBox))),
-        moov_trak_mdia_hdlr_(re2::StringPiece(kHdlrBox, sizeof(kHdlrBox))),
-        moov_trak_mdia_minf_vmhddinf_(
+        moov_video_trak_mdia_hdlr_(
+            re2::StringPiece(kVideoHdlrBox, sizeof(kVideoHdlrBox))),
+        moov_video_trak_mdia_minf_vmhddinf_(
             re2::StringPiece(kVmhdAndDinfBoxes, sizeof(kVmhdAndDinfBoxes))),
-        moov_trak_mdia_minf_stbl_stsd_entry_(video_sample_entry_.data) {
+        moov_video_trak_mdia_minf_stbl_stsd_entry_(video_sample_entry_.data),
+        moov_subtitle_trak_mdia_hdlr_(
+            re2::StringPiece(kSubtitleHdlrBox, sizeof(kSubtitleHdlrBox))),
+        moov_subtitle_trak_mdia_minf_nmhddinf_(
+            re2::StringPiece(kNmhdAndDinfBoxes, sizeof(kNmhdAndDinfBoxes))),
+        moov_subtitle_trak_mdia_minf_stbl_stsd_(
+            re2::StringPiece(kSubtitleStsdBox, sizeof(kSubtitleStsdBox))),
+        include_timestamp_subtitle_track_(include_timestamp_subtitle_track) {
     uint32_t duration = 0;
     int64_t max_time_90k = 0;
     for (const auto &segment : segments_) {
       duration += segment->pieces.duration_90k();
+      int64_t start_90k =
+          segment->recording.start_time_90k + segment->pieces.start_90k();
       int64_t end_90k =
           segment->recording.start_time_90k + segment->pieces.end_90k();
+      int64_t start_ts = start_90k / kTimeUnitsPerSecond;
+      int64_t end_ts =
+          (end_90k + kTimeUnitsPerSecond - 1) / kTimeUnitsPerSecond;
+      num_subtitle_samples_ += end_ts - start_ts;
       max_time_90k = std::max(max_time_90k, end_90k);
     }
     last_modified_ = max_time_90k / kTimeUnitsPerSecond;
-    auto net_duration = ToNetworkU32(duration);
-    auto net_creation_ts = ToNetworkU32(ToIso14496Timestamp(max_time_90k));
+    auto creation_ts = ToIso14496Timestamp(max_time_90k);
 
     slices_.Append(&ftyp_);
-    AppendMoov(net_duration, net_creation_ts);
+    AppendMoov(ToNetworkU32(duration), ToNetworkU32(creation_ts));
 
     // Add the mdat_ without using CONSTRUCT_BOX.
     // mdat_ is special because it uses largesize rather than size.
@@ -397,11 +508,23 @@ class Mp4File : public VirtualFile {
           segment->pieces.sample_pos());
       slices_.Append(&segment->sample_file_slice, FileSlices::kLazy);
     }
+    if (include_timestamp_subtitle_track_) {
+      subtitle_sample_byte_pos_ = slices_.size();
+      mdat_subtitle_.Init(
+          num_subtitle_samples_ * (sizeof(uint16_t) + kSubtitleLength),
+          [this](std::string *s, std::string *error_message) {
+            return FillMdatSubtitle(s, error_message);
+          });
+      slices_.Append(&mdat_subtitle_);
+    }
     mdat_.header().largesize = ToNetworkU64(slices_.size() - size_before_mdat);
 
     auto etag_digest = Digest::SHA1();
     etag_digest->Update(
         re2::StringPiece(kFormatVersion, sizeof(kFormatVersion)));
+    if (include_timestamp_subtitle_track_) {
+      etag_digest->Update(":ts:");
+    }
     std::string segment_times;
     for (const auto &segment : segments_) {
       segment_times.clear();
@@ -433,98 +556,103 @@ class Mp4File : public VirtualFile {
       moov_mvhd_.header().duration = net_duration;
     }
     {
-      CONSTRUCT_BOX(moov_trak_);
+      CONSTRUCT_BOX(moov_video_trak_);
       {
-        CONSTRUCT_BOX(moov_trak_tkhd_);
-        moov_trak_tkhd_.header().creation_time = net_creation_ts;
-        moov_trak_tkhd_.header().modification_time = net_creation_ts;
-        moov_trak_tkhd_.header().track_id = NET_UINT32_C(1);
-        moov_trak_tkhd_.header().duration = net_duration;
-        moov_trak_tkhd_.header().width =
+        CONSTRUCT_BOX(moov_video_trak_tkhd_);
+        moov_video_trak_tkhd_.header().creation_time = net_creation_ts;
+        moov_video_trak_tkhd_.header().modification_time = net_creation_ts;
+        moov_video_trak_tkhd_.header().track_id = NET_UINT32_C(1);
+        moov_video_trak_tkhd_.header().duration = net_duration;
+        moov_video_trak_tkhd_.header().width =
             NET_UINT32_C(video_sample_entry_.width << 16);
-        moov_trak_tkhd_.header().height =
+        moov_video_trak_tkhd_.header().height =
             NET_UINT32_C(video_sample_entry_.height << 16);
       }
       {
-        CONSTRUCT_BOX(moov_trak_mdia_);
+        CONSTRUCT_BOX(moov_video_trak_mdia_);
         {
-          CONSTRUCT_BOX(moov_trak_mdia_mdhd_);
-          moov_trak_mdia_mdhd_.header().creation_time = net_creation_ts;
-          moov_trak_mdia_mdhd_.header().modification_time = net_creation_ts;
-          moov_trak_mdia_mdhd_.header().duration = net_duration;
+          CONSTRUCT_BOX(moov_video_trak_mdia_mdhd_);
+          moov_video_trak_mdia_mdhd_.header().creation_time = net_creation_ts;
+          moov_video_trak_mdia_mdhd_.header().modification_time =
+              net_creation_ts;
+          moov_video_trak_mdia_mdhd_.header().duration = net_duration;
         }
-        slices_.Append(&moov_trak_mdia_hdlr_);
+        slices_.Append(&moov_video_trak_mdia_hdlr_);
         {
-          CONSTRUCT_BOX(moov_trak_mdia_minf_);
-          slices_.Append(&moov_trak_mdia_minf_vmhddinf_);
-          AppendStbl();
+          CONSTRUCT_BOX(moov_video_trak_mdia_minf_);
+          slices_.Append(&moov_video_trak_mdia_minf_vmhddinf_);
+          AppendVideoStbl();
         }
       }
     }
+    if (include_timestamp_subtitle_track_) {
+      AppendSubtitleTrack(net_duration, net_creation_ts);
+    }
   }
 
-  void AppendStbl() {
-    CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_);
+  void AppendVideoStbl() {
+    CONSTRUCT_BOX(moov_video_trak_mdia_minf_stbl_);
     {
-      CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_stsd_);
-      moov_trak_mdia_minf_stbl_stsd_.header().entry_count = NET_UINT32_C(1);
-      slices_.Append(&moov_trak_mdia_minf_stbl_stsd_entry_);
+      CONSTRUCT_BOX(moov_video_trak_mdia_minf_stbl_stsd_);
+      moov_video_trak_mdia_minf_stbl_stsd_.header().entry_count =
+          NET_UINT32_C(1);
+      slices_.Append(&moov_video_trak_mdia_minf_stbl_stsd_entry_);
     }
     {
-      CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_stts_);
+      CONSTRUCT_BOX(moov_video_trak_mdia_minf_stbl_stts_);
       int32_t stts_entry_count = 0;
       for (const auto &segment : segments_) {
         stts_entry_count += segment->pieces.stts_entry_count();
         slices_.Append(segment->pieces.stts_entries());
       }
-      moov_trak_mdia_minf_stbl_stts_.header().entry_count =
+      moov_video_trak_mdia_minf_stbl_stts_.header().entry_count =
           ToNetwork32(stts_entry_count);
     }
     {
-      CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_stsc_);
-      moov_trak_mdia_minf_stbl_stsc_entries_.Init(
+      CONSTRUCT_BOX(moov_video_trak_mdia_minf_stbl_stsc_);
+      moov_video_trak_mdia_minf_stbl_stsc_entries_.Init(
           3 * sizeof(uint32_t) * segments_.size(),
           [this](std::string *s, std::string *error_message) {
-            return FillStscEntries(s, error_message);
+            return FillVideoStscEntries(s, error_message);
           });
-      moov_trak_mdia_minf_stbl_stsc_.header().entry_count =
+      moov_video_trak_mdia_minf_stbl_stsc_.header().entry_count =
           ToNetwork32(segments_.size());
-      slices_.Append(&moov_trak_mdia_minf_stbl_stsc_entries_);
+      slices_.Append(&moov_video_trak_mdia_minf_stbl_stsc_entries_);
     }
     {
-      CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_stsz_);
+      CONSTRUCT_BOX(moov_video_trak_mdia_minf_stbl_stsz_);
       uint32_t stsz_entry_count = 0;
       for (const auto &segment : segments_) {
         stsz_entry_count += segment->pieces.stsz_entry_count();
         slices_.Append(segment->pieces.stsz_entries());
       }
-      moov_trak_mdia_minf_stbl_stsz_.header().sample_count =
+      moov_video_trak_mdia_minf_stbl_stsz_.header().sample_count =
           ToNetwork32(stsz_entry_count);
     }
     {
-      CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_co64_);
-      moov_trak_mdia_minf_stbl_co64_entries_.Init(
+      CONSTRUCT_BOX(moov_video_trak_mdia_minf_stbl_co64_);
+      moov_video_trak_mdia_minf_stbl_co64_entries_.Init(
           sizeof(uint64_t) * segments_.size(),
           [this](std::string *s, std::string *error_message) {
-            return FillCo64Entries(s, error_message);
+            return FillVideoCo64Entries(s, error_message);
           });
-      moov_trak_mdia_minf_stbl_co64_.header().entry_count =
+      moov_video_trak_mdia_minf_stbl_co64_.header().entry_count =
           ToNetwork32(segments_.size());
-      slices_.Append(&moov_trak_mdia_minf_stbl_co64_entries_);
+      slices_.Append(&moov_video_trak_mdia_minf_stbl_co64_entries_);
     }
     {
-      CONSTRUCT_BOX(moov_trak_mdia_minf_stbl_stss_);
+      CONSTRUCT_BOX(moov_video_trak_mdia_minf_stbl_stss_);
       uint32_t stss_entry_count = 0;
       for (const auto &segment : segments_) {
         stss_entry_count += segment->pieces.stss_entry_count();
         slices_.Append(segment->pieces.stss_entries());
       }
-      moov_trak_mdia_minf_stbl_stss_.header().entry_count =
+      moov_video_trak_mdia_minf_stbl_stss_.header().entry_count =
           ToNetwork32(stss_entry_count);
     }
   }
 
-  bool FillStscEntries(std::string *s, std::string *error_message) {
+  bool FillVideoStscEntries(std::string *s, std::string *error_message) {
     uint32_t chunk = 0;
     for (const auto &segment : segments_) {
       AppendU32(++chunk, s);
@@ -534,7 +662,7 @@ class Mp4File : public VirtualFile {
     return true;
   }
 
-  bool FillCo64Entries(std::string *s, std::string *error_message) {
+  bool FillVideoCo64Entries(std::string *s, std::string *error_message) {
     int64_t pos = initial_sample_byte_pos_;
     for (const auto &segment : segments_) {
       AppendU64(pos, s);
@@ -543,7 +671,161 @@ class Mp4File : public VirtualFile {
     return true;
   }
 
+  void AppendSubtitleTrack(uint32_t net_duration, uint32_t net_creation_ts) {
+    CONSTRUCT_BOX(moov_subtitle_trak_);
+    {
+      CONSTRUCT_BOX(moov_subtitle_trak_tkhd_);
+      auto &hdr = moov_subtitle_trak_tkhd_.header();
+      hdr.creation_time = net_creation_ts;
+      hdr.modification_time = net_creation_ts;
+      hdr.track_id = NET_UINT32_C(2);
+      hdr.duration = net_duration;
+#if 0
+      hdr.width = NET_UINT32_C(800 /*video_sample_entry_.width*/ << 16);
+      hdr.height = NET_UINT32_C(60 /*video_sample_entry_.height*/ << 16);
+      hdr.matrix[0] = NET_INT32_C(1 << 16);    // a
+      hdr.matrix[1] = NET_INT32_C(0 << 16);    // b
+      hdr.matrix[2] = NET_INT32_C(0 << 30);    // u
+      hdr.matrix[3] = NET_INT32_C(0 << 16);    // c
+      hdr.matrix[4] = NET_INT32_C(1 << 16);    // d
+      hdr.matrix[5] = NET_INT32_C(0 << 30);    // v
+      hdr.matrix[6] = NET_INT32_C(240 << 16);  // x
+      hdr.matrix[7] = NET_INT32_C(660 << 16);  // y
+      hdr.matrix[8] = NET_INT32_C(1 << 30);    // w
+#endif
+    }
+    {
+      CONSTRUCT_BOX(moov_subtitle_trak_mdia_);
+      {
+        CONSTRUCT_BOX(moov_video_trak_mdia_mdhd_);
+        moov_subtitle_trak_mdia_mdhd_.header().creation_time = net_creation_ts;
+        moov_subtitle_trak_mdia_mdhd_.header().modification_time =
+            net_creation_ts;
+        moov_subtitle_trak_mdia_mdhd_.header().duration = net_duration;
+      }
+      slices_.Append(&moov_subtitle_trak_mdia_hdlr_);
+      {
+        CONSTRUCT_BOX(moov_subtitle_trak_mdia_minf_);
+        slices_.Append(&moov_subtitle_trak_mdia_minf_nmhddinf_);
+        AppendSubtitleStbl();
+      }
+    }
+  }
+
+  void AppendSubtitleStbl() {
+    CONSTRUCT_BOX(moov_subtitle_trak_mdia_minf_stbl_);
+    slices_.Append(&moov_subtitle_trak_mdia_minf_stbl_stsd_);
+    {
+      CONSTRUCT_BOX(moov_subtitle_trak_mdia_minf_stbl_stts_);
+      int32_t num_entries = 0;
+      FillSubtitleSttsEntries(&num_entries);
+      moov_subtitle_trak_mdia_minf_stbl_stts_.header().entry_count =
+          ToNetwork32(num_entries);
+      slices_.Append(&moov_subtitle_trak_mdia_minf_stbl_stts_entries_);
+    }
+    {
+      CONSTRUCT_BOX(moov_subtitle_trak_mdia_minf_stbl_stsc_);
+      moov_subtitle_trak_mdia_minf_stbl_stsc_entries_.Init(
+          3 * sizeof(uint32_t),
+          [this](std::string *s, std::string *error_message) {
+            AppendU32(1, s);                      // first_chunk
+            AppendU32(num_subtitle_samples_, s);  // samples_per_chunk
+            AppendU32(1, s);                      // sample_description
+            return true;
+          });
+      moov_subtitle_trak_mdia_minf_stbl_stsc_.header().entry_count =
+          ToNetwork32(1);
+      slices_.Append(&moov_subtitle_trak_mdia_minf_stbl_stsc_entries_);
+    }
+    {
+      CONSTRUCT_BOX(moov_subtitle_trak_mdia_minf_stbl_stsz_);
+      moov_subtitle_trak_mdia_minf_stbl_stsz_.header().sample_size =
+          ToNetwork32(sizeof(uint16_t) + kSubtitleLength);
+      moov_subtitle_trak_mdia_minf_stbl_stsz_.header().sample_count =
+          ToNetwork32(num_subtitle_samples_);
+    }
+    {
+      CONSTRUCT_BOX(moov_subtitle_trak_mdia_minf_stbl_co64_);
+      moov_subtitle_trak_mdia_minf_stbl_co64_entries_.Init(
+          sizeof(uint64_t), [this](std::string *s, std::string *error_message) {
+            AppendU64(subtitle_sample_byte_pos_, s);
+            return true;
+          });
+      moov_subtitle_trak_mdia_minf_stbl_co64_.header().entry_count =
+          ToNetwork32(1);
+      slices_.Append(&moov_subtitle_trak_mdia_minf_stbl_co64_entries_);
+    }
+  }
+
+  // Fills |moov_subtitle_trak_mdia_minf_stbl_stts_entries_| and puts
+  // the number of STTS entries into |num_entries| (in host byte order).
+  void FillSubtitleSttsEntries(int32_t *num_entries) {
+    std::string &s = moov_subtitle_trak_mdia_minf_stbl_stts_entries_str_;
+    for (const auto &segment : segments_) {
+      int64_t start_90k =
+          segment->recording.start_time_90k + segment->pieces.start_90k();
+      int64_t end_90k =
+          segment->recording.start_time_90k + segment->pieces.end_90k();
+      int64_t start_next_90k =
+          start_90k + kTimeUnitsPerSecond - (start_90k % kTimeUnitsPerSecond);
+
+      if (end_90k <= start_next_90k) {
+        ++*num_entries;
+        AppendU32(1, &s);                    // sample_count
+        AppendU32(end_90k - start_90k, &s);  // sample_duration
+      } else {
+        ++*num_entries;
+        AppendU32(1, &s);                           // sample_count
+        AppendU32(start_next_90k - start_90k, &s);  // sample_duration
+
+        int64_t end_prev_90k = end_90k - (end_90k % kTimeUnitsPerSecond);
+        if (start_next_90k < end_prev_90k) {
+          ++*num_entries;
+          int64_t interior =
+              (end_prev_90k - start_next_90k) / kTimeUnitsPerSecond;
+          AppendU32(interior, &s);  // sample_count
+          AppendU32(kTimeUnitsPerSecond, &s);
+        }
+
+        ++*num_entries;
+        AppendU32(1, &s);                       // sample_count
+        AppendU32(end_90k - end_prev_90k, &s);  // sample_duration
+      }
+    }
+    moov_subtitle_trak_mdia_minf_stbl_stts_entries_.Init(
+        moov_subtitle_trak_mdia_minf_stbl_stts_entries_str_);
+  }
+
+  bool FillMdatSubtitle(std::string *s, std::string *error_message) {
+    char buf[kSubtitleLength + 1 /* null */];
+    struct tm mytm;
+    memset(&mytm, 0, sizeof(mytm));
+    for (const auto &segment : segments_) {
+      int64_t start_90k =
+          segment->recording.start_time_90k + segment->pieces.start_90k();
+      int64_t end_90k =
+          segment->recording.start_time_90k + segment->pieces.end_90k();
+      int64_t start_ts = start_90k / kTimeUnitsPerSecond;
+      int64_t end_ts =
+          (end_90k + kTimeUnitsPerSecond - 1) / kTimeUnitsPerSecond;
+      for (time_t ts = start_ts; ts < end_ts; ++ts) {
+        AppendU16(kSubtitleLength, s);
+        localtime_r(&ts, &mytm);
+        size_t r = strftime(buf, sizeof(buf), kSubtitleTemplate, &mytm);
+        if (r != kSubtitleLength) {
+          *error_message = StrCat("strftime unexpectedly returned ", r);
+          return false;
+        }
+        s->append(buf, r);
+      }
+    }
+    LOG(INFO) << "FillMdatSubtitle: " << s->size() << " bytes.";
+    return true;
+  }
+
   int64_t initial_sample_byte_pos_ = 0;
+  int64_t subtitle_sample_byte_pos_ = 0;
+  int64_t num_subtitle_samples_ = 0;
   File *sample_file_dir_ = nullptr;
   std::vector<std::unique_ptr<Mp4FileSegment>> segments_;
   VideoSampleEntry video_sample_entry_;
@@ -551,27 +833,51 @@ class Mp4File : public VirtualFile {
   std::string etag_;
   time_t last_modified_ = -1;
 
-  StaticStringPieceSlice ftyp_;
+  StringPieceSlice ftyp_;
   Mp4Box<MovieBox> moov_;
   Mp4Box<MovieHeaderBoxVersion0> moov_mvhd_;
-  Mp4Box<TrackBox> moov_trak_;
-  Mp4Box<TrackHeaderBoxVersion0> moov_trak_tkhd_;
-  Mp4Box<MediaBox> moov_trak_mdia_;
-  Mp4Box<MediaHeaderBoxVersion0> moov_trak_mdia_mdhd_;
-  StaticStringPieceSlice moov_trak_mdia_hdlr_;
-  Mp4Box<MediaInformationBox> moov_trak_mdia_minf_;
-  StaticStringPieceSlice moov_trak_mdia_minf_vmhddinf_;
-  Mp4Box<SampleTableBox> moov_trak_mdia_minf_stbl_;
-  Mp4Box<SampleDescriptionBoxVersion0> moov_trak_mdia_minf_stbl_stsd_;
-  CopyingStringPieceSlice moov_trak_mdia_minf_stbl_stsd_entry_;
-  Mp4Box<TimeToSampleBoxVersion0> moov_trak_mdia_minf_stbl_stts_;
-  Mp4Box<SampleToChunkBoxVersion0> moov_trak_mdia_minf_stbl_stsc_;
-  FillerFileSlice moov_trak_mdia_minf_stbl_stsc_entries_;
-  Mp4Box<SampleSizeBoxVersion0> moov_trak_mdia_minf_stbl_stsz_;
-  Mp4Box<ChunkLargeOffsetBoxVersion0> moov_trak_mdia_minf_stbl_co64_;
-  FillerFileSlice moov_trak_mdia_minf_stbl_co64_entries_;
-  Mp4Box<SyncSampleBoxVersion0> moov_trak_mdia_minf_stbl_stss_;
+
+  Mp4Box<TrackBox> moov_video_trak_;
+  Mp4Box<TrackHeaderBoxVersion0> moov_video_trak_tkhd_;
+  Mp4Box<MediaBox> moov_video_trak_mdia_;
+  Mp4Box<MediaHeaderBoxVersion0> moov_video_trak_mdia_mdhd_;
+  StringPieceSlice moov_video_trak_mdia_hdlr_;
+  Mp4Box<MediaInformationBox> moov_video_trak_mdia_minf_;
+  StringPieceSlice moov_video_trak_mdia_minf_vmhddinf_;
+  Mp4Box<SampleTableBox> moov_video_trak_mdia_minf_stbl_;
+  Mp4Box<SampleDescriptionBoxVersion0> moov_video_trak_mdia_minf_stbl_stsd_;
+  StringPieceSlice moov_video_trak_mdia_minf_stbl_stsd_entry_;
+  Mp4Box<TimeToSampleBoxVersion0> moov_video_trak_mdia_minf_stbl_stts_;
+  Mp4Box<SampleToChunkBoxVersion0> moov_video_trak_mdia_minf_stbl_stsc_;
+  FillerFileSlice moov_video_trak_mdia_minf_stbl_stsc_entries_;
+  Mp4Box<SampleSizeBoxVersion0> moov_video_trak_mdia_minf_stbl_stsz_;
+  Mp4Box<ChunkLargeOffsetBoxVersion0> moov_video_trak_mdia_minf_stbl_co64_;
+  FillerFileSlice moov_video_trak_mdia_minf_stbl_co64_entries_;
+  Mp4Box<SyncSampleBoxVersion0> moov_video_trak_mdia_minf_stbl_stss_;
+
+  Mp4Box<TrackBox> moov_subtitle_trak_;
+  Mp4Box<TrackHeaderBoxVersion0> moov_subtitle_trak_tkhd_;
+  Mp4Box<MediaBox> moov_subtitle_trak_mdia_;
+  Mp4Box<MediaHeaderBoxVersion0> moov_subtitle_trak_mdia_mdhd_;
+  StringPieceSlice moov_subtitle_trak_mdia_hdlr_;
+  Mp4Box<MediaInformationBox> moov_subtitle_trak_mdia_minf_;
+  StringPieceSlice moov_subtitle_trak_mdia_minf_nmhddinf_;
+  Mp4Box<SampleTableBox> moov_subtitle_trak_mdia_minf_stbl_;
+  StringPieceSlice moov_subtitle_trak_mdia_minf_stbl_stsd_;
+  Mp4Box<TimeToSampleBoxVersion0> moov_subtitle_trak_mdia_minf_stbl_stts_;
+  StringPieceSlice moov_subtitle_trak_mdia_minf_stbl_stts_entries_;
+  std::string moov_subtitle_trak_mdia_minf_stbl_stts_entries_str_;
+  Mp4Box<SampleToChunkBoxVersion0> moov_subtitle_trak_mdia_minf_stbl_stsc_;
+  FillerFileSlice moov_subtitle_trak_mdia_minf_stbl_stsc_entries_;
+  Mp4Box<SampleSizeBoxVersion0> moov_subtitle_trak_mdia_minf_stbl_stsz_;
+  Mp4Box<ChunkLargeOffsetBoxVersion0> moov_subtitle_trak_mdia_minf_stbl_co64_;
+  FillerFileSlice moov_subtitle_trak_mdia_minf_stbl_co64_entries_;
+  Mp4Box<SyncSampleBoxVersion0> moov_subtitle_trak_mdia_minf_stbl_stss_;
+  FillerFileSlice mdat_subtitle_;
+
   Mp4Box<LargeMediaDataBox> mdat_;
+
+  bool include_timestamp_subtitle_track_ = false;
 };
 
 #undef CONSTRUCT_BOX
@@ -754,7 +1060,8 @@ std::shared_ptr<VirtualFile> Mp4FileBuilder::Build(std::string *error_message) {
   }
 
   return std::shared_ptr<VirtualFile>(new Mp4File(
-      sample_file_dir_, std::move(segments_), std::move(video_sample_entry_)));
+      sample_file_dir_, std::move(segments_), std::move(video_sample_entry_),
+      include_timestamp_subtitle_track_));
 }
 
 }  // namespace moonfire_nvr

@@ -148,6 +148,8 @@ Expected query parameters:
 
 *   `start\_time\_90k`
 *   `end\_time\_90k`
+*   `ts`: should be set to `true` to request a subtitle track be added with
+    human-readable recording timestamps.
 *   TODO(slamb): possibly `overlap` to indicate what to do about segments of
     recording with overlapping wall times. Values might include:
     *   `error` (return an HTTP error)

@@ -75,7 +75,7 @@ class WebInterface {
   // TODO: more nuanced error code for HTTP.
   std::shared_ptr<VirtualFile> BuildMp4(Uuid camera_uuid,
                                         int64_t start_time_90k,
-                                        int64_t end_time_90k,
+                                        int64_t end_time_90k, bool include_ts,
                                         std::string *error_message);
 
   Environment *const env_;

@@ -350,10 +350,11 @@ void WebInterface::HandleMp4View(evhttp_request *req, Uuid camera_uuid) {
       start_time_90k < 0 || start_time_90k >= end_time_90k) {
     return evhttp_send_error(req, HTTP_BADREQUEST, "bad query parameters");
   }
+  bool include_ts = re2::StringPiece(params.Get("ts")) == "true";
 
   std::string error_message;
-  auto file =
-      BuildMp4(camera_uuid, start_time_90k, end_time_90k, &error_message);
+  auto file = BuildMp4(camera_uuid, start_time_90k, end_time_90k, include_ts,
+                       &error_message);
   if (file == nullptr) {
     // TODO: more nuanced HTTP status codes.
     LOG(WARNING) << "BuildMp4 failed: " << error_message;
@@ -366,7 +367,7 @@ void WebInterface::HandleMp4View(evhttp_request *req, Uuid camera_uuid) {
 
 std::shared_ptr<VirtualFile> WebInterface::BuildMp4(
     Uuid camera_uuid, int64_t start_time_90k, int64_t end_time_90k,
-    std::string *error_message) {
+    bool include_ts, std::string *error_message) {
   LOG(INFO) << "Building mp4 for camera: " << camera_uuid.UnparseText()
             << ", start_time_90k: " << start_time_90k
             << ", end_time_90k: " << end_time_90k;
@@ -431,6 +432,8 @@ std::shared_ptr<VirtualFile> WebInterface::BuildMp4(
                             ") after ", rows, " rows");
     return false;
   }
+
+  builder.include_timestamp_subtitle_track(include_ts);
 
   VLOG(1) << "...(3/4) building VirtualFile from " << rows << " recordings.";
   auto file = builder.Build(error_message);

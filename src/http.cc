@@ -88,7 +88,7 @@ void ServeChunkCallback(evhttp_connection *con, void *arg) {
   EvBuffer buf;
   std::string error_message;
   int64_t added = serve->file->AddRange(serve->left, &buf, &error_message);
-  if (added < 0) {
+  if (added <= 0) {
     // Order is important here: evhttp_cancel_request immediately calls the
     // close callback, so remove it first to avoid double-freeing |serve|.
     evhttp_connection_set_closecb(con, nullptr, nullptr);
@@ -259,16 +259,10 @@ int64_t FillerFileSlice::AddRange(ByteRange range, EvBuffer *buf,
   return range.size();
 }
 
-int64_t StaticStringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
-                                         std::string *error_message) const {
+int64_t StringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
+                                   std::string *error_message) const {
   buf->AddReference(piece_.data() + range.begin, range.size(), nullptr,
                     nullptr);
-  return range.size();
-}
-
-int64_t CopyingStringPieceSlice::AddRange(ByteRange range, EvBuffer *buf,
-                                          std::string *error_message) const {
-  buf->Add(re2::StringPiece(piece_.data() + range.begin, range.size()));
   return range.size();
 }
 

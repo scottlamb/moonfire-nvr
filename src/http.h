@@ -207,23 +207,12 @@ class FillerFileSlice : public FileSlice {
   size_t size_;
 };
 
-// A FileSlice backed by in-memory data which lives forever (static data).
-class StaticStringPieceSlice : public FileSlice {
+// A FileSlice backed by in-memory data which outlives this object.
+class StringPieceSlice : public FileSlice {
  public:
-  explicit StaticStringPieceSlice(re2::StringPiece piece) : piece_(piece) {}
-
-  int64_t size() const final { return piece_.size(); }
-  int64_t AddRange(ByteRange range, EvBuffer *buf,
-                   std::string *error_message) const final;
-
- private:
-  re2::StringPiece piece_;
-};
-
-// A FileSlice backed by in-memory data which should be copied.
-class CopyingStringPieceSlice : public FileSlice {
- public:
-  explicit CopyingStringPieceSlice(re2::StringPiece piece) : piece_(piece) {}
+  StringPieceSlice() = default;
+  explicit StringPieceSlice(re2::StringPiece piece) : piece_(piece) {}
+  void Init(re2::StringPiece piece) { piece_ = piece; }
 
   int64_t size() const final { return piece_.size(); }
   int64_t AddRange(ByteRange range, EvBuffer *buf,
@@ -280,14 +269,7 @@ class FileSlices : public FileSlice {
 // Serve an HTTP request |req| from |file|, handling byte range and
 // conditional serving. (Similar to golang's http.ServeContent.)
 //
-// |file| only needs to live through the call to HttpServe itself.
-// This contract may change in the future; currently all the ranges are added
-// at the beginning of the request, so if large memory-backed buffers (as
-// opposed to file-backed buffers) are used, the program's memory usage will
-// spike, even if the HTTP client aborts early in the request. If this becomes
-// problematic, this interface may change to take advantage of
-// evbuffer_add_cb, adding buffers incrementally, and some mechanism will be
-// added to guarantee VirtualFile objects outlive the HTTP requests they serve.
+// |file| will be retained as long as the request is being served.
 void HttpServe(const std::shared_ptr<VirtualFile> &file, evhttp_request *req);
 
 namespace internal {

@@ -147,8 +147,10 @@ class Mp4FileBuilder {
   Mp4FileBuilder &SetSampleEntry(const VideoSampleEntry &entry);
 
   // Set if a subtitle track should be added with timestamps.
-  // TODO: unimplemented.
-  Mp4FileBuilder &include_timestamp_subtitle_track(bool);
+  Mp4FileBuilder &include_timestamp_subtitle_track(bool v) {
+    include_timestamp_subtitle_track_ = v;
+    return *this;
+  }
 
   // TODO: MPEG-DASH / ISO BMFF Byte Stream Format support.
 
@@ -169,6 +171,7 @@ class Mp4FileBuilder {
   File *sample_file_dir_;
   std::vector<std::unique_ptr<internal::Mp4FileSegment>> segments_;
   VideoSampleEntry video_sample_entry_;
+  bool include_timestamp_subtitle_track_ = false;
 };
 
 }  // namespace moonfire_nvr
