@@ -48,16 +48,10 @@ static const char kJsonMimeType[] = "application/json";
 
 void ReplyWithJson(evhttp_request *req, const Json::Value &value) {
   EvBuffer buf;
-  buf.Add(Json::writeString(Json::StreamWriterBuilder(), value));
+  buf.Add(Json::FastWriter().write(value));
   evhttp_add_header(evhttp_request_get_output_headers(req), "Content-Type",
                     kJsonMimeType);
   evhttp_send_reply(req, HTTP_OK, "OK", buf.get());
-}
-
-// RE2::Arg::Parser for uuids.
-bool ParseUuid(const char *str, int n, void *dest) {
-  auto *uuid = reinterpret_cast<Uuid *>(dest);
-  return uuid->ParseText(re2::StringPiece(str, n));
 }
 
 }  // namespace
@@ -78,25 +72,28 @@ void WebInterface::DispatchHttpRequest(evhttp_request *req, void *arg) {
   auto *this_ = reinterpret_cast<WebInterface *>(arg);
   const evhttp_uri *uri = evhttp_request_get_evhttp_uri(req);
   re2::StringPiece path = evhttp_uri_get_path(uri);
+  re2::StringPiece camera_uuid_str;
   Uuid camera_uuid;
-  RE2::Arg camera_uuid_arg(&camera_uuid, &ParseUuid);
   if (path == "/" || path == "/cameras/") {
     if (json) {
       this_->HandleJsonCameraList(req);
     } else {
       this_->HandleHtmlCameraList(req);
     }
-  } else if (RE2::FullMatch(path, kCameraUri, camera_uuid_arg)) {
+  } else if (RE2::FullMatch(path, kCameraUri, &camera_uuid_str) &&
+             camera_uuid.ParseText(camera_uuid_str)) {
     if (json) {
       this_->HandleJsonCameraDetail(req, camera_uuid);
     } else {
       this_->HandleHtmlCameraDetail(req, camera_uuid);
     }
-  } else if (RE2::FullMatch(path, kCameraRecordingsUri, camera_uuid_arg)) {
+  } else if (RE2::FullMatch(path, kCameraRecordingsUri, &camera_uuid_str) &&
+             camera_uuid.ParseText(camera_uuid_str)) {
     // The HTML version includes this in the top-level camera view.
     // So only support JSON at this URI.
     this_->HandleJsonCameraRecordings(req, camera_uuid);
-  } else if (RE2::FullMatch(path, kCameraViewUri, camera_uuid_arg)) {
+  } else if (RE2::FullMatch(path, kCameraViewUri, &camera_uuid_str) &&
+             camera_uuid.ParseText(camera_uuid_str)) {
     this_->HandleMp4View(req, camera_uuid);
   } else {
     evhttp_send_error(req, HTTP_NOTFOUND, "path not understood");

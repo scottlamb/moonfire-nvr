@@ -217,12 +217,12 @@ const char kSubtitleStsdBox[] = {
     0x00, 0x00,  // right
 
     // TextSampleEntry.StyleRecord
-    0x00, 0x00,      // startChar
-    0x00, 0x00,      // endChar
-    0x00, 0x01,      // font-ID
-    0x00,            // face-style-flags
-    0x12,            // font-size == 18 px
-    ~0, ~0, ~0, ~0,  // text-color-rgba == opaque white
+    0x00, 0x00,                      // startChar
+    0x00, 0x00,                      // endChar
+    0x00, 0x01,                      // font-ID
+    0x00,                            // face-style-flags
+    0x12,                            // font-size == 18 px
+    '\xff', '\xff', '\xff', '\xff',  // text-color-rgba == opaque white
 
     // TextSampleEntry.FontTableBox
     0x00, 0x00, 0x00, 0x16,  // length
