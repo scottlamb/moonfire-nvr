@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash -x
 #
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
@@ -45,43 +45,43 @@
 # User and group
 # Default: or whatever is in $NVR_USER (default "moonfire-nvr")
 #
-NVR_USER=
-NVR_GROUP=
+#NVR_USER=
+#NVR_GROUP=
 
 # Port for web server
 # Default: 8080
 #
-NVR_PORT=
+#NVR_PORT=
 
 # This should, ideally, be a location on flash storage under which the
 # moonfire user's home directory will be created.
 # Default: "/var/lib"
 #
-NVR_HOME_BASE=
+#NVR_HOME_BASE=
 
 # Set to mountpoint of media directory, empty to stay in home directory
 # Default: empty
-SAMPLES_DIR=
+#SAMPLES_DIR=
 
 # Set to path for media directory relative to mountpoint
 # Default: "samples"
 #
-SAMPLES_DIR_NAME=
+#SAMPLES_DIR_NAME=
 
 # Binary location
 # Default: "/usr/local/bin/moonfire-nvr"
 #
-SERVICE_BIN=
+#SERVICE_BIN=
 
 # Service name
 # Default: "moonfire-nvr"
 #
-SERVICE_NAME=
+#SERVICE_NAME=
 
 # Service Description
 # Default: "Moonfire NVR"
 #
-SERVICE_DESC=
+#SERVICE_DESC=
 
 # --------------------------------------------------------------------
 # Derived variables: Do not modify!
@@ -138,7 +138,7 @@ done
 echo 'Preparing and downloading packages we need...'; echo
 if [ "${SKIP_APT:-0}" != 1 ]; then
 	sudo apt-get update
-	[ "${PURGE_LIBEVENT:-0}" == 1] && sudo apt-get --purge remove libevent-*
+	[ "${PURGE_LIBEVENT:-0}" == 1 ] && sudo apt-get --purge remove libevent-*
 	sudo apt-get install \
 		build-essential \
 		cmake \
@@ -149,6 +149,7 @@ if [ "${SKIP_APT:-0}" != 1 ]; then
 		libgoogle-glog-dev \
 		libgoogle-perftools-dev \
 		libre2-dev \
+		libssl-dev \
 		sqlite3 \
 		libsqlite3-dev \
 		pkgconf \
@@ -182,7 +183,7 @@ fi
 #
 echo 'Create user/group and directories we need...'; echo
 sudo addgroup --quiet --system ${NVR_GROUP}
-sudo adduser --quiet --system ${NVR_USER} --home "${NVR_HOME}"
+sudo adduser --quiet --system ${NVR_USER} --group "${NVR_GROUP}" --home "${NVR_HOME}"
 if [ ! -d "${NVR_HOME}" ]; then
 	sudo mkdir "${NVR_HOME}"
 fi
@@ -194,6 +195,8 @@ if [ -z "${SAMPLES_DIR}" ]; then
 	SAMPLES_PATH="${NVR_HOME}/${SAMPLES_DIR_NAME}"
 	if [ ! -d "${SAMPLES_PATH}" ]; then
 		sudo -u ${NVR_USER} -H mkdir "${SAMPLES_PATH}"
+	else
+		chown -R ${NVR_USER}.${NVR_USER} "${SAMPLES_PATH}"
 	fi
 else
 	SAMPLES_PATH="${SAMPLES_DIR}"
@@ -201,6 +204,7 @@ else
 		sudo mkdir "${SAMPLES_PATH}"
 		echo ">>> Do not forget to edit /etc/fstab to mount samples media"; echo
 	fi
+	chown -R ${NVR_USER}.${NVR_USER} "${SAMPLES_PATH}"
 fi
 
 
@@ -248,6 +252,7 @@ NVR_EOF
 if [ -f "${SERVICE_PATH}" ]; then
 	echo 'Configuring system daemon...'; echo
 	sudo systemctl daemon-reload
+	sudo systemctl enable ${SERVICE_NAME}
 	sudo systemctl restart ${SERVICE_NAME}
 	echo 'Getting system daemon status...'; echo
 	sudo systemctl status ${SERVICE_NAME}
