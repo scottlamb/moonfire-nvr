@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 #
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
