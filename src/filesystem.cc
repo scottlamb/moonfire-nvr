@@ -65,6 +65,10 @@ class RealFile : public File {
 
   ~RealFile() final { Close(); }
 
+  int Access(const char *path, int mode, int flags) final {
+    return faccessat(fd_, path, mode, flags) < 0 ? errno : 0;
+  }
+
   int Close() final {
     if (fd_ < 0) {
       return 0;

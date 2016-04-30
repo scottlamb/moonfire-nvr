@@ -58,6 +58,9 @@ class File {
   // Close the file, ignoring the result.
   virtual ~File() {}
 
+  // faccessat(), returning 0 on success or errno>0 on failure.
+  virtual int Access(const char *path, int mode, int flags) = 0;
+
   // Close the file, returning 0 on success or errno>0 on failure.
   // Already closed is considered a success.
   virtual int Close() = 0;
@@ -92,6 +95,7 @@ class File {
 
 class MockFile : public File {
  public:
+  MOCK_METHOD3(Access, int(const char *, int, int));
   MOCK_METHOD0(Close, int());
 
   // The std::unique_ptr<File> variants of Open are wrapped here because gmock's

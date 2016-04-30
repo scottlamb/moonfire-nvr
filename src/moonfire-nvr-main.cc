@@ -131,13 +131,25 @@ int main(int argc, char** argv) {
   env.video_source = moonfire_nvr::GetRealVideoSource();
 
   std::unique_ptr<moonfire_nvr::File> sample_file_dir;
+  std::string sample_file_dirname = FLAGS_sample_file_dir;
   int ret = moonfire_nvr::GetRealFilesystem()->Open(
-      FLAGS_sample_file_dir.c_str(), O_DIRECTORY | O_RDONLY, &sample_file_dir);
+      sample_file_dirname.c_str(), O_DIRECTORY | O_RDONLY, &sample_file_dir);
   if (ret != 0) {
-    LOG(ERROR) << "Unable to open --sample_file_dir=" << FLAGS_sample_file_dir
+    LOG(ERROR) << "Unable to open --sample_file_dir=" << sample_file_dirname
                << ": " << strerror(ret) << "; exiting.";
     exit(1);
   }
+
+  // Separately, ensure the sample file directory is writable.
+  // (Opening the directory above with O_DIRECTORY|O_RDWR doesn't work even
+  // when the directory is writable; it fails with EISDIR.)
+  ret = sample_file_dir->Access(".", W_OK, 0);
+  if (ret != 0) {
+    LOG(ERROR) << "--sample_file_dir=" << sample_file_dirname
+               << " is not writable: " << strerror(ret) << "; exiting.";
+    exit(1);
+  }
+
   env.sample_file_dir = sample_file_dir.release();
 
   moonfire_nvr::Database db;
