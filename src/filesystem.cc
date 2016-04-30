@@ -59,11 +59,14 @@ namespace {
 
 class RealFile : public File {
  public:
-  explicit RealFile(int fd) : fd_(fd) {}
+  RealFile(re2::StringPiece name, int fd)
+      : name_(name.data(), name.size()), fd_(fd) {}
   RealFile(const RealFile &) = delete;
   void operator=(const RealFile &) = delete;
 
   ~RealFile() final { Close(); }
+
+  const std::string &name() const { return name_; }
 
   int Access(const char *path, int mode, int flags) final {
     return faccessat(fd_, path, mode, flags) < 0 ? errno : 0;
@@ -106,7 +109,7 @@ class RealFile : public File {
     if (ret < 0) {
       return errno;
     }
-    f->reset(new RealFile(ret));
+    f->reset(new RealFile(StrCat(name_, "/", path), ret));
     return 0;
   }
 
@@ -145,6 +148,7 @@ class RealFile : public File {
   }
 
  private:
+  std::string name_;
   int fd_ = -1;
 };
 
@@ -186,7 +190,7 @@ class RealFilesystem : public Filesystem {
     if (ret < 0) {
       return errno;
     }
-    f->reset(new RealFile(ret));
+    f->reset(new RealFile(path, ret));
     return 0;
   }
 

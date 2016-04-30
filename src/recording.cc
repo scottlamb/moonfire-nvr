@@ -143,7 +143,8 @@ bool SampleFileWriter::Open(const char *filename, std::string *error_message) {
   int ret =
       parent_dir_->Open(filename, O_WRONLY | O_CREAT | O_EXCL, 0600, &file_);
   if (ret != 0) {
-    *error_message = StrCat("open ", filename, ": ", strerror(ret));
+    *error_message = StrCat("open ", filename, " (within dir ",
+                            parent_dir_->name(), "): ", strerror(ret));
     return false;
   }
   return true;

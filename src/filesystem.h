@@ -58,6 +58,9 @@ class File {
   // Close the file, ignoring the result.
   virtual ~File() {}
 
+  // A name for the file (typically assigned at open time).
+  virtual const std::string &name() const = 0;
+
   // faccessat(), returning 0 on success or errno>0 on failure.
   virtual int Access(const char *path, int mode, int flags) = 0;
 
@@ -95,6 +98,7 @@ class File {
 
 class MockFile : public File {
  public:
+  MOCK_CONST_METHOD0(name, const std::string &());
   MOCK_METHOD3(Access, int(const char *, int, int));
   MOCK_METHOD0(Close, int());
 
