@@ -881,7 +881,6 @@ class Mp4File : public VirtualFile {
         s->append(buf, r);
       }
     }
-    LOG(INFO) << "FillMdatSubtitle: " << s->size() << " bytes.";
     return true;
   }
 
