@@ -66,10 +66,10 @@ class Mp4SampleTablePieces {
   // samples() values.
   //
   // |start_90k| and |end_90k| should be relative to the start of the recording.
-  // They indicate the *desired* time range. The *actual* time range will be
-  // from the last sync sample <= |start_90k| to the last sample with start time
-  // <= |end_90k|. TODO: support edit lists and duration trimming to produce
-  // the exact correct time range.
+  // They indicate the *desired* time range. The *actual* time range will
+  // start at the last sync sample <= |start_90k|. (The caller is responsible
+  // for creating an edit list to skip the undesired portion.) It will end at
+  // the desired range, or the end of the recording, whichever is sooner.
   bool Init(const Recording *recording, int sample_entry_index,
             int32_t sample_offset, int32_t start_90k, int32_t end_90k,
             std::string *error_message);
@@ -88,8 +88,8 @@ class Mp4SampleTablePieces {
   // Return the byte range in the sample file of the frames represented here.
   ByteRange sample_pos() const { return sample_pos_; }
 
+  // As described above, these may differ from the desired range.
   uint64_t duration_90k() const { return actual_end_90k_ - begin_.start_90k(); }
-
   int32_t start_90k() const { return begin_.start_90k(); }
   int32_t end_90k() const { return actual_end_90k_; }
 
@@ -121,7 +121,15 @@ struct Mp4FileSegment {
   Recording recording;
   Mp4SampleTablePieces pieces;
   RealFileSlice sample_file_slice;
+
+  // Requested start time, relative to recording.start_90k.
+  // If there is no key frame at exactly this position, |pieces| will actually
+  // start sooner, and an edit list should be used to skip the undesired
+  // prefix.
   int32_t rel_start_90k = 0;
+
+  // Requested end time, relative to recording.end_90k.
+  // This will be clamped to the actual duration of the recording.
   int32_t rel_end_90k = std::numeric_limits<int32_t>::max();
 };
 

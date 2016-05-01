@@ -375,14 +375,15 @@ std::shared_ptr<VirtualFile> WebInterface::BuildMp4(
   bool ok = true;
   auto row_cb = [&](Recording &recording,
                     const VideoSampleEntry &sample_entry) {
-    if (rows == 0 && recording.start_time_90k != next_row_start_time_90k) {
+    if (rows == 0 && recording.start_time_90k > next_row_start_time_90k) {
       *error_message = StrCat(
           "recording starts late: ", PrettyTimestamp(recording.start_time_90k),
           " (", recording.start_time_90k, ") rather than requested: ",
           PrettyTimestamp(start_time_90k), " (", start_time_90k, ")");
       ok = false;
       return IterationControl::kBreak;
-    } else if (recording.start_time_90k != next_row_start_time_90k) {
+    } else if (rows > 0 &&
+               recording.start_time_90k != next_row_start_time_90k) {
       *error_message = StrCat("gap/overlap in recording: ",
                               PrettyTimestamp(next_row_start_time_90k), " (",
                               next_row_start_time_90k, ") to: ",
@@ -405,10 +406,15 @@ std::shared_ptr<VirtualFile> WebInterface::BuildMp4(
       builder.SetSampleEntry(sample_entry);
     }
 
-    // TODO: correct bounds within recording.
-    // Currently this can return too much data.
-    builder.Append(std::move(recording), 0,
-                   std::numeric_limits<int32_t>::max());
+    int32_t rel_start_90k = 0;
+    int32_t rel_end_90k = std::numeric_limits<int32_t>::max();
+    if (recording.start_time_90k < start_time_90k) {
+      rel_start_90k = start_time_90k - recording.start_time_90k;
+    }
+    if (recording.end_time_90k > end_time_90k) {
+      rel_end_90k = end_time_90k - recording.start_time_90k;
+    }
+    builder.Append(std::move(recording), rel_start_90k, rel_end_90k);
     ++rows;
     return IterationControl::kContinue;
   };
@@ -421,7 +427,7 @@ std::shared_ptr<VirtualFile> WebInterface::BuildMp4(
     *error_message = StrCat("no recordings in range");
     return false;
   }
-  if (next_row_start_time_90k != end_time_90k) {
+  if (next_row_start_time_90k < end_time_90k) {
     *error_message = StrCat("recording ends early: ",
                             PrettyTimestamp(next_row_start_time_90k), " (",
                             next_row_start_time_90k, "), not requested: ",

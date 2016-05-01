@@ -106,7 +106,7 @@ const size_t kSubtitleLength = strlen("2015-07-02 17:10:00 -0700");
 // that causes the different bytes to be output for a particular set of
 // Mp4Builder options. Incrementing this value will cause the etag to change
 // as well.
-const char kFormatVersion[] = {0x00};
+const char kFormatVersion[] = {0x01};
 
 // ISO/IEC 14496-12 section 4.3, ftyp.
 const char kFtypBox[] = {
@@ -293,6 +293,18 @@ struct TrackHeaderBoxVersion0 {  // ISO/IEC 14496-12 section 8.3.2, tkhd.
   uint32_t height = NET_UINT32_C(0);
 } __attribute__((packed));
 
+struct EditBox {  // ISO/IEC 14496-12 section 8.6.5, edts.
+  uint32_t size = NET_UINT32_C(0);
+  const char type[4] = {'e', 'd', 't', 's'};
+} __attribute__((packed));
+
+struct EditListBoxVersion0 {  // ISO/IEC 14496-12 section 8.6.6, elst.
+  uint32_t size = NET_UINT32_C(0);
+  const char type[4] = {'e', 'l', 's', 't'};
+  const uint32_t version_and_flags = NET_UINT32_C(0);
+  uint32_t entry_count = NET_UINT32_C(0);
+};
+
 struct MediaBox {  // ISO/IEC 14496-12 section 8.4.1, mdia.
   uint32_t size = NET_UINT32_C(0);
   const char type[4] = {'m', 'd', 'i', 'a'};
@@ -425,6 +437,8 @@ class ScopedMp4Box {
 //
 // ** trak (video: container for an individual track or stream)
 // *** tkhd (track header, overall information about the track)
+// *** (optional) edts (edit list container)
+// **** elst (an edit list)
 // *** mdia (container for the media information in a track)
 // **** mdhd (media header, overall information about the media)
 // *** minf (media information container)
@@ -439,7 +453,7 @@ class ScopedMp4Box {
 // ***** co64 (64-bit chunk offset)
 // ***** stss (sync sample table)
 //
-// ** trak (subtitle: container for an individual track or stream)
+// ** (optional) trak (subtitle: container for an individual track or stream)
 // *** tkhd (track header, overall information about the track)
 // *** mdia (container for the media information in a track)
 // **** mdhd (media header, overall information about the media)
@@ -480,9 +494,9 @@ class Mp4File : public VirtualFile {
     uint32_t duration = 0;
     int64_t max_time_90k = 0;
     for (const auto &segment : segments_) {
-      duration += segment->pieces.duration_90k();
+      duration += segment->pieces.end_90k() - segment->rel_start_90k;
       int64_t start_90k =
-          segment->recording.start_time_90k + segment->pieces.start_90k();
+          segment->recording.start_time_90k + segment->rel_start_90k;
       int64_t end_90k =
           segment->recording.start_time_90k + segment->pieces.end_90k();
       int64_t start_ts = start_90k / kTimeUnitsPerSecond;
@@ -568,6 +582,7 @@ class Mp4File : public VirtualFile {
         moov_video_trak_tkhd_.header().height =
             NET_UINT32_C(video_sample_entry_.height << 16);
       }
+      MaybeAppendVideoEdts();
       {
         CONSTRUCT_BOX(moov_video_trak_mdia_);
         {
@@ -588,6 +603,53 @@ class Mp4File : public VirtualFile {
     if (include_timestamp_subtitle_track_) {
       AppendSubtitleTrack(net_duration, net_creation_ts);
     }
+  }
+
+  void MaybeAppendVideoEdts() {
+    struct Entry {
+      Entry(int32_t segment_duration, int32_t media_time)
+          : segment_duration(segment_duration), media_time(media_time) {}
+      int32_t segment_duration = 0;
+      int32_t media_time = 0;
+      int32_t end() const { return segment_duration + media_time; }
+    };
+    std::vector<Entry> entries;
+    int64_t cur_media_time = 0;
+    for (const auto &segment : segments_) {
+      auto skip = segment->rel_start_90k - segment->pieces.start_90k();
+      auto keep = segment->pieces.end_90k() - segment->rel_start_90k;
+      DCHECK_GE(skip, 0);
+      DCHECK_GT(keep, 0);
+      cur_media_time += skip;
+      if (!entries.empty() && entries.back().end() == cur_media_time) {
+        entries.back().segment_duration += keep;
+      } else {
+        entries.emplace_back(keep, cur_media_time);
+      }
+      DCHECK_GT(segment->pieces.duration_90k(), 0);
+      cur_media_time += keep;
+    }
+    if (entries.size() == 1 && entries[0].media_time == 0) {
+      return;  // use implicit one-to-one mapping.
+    }
+
+    VLOG(1) << "Using edit list with " << entries.size() << " entries.";
+    std::string *s = &moov_video_trak_edts_elst_entries_str_;
+    for (const auto &entry : entries) {
+      VLOG(2) << "...duration=" << entry.segment_duration
+              << ", time=" << entry.media_time;
+      AppendU32(entry.segment_duration, s);
+      AppendU32(entry.media_time, s);
+      AppendU16(1, s);  // media_rate_integer
+      AppendU16(1, s);  // media_rate_fraction
+    }
+    CONSTRUCT_BOX(moov_video_trak_edts_);
+    CONSTRUCT_BOX(moov_video_trak_edts_elst_);
+    moov_video_trak_edts_elst_.header().entry_count =
+        ToNetworkU32(entries.size());
+    moov_video_trak_edts_elst_entries_.Init(
+        moov_video_trak_edts_elst_entries_str_);
+    slices_.Append(&moov_video_trak_edts_elst_entries_);
   }
 
   void AppendVideoStbl() {
@@ -763,7 +825,7 @@ class Mp4File : public VirtualFile {
     std::string &s = moov_subtitle_trak_mdia_minf_stbl_stts_entries_str_;
     for (const auto &segment : segments_) {
       int64_t start_90k =
-          segment->recording.start_time_90k + segment->pieces.start_90k();
+          segment->recording.start_time_90k + segment->rel_start_90k;
       int64_t end_90k =
           segment->recording.start_time_90k + segment->pieces.end_90k();
       int64_t start_next_90k =
@@ -802,7 +864,7 @@ class Mp4File : public VirtualFile {
     memset(&mytm, 0, sizeof(mytm));
     for (const auto &segment : segments_) {
       int64_t start_90k =
-          segment->recording.start_time_90k + segment->pieces.start_90k();
+          segment->recording.start_time_90k + segment->rel_start_90k;
       int64_t end_90k =
           segment->recording.start_time_90k + segment->pieces.end_90k();
       int64_t start_ts = start_90k / kTimeUnitsPerSecond;
@@ -839,6 +901,10 @@ class Mp4File : public VirtualFile {
 
   Mp4Box<TrackBox> moov_video_trak_;
   Mp4Box<TrackHeaderBoxVersion0> moov_video_trak_tkhd_;
+  Mp4Box<EditBox> moov_video_trak_edts_;
+  Mp4Box<EditListBoxVersion0> moov_video_trak_edts_elst_;
+  StringPieceSlice moov_video_trak_edts_elst_entries_;
+  std::string moov_video_trak_edts_elst_entries_str_;
   Mp4Box<MediaBox> moov_video_trak_mdia_;
   Mp4Box<MediaHeaderBoxVersion0> moov_video_trak_mdia_mdhd_;
   StringPieceSlice moov_video_trak_mdia_hdlr_;
@@ -906,6 +972,7 @@ bool Mp4SampleTablePieces::Init(const Recording *recording,
     key_frames_ = recording->video_sync_samples;
     actual_end_90k_ = recording_duration_90k;
   } else {
+    VLOG(1) << "Slow path.";
     if (!it.done() && !it.is_key()) {
       *error_message = "First frame must be a key frame.";
       return false;
@@ -941,6 +1008,7 @@ bool Mp4SampleTablePieces::Init(const Recording *recording,
     *error_message = it.error();
     return false;
   }
+  actual_end_90k_ = std::min(actual_end_90k_, desired_end_90k_);
   VLOG(1) << "requested ts [" << start_90k << ", " << end_90k << "), got ts ["
           << begin_.start_90k() << ", " << actual_end_90k_ << "), " << frames_
           << " frames (" << key_frames_
@@ -967,7 +1035,17 @@ bool Mp4SampleTablePieces::FillSttsEntries(std::string *s,
   for (it = begin_; !it.done() && it.start_90k() < desired_end_90k_;
        it.Next()) {
     AppendU32(1, s);
-    AppendU32(it.duration_90k(), s);
+
+    // The final sample may be shortened to the desired end.
+    if (it.end_90k() > desired_end_90k_) {
+      auto new_duration = desired_end_90k_ - it.start_90k();
+      VLOG(1) << "Shortening final sample duration from " << it.duration_90k()
+              << " to " << new_duration;
+      AppendU32(new_duration, s);
+      break;
+    } else {
+      AppendU32(it.duration_90k(), s);
+    }
   }
   if (it.has_error()) {
     *error_message = it.error();

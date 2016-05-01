@@ -256,11 +256,11 @@ class IntegrationTest : public testing::Test {
   }
 
   std::shared_ptr<VirtualFile> CreateMp4FromSingleRecording(
-      const Recording &recording, bool include_ts) {
+      const Recording &recording, int32_t rel_start_90k, int32_t rel_end_90k,
+      bool include_ts) {
     Mp4FileBuilder builder(tmpdir_.get());
     builder.SetSampleEntry(video_sample_entry_);
-    builder.Append(Recording(recording), 0,
-                   std::numeric_limits<int32_t>::max());
+    builder.Append(Recording(recording), rel_start_90k, rel_end_90k);
     builder.include_timestamp_subtitle_track(include_ts);
     std::string error_message;
     auto mp4 = builder.Build(&error_message);
@@ -280,7 +280,7 @@ class IntegrationTest : public testing::Test {
     WriteFileOrDie(StrCat(tmpdir_path_, "/clip.new.mp4"), &buf);
   }
 
-  void CompareMp4s() {
+  void CompareMp4s(int64_t pts_offset) {
     std::string error_message;
     auto original = GetRealVideoSource()->OpenFile("../src/testdata/clip.mp4",
                                                    &error_message);
@@ -294,22 +294,33 @@ class IntegrationTest : public testing::Test {
     EXPECT_EQ(original->stream()->codec->height,
               copied->stream()->codec->height);
 
+    int pkt = 0;
     while (true) {
       VideoPacket original_pkt;
       VideoPacket copied_pkt;
 
       bool original_has_next = original->GetNext(&original_pkt, &error_message);
-      ASSERT_TRUE(original_has_next || error_message.empty()) << error_message;
+      ASSERT_TRUE(original_has_next || error_message.empty())
+          << "pkt " << pkt << ": " << error_message;
       bool copied_has_next = copied->GetNext(&copied_pkt, &error_message);
-      ASSERT_TRUE(copied_has_next || error_message.empty()) << error_message;
+      ASSERT_TRUE(copied_has_next || error_message.empty())
+          << "pkt " << pkt << ": " << error_message;
       if (!original_has_next && !copied_has_next) {
         break;
       }
-      ASSERT_TRUE(original_has_next);
-      ASSERT_TRUE(copied_has_next);
-      EXPECT_EQ(original_pkt.pkt()->pts, copied_pkt.pkt()->pts);
-      EXPECT_EQ(original_pkt.pkt()->duration, copied_pkt.pkt()->duration);
-      EXPECT_EQ(GetData(original_pkt), GetData(copied_pkt));
+      ASSERT_TRUE(original_has_next) << "pkt " << pkt;
+      ASSERT_TRUE(copied_has_next) << "pkt " << pkt;
+      EXPECT_EQ(original_pkt.pkt()->pts + pts_offset, copied_pkt.pkt()->pts)
+          << "pkt " << pkt;
+
+      // One would normally expect the duration to be exactly the same, but
+      // when using an edit list, ffmpeg appears to extend the last packet's
+      // duration by the amount skipped at the beginning. I think this is a
+      // bug on their side.
+      EXPECT_LE(original_pkt.pkt()->duration, copied_pkt.pkt()->duration)
+          << "pkt " << pkt;
+      EXPECT_EQ(GetData(original_pkt), GetData(copied_pkt)) << "pkt " << pkt;
+      ++pkt;
     }
   }
 
@@ -329,9 +340,10 @@ TEST_F(IntegrationTest, RoundTrip) {
   if (HasFailure()) {
     return;
   }
-  auto f = CreateMp4FromSingleRecording(recording, false);
+  auto f = CreateMp4FromSingleRecording(
+      recording, 0, std::numeric_limits<int32_t>::max(), false);
   WriteMp4(f.get());
-  CompareMp4s();
+  CompareMp4s(0);
 }
 
 TEST_F(IntegrationTest, RoundTripWithSubtitle) {
@@ -339,9 +351,21 @@ TEST_F(IntegrationTest, RoundTripWithSubtitle) {
   if (HasFailure()) {
     return;
   }
-  auto f = CreateMp4FromSingleRecording(recording, true);
+  auto f = CreateMp4FromSingleRecording(
+      recording, 0, std::numeric_limits<int32_t>::max(), true);
   WriteMp4(f.get());
-  CompareMp4s();
+  CompareMp4s(0);
+}
+
+TEST_F(IntegrationTest, RoundTripWithEditList) {
+  Recording recording = CopyMp4ToSingleRecording();
+  if (HasFailure()) {
+    return;
+  }
+  auto f = CreateMp4FromSingleRecording(
+      recording, 1, std::numeric_limits<int32_t>::max(), false);
+  WriteMp4(f.get());
+  CompareMp4s(-1);
 }
 
 TEST_F(IntegrationTest, Metadata) {
@@ -349,14 +373,15 @@ TEST_F(IntegrationTest, Metadata) {
   if (HasFailure()) {
     return;
   }
-  auto f = CreateMp4FromSingleRecording(recording, false);
+  auto f = CreateMp4FromSingleRecording(
+      recording, 0, std::numeric_limits<int32_t>::max(), false);
 
   // This test is brittle, which is the point. Any time the digest comparison
   // here fails, it can be updated, but the etag must change as well!
   // Otherwise clients may combine ranges from the new format with ranges
   // from the old format!
   EXPECT_EQ("1e5331e8371bd97ac3158b3a86494abc87cdc70e", Digest(f.get()));
-  EXPECT_EQ("\"62f5e00a6e1e6dd893add217b1bf7ed7446b8b9d\"", f->etag());
+  EXPECT_EQ("\"a9ce99a83a177516e7f862fed405e2b47b7d4ae3\"", f->etag());
 
   // 10 seconds later than the segment's start time.
   EXPECT_EQ(1430006410, f->last_modified());
