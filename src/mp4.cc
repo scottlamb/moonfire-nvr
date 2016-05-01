@@ -548,7 +548,8 @@ class Mp4File : public VirtualFile {
       etag_digest->Update(segment->recording.sample_file_sha1);
     }
     etag_ = StrCat("\"", ToHex(etag_digest->Finalize()), "\"");
-    VLOG(1) << "Constructed .mp4 has " << slices_.size() << " slices.";
+    VLOG(1) << "Constructed .mp4 has " << slices_.num_slices() << " slices for "
+            << segments_.size() << " segments, " << slices_.size() << " bytes.";
   }
 
   time_t last_modified() const final { return last_modified_; }

@@ -238,6 +238,8 @@ class FileSlices : public FileSlice {
     size_ = new_size;
   }
 
+  size_t num_slices() const { return slices_.size(); }
+
   int64_t size() const final { return size_; }
   int64_t AddRange(ByteRange range, EvBuffer *buf,
                    std::string *error_message) const final;
