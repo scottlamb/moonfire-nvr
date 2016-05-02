@@ -47,6 +47,9 @@ namespace moonfire_nvr {
 
 namespace {
 
+const char kDayFmt[] = "%Y-%m-%d";
+constexpr size_t kDayFmtBufSize = sizeof("YYYY-mm-DD");
+
 // Helper for AdjustDaysMap.
 void AdjustDay(const std::string &day, int64_t delta,
                std::map<std::string, int64_t> *days) {
@@ -80,9 +83,8 @@ void AdjustDaysMap(int64_t start_time_90k, int64_t end_time_90k, int sign,
   memset(&mytm, 0, sizeof(mytm));
   time_t start_ts = start_time_90k / kTimeUnitsPerSecond;
   localtime_r(&start_ts, &mytm);
-  const char kFmt[] = "%Y-%m-%d";
-  char buf[sizeof("YYYY-mm-DD")];
-  strftime(buf, sizeof(buf), kFmt, &mytm);
+  char buf[kDayFmtBufSize];
+  strftime(buf, sizeof(buf), kDayFmt, &mytm);
 
   // Determine the start of the next day.
   // Note that mktime(3) normalizes tm_mday, so this should work on the last
@@ -106,7 +108,7 @@ void AdjustDaysMap(int64_t start_time_90k, int64_t end_time_90k, int sign,
   }
 
   // Fill |buf| with the second day.
-  strftime(buf, sizeof(buf), kFmt, &mytm);
+  strftime(buf, sizeof(buf), kDayFmt, &mytm);
 
   // Adjust the second day.
   auto second_day_delta = sign * (end_time_90k - boundary_90k);
@@ -116,6 +118,30 @@ void AdjustDaysMap(int64_t start_time_90k, int64_t end_time_90k, int sign,
 }
 
 }  // namespace internal
+
+bool GetDayBounds(const std::string &day, int64_t *start_time_90k,
+                  int64_t *end_time_90k, std::string *error_message) {
+  struct tm mytm;
+  memset(&mytm, 0, sizeof(mytm));
+  if (strptime(day.c_str(), kDayFmt, &mytm) != day.c_str() + day.size()) {
+    *error_message = StrCat("Unparseable day: ", day);
+    return false;
+  }
+
+  mytm.tm_isdst = -1;
+  mytm.tm_hour = 0;
+  mytm.tm_min = 0;
+  mytm.tm_sec = 0;
+  *start_time_90k = kTimeUnitsPerSecond * static_cast<int64_t>(mktime(&mytm));
+
+  mytm.tm_isdst = -1;
+  mytm.tm_hour = 0;
+  mytm.tm_min = 0;
+  mytm.tm_sec = 0;
+  ++mytm.tm_mday;
+  *end_time_90k = kTimeUnitsPerSecond * static_cast<int64_t>(mktime(&mytm));
+  return true;
+}
 
 bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
   CHECK(db_ == nullptr);

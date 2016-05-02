@@ -259,6 +259,12 @@ class MoonfireDatabase {
   std::map<int64_t, VideoSampleEntry> video_sample_entries_;
 };
 
+// Given a key in the day-to-duration map, produce the start and end times of
+// the day. (Typically the end time is 24 hours later than the start; but it's
+// 23 or 25 hours for the days of spring forward and fall back, respectively.)
+bool GetDayBounds(const std::string &day, int64_t *start_time_90k,
+                  int64_t *end_time_90k, std::string *error_message);
+
 namespace internal {
 
 // Adjust a day-to-duration map (see MoonfireDatabase::CameraData::days_)

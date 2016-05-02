@@ -291,6 +291,31 @@ TEST(AdjustDaysMapTest, Basic) {
   EXPECT_THAT(days, testing::ElementsAre());
 }
 
+TEST(GetDayBoundsTest, Basic) {
+  int64_t start_90k;
+  int64_t end_90k;
+  std::string error_msg;
+
+  // Normal day.
+  EXPECT_TRUE(GetDayBounds("2015-12-31", &start_90k, &end_90k, &error_msg))
+      << error_msg;
+  EXPECT_EQ(INT64_C(130639392000000), start_90k);
+  EXPECT_EQ(INT64_C(130647168000000), end_90k);
+
+  // Spring forward (23-hour day).
+  EXPECT_TRUE(GetDayBounds("2016-03-13", &start_90k, &end_90k, &error_msg));
+  EXPECT_EQ(INT64_C(131207040000000), start_90k);
+  EXPECT_EQ(INT64_C(131214492000000), end_90k);
+
+  // Fall back (25-hour day).
+  EXPECT_TRUE(GetDayBounds("2016-11-06", &start_90k, &end_90k, &error_msg));
+  EXPECT_EQ(INT64_C(133057404000000), start_90k);
+  EXPECT_EQ(INT64_C(133065504000000), end_90k);
+
+  // Unparseable day.
+  EXPECT_FALSE(GetDayBounds("xxxx-xx-xx", &start_90k, &end_90k, &error_msg));
+}
+
 // Basic test of running some queries on an empty database.
 TEST_F(MoonfireDbTest, EmptyDatabase) {
   std::string error_message;
