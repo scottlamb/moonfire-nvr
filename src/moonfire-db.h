@@ -105,8 +105,7 @@ struct GetCameraRow {
   int64_t max_end_time_90k = -1;
   int64_t total_duration_90k = -1;
   int64_t total_sample_file_bytes = -1;
-
-  // TODO: std::vector<std::string> days;  // keys: YYYY-mm-dd.
+  std::map<std::string, int64_t> days;  // YYYY-mm-dd -> duration_90k.
 };
 
 // For use with MoonfireDatabase::ListCameraRecordings.
@@ -129,6 +128,7 @@ struct ListOldestSampleFilesRow {
   int64_t camera_id = -1;
   int64_t recording_id = -1;
   Uuid sample_file_uuid;
+  int64_t start_time_90k = -1;
   int64_t duration_90k = -1;
   int64_t sample_file_bytes = -1;
 };
@@ -221,15 +221,14 @@ class MoonfireDatabase {
     int64_t retain_bytes = -1;
 
     // Aggregates of all recordings associated with the camera.
-    int64_t min_start_time_90k = -1;
-    int64_t max_end_time_90k = -1;
-    int64_t total_sample_file_bytes = -1;
-    int64_t total_duration_90k = -1;
+    int64_t min_start_time_90k = std::numeric_limits<int64_t>::max();
+    int64_t max_end_time_90k = std::numeric_limits<int64_t>::min();
+    int64_t total_sample_file_bytes = 0;
+    int64_t total_duration_90k = 0;
 
     // A map of calendar days (in the local timezone, "YYYY-mm-DD") to the
     // total duration (in 90k units) of recorded data in the day. A day is
     // present in the map ff the value is non-zero.
-    // TODO: actually fill this.
     std::map<std::string, int64_t> days;
   };
 

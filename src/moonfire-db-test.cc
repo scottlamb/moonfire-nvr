@@ -101,13 +101,17 @@ class MoonfireDbTest : public testing::Test {
       EXPECT_EQ("/main", row.main_rtsp_path);
       EXPECT_EQ("/sub", row.sub_rtsp_path);
       EXPECT_EQ(42, row.retain_bytes);
-      EXPECT_EQ(-1, row.min_start_time_90k);
-      EXPECT_EQ(-1, row.max_end_time_90k);
+      EXPECT_EQ(std::numeric_limits<int64_t>::max(), row.min_start_time_90k);
+      EXPECT_EQ(std::numeric_limits<int64_t>::min(), row.max_end_time_90k);
       EXPECT_EQ(0, row.total_duration_90k);
       EXPECT_EQ(0, row.total_sample_file_bytes);
       return IterationControl::kContinue;
     });
     EXPECT_EQ(1, rows);
+
+    GetCameraRow row;
+    EXPECT_TRUE(mdb_->GetCamera(camera_uuid, &row));
+    EXPECT_THAT(row.days, testing::ElementsAre());
 
     std::string error_message;
     rows = 0;
@@ -149,6 +153,13 @@ class MoonfireDbTest : public testing::Test {
       return IterationControl::kContinue;
     });
     EXPECT_EQ(1, rows);
+
+    std::map<std::string, int64_t> expected_days;
+    internal::AdjustDaysMap(recording.start_time_90k, recording.end_time_90k, 1,
+                            &expected_days);
+    GetCameraRow row;
+    EXPECT_TRUE(mdb_->GetCamera(camera_uuid, &row));
+    EXPECT_THAT(row.days, testing::Eq(expected_days));
 
     GetCameraRow camera_row;
     EXPECT_TRUE(mdb_->GetCamera(camera_uuid, &camera_row));

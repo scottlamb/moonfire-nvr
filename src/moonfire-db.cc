@@ -73,10 +73,13 @@ void AdjustDaysMap(int64_t start_time_90k, int64_t end_time_90k, int sign,
                    std::map<std::string, int64_t> *days) {
   // There will always be at most two days adjusted, because
   // kMaxRecordingDuration is less than a day (even during spring forward).
-  DCHECK_LT(start_time_90k, end_time_90k);
+  DCHECK_LE(start_time_90k, end_time_90k);
   DCHECK_LE(end_time_90k - start_time_90k, kMaxRecordingDuration);
   static_assert(kMaxRecordingDuration <= 23 * 60 * kTimeUnitsPerSecond,
                 "max duration should be less than a (spring-forward) day");
+  if (start_time_90k == end_time_90k) {
+    return;
+  }
 
   // Fill |buf| with the first day.
   struct tm mytm;
@@ -150,8 +153,6 @@ bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
   {
     DatabaseContext ctx(db_);
 
-    // This query scans the entirety of the recording table's index.
-    // It is quite slow, so the results are cached.
     auto list_cameras_run = ctx.UseOnce(
         R"(
         select
@@ -164,20 +165,9 @@ bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
           camera.password,
           camera.main_rtsp_path,
           camera.sub_rtsp_path,
-          camera.retain_bytes,
-          min(recording.start_time_90k),
-          max(recording.start_time_90k + recording.duration_90k),
-          sum(recording.duration_90k),
-          sum(recording.sample_file_bytes)
+          camera.retain_bytes
         from
-          camera
-          left join recording on (camera.id = recording.camera_id)
-        group by
-          camera.id,
-          camera.uuid,
-          camera.short_name,
-          camera.description,
-          camera.retain_bytes;
+          camera;
         )");
     while (list_cameras_run.Step() == SQLITE_ROW) {
       CameraData data;
@@ -197,14 +187,6 @@ bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
       data.main_rtsp_path = list_cameras_run.ColumnText(7).as_string();
       data.sub_rtsp_path = list_cameras_run.ColumnText(8).as_string();
       data.retain_bytes = list_cameras_run.ColumnInt64(9);
-      data.min_start_time_90k = list_cameras_run.ColumnType(10) == SQLITE_NULL
-                                    ? -1
-                                    : list_cameras_run.ColumnInt64(10);
-      data.max_end_time_90k = list_cameras_run.ColumnType(11) == SQLITE_NULL
-                                  ? -1
-                                  : list_cameras_run.ColumnInt64(11);
-      data.total_duration_90k = list_cameras_run.ColumnInt64(12);
-      data.total_sample_file_bytes = list_cameras_run.ColumnInt64(13);
 
       auto ret = cameras_by_uuid_.insert(std::make_pair(uuid, data));
       if (!ret.second) {
@@ -220,6 +202,45 @@ bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
     if (list_cameras_run.status() != SQLITE_DONE) {
       *error_message = StrCat("Camera list query failed: ",
                               list_cameras_run.error_message());
+      return false;
+    }
+
+    // This query scans the entirety of the recording table's index.
+    // It is quite slow, so the results are cached.
+    auto list_recordings_run = ctx.UseOnce(
+        R"(
+        select
+          recording.start_time_90k,
+          recording.duration_90k,
+          recording.sample_file_bytes,
+          recording.camera_id
+        from
+          recording
+        )");
+    while (list_recordings_run.Step() == SQLITE_ROW) {
+      int64_t start_time_90k = list_recordings_run.ColumnInt64(0);
+      int64_t duration_90k = list_recordings_run.ColumnInt64(1);
+      int64_t end_time_90k = start_time_90k + duration_90k;
+      int64_t sample_file_bytes = list_recordings_run.ColumnInt64(2);
+      int64_t camera_id = list_recordings_run.ColumnInt64(3);
+      auto it = cameras_by_id_.find(camera_id);
+      if (it == cameras_by_id_.end()) {
+        *error_message =
+            StrCat("Recording refers to unknown camera ", camera_id);
+        return false;
+      }
+      CameraData *data = it->second;
+      data->min_start_time_90k =
+          std::min(data->min_start_time_90k, start_time_90k);
+      data->max_end_time_90k = std::max(data->max_end_time_90k, end_time_90k);
+      data->total_sample_file_bytes += sample_file_bytes;
+      data->total_duration_90k += duration_90k;
+      internal::AdjustDaysMap(start_time_90k, end_time_90k, 1, &data->days);
+    }
+    if (list_cameras_run.status() != SQLITE_DONE) {
+      *error_message = StrCat("Recording list query failed: ",
+                              list_recordings_run.error_message());
+      return false;
     }
 
     // It's simplest to just keep the video sample entries in RAM.
@@ -358,6 +379,7 @@ bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
       select
         id,
         sample_file_uuid,
+        start_time_90k,
         duration_90k,
         sample_file_bytes
       from
@@ -453,6 +475,7 @@ bool MoonfireDatabase::GetCamera(Uuid camera_uuid, GetCameraRow *row) {
   row->max_end_time_90k = data.max_end_time_90k;
   row->total_duration_90k = data.total_duration_90k;
   row->total_sample_file_bytes = data.total_sample_file_bytes;
+  row->days = data.days;
   return true;
 }
 
@@ -732,6 +755,8 @@ bool MoonfireDatabase::InsertRecording(Recording *recording,
   camera_data->total_duration_90k +=
       recording->end_time_90k - recording->start_time_90k;
   camera_data->total_sample_file_bytes += recording->sample_file_bytes;
+  internal::AdjustDaysMap(recording->start_time_90k, recording->end_time_90k, 1,
+                          &camera_data->days);
   return true;
 }
 
@@ -758,8 +783,9 @@ bool MoonfireDatabase::ListOldestSampleFiles(
                  ToHex(run.ColumnBlob(1)));
       return false;
     }
-    row.duration_90k = run.ColumnInt64(2);
-    row.sample_file_bytes = run.ColumnInt64(3);
+    row.start_time_90k = run.ColumnInt64(2);
+    row.duration_90k = run.ColumnInt64(3);
+    row.sample_file_bytes = run.ColumnInt64(4);
     if (row_cb(row) == IterationControl::kBreak) {
       return true;
     }
@@ -787,6 +813,7 @@ bool MoonfireDatabase::DeleteRecordings(
     int64_t deleted_sample_file_bytes = 0;
     int64_t min_start_time_90k = -1;
     int64_t max_end_time_90k = -1;
+    std::map<std::string, int64_t> days;
     CameraData *camera_data = nullptr;
   };
   std::map<int64_t, State> state_by_camera_id;
@@ -794,6 +821,9 @@ bool MoonfireDatabase::DeleteRecordings(
     State &state = state_by_camera_id[recording.camera_id];
     state.deleted_duration_90k += recording.duration_90k;
     state.deleted_sample_file_bytes += recording.sample_file_bytes;
+    internal::AdjustDaysMap(recording.start_time_90k,
+                            recording.start_time_90k + recording.duration_90k,
+                            1, &state.days);
 
     auto delete_run = ctx.Borrow(&delete_recording_stmt_);
     delete_run.BindInt64(":recording_id", recording.recording_id);
@@ -839,8 +869,8 @@ bool MoonfireDatabase::DeleteRecordings(
       state.min_start_time_90k = min_run.ColumnInt64(0);
     } else if (min_run.Step() == SQLITE_DONE) {
       // There are no recordings left.
-      state.min_start_time_90k = -1;
-      state.max_end_time_90k = -1;
+      state.min_start_time_90k = std::numeric_limits<int64_t>::max();
+      state.max_end_time_90k = std::numeric_limits<int64_t>::min();
       continue;  // skip additional query below to calculate max.
     } else {
       ctx.RollbackTransaction();
@@ -885,6 +915,9 @@ bool MoonfireDatabase::DeleteRecordings(
         state.deleted_sample_file_bytes;
     state.camera_data->min_start_time_90k = state.min_start_time_90k;
     state.camera_data->max_end_time_90k = state.max_end_time_90k;
+    for (const auto &day : state.days) {
+      AdjustDay(day.first, -day.second, &state.camera_data->days);
+    }
   }
   return true;
 }
