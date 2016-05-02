@@ -285,16 +285,34 @@ void WebInterface::HandleJsonCameraDetail(evhttp_request *req,
       static_cast<Json::Int64>(camera_row.total_duration_90k);
   camera["total_sample_file_bytes"] =
       static_cast<Json::Int64>(camera_row.total_sample_file_bytes);
-  if (camera_row.min_start_time_90k != -1) {
+  if (camera_row.min_start_time_90k != std::numeric_limits<int64_t>::max()) {
     camera["min_start_time_90k"] =
         static_cast<Json::Int64>(camera_row.min_start_time_90k);
   }
-  if (camera_row.max_end_time_90k != -1) {
+  if (camera_row.max_end_time_90k != std::numeric_limits<int64_t>::min()) {
     camera["max_end_time_90k"] =
         static_cast<Json::Int64>(camera_row.max_end_time_90k);
   }
 
-  // TODO(slamb): include list of calendar days with data.
+  Json::Value days(Json::objectValue);
+  std::string error_message;
+  for (const auto &day : camera_row.days) {
+    int64_t start_time_usec;
+    int64_t end_time_usec;
+    if (!GetDayBounds(day.first, &start_time_usec, &end_time_usec,
+                      &error_message)) {
+      return evhttp_send_error(
+          req, HTTP_INTERNAL,
+          StrCat("internal error: ", EscapeHtml(error_message)).c_str());
+    }
+
+    Json::Value day_val(Json::objectValue);
+    day_val["start_time_usec"] = static_cast<Json::Int64>(start_time_usec);
+    day_val["end_time_usec"] = static_cast<Json::Int64>(end_time_usec);
+    day_val["total_duration_90k"] = static_cast<Json::Int64>(day.second);
+    days[day.first] = day_val;
+  }
+  camera["days"] = days;
   ReplyWithJson(req, camera);
 }
 

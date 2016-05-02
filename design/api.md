@@ -66,12 +66,48 @@ Example response:
 ### `/cameras/<uuid>`
 
 A GET returns information for the camera with the given URL. The information
-returned is a superset of that returned by the camera list.
+returned is a superset of that returned by the camera list. It also includes a
+list of calendar days (in the server's time zone) with data in the server's
+time zone. The `days` entry is a object mapping `YYYY-mm-dd` to a day object
+with the following attributes:
 
-TODO(slamb): this should likely return a list of calendar days with data in the
-server's time zone, along with the associated `start\_time\_90k` and
-`end\_time\_90k`. The server will calculate this on startup and maintain it
-as recordings are updated.
+*   `total_duration_90k` is the total duration recorded during that day.
+    If a recording spans a day boundary, some portion of it is accounted to
+    each day.
+*   `start_time_90k` is the start of that calendar day in the server's time
+    zone.
+*   `end_time_90k` is the end of that calendar day in the server's time zone.
+    It is usually 24 hours after the start time. It might be 23 hours or 25
+    hours during spring forward or fall back, respectively.
+
+A calendar day will be present in the `days` object iff there is a non-zero
+total duration of recordings for that day.
+
+Example response:
+
+```json
+{
+  "days": {
+    "2016-05-01": {
+      "end_time_usec": 131595516000000,
+      "start_time_usec": 131587740000000,
+      "total_duration_90k": 52617609
+    },
+    "2016-05-02": {
+      "end_time_usec": 131603292000000,
+      "start_time_usec": 131595516000000,
+      "total_duration_90k": 20946022
+    }
+  },
+  "description":"",
+  "max_end_time_90k": 131598273666690,
+  "min_start_time_90k": 131590386129355,
+  "retain_bytes": 104857600,
+  "short_name": "driveway",
+  "total_duration_90k": 73563631,
+  "total_sample_file_bytes": 98901406,
+}
+```
 
 ### `/camera/<uuid>/recordings`
 
