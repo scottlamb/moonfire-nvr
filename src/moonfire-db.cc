@@ -33,6 +33,8 @@
 
 #include "moonfire-db.h"
 
+#include <time.h>
+
 #include <string>
 
 #include <glog/logging.h>
@@ -42,6 +44,78 @@
 #include "recording.h"
 
 namespace moonfire_nvr {
+
+namespace {
+
+// Helper for AdjustDaysMap.
+void AdjustDay(const std::string &day, int64_t delta,
+               std::map<std::string, int64_t> *days) {
+  auto it = days->find(day);
+  if (it != days->end()) {
+    it->second += delta;
+    DCHECK_GE(it->second, 0) << day << ", " << delta;
+    if (it->second == 0) {
+      days->erase(it);
+    }
+  } else {
+    days->insert(it, std::make_pair(day, delta));
+  }
+}
+
+}  // namespace
+
+namespace internal {
+
+void AdjustDaysMap(int64_t start_time_90k, int64_t end_time_90k, int sign,
+                   std::map<std::string, int64_t> *days) {
+  // There will always be at most two days adjusted, because
+  // kMaxRecordingDuration is less than a day (even during spring forward).
+  DCHECK_LT(start_time_90k, end_time_90k);
+  DCHECK_LE(end_time_90k - start_time_90k, kMaxRecordingDuration);
+  static_assert(kMaxRecordingDuration <= 23 * 60 * kTimeUnitsPerSecond,
+                "max duration should be less than a (spring-forward) day");
+
+  // Fill |buf| with the first day.
+  struct tm mytm;
+  memset(&mytm, 0, sizeof(mytm));
+  time_t start_ts = start_time_90k / kTimeUnitsPerSecond;
+  localtime_r(&start_ts, &mytm);
+  const char kFmt[] = "%Y-%m-%d";
+  char buf[sizeof("YYYY-mm-DD")];
+  strftime(buf, sizeof(buf), kFmt, &mytm);
+
+  // Determine the start of the next day.
+  // Note that mktime(3) normalizes tm_mday, so this should work on the last
+  // day of the month/year.
+  mytm.tm_isdst = -1;
+  mytm.tm_hour = 0;
+  mytm.tm_min = 0;
+  mytm.tm_sec = 0;
+  ++mytm.tm_mday;
+  auto boundary_90k = kTimeUnitsPerSecond * static_cast<int64_t>(mktime(&mytm));
+
+  // Adjust the first day.
+  auto first_day_delta =
+      sign * (std::min(end_time_90k, boundary_90k) - start_time_90k);
+  DCHECK_NE(first_day_delta, 0) << "start=" << start_time_90k
+                                << ", end=" << end_time_90k;
+  AdjustDay(buf, first_day_delta, days);
+
+  if (end_time_90k <= boundary_90k) {
+    return;  // no second day.
+  }
+
+  // Fill |buf| with the second day.
+  strftime(buf, sizeof(buf), kFmt, &mytm);
+
+  // Adjust the second day.
+  auto second_day_delta = sign * (end_time_90k - boundary_90k);
+  DCHECK_NE(second_day_delta, 0) << "start=" << start_time_90k
+                                 << ", end=" << end_time_90k;
+  AdjustDay(buf, second_day_delta, days);
+}
+
+}  // namespace internal
 
 bool MoonfireDatabase::Init(Database *db, std::string *error_message) {
   CHECK(db_ == nullptr);

@@ -225,6 +225,12 @@ class MoonfireDatabase {
     int64_t max_end_time_90k = -1;
     int64_t total_sample_file_bytes = -1;
     int64_t total_duration_90k = -1;
+
+    // A map of calendar days (in the local timezone, "YYYY-mm-DD") to the
+    // total duration (in 90k units) of recorded data in the day. A day is
+    // present in the map ff the value is non-zero.
+    // TODO: actually fill this.
+    std::map<std::string, int64_t> days;
   };
 
   enum class ReservationState { kWriting = 0, kDeleting = 1 };
@@ -252,6 +258,15 @@ class MoonfireDatabase {
   std::map<int64_t, CameraData *> cameras_by_id_;
   std::map<int64_t, VideoSampleEntry> video_sample_entries_;
 };
+
+namespace internal {
+
+// Adjust a day-to-duration map (see MoonfireDatabase::CameraData::days_)
+// to reflect a recording.
+void AdjustDaysMap(int64_t start_time_90k, int64_t end_time_90k, int sign,
+                   std::map<std::string, int64_t> *days);
+
+}  // namespace internal
 
 }  // namespace moonfire_nvr
 

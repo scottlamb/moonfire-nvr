@@ -28,6 +28,8 @@
 //
 // moonfire-db-test.cc: tests of the moonfire-db.h interface.
 
+#include <time.h>
+
 #include <string>
 
 #include <gflags/gflags.h>
@@ -232,6 +234,63 @@ class MoonfireDbTest : public testing::Test {
   std::unique_ptr<MoonfireDatabase> mdb_;
 };
 
+TEST(AdjustDaysMapTest, Basic) {
+  std::map<std::string, int64_t> days;
+
+  // Create a day.
+  const int64_t kTestTime = INT64_C(130647162600000);  // 2015-12-31 23:59:00
+  moonfire_nvr::internal::AdjustDaysMap(
+      kTestTime, kTestTime + 60 * kTimeUnitsPerSecond, 1, &days);
+  EXPECT_THAT(days, testing::ElementsAre(std::make_pair(
+                        "2015-12-31", 60 * kTimeUnitsPerSecond)));
+
+  // Add to a day.
+  moonfire_nvr::internal::AdjustDaysMap(
+      kTestTime, kTestTime + 60 * kTimeUnitsPerSecond, 1, &days);
+  EXPECT_THAT(days, testing::ElementsAre(std::make_pair(
+                        "2015-12-31", 120 * kTimeUnitsPerSecond)));
+
+  // Subtract from a day.
+  moonfire_nvr::internal::AdjustDaysMap(
+      kTestTime, kTestTime + 60 * kTimeUnitsPerSecond, -1, &days);
+  EXPECT_THAT(days, testing::ElementsAre(std::make_pair(
+                        "2015-12-31", 60 * kTimeUnitsPerSecond)));
+
+  // Remove a day.
+  moonfire_nvr::internal::AdjustDaysMap(
+      kTestTime, kTestTime + 60 * kTimeUnitsPerSecond, -1, &days);
+  EXPECT_THAT(days, testing::ElementsAre());
+
+  // Create two days.
+  moonfire_nvr::internal::AdjustDaysMap(
+      kTestTime, kTestTime + 3 * 60 * kTimeUnitsPerSecond, 1, &days);
+  EXPECT_THAT(days,
+              testing::ElementsAre(
+                  std::make_pair("2015-12-31", 1 * 60 * kTimeUnitsPerSecond),
+                  std::make_pair("2016-01-01", 2 * 60 * kTimeUnitsPerSecond)));
+
+  // Add to two days.
+  moonfire_nvr::internal::AdjustDaysMap(
+      kTestTime, kTestTime + 3 * 60 * kTimeUnitsPerSecond, 1, &days);
+  EXPECT_THAT(days,
+              testing::ElementsAre(
+                  std::make_pair("2015-12-31", 2 * 60 * kTimeUnitsPerSecond),
+                  std::make_pair("2016-01-01", 4 * 60 * kTimeUnitsPerSecond)));
+
+  // Subtract from two days.
+  moonfire_nvr::internal::AdjustDaysMap(
+      kTestTime, kTestTime + 3 * 60 * kTimeUnitsPerSecond, -1, &days);
+  EXPECT_THAT(days,
+              testing::ElementsAre(
+                  std::make_pair("2015-12-31", 1 * 60 * kTimeUnitsPerSecond),
+                  std::make_pair("2016-01-01", 2 * 60 * kTimeUnitsPerSecond)));
+
+  // Remove two days.
+  moonfire_nvr::internal::AdjustDaysMap(
+      kTestTime, kTestTime + 3 * 60 * kTimeUnitsPerSecond, -1, &days);
+  EXPECT_THAT(days, testing::ElementsAre());
+}
+
 // Basic test of running some queries on an empty database.
 TEST_F(MoonfireDbTest, EmptyDatabase) {
   std::string error_message;
@@ -337,7 +396,6 @@ TEST_F(MoonfireDbTest, FullLifecycle) {
   EXPECT_TRUE(mdb_->ListReservedSampleFiles(&reserved, &error_message))
       << error_message;
   EXPECT_THAT(reserved, testing::UnorderedElementsAre(uuids[0], uuids[1]));
-  LOG(INFO) << "after delete";
   ExpectNoRecordings(camera_uuid);
 
   EXPECT_TRUE(mdb_->MarkSampleFilesDeleted(uuids, &error_message))
@@ -355,5 +413,10 @@ int main(int argc, char **argv) {
   google::ParseCommandLineFlags(&argc, &argv, true);
   testing::InitGoogleTest(&argc, argv);
   google::InitGoogleLogging(argv[0]);
+
+  // The calendar day math assumes this timezone.
+  CHECK_EQ(0, setenv("TZ", "America/Los_Angeles", 1)) << strerror(errno);
+  tzset();
+
   return RUN_ALL_TESTS();
 }
