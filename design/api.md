@@ -193,5 +193,3 @@ Expected query parameters:
     *   `include_latest` (include only the latest by recording id for a
         particular segment of time)
 *   TODO(slamb): gaps allowed or not? maybe a parameter for this also?
-*   TODO(slamb): parameter to indicate if a caption track should be included
-    with timestamps?
