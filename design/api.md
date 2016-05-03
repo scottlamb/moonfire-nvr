@@ -22,25 +22,25 @@ HTML rather than JSON.
 
 TODO(slamb): authentication.
 
-### `/cameras`
+### `/cameras/`
 
 A `GET` request on this URL returns basic information about all cameras. The
 `application/json` response will have a top-level `cameras` with a list of
 attributes about each camera:
 
 *   `uuid`: in text format
-*   `short\_name`: a short name (typically one or two words)
+*   `short_name`: a short name (typically one or two words)
 *   `description`: a longer description (typically a phrase or paragraph)
-*   `retain\_bytes`: the configured total number of bytes of completed
+*   `retain_bytes`: the configured total number of bytes of completed
     recordings to retain.
-*   `min\_start\_time\_90k`: the start time of the earliest recording for this
+*   `min_start_time_90k`: the start time of the earliest recording for this
     camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
-*   `max\_end\_time\_90k`: the end time of the latest recording for this
+*   `max_end_time_90k`: the end time of the latest recording for this
     camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
-*   `total\_duration\_90k`: the total duration recorded, in 90 kHz units.
-    This is no greater than `max\_end\_time\_90k - max\_start\_time\_90k`; it
+*   `total_duration_90k`: the total duration recorded, in 90 kHz units.
+    This is no greater than `max_end_time_90k - max_start_time_90k`; it
     will be lesser if there are gaps in the recorded data.
-*   `total\_sample\_file\_bytes`: the total number of bytes of sample data (the
+*   `total_sample_file_bytes`: the total number of bytes of sample data (the
     `mdat` portion of a `.mp4` file).
 
 Example response:
@@ -54,7 +54,7 @@ Example response:
       "description": "Hikvision DS-2CD2032 overlooking the driveway from east",
       "retain_bytes": 536870912000,
       "min_start_time_90k": 130888729442361,
-      "max_end_time_90k": 130985466591817
+      "max_end_time_90k": 130985466591817,
       "total_duration_90k": 96736169725,
       "total_sample_file_bytes": 446774393937,
     },
@@ -63,7 +63,7 @@ Example response:
 }
 ```
 
-### `/cameras/<uuid>`
+### `/cameras/<uuid>/`
 
 A GET returns information for the camera with the given URL. The information
 returned is a superset of that returned by the camera list. It also includes a
@@ -135,17 +135,17 @@ fact.
 In the property `recordings`, returns a list of recordings. Each recording
 object has the following properties:
 
-*   `start\_time\_90k`
-*   `end\_time\_90k`
-*   `sample\_file\_bytes`
-*   `video\_sample\_entry\_sha1`
-*   `video\_sample\_entry\_width`
-*   `video\_sample\_entry\_height`
+*   `start_time_90k`
+*   `end_time_90k`
+*   `sample_file_bytes`
+*   `video_sample_entry_sha1`
+*   `video_sample_entry_width`
+*   `video_sample_entry_height`
 
 TODO(slamb): consider ways to reduce the data size; this is in theory quite
 compressible but I'm not sure how effective gzip will be without some tweaks.
 One simple approach would be to just combine some adjacent list entries if
-one's start matches the other's end exactly and the `video\_sample\_entry\_*`
+one's start matches the other's end exactly and the `video_sample_entry_*`
 parameters are the same. So you might get one entry that represents 2 hours of
 video instead of 120 entries representing a minute each.
 
@@ -186,8 +186,8 @@ A GET returns a .mp4 file, with an etag and support for range requests.
 
 Expected query parameters:
 
-*   `start\_time\_90k`
-*   `end\_time\_90k`
+*   `start_time_90k`
+*   `end_time_90k`
 *   `ts`: should be set to `true` to request a subtitle track be added with
     human-readable recording timestamps.
 *   TODO(slamb): possibly `overlap` to indicate what to do about segments of
