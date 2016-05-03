@@ -113,13 +113,17 @@ Example response:
 
 A GET returns information about recordings, in descending order.
 
+Valid request parameters:
+
+*   `start_time_90k` and and `end_time_90k` limit the data returned to only
+    recordings which overlap with the given half-open interval. Either or both
+    may be absent; they default to the beginning and end of time, respectively.
+*   TODO(slamb): `continue` to support paging. (If data is too large, the
+    server should return a `continue` key which is expected to be returned on
+    following requests.)
+
 TODO(slamb): once we support annotations, should they be included in the same
 URI or as a separate `/annotations`?
-
-TODO(slamb): this should support paging. The client can limit the range via
-the URI parameters `start\_time\_90k` and `end\_time\_90k`. If the range is
-too large, the server will return some fraction of the data along with a
-continuation key to pass in for the next request.
 
 TODO(slamb): There might be some irregularity in the order if there are
 overlapping recordings (such as if the server's clock jumped while running)
@@ -172,7 +176,7 @@ Example response:
     },
     ...
   ],
-  "continuation_key": "<opaque blob>",
+  "continue": "<opaque blob>",
 }
 ```
 

@@ -46,6 +46,20 @@ namespace {
 
 static const char kJsonMimeType[] = "application/json";
 
+bool ParseOptionalStartAndEnd(const QueryParameters &params,
+                              int64_t *start_time_90k, int64_t *end_time_90k) {
+  *start_time_90k = std::numeric_limits<int64_t>::min();
+  *end_time_90k = std::numeric_limits<int64_t>::max();
+  if (!params.ok() ||
+      (params.Get("start_time_90k") != nullptr &&
+       !Atoi64(params.Get("start_time_90k"), 10, start_time_90k)) ||
+      (params.Get("end_time_90k") != nullptr &&
+       !Atoi64(params.Get("end_time_90k"), 10, end_time_90k))) {
+    return false;
+  }
+  return true;
+}
+
 void ReplyWithJson(evhttp_request *req, const Json::Value &value) {
   EvBuffer buf;
   buf.Add(Json::FastWriter().write(value));
@@ -186,6 +200,13 @@ void WebInterface::HandleHtmlCameraDetail(evhttp_request *req,
     return evhttp_send_error(req, HTTP_NOTFOUND, "no such camera");
   }
 
+  int64_t start_time_90k;
+  int64_t end_time_90k;
+  QueryParameters params(evhttp_request_get_uri(req));
+  if (!ParseOptionalStartAndEnd(params, &start_time_90k, &end_time_90k)) {
+    return evhttp_send_error(req, HTTP_BADREQUEST, "bad query parameters");
+  }
+
   EvBuffer buf;
   buf.AddPrintf(
       "<!DOCTYPE html>\n"
@@ -253,8 +274,6 @@ void WebInterface::HandleHtmlCameraDetail(evhttp_request *req,
     }
     return IterationControl::kContinue;
   };
-  int64_t start_time_90k = 0;
-  int64_t end_time_90k = std::numeric_limits<int64_t>::max();
   std::string error_message;
   if (!env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
                                        end_time_90k, handle_sql_row,
@@ -318,6 +337,13 @@ void WebInterface::HandleJsonCameraDetail(evhttp_request *req,
 
 void WebInterface::HandleJsonCameraRecordings(evhttp_request *req,
                                               Uuid camera_uuid) {
+  int64_t start_time_90k;
+  int64_t end_time_90k;
+  QueryParameters params(evhttp_request_get_uri(req));
+  if (!ParseOptionalStartAndEnd(params, &start_time_90k, &end_time_90k)) {
+    return evhttp_send_error(req, HTTP_BADREQUEST, "bad query parameters");
+  }
+
   GetCameraRow camera_row;
   if (!env_->mdb->GetCamera(camera_uuid, &camera_row)) {
     return evhttp_send_error(req, HTTP_NOTFOUND, "no such camera");
@@ -339,8 +365,6 @@ void WebInterface::HandleJsonCameraRecordings(evhttp_request *req,
     recordings.append(recording);
     return IterationControl::kContinue;
   };
-  int64_t start_time_90k = 0;
-  int64_t end_time_90k = std::numeric_limits<int64_t>::max();
   std::string error_message;
   if (!env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
                                        end_time_90k, handle_row,
