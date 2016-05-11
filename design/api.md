@@ -141,13 +141,15 @@ object has the following properties:
 *   `video_sample_entry_sha1`
 *   `video_sample_entry_width`
 *   `video_sample_entry_height`
+*   `video_samples`: the number of samples (aka frames) of video in this
+    recording.
+*   TODO: recording id(s)? interior split points for coalesced recordings?
 
-TODO(slamb): consider ways to reduce the data size; this is in theory quite
-compressible but I'm not sure how effective gzip will be without some tweaks.
-One simple approach would be to just combine some adjacent list entries if
-one's start matches the other's end exactly and the `video_sample_entry_*`
-parameters are the same. So you might get one entry that represents 2 hours of
-video instead of 120 entries representing a minute each.
+Recordings may be coalesced if they are adjacent and have the same
+`video_sample_entry_*` data. That is, if recording A spans times [t, u) and
+recording B spans times [u, v), they may be returned as a single recording
+AB spanning times [t, v). Arbitrarily many recordings may be coalesced in this
+fashion.
 
 Example request URI (with added whitespace between parameters):
 

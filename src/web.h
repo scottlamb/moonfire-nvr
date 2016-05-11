@@ -72,6 +72,12 @@ class WebInterface {
   void HandleJsonCameraRecordings(evhttp_request *req, Uuid camera_uuid);
   void HandleMp4View(evhttp_request *req, Uuid camera_uuid);
 
+  bool ListAggregatedCameraRecordings(
+      Uuid camera_uuid, int64_t start_time_90k, int64_t end_time_90k,
+      int64_t forced_split_duration_90k,
+      const std::function<void (const ListCameraRecordingsRow &)> &fn,
+      std::string *error_message);
+
   // TODO: more nuanced error code for HTTP.
   std::shared_ptr<VirtualFile> BuildMp4(Uuid camera_uuid,
                                         int64_t start_time_90k,

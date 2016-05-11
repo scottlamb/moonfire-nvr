@@ -193,6 +193,37 @@ void WebInterface::HandleJsonCameraList(evhttp_request *req) {
   ReplyWithJson(req, cameras);
 }
 
+bool WebInterface::ListAggregatedCameraRecordings(
+      Uuid camera_uuid, int64_t start_time_90k, int64_t end_time_90k,
+      int64_t forced_split_duration_90k,
+      const std::function<void(const ListCameraRecordingsRow &)> &fn,
+      std::string *error_message) {
+  ListCameraRecordingsRow aggregated;
+  auto handle_sql_row = [&](const ListCameraRecordingsRow &row) {
+    auto new_duration_90k = aggregated.end_time_90k - row.start_time_90k;
+    if (row.video_sample_entry_sha1 == aggregated.video_sample_entry_sha1 &&
+        row.end_time_90k == aggregated.start_time_90k &&
+        new_duration_90k < forced_split_duration_90k) {
+      // Append to current .mp4.
+      aggregated.start_time_90k = row.start_time_90k;
+      aggregated.video_samples += row.video_samples;
+      aggregated.sample_file_bytes += row.sample_file_bytes;
+    } else {
+      // Start a new .mp4.
+      if (aggregated.start_time_90k != -1) { fn(aggregated); }
+      aggregated = row;
+    }
+    return IterationControl::kContinue;
+  };
+  if (!env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
+                                       end_time_90k, handle_sql_row,
+                                       error_message)) {
+    return false;
+  }
+  if (aggregated.start_time_90k != -1) { fn(aggregated); }
+  return true;
+}
+
 void WebInterface::HandleHtmlCameraDetail(evhttp_request *req,
                                           Uuid camera_uuid) {
   GetCameraRow camera_row;
@@ -234,11 +265,7 @@ void WebInterface::HandleHtmlCameraDetail(evhttp_request *req,
   // aggregated .mp4 files of up to kForceSplitDuration90k each, provided
   // there is no gap or change in video parameters between recordings.
   static const int64_t kForceSplitDuration90k = 60 * 60 * kTimeUnitsPerSecond;
-  ListCameraRecordingsRow aggregated;
-  auto maybe_finish_html_row = [&]() {
-    if (aggregated.start_time_90k == -1) {
-      return;  // there is no row to finish.
-    }
+  auto finish_html_row = [&](const ListCameraRecordingsRow &aggregated) {
     auto seconds = static_cast<float>(aggregated.end_time_90k -
                                       aggregated.start_time_90k) /
                    kTimeUnitsPerSecond;
@@ -258,31 +285,14 @@ void WebInterface::HandleHtmlCameraDetail(evhttp_request *req,
             "bps")
             .c_str());
   };
-  auto handle_sql_row = [&](const ListCameraRecordingsRow &row) {
-    auto new_duration_90k = aggregated.end_time_90k - row.start_time_90k;
-    if (row.video_sample_entry_sha1 == aggregated.video_sample_entry_sha1 &&
-        row.end_time_90k == aggregated.start_time_90k &&
-        new_duration_90k < kForceSplitDuration90k) {
-      // Append to current .mp4.
-      aggregated.start_time_90k = row.start_time_90k;
-      aggregated.video_samples += row.video_samples;
-      aggregated.sample_file_bytes += row.sample_file_bytes;
-    } else {
-      // Start a new .mp4.
-      maybe_finish_html_row();
-      aggregated = row;
-    }
-    return IterationControl::kContinue;
-  };
   std::string error_message;
-  if (!env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
-                                       end_time_90k, handle_sql_row,
-                                       &error_message)) {
+  if (!ListAggregatedCameraRecordings(camera_uuid, start_time_90k,
+                                      end_time_90k, kForceSplitDuration90k,
+                                      finish_html_row, &error_message)) {
     return evhttp_send_error(
         req, HTTP_INTERNAL,
         StrCat("sqlite query failed: ", EscapeHtml(error_message)).c_str());
   }
-  maybe_finish_html_row();
   buf.Add(
       "</table>\n"
       "</html>\n");
@@ -366,9 +376,10 @@ void WebInterface::HandleJsonCameraRecordings(evhttp_request *req,
     return IterationControl::kContinue;
   };
   std::string error_message;
-  if (!env_->mdb->ListCameraRecordings(camera_uuid, start_time_90k,
-                                       end_time_90k, handle_row,
-                                       &error_message)) {
+  const auto kForceSplitDuration90k = std::numeric_limits<int64_t>::max();
+  if (!ListAggregatedCameraRecordings(camera_uuid, start_time_90k,
+                                      end_time_90k, kForceSplitDuration90k,
+                                      handle_row, &error_message)) {
     return evhttp_send_error(
         req, HTTP_INTERNAL,
         StrCat("sqlite query failed: ", EscapeHtml(error_message)).c_str());
