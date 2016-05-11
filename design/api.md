@@ -89,13 +89,13 @@ Example response:
 {
   "days": {
     "2016-05-01": {
-      "end_time_usec": 131595516000000,
-      "start_time_usec": 131587740000000,
+      "end_time_90k": 131595516000000,
+      "start_time_90k": 131587740000000,
       "total_duration_90k": 52617609
     },
     "2016-05-02": {
-      "end_time_usec": 131603292000000,
-      "start_time_usec": 131595516000000,
+      "end_time_90k": 131603292000000,
+      "start_time_90k": 131595516000000,
       "total_duration_90k": 20946022
     }
   },

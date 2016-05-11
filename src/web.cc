@@ -316,9 +316,9 @@ void WebInterface::HandleJsonCameraDetail(evhttp_request *req,
   Json::Value days(Json::objectValue);
   std::string error_message;
   for (const auto &day : camera_row.days) {
-    int64_t start_time_usec;
-    int64_t end_time_usec;
-    if (!GetDayBounds(day.first, &start_time_usec, &end_time_usec,
+    int64_t start_time_90k;
+    int64_t end_time_90k;
+    if (!GetDayBounds(day.first, &start_time_90k, &end_time_90k,
                       &error_message)) {
       return evhttp_send_error(
           req, HTTP_INTERNAL,
@@ -326,8 +326,8 @@ void WebInterface::HandleJsonCameraDetail(evhttp_request *req,
     }
 
     Json::Value day_val(Json::objectValue);
-    day_val["start_time_usec"] = static_cast<Json::Int64>(start_time_usec);
-    day_val["end_time_usec"] = static_cast<Json::Int64>(end_time_usec);
+    day_val["start_time_90k"] = static_cast<Json::Int64>(start_time_90k);
+    day_val["end_time_90k"] = static_cast<Json::Int64>(end_time_90k);
     day_val["total_duration_90k"] = static_cast<Json::Int64>(day.second);
     days[day.first] = day_val;
   }
