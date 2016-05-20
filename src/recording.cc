@@ -36,6 +36,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "common.h"
 #include "coding.h"
 #include "string.h"
 
@@ -81,22 +82,23 @@ void SampleIndexEncoder::AddSample(int32_t duration_90k, int32_t bytes,
 void SampleIndexIterator::Next() {
   uint32_t raw1;
   uint32_t raw2;
-  pos_ += bytes_internal();
-  if (data_.empty() || !DecodeVar32(&data_, &raw1, &error_) ||
-      !DecodeVar32(&data_, &raw2, &error_)) {
+  pos_ += bytes_;
+  if (UNLIKELY(data_.empty()) ||
+      UNLIKELY(!DecodeVar32(&data_, &raw1, &error_)) ||
+      UNLIKELY(!DecodeVar32(&data_, &raw2, &error_))) {
     done_ = true;
     return;
   }
   start_90k_ += duration_90k_;
   int32_t duration_90k_delta = Unzigzag32(raw1 >> 1);
   duration_90k_ += duration_90k_delta;
-  if (duration_90k_ < 0) {
+  if (UNLIKELY(duration_90k_ < 0)) {
     error_ = StrCat("negative duration ", duration_90k_,
                     " after applying delta ", duration_90k_delta);
     done_ = true;
     return;
   }
-  if (duration_90k_ == 0 && !data_.empty()) {
+  if (UNLIKELY(duration_90k_ == 0 && !data_.empty())) {
     error_ = StrCat("zero duration only allowed at end; have ", data_.size(),
                     "bytes left.");
     done_ = true;
@@ -104,15 +106,15 @@ void SampleIndexIterator::Next() {
   }
   is_key_ = raw1 & 0x01;
   int32_t bytes_delta = Unzigzag32(raw2);
-  if (is_key_) {
-    bytes_key_ += bytes_delta;
+  if (UNLIKELY(is_key_)) {
+    bytes_ = bytes_key_ += bytes_delta;
   } else {
-    bytes_nonkey_ += bytes_delta;
+    bytes_ = bytes_nonkey_ += bytes_delta;
   }
-  if (bytes_internal() <= 0) {
-    error_ = StrCat("non-positive bytes ", bytes_internal(),
-                    " after applying delta ", bytes_delta, " to ",
-                    (is_key_ ? "key" : "non-key"), " frame at ts ", start_90k_);
+  if (UNLIKELY(bytes_ <= 0)) {
+    error_ = StrCat("non-positive bytes ", bytes_, " after applying delta ",
+                    bytes_delta, " to ", (is_key_ ? "key" : "non-key"),
+                    " frame at ts ", start_90k_);
     done_ = true;
     return;
   }
@@ -128,6 +130,7 @@ void SampleIndexIterator::Clear() {
   duration_90k_ = 0;
   bytes_key_ = 0;
   bytes_nonkey_ = 0;
+  bytes_ = 0;
   is_key_ = false;
   done_ = true;
 }

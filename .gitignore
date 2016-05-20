@@ -1,6 +1,7 @@
 *.swp
 build
 debug
+release
 obj-*
 cameras.sql
 debian/files

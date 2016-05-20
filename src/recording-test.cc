@@ -40,6 +40,7 @@
 
 #include "recording.h"
 #include "string.h"
+#include "testutil.h"
 
 DECLARE_bool(alsologtostderr);
 

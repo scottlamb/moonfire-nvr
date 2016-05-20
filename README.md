@@ -142,9 +142,9 @@ For instructions, you can skip to "[Camera configuration and hard disk mounting]
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
-    $ mkdir build
-    $ cd build
-    $ cmake ..
+    $ mkdir release
+    $ cd release
+    $ cmake -DCMAKE_BUILD_TYPE=Release ..
     $ make
     $ sudo make install
 

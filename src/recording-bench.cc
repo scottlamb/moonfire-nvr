@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 Lamb <slamb@slamb.org>
+// Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -28,54 +28,39 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-// uuid.h: small wrapper around the C UUID library for generating/parsing
-// RFC 4122 UUIDs.
+// recording-bench.cc: benchmarks of the recording.h interface.
 
-#ifndef MOONFIRE_NVR_UUID_H
-#define MOONFIRE_NVR_UUID_H
+#include <benchmark/benchmark.h>
+#include <gflags/gflags.h>
 
-#include <re2/stringpiece.h>
-#include <uuid/uuid.h>
+#include "recording.h"
+#include "testutil.h"
 
-namespace moonfire_nvr {
+DECLARE_bool(alsologtostderr);
 
-class Uuid {
- public:
-  // Create a null uuid.
-  Uuid() { uuid_clear(me_); }
+static void BM_Iterator(benchmark::State &state) {
+  using moonfire_nvr::ReadFileOrDie;
+  using moonfire_nvr::SampleIndexIterator;
+  // state.PauseTiming();
+  std::string index = ReadFileOrDie("../src/testdata/video_sample_index.bin");
+  // state.ResumeTiming();
+  while (state.KeepRunning()) {
+    SampleIndexIterator it(index);
+    while (!it.done()) it.Next();
+    CHECK(!it.has_error()) << it.error();
+  }
+  state.SetBytesProcessed(int64_t(state.iterations()) * int64_t(index.size()));
+}
+BENCHMARK(BM_Iterator);
 
-  // Parse the text UUID. Returns success.
-  bool ParseText(re2::StringPiece input);
+int main(int argc, char **argv) {
+  FLAGS_alsologtostderr = true;
 
-  // Parse a binary UUID. In practice any 16-byte string is considered valid.
-  bool ParseBinary(re2::StringPiece input);
+  // Sadly, these two flag-parsing libraries don't appear to get along.
+  // google::ParseCommandLineFlags(&argc, &argv, true);
+  benchmark::Initialize(&argc, argv);
 
-  // Return a 36-byte lowercase text representation, such as
-  // 1b4e28ba-2fa1-11d2-883f-0016d3cca427.
-  std::string UnparseText() const;
-
-  // Return a reference to the 16-byte binary form.
-  // Invalidated by any change to the Uuid object.
-  re2::StringPiece binary_view() const;
-
-  bool operator==(const Uuid &) const;
-  bool operator<(const Uuid &) const;
-
-  bool is_null() const { return uuid_is_null(me_); }
-
- private:
-  friend class RealUuidGenerator;
-  uuid_t me_;
-};
-
-class UuidGenerator {
- public:
-  virtual ~UuidGenerator() {}
-  virtual Uuid Generate() = 0;
-};
-
-UuidGenerator *GetRealUuidGenerator();
-
-}  // namespace moonfire_nvr
-
-#endif  // MOONFIRE_NVR_CODING_H
+  google::InitGoogleLogging(argv[0]);
+  benchmark::RunSpecifiedBenchmarks();
+  return 0;
+}

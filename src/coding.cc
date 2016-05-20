@@ -31,6 +31,7 @@
 // coding.cc: see coding.h.
 
 #include "coding.h"
+#include "common.h"
 
 namespace moonfire_nvr {
 
@@ -50,24 +51,56 @@ void AppendVar32Slow(uint32_t in, std::string *out) {
 
 bool DecodeVar32Slow(re2::StringPiece *in, uint32_t *out_p,
                      std::string *error_message) {
+  // The fast path is inlined; this function is called only when
+  // byte 0 is present and >= 0x80.
+  size_t left = in->size() - 1;
   auto p = reinterpret_cast<uint8_t const *>(in->data());
-  auto end = p + in->size();
-  uint32_t out = 0;
-  int shift = 0;
-  do {
-    if (p == end) {
-      *error_message = "buffer underrun";
-      return false;
+  uint32_t v = uint32_t(p[0] & 0x7f);
+  size_t size = 1;
+
+  // Aid branch prediction in two ways:
+  // * have a faster path which doesn't check for buffer underrun on every
+  //   byte if there's plenty of bytes left or the last byte is not continued.
+  // * fully unroll the loop
+  if (left >= 4 || (p[left] & 0x80) == 0) {
+    v |= uint32_t(p[size] & 0x7f) << 7;
+    if (p[size++] & 0x80) {
+      v |= uint32_t(p[size] & 0x7f) << 14;
+      if (p[size++] & 0x80) {
+        v |= uint32_t(p[size] & 0x7f) << 21;
+        if (p[size++] & 0x80) {
+          if (UNLIKELY(p[size] & 0xf0)) {
+            *error_message = "integer overflow";
+            return false;
+          }
+          v |= uint32_t(p[size++] & 0x7f) << 28;
+        }
+      }
     }
-    if (shift == 28 && *p & 0xf0) {
-      *error_message = "integer overflow";
-      return false;
+    *out_p = v;
+    in->remove_prefix(size);
+    return true;
+  }
+
+  // Slowest path.
+  if (LIKELY(left)) {
+    v |= uint32_t(p[size] & 0x7f) << 7;
+    if (p[size++] & 0x80 && --left > 0) {
+      v |= uint32_t(p[size] & 0x7f) << 14;
+      if (p[size++] & 0x80 && --left > 0) {
+        v |= uint32_t(p[size] & 0x7f) << 21;
+        if (p[size++] & 0x80) {
+          --left;
+        }
+      }
     }
-    out |= uint32_t(*p & 0x7f) << shift;
-    shift += 7;
-  } while ((*p++ & 0x80) != 0);
-  *out_p = out;
-  in->remove_prefix(reinterpret_cast<char const *>(p) - in->data());
+  }
+  if (UNLIKELY(left == 0 && p[size - 1] & 0x80)) {
+    *error_message = "buffer underrun";
+    return false;
+  }
+  *out_p = v;
+  in->remove_prefix(size);
   return true;
 }
 

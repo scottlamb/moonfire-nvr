@@ -134,7 +134,7 @@ class SampleIndexIterator {
   int32_t end_90k() const { return start_90k_ + duration_90k(); }
   int32_t bytes() const {
     DCHECK(!done_);
-    return bytes_internal();
+    return bytes_;
   }
   bool is_key() const {
     DCHECK(!done_);
@@ -144,16 +144,12 @@ class SampleIndexIterator {
  private:
   void Clear();
 
-  // Return the bytes taken by the current sample, or 0 after Clear().
-  int64_t bytes_internal() const {
-    return is_key_ ? bytes_key_ : bytes_nonkey_;
-  }
-
   re2::StringPiece data_;
   std::string error_;
   int64_t pos_;
   int32_t start_90k_;
   int32_t duration_90k_;
+  int32_t bytes_;  // bytes taken by the current sample, or 0 after Clear().
   int32_t bytes_key_;
   int32_t bytes_nonkey_;
   bool is_key_;

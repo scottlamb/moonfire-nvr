@@ -33,6 +33,9 @@
 #ifndef MOONFIRE_NVR_COMMON_H
 #define MOONFIRE_NVR_COMMON_H
 
+#define LIKELY(x) __builtin_expect((x), 1)
+#define UNLIKELY(x) __builtin_expect((x), 0)
+
 namespace moonfire_nvr {
 
 // Return value for *ForEach callbacks.

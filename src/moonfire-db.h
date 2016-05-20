@@ -61,6 +61,7 @@
 #define MOONFIRE_NVR_MOONFIRE_DB_H
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>

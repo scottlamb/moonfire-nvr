@@ -387,7 +387,11 @@ void HttpServe(const std::shared_ptr<VirtualFile> &file, evhttp_request *req) {
                 << ": Client requested whole file of size " << file->size();
       http_status = HTTP_OK;
       http_status_str = "OK";
+      break;
     }
+
+    default:
+      LOG(FATAL) << "unexpected range_type: " << static_cast<int>(range_type);
   }
 
   // Successful reply started; add common headers and send.

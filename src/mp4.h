@@ -36,6 +36,7 @@
 #ifndef MOONFIRE_NVR_MP4_H
 #define MOONFIRE_NVR_MP4_H
 
+#include <limits>
 #include <memory>
 #include <vector>
 

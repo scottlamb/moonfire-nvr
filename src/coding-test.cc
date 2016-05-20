@@ -58,18 +58,53 @@ TEST(VarintTest, Simple) {
   EXPECT_EQ(UINT32_C(1), out);
   EXPECT_TRUE(DecodeVar32(&p, &out, &error_message));
   EXPECT_EQ(UINT32_C(300), out);
+  EXPECT_EQ(0, p.size());
+}
+
+TEST(VarintTest, AllDecodeSizes) {
+  std::string error_message;
+  const uint32_t kToDecode[]{
+      1,
+      1 | (2 << 7),
+      1 | (2 << 7) | (3 << 14),
+      1 | (2 << 7) | (3 << 14) | (4 << 21),
+      1 | (2 << 7) | (3 << 14) | (4 << 21) | (5 << 28),
+  };
+  for (size_t i = 0; i < sizeof(kToDecode) / sizeof(kToDecode[0]); ++i) {
+    auto in = kToDecode[i];
+    std::string foo;
+    AppendVar32(in, &foo);
+    ASSERT_EQ(i + 1, foo.size());
+    re2::StringPiece p(foo);
+    uint32_t out;
+
+    // Slow path: last bytes of the buffer.
+    DecodeVar32(&p, &out, &error_message);
+    EXPECT_EQ(in, out) << "i: " << i;
+    EXPECT_EQ(0, p.size()) << "i: " << i;
+
+    // Fast path: plenty of bytes in the buffer.
+    foo.append(4, 0);
+    p = foo;
+    DecodeVar32(&p, &out, &error_message);
+    EXPECT_EQ(in, out);
+    EXPECT_EQ(4, p.size());
+  }
 }
 
 TEST(VarintTest, DecodeErrors) {
   re2::StringPiece empty;
   uint32_t out;
   std::string error_message;
-  EXPECT_FALSE(DecodeVar32(&empty, &out, &error_message));
-  EXPECT_EQ("buffer underrun", error_message);
 
-  re2::StringPiece partial("\x80", 1);
-  EXPECT_FALSE(DecodeVar32(&partial, &out, &error_message));
-  EXPECT_EQ("buffer underrun", error_message);
+  for (auto input :
+       {re2::StringPiece("", 0), re2::StringPiece("\x80", 1),
+        re2::StringPiece("\x80\x80", 2), re2::StringPiece("\x80\x80\x80", 3),
+        re2::StringPiece("\x80\x80\x80\x80", 4)}) {
+    EXPECT_FALSE(DecodeVar32(&input, &out, &error_message)) << "input: "
+                                                            << input;
+    EXPECT_EQ("buffer underrun", error_message);
+  }
 
   re2::StringPiece too_big("\x80\x80\x80\x80\x10", 5);
   EXPECT_FALSE(DecodeVar32(&too_big, &out, &error_message));

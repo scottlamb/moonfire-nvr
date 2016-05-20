@@ -376,7 +376,7 @@ Statement Database::Prepare(re2::StringPiece sql, size_t *used,
 bool RunStatements(DatabaseContext *ctx, re2::StringPiece stmts,
                    std::string *error_message) {
   while (true) {
-    size_t used;
+    size_t used = 0;
     auto stmt = ctx->db()->Prepare(stmts, &used, error_message);
     if (!stmt.valid()) {
       // Statement didn't parse. If |error_message| is empty, there are just no

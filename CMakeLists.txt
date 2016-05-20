@@ -39,8 +39,25 @@ else()
   set(CMAKE_CXX_STANDARD 11)
 endif()
 
-set(CMAKE_CXX_FLAGS "-Wall -Werror -pedantic-errors ${CMAKE_CXX_FLAGS}")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ggdb")
+set(CMAKE_CXX_FLAGS "-Wall -Werror -pedantic-errors -ggdb ${CMAKE_CXX_FLAGS}")
+
+option(LTO "Use link-time optimization" ON)
+option(FPROFILE_GENERATE "Compile executable to generate usage data" OFF)
+option(FPROFILE_USE "Compile executable using generated usage data" OFF)
+
+if(LTO)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
+  set(CMAKE_AR "gcc-ar")
+  set(CMAKE_RANLIB "gcc-ranlib")
+  set(CMAKE_LD "gcc-ld")
+endif()
+
+if(PROFILE_GENERATE)
+  set(CMAKE_CXX_FLAGS "-fprofile-generate ${CMAKE_CXX_FLAGS}")
+endif()
+if(PROFILE_USE)
+  set(CMAKE_CXX_FLAGS "-fprofile-use -fprofile-correction ${CMAKE_CXX_FLAGS}")
+endif()
 
 #
 # Dependencies.
@@ -113,6 +130,21 @@ add_library(GMock STATIC IMPORTED)
 add_dependencies(GMock GMockProject)
 set_target_properties(GMock PROPERTIES
     IMPORTED_LOCATION "${binary_dir}/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
+    IMPORTED_LINK_INTERFACE_LIBRARIES "${CMAKE_THREAD_LIBS_INIT}")
+
+ExternalProject_Add(
+    GBenchmarkProject
+    URL "https://github.com/google/benchmark/archive/v1.0.0.tar.gz"
+    URL_HASH "SHA1=4f778985dce02d2e63262e6f388a24b595254a93"
+    CMAKE_ARGS
+      -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
+    INSTALL_COMMAND "")
+ExternalProject_Get_Property(GBenchmarkProject source_dir binary_dir)
+set(GBenchmark_INCLUDE_DIR ${source_dir}/include)
+add_library(GBenchmark STATIC IMPORTED)
+add_dependencies(GBenchmark GBenchmarkProject)
+set_target_properties(GBenchmark PROPERTIES
+    IMPORTED_LOCATION "${binary_dir}/src/${CMAKE_STATIC_LIBRARY_PREFIX}benchmark${CMAKE_STATIC_LIBRARY_SUFFIX}"
     IMPORTED_LINK_INTERFACE_LIBRARIES "${CMAKE_THREAD_LIBS_INIT}")
 
 #

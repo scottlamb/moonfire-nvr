@@ -73,6 +73,7 @@ install_programs(/bin FILES moonfire-nvr)
 # Tests.
 include_directories(${GTest_INCLUDE_DIR})
 include_directories(${GMock_INCLUDE_DIR})
+include_directories(${GBenchmark_INCLUDE_DIR})
 
 set(MOONFIRE_NVR_TESTS
     coding
@@ -88,8 +89,13 @@ set(MOONFIRE_NVR_TESTS
 
 foreach(test ${MOONFIRE_NVR_TESTS})
   add_executable(${test}-test ${test}-test.cc testutil.cc)
-  target_link_libraries(${test}-test GTest GMock moonfire-nvr-lib )
+  target_link_libraries(${test}-test GTest GMock moonfire-nvr-lib)
   add_test(NAME ${test}-test
            COMMAND ${test}-test
            WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 endforeach(test)
+
+foreach(bench recording)
+  add_executable(${bench}-bench ${bench}-bench.cc testutil.cc)
+  target_link_libraries(${bench}-bench GTest GMock GBenchmark moonfire-nvr-lib)
+endforeach(bench)

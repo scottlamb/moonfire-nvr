@@ -169,9 +169,9 @@ fi
 #
 if [ "${FORCE_BUILD:-0}" -eq 1 ]; then
 	# Remove previous build, if any
-	[ -d build ] && rm -fr build 2>/dev/null
-	mkdir build; cd build
-	cmake .. && make && sudo make install
+	[ -d release ] && rm -fr release 2>/dev/null
+	mkdir release; cd release
+	cmake -DCMAKE_BUILD_TYPE=Release .. && make && sudo make install
 	if [ -x "${SERVICE_BIN}" ]; then
 		echo "Binary installed..."; echo
 	else
