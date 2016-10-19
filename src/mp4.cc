@@ -298,10 +298,10 @@ struct EditBox {  // ISO/IEC 14496-12 section 8.6.5, edts.
   const char type[4] = {'e', 'd', 't', 's'};
 } __attribute__((packed));
 
-struct EditListBoxVersion0 {  // ISO/IEC 14496-12 section 8.6.6, elst.
+struct EditListBoxVersion1 {  // ISO/IEC 14496-12 section 8.6.6, elst.
   uint32_t size = NET_UINT32_C(0);
   const char type[4] = {'e', 'l', 's', 't'};
-  const uint32_t version_and_flags = NET_UINT32_C(0);
+  const uint32_t version_and_flags = NET_UINT32_C(1 << 24);
   uint32_t entry_count = NET_UINT32_C(0);
 };
 
@@ -542,8 +542,9 @@ class Mp4File : public VirtualFile {
     std::string segment_times;
     for (const auto &segment : segments_) {
       segment_times.clear();
-      Append64(segment->pieces.sample_pos().begin, &segment_times);
-      Append64(segment->pieces.sample_pos().end, &segment_times);
+      Append64(segment->recording.start_time_90k, &segment_times);
+      Append32(segment->rel_start_90k, &segment_times);
+      Append32(segment->pieces.end_90k(), &segment_times);
       etag_digest->Update(segment_times);
       etag_digest->Update(segment->recording.sample_file_sha1);
     }
@@ -609,11 +610,11 @@ class Mp4File : public VirtualFile {
 
   void MaybeAppendVideoEdts() {
     struct Entry {
-      Entry(int32_t segment_duration, int32_t media_time)
+      Entry(int64_t segment_duration, int64_t media_time)
           : segment_duration(segment_duration), media_time(media_time) {}
-      int32_t segment_duration = 0;
-      int32_t media_time = 0;
-      int32_t end() const { return segment_duration + media_time; }
+      int64_t segment_duration = 0;
+      int64_t media_time = 0;
+      int64_t end() const { return segment_duration + media_time; }
     };
     std::vector<Entry> entries;
     int64_t cur_media_time = 0;
@@ -640,8 +641,8 @@ class Mp4File : public VirtualFile {
     for (const auto &entry : entries) {
       VLOG(2) << "...duration=" << entry.segment_duration
               << ", time=" << entry.media_time;
-      AppendU32(entry.segment_duration, s);
-      AppendU32(entry.media_time, s);
+      AppendU64(entry.segment_duration, s);
+      AppendU64(entry.media_time, s);
       AppendU16(1, s);  // media_rate_integer
       AppendU16(1, s);  // media_rate_fraction
     }
@@ -761,7 +762,7 @@ class Mp4File : public VirtualFile {
     {
       CONSTRUCT_BOX(moov_subtitle_trak_mdia_);
       {
-        CONSTRUCT_BOX(moov_video_trak_mdia_mdhd_);
+        CONSTRUCT_BOX(moov_subtitle_trak_mdia_mdhd_);
         moov_subtitle_trak_mdia_mdhd_.header().creation_time = net_creation_ts;
         moov_subtitle_trak_mdia_mdhd_.header().modification_time =
             net_creation_ts;
@@ -903,7 +904,7 @@ class Mp4File : public VirtualFile {
   Mp4Box<TrackBox> moov_video_trak_;
   Mp4Box<TrackHeaderBoxVersion0> moov_video_trak_tkhd_;
   Mp4Box<EditBox> moov_video_trak_edts_;
-  Mp4Box<EditListBoxVersion0> moov_video_trak_edts_elst_;
+  Mp4Box<EditListBoxVersion1> moov_video_trak_edts_elst_;
   StringPieceSlice moov_video_trak_edts_elst_entries_;
   std::string moov_video_trak_edts_elst_entries_str_;
   Mp4Box<MediaBox> moov_video_trak_mdia_;

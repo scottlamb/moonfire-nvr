@@ -344,6 +344,16 @@ TEST_F(IntegrationTest, RoundTrip) {
       recording, 0, std::numeric_limits<int32_t>::max(), false);
   WriteMp4(f.get());
   CompareMp4s(0);
+
+  // This test is brittle, which is the point. Any time the digest comparison
+  // here fails, it can be updated, but the etag must change as well!
+  // Otherwise clients may combine ranges from the new format with ranges
+  // from the old format!
+  EXPECT_EQ("1e5331e8371bd97ac3158b3a86494abc87cdc70e", Digest(f.get()));
+  EXPECT_EQ("\"268db2cd6e4814676d38832f1f9340c7555e4e71\"", f->etag());
+
+  // 10 seconds later than the segment's start time.
+  EXPECT_EQ(1430006410, f->last_modified());
 }
 
 TEST_F(IntegrationTest, RoundTripWithSubtitle) {
@@ -355,6 +365,13 @@ TEST_F(IntegrationTest, RoundTripWithSubtitle) {
       recording, 0, std::numeric_limits<int32_t>::max(), true);
   WriteMp4(f.get());
   CompareMp4s(0);
+
+  // This test is brittle, which is the point. Any time the digest comparison
+  // here fails, it can be updated, but the etag must change as well!
+  // Otherwise clients may combine ranges from the new format with ranges
+  // from the old format!
+  EXPECT_EQ("0081a442ba73092027fc580eeac2ebf25cb1ef50", Digest(f.get()));
+  EXPECT_EQ("\"8a29042355e1e28c10fbba328d1ddc9d54e450cd\"", f->etag());
 }
 
 TEST_F(IntegrationTest, RoundTripWithEditList) {
@@ -366,25 +383,13 @@ TEST_F(IntegrationTest, RoundTripWithEditList) {
       recording, 1, std::numeric_limits<int32_t>::max(), false);
   WriteMp4(f.get());
   CompareMp4s(-1);
-}
-
-TEST_F(IntegrationTest, Metadata) {
-  Recording recording = CopyMp4ToSingleRecording();
-  if (HasFailure()) {
-    return;
-  }
-  auto f = CreateMp4FromSingleRecording(
-      recording, 0, std::numeric_limits<int32_t>::max(), false);
 
   // This test is brittle, which is the point. Any time the digest comparison
   // here fails, it can be updated, but the etag must change as well!
   // Otherwise clients may combine ranges from the new format with ranges
   // from the old format!
-  EXPECT_EQ("1e5331e8371bd97ac3158b3a86494abc87cdc70e", Digest(f.get()));
-  EXPECT_EQ("\"a9ce99a83a177516e7f862fed405e2b47b7d4ae3\"", f->etag());
-
-  // 10 seconds later than the segment's start time.
-  EXPECT_EQ(1430006410, f->last_modified());
+  EXPECT_EQ("685e026af44204bc9cc52115c5e17058e9fb7c70", Digest(f.get()));
+  EXPECT_EQ("\"1373289ddc7c05580deeeb1f1624e2d6cac7ddd3\"", f->etag());
 }
 
 }  // namespace
