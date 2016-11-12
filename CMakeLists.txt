@@ -114,22 +114,22 @@ enable_testing()
 # http://www.kaizou.org/2014/11/gtest-cmake/
 include(ExternalProject)
 ExternalProject_Add(
-    GMockProject
-    URL "https://googlemock.googlecode.com/files/gmock-1.7.0.zip"
-    URL_HASH "SHA1=f9d9dd882a25f4069ed9ee48e70aff1b53e3c5a5"
+    GTestProject
+    URL "https://github.com/google/googletest/archive/release-1.8.0.tar.gz"
+    URL_HASH "SHA1=e7e646a6204638fe8e87e165292b8dd9cd4c36ed"
     INSTALL_COMMAND "")
-ExternalProject_Get_Property(GMockProject source_dir binary_dir)
-set(GTest_INCLUDE_DIR ${source_dir}/gtest/include)
+ExternalProject_Get_Property(GTestProject source_dir binary_dir)
+set(GTest_INCLUDE_DIR ${source_dir}/googletest/include)
 add_library(GTest STATIC IMPORTED)
-add_dependencies(GTest GMockProject)
+add_dependencies(GTest GTestProject)
 set_target_properties(GTest PROPERTIES
-    IMPORTED_LOCATION "${binary_dir}/gtest/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}"
+    IMPORTED_LOCATION "${binary_dir}/googlemock/gtest/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}"
     IMPORTED_LINK_INTERFACE_LIBRARIES "${CMAKE_THREAD_LIBS_INIT}")
-set(GMock_INCLUDE_DIR ${source_dir}/include)
+set(GMock_INCLUDE_DIR ${source_dir}/googlemock/include)
 add_library(GMock STATIC IMPORTED)
-add_dependencies(GMock GMockProject)
+add_dependencies(GMock GTestProject)
 set_target_properties(GMock PROPERTIES
-    IMPORTED_LOCATION "${binary_dir}/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
+    IMPORTED_LOCATION "${binary_dir}/googlemock/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
     IMPORTED_LINK_INTERFACE_LIBRARIES "${CMAKE_THREAD_LIBS_INIT}")
 
 ExternalProject_Add(
