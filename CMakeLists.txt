@@ -56,7 +56,7 @@ if(PROFILE_GENERATE)
   set(CMAKE_CXX_FLAGS "-fprofile-generate ${CMAKE_CXX_FLAGS}")
 endif()
 if(PROFILE_USE)
-  set(CMAKE_CXX_FLAGS "-fprofile-use -fprofile-correction ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "-fprofile-use -fprofile-correction -Wno-error=coverage-mismatch ${CMAKE_CXX_FLAGS}")
 endif()
 
 #
