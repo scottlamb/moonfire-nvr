@@ -59,6 +59,7 @@ using moonfire_nvr::StrCat;
 DEFINE_int32(http_port, 0, "");
 DEFINE_string(db_dir, "", "");
 DEFINE_string(sample_file_dir, "", "");
+DEFINE_bool(read_only, false, "");
 
 namespace {
 
@@ -152,10 +153,28 @@ int main(int argc, char** argv) {
 
   env.sample_file_dir = sample_file_dir.release();
 
+  std::unique_ptr<moonfire_nvr::File> db_dir;
+  std::string db_dirname = FLAGS_db_dir;
+  ret = moonfire_nvr::GetRealFilesystem()->Open(
+      db_dirname.c_str(), O_DIRECTORY | O_RDONLY, &db_dir);
+  if (ret != 0) {
+    LOG(ERROR) << "Unable to open --db_dir=" << db_dirname << ": "
+               << strerror(ret) << "; exiting.";
+    exit(1);
+  }
+  bool read_only = FLAGS_read_only;
+  ret = db_dir->Lock((read_only ? LOCK_SH : LOCK_EX) | LOCK_NB);
+  if (ret != 0) {
+    LOG(ERROR) << "Unable to lock --db_dir=" << db_dirname << ": "
+               << strerror(ret) << "; exiting.";
+    exit(1);
+  }
   moonfire_nvr::Database db;
   std::string error_msg;
   std::string db_path = StrCat(FLAGS_db_dir, "/db");
-  if (!db.Open(db_path.c_str(), SQLITE_OPEN_READWRITE, &error_msg)) {
+  if (!db.Open(db_path.c_str(),
+               read_only ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE,
+               &error_msg)) {
     LOG(ERROR) << error_msg << "; exiting.";
     exit(1);
   }
@@ -171,10 +190,13 @@ int main(int argc, char** argv) {
             << ", running with version " << event_get_version();
   base = CHECK_NOTNULL(event_base_new());
 
-  std::unique_ptr<moonfire_nvr::Nvr> nvr(new moonfire_nvr::Nvr(&env));
-  if (!nvr->Init(&error_msg)) {
-    LOG(ERROR) << "Unable to initialize: " << error_msg << "; exiting.";
-    exit(1);
+  std::unique_ptr<moonfire_nvr::Nvr> nvr;
+  if (!read_only) {
+    nvr.reset(new moonfire_nvr::Nvr(&env));
+    if (!nvr->Init(&error_msg)) {
+      LOG(ERROR) << "Unable to initialize: " << error_msg << "; exiting.";
+      exit(1);
+    }
   }
 
   evhttp* http = CHECK_NOTNULL(evhttp_new(base));

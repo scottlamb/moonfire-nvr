@@ -67,6 +67,9 @@ class File {
   // Already closed is considered a success.
   virtual int Close() = 0;
 
+  // flock(), returning 0 on success or errno>0 on failure.
+  virtual int Lock(int operation) = 0;
+
   // openat(), returning 0 on success or errno>0 on failure.
   virtual int Open(const char *path, int flags, int *fd) = 0;
   virtual int Open(const char *path, int flags, std::unique_ptr<File> *f) = 0;

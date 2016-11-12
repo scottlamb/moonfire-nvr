@@ -137,6 +137,7 @@ class MockFile : public File {
     return ret;
   }
 
+  MOCK_METHOD1(Lock, int(int));
   MOCK_METHOD3(Open, int(const char *, int, int *));
   MOCK_METHOD4(Open, int(const char *, int, mode_t, int *));
   MOCK_METHOD3(OpenRaw, int(const char *, int, File **));

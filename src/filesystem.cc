@@ -36,6 +36,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -84,6 +85,10 @@ class RealFile : public File {
     }
     fd_ = -1;
     return 0;
+  }
+
+  int Lock(int operation) final {
+    return (flock(fd_, operation) < 0) ? errno : 0;
   }
 
   int Open(const char *path, int flags, int *fd) final {
