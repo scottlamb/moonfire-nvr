@@ -1,8 +1,8 @@
 # Introduction
 
 Moonfire NVR is an open-source security camera network video recorder, started
-by Scott Lamb <slamb@slamb.org>. It saves H.264-over-RTSP streams from IP
-cameras to disk into a hybrid format: video frames in a directory on
+by Scott Lamb &lt;<slamb@slamb.org>&gt;. It saves H.264-over-RTSP streams from
+IP cameras to disk into a hybrid format: video frames in a directory on
 spinning disk, other data in a SQLite3 database on flash. It can construct
 `.mp4` files for arbitrary time ranges on-the-fly. It does not decode,
 analyze, or re-encode video frames, so it requires little CPU. It handles six
@@ -82,7 +82,7 @@ from source. It requires several packages to build:
   This will be automatically downloaded during the build process, so it's
   not necessary to install it beforehand.
 * [re2](https://github.com/google/re2), for parsing with regular expressions.
-* libuuid from (util-linux)[https://en.wikipedia.org/wiki/Util-linux].
+* libuuid from [util-linux](https://en.wikipedia.org/wiki/Util-linux).
 * [SQLite3](https://www.sqlite.org/).
 
 On Ubuntu 15.10 or Raspbian Jessie, the following command will install most
