@@ -1,13 +1,19 @@
 # Introduction
 
 Moonfire NVR is an open-source security camera network video recorder, started
-by Scott Lamb <slamb@slamb.org>. Currently it is basic: it saves
-H.264-over-RTSP streams from IP cameras to disk as .mp4 files and provides a
-simple HTTP interface for listing and viewing fixed-length segments of video.
-It does not decode, analyze, or re-encode video frames, so it requires little
-CPU. It handles six 720p/15fps streams on a [Raspberry Pi
-2](https://www.raspberrypi.org/products/raspberry-pi-2-model-b/), using roughly
-5% of the machine's total CPU.
+by Scott Lamb <slamb@slamb.org>. It saves H.264-over-RTSP streams from IP
+cameras to disk into a hybrid format: video frames in a directory on
+spinning disk, other data in a SQLite3 database on flash. It can construct
+`.mp4` files for arbitrary time ranges on-the-fly. It does not decode,
+analyze, or re-encode video frames, so it requires little CPU. It handles six
+1080p/30fps streams on a [Raspberry Pi
+2](https://www.raspberrypi.org/products/raspberry-pi-2-model-b/), using
+less than 10% of the machine's total CPU.
+
+So far, the web interface is basic: just a table with links to one-hour
+segments of video. Although the backend supports generating `.mp4` files for
+arbitrary time ranges, you have to construct URLs by hand. There's also no
+support for motion detection, no authentication, and no config UI.
 
 This is version 0.1, the initial release. Until version 1.0, there will be no
 compatibility guarantees: configuration and storage formats may change from
