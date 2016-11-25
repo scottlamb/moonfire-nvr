@@ -184,7 +184,7 @@ fi
 #
 echo 'Create user/group and directories we need...'; echo
 sudo addgroup --quiet --system ${NVR_GROUP}
-sudo adduser --quiet --system ${NVR_USER} --group "${NVR_GROUP}" --home "${NVR_HOME}"
+sudo adduser --quiet --system ${NVR_USER} --ingroup "${NVR_GROUP}" --home "${NVR_HOME}"
 if [ ! -d "${NVR_HOME}" ]; then
 	sudo mkdir "${NVR_HOME}"
 fi
