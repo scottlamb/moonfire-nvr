@@ -1342,7 +1342,7 @@ mod tests {
 
     #[test]
     fn test_round_trip() {
-        testutil::init_logging();
+        testutil::init();
         let db = setup_db();
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
@@ -1362,7 +1362,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_with_subtitles() {
-        testutil::init_logging();
+        testutil::init();
         let db = setup_db();
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, true);
@@ -1382,7 +1382,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_with_edit_list() {
-        testutil::init_logging();
+        testutil::init();
         let db = setup_db();
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 1, 0, false);
@@ -1402,7 +1402,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_with_shorten() {
-        testutil::init_logging();
+        testutil::init();
         let db = setup_db();
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 1, false);
@@ -1478,7 +1478,7 @@ mod tests {
     /// Benchmarks serving the generated part of a `.mp4` file (up to the first byte from disk).
     #[bench]
     fn serve_generated_bytes_fresh_client(b: &mut Bencher) {
-        testutil::init_logging();
+        testutil::init();
         let server = &*SERVER;
         let p = server.generated_len;
         let mut buf = Vec::with_capacity(p as usize);
@@ -1503,7 +1503,7 @@ mod tests {
     /// algorithm.
     #[bench]
     fn serve_generated_bytes_reuse_client(b: &mut Bencher) {
-        testutil::init_logging();
+        testutil::init();
         let server = &*SERVER;
         let p = server.generated_len;
         let mut buf = Vec::with_capacity(p as usize);
@@ -1524,7 +1524,7 @@ mod tests {
 
     #[bench]
     fn mp4_construction(b: &mut Bencher) {
-        testutil::init_logging();
+        testutil::init();
         let db = setup_db();
         add_dummy_recordings_to_db(&db.db);
         b.iter(|| {

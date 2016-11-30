@@ -28,18 +28,27 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::env;
 use std::sync;
 use slog::{self, DrainExt};
 use slog_envlogger;
 use slog_stdlog;
 use slog_term;
+use time;
 
-static INIT_LOGGING: sync::Once = sync::ONCE_INIT;
+static INIT: sync::Once = sync::ONCE_INIT;
 
-pub fn init_logging() {
-    INIT_LOGGING.call_once(|| {
+/// Performs global initialization for tests.
+///    * set up logging. (Note the output can be confusing unless `RUST_TEST_THREADS=1` is set in
+///      the program's environment prior to running.)
+///    * set `TZ=America/Los_Angeles` so that tests that care about calendar time get the expected
+///      results regardless of machine setup.)
+pub fn init() {
+    INIT.call_once(|| {
         let drain = slog_term::StreamerBuilder::new().async().full().build();
         let drain = slog_envlogger::new(drain);
         slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
+        env::set_var("TZ", "America/Los_Angeles");
+        time::tzset();
     });
 }

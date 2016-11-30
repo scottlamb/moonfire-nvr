@@ -1151,7 +1151,7 @@ mod tests {
 
     #[test]
     fn test_adjust_days() {
-        testutil::init_logging();
+        testutil::init();
         let mut m = BTreeMap::new();
 
         // Create a day.
@@ -1206,7 +1206,7 @@ mod tests {
     /// Basic test of running some queries on an empty database.
     #[test]
     fn test_empty_db() {
-        testutil::init_logging();
+        testutil::init();
         let conn = setup_conn();
         let db = Database::new(conn).unwrap();
         let db = db.lock();
@@ -1216,7 +1216,7 @@ mod tests {
     /// Basic test of the full lifecycle of recording. Does not exercise error cases.
     #[test]
     fn test_full_lifecycle() {
-        testutil::init_logging();
+        testutil::init();
         let conn = setup_conn();
         let camera_uuid = Uuid::new_v4();
         let camera_id = setup_camera(&conn, camera_uuid, "testcam");
@@ -1289,7 +1289,7 @@ mod tests {
 
     #[test]
     fn test_drop_tx() {
-        testutil::init_logging();
+        testutil::init();
         let conn = setup_conn();
         let db = Database::new(conn).unwrap();
         let mut db = db.lock();

@@ -418,7 +418,7 @@ mod tests {
 
     #[test]
     fn serve_without_etag() {
-        testutil::init_logging();
+        testutil::init();
         *RESOURCE.lock().unwrap() = Some(FakeResource{
             etag: None,
             mime: mime!(Application/OctetStream),
@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn serve_with_strong_etag() {
-        testutil::init_logging();
+        testutil::init();
         *RESOURCE.lock().unwrap() = Some(FakeResource{
             etag: Some(EntityTag::strong("foo".to_owned())),
             mime: mime!(Application/OctetStream),
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn serve_with_weak_etag() {
-        testutil::init_logging();
+        testutil::init();
         *RESOURCE.lock().unwrap() = Some(FakeResource{
             etag: Some(EntityTag::weak("foo".to_owned())),
             mime: mime!(Application/OctetStream),
