@@ -622,12 +622,11 @@ impl<'a> Transaction<'a> {
         // Recompute start and end times for each camera.
         for (&camera_id, m) in &mut self.mods_by_camera {
             // The minimum is straightforward, taking advantage of the start_time_90k index.
-            let min_start_opt: Option<i64> =
-                self.tx.query_row_named(CAMERA_MIN_START_SQL, &[(":camera_id", &camera_id)],
-                                        |r| { r.get_checked(0) })??;
-            let min_start = match min_start_opt {
-                Some(min) => recording::Time(min),
-                None => { continue; },  // no data; leave m.range alone.
+            let mut stmt = self.tx.prepare_cached(CAMERA_MIN_START_SQL)?;
+            let mut rows = stmt.query_named(&[(":camera_id", &camera_id)])?;
+            let min_start = match rows.next() {
+                Some(row) => recording::Time(row?.get_checked(0)?),
+                None => continue,  // no data; leave m.range alone.
             };
 
             // There was a minimum, so there should be a maximum too. Calculating it is less
@@ -1275,6 +1274,17 @@ mod tests {
         assert_single_recording(&db, camera_uuid, &recording);
 
         // Deleting a recording should succeed, update the min/max times, and re-reserve the uuid.
-        // TODO
+        {
+            let mut db = db.lock();
+            let mut v = Vec::new();
+            db.list_oldest_sample_files(camera_id, |r| { v.push(r); true }).unwrap();
+            assert_eq!(1, v.len());
+            let mut tx = db.tx().unwrap();
+            tx.delete_recordings(&v).unwrap();
+            tx.commit().unwrap();
+        }
+        assert_no_recordings(&db, camera_uuid);
+        assert_unsorted_eq(db.lock().list_reserved_sample_files().unwrap(),
+                           vec![uuid_to_use, uuid_to_keep]);
     }
 }
