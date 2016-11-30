@@ -430,7 +430,6 @@ struct State {
 
 /// A high-level transaction. This manages the SQLite transaction and the matching modification to
 /// be applied to the in-memory state on successful commit.
-// TODO: requires a drop implementation, or is it sufficient for rusqlite::Transaction to have one?
 pub struct Transaction<'a> {
     state: &'a mut State,
     mods_by_camera: fnv::FnvHashMap<i32, CameraModification>,
@@ -1214,7 +1213,7 @@ mod tests {
         assert_eq!(0, db.cameras_by_id().values().count());
     }
 
-    /// Basic test of the full lifecycle of recording. Does not exercise many error cases.
+    /// Basic test of the full lifecycle of recording. Does not exercise error cases.
     #[test]
     fn test_full_lifecycle() {
         testutil::init_logging();
@@ -1286,5 +1285,30 @@ mod tests {
         assert_no_recordings(&db, camera_uuid);
         assert_unsorted_eq(db.lock().list_reserved_sample_files().unwrap(),
                            vec![uuid_to_use, uuid_to_keep]);
+    }
+
+    #[test]
+    fn test_drop_tx() {
+        testutil::init_logging();
+        let conn = setup_conn();
+        let db = Database::new(conn).unwrap();
+        let mut db = db.lock();
+        {
+            let mut tx = db.tx().unwrap();
+            tx.reserve_sample_file().unwrap();
+            // drop tx without committing.
+        }
+
+        // The dropped tx should have done nothing.
+        assert_eq!(db.list_reserved_sample_files().unwrap(), &[]);
+
+        // Following transactions should succeed.
+        let uuid;
+        {
+            let mut tx = db.tx().unwrap();
+            uuid = tx.reserve_sample_file().unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(db.list_reserved_sample_files().unwrap(), &[uuid]);
     }
 }
