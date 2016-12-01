@@ -1,8 +1,5 @@
 # Introduction
 
-*Note*: Moonfire NVR is currently being rewritten from C++ into Rust. The text
-below describes the C++ version. See also the "rust" branch.
-
 Moonfire NVR is an open-source security camera network video recorder, started
 by Scott Lamb &lt;<slamb@slamb.org>&gt;. It saves H.264-over-RTSP streams from
 IP cameras to disk into a hybrid format: video frames in a directory on

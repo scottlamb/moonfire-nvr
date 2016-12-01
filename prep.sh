@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 #
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
@@ -158,10 +158,15 @@ if [ ! -x "${SERVICE_BIN}" ]; then
 		echo
 		exit 1
 	fi
-	RUST_TEST_THREADS=1 cargo test
-	if ! cargo build --release; then
+	if ! RUST_TEST_THREADS=1 cargo test; then
 		echo "test failed. Try to run the following manually for more info"
 		echo "RUST_TEST_THREADS=1 cargo test --verbose"
+		echo
+		exit 1
+	fi
+	if ! cargo build --release; then
+		echo "Build failed."
+		echo "RUST_TEST_THREADS=1 cargo build --release --verbose"
 		echo
 		exit 1
 	fi
