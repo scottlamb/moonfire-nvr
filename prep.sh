@@ -75,7 +75,7 @@ fi
 # Binary location
 # Default: "/usr/local/bin/moonfire-nvr"
 #
-SERVICE_BIN=/usr/local/bin/moonfire-nvr-rust
+#SERVICE_BIN=
 
 # Service name
 # Default: "moonfire-nvr"
