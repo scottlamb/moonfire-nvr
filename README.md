@@ -63,58 +63,50 @@ edge version from the command line via git:
 # Building from source
 
 There are no binary packages of Moonfire NVR available yet, so it must be built
-from source. It requires several packages to build:
+from source.
 
-* [CMake](https://cmake.org/) version 3.1.0 or higher.
-* a C++11 compiler, such as [gcc](https://gcc.gnu.org/) 4.7 or higher.
-* [ffmpeg](http://ffmpeg.org/), including `libavutil`,
+The `rust` branch contains a rewrite into the [Rust Programming
+Language](https://www.rust-lang.org/en-US/). In the long term, I expect this
+will result in a more secure, full-featured, easy-to-install software. In the
+short term, there will be growing pains. Rust is a new programming language.
+Moonfire NVR's primary author is new to Rust. And Moonfire NVR is a young
+project.
+
+You will need the following C libraries installed:
+
+* [ffmpeg](http://ffmpeg.org/) version 2.x, including `libavutil`,
   `libavcodec` (to inspect H.264 frames), and `libavformat` (to connect to RTSP
-  servers and write `.mp4` files). Note ffmpeg versions older than 55.1.101,
-  along with all versions of the competing project [libav](http://libav.org),
-  does not support socket timeouts for RTSP. For reliable reconnections on
-  error, it's strongly recommended to use ffmpeg >= 55.1.101.
-* [libevent](http://libevent.org/) 2.1, for the built-in HTTP server.
-  (This might be replaced with the more full-featured
-  [nghttp2](https://github.com/tatsuhiro-t/nghttp2) in the future.)
-  Unfortunately, the libevent 2.0 bundled with current Debian releases is
-  unsuitable.
-* [gflags](http://gflags.github.io/gflags/), for command line flag parsing.
-* [glog](https://github.com/google/glog), for debug logging.
-* [gperftools](https://github.com/gperftools/gperftools), for debugging.
-* [googletest](https://github.com/google/googletest), for automated testing.
-  This will be automatically downloaded during the build process, so it's
-  not necessary to install it beforehand.
-* [re2](https://github.com/google/re2), for parsing with regular expressions.
-* libuuid from [util-linux](https://en.wikipedia.org/wiki/Util-linux).
+  servers and write `.mp4` files).
+
+  Note ffmpeg 3.x isn't supported yet by the Rust `ffmpeg` crate; see
+  [rust-ffmpeg/issues/64](https://github.com/meh/rust-ffmpeg/issues/64).
+
+  Additionally, ffmpeg library versions older than 55.1.101, along with
+  55.1.101, along with all versions of the competing project
+  [libav](http://libav.org), don't not support socket timeouts for RTSP. For
+  reliable reconnections on error, it's strongly recommended to use ffmpeg
+  library versions >= 55.1.101.
+
 * [SQLite3](https://www.sqlite.org/).
 
-On Ubuntu 15.10 or Raspbian Jessie, the following command will install most
-pre-requisites (see also the `Build-Depends` field in `debian/control`):
+On Ubuntu 16.04.1 LTS or Raspbian Jessie, the following command will install
+all non-Rust dependencies:
 
     $ sudo apt-get install \
                    build-essential \
-                   cmake \
                    libavcodec-dev \
                    libavformat-dev \
                    libavutil-dev \
-                   libgflags-dev \
-                   libgoogle-glog-dev \
-                   libgoogle-perftools-dev \
-                   libjsoncpp-dev \
-                   libre2-dev \
                    sqlite3 \
                    libsqlite3-dev \
-                   pkgconf \
-                   uuid-runtime \
-                   uuid-dev
-
-libevent 2.1 will have to be installed from source. In the future, this
-dependency may be replaced or support may be added for automatically building
-libevent in-tree to avoid the inconvenience.
+                   uuid-runtime
 
 uuid-runtime is only necessary if you wish to use the uuid command to generate
 uuids for your cameras (see below). If you obtain them elsewhere, you can skip this
 package.
+
+Next, you need a nightly version of Rust and Cargo. The easiest way to install
+them is by following the instructions at [rustup.rs](https://www.rustup.rs/).
 
 You can continue to follow the build/install instructions below for a manual
 build and install, or alternatively you can run the prep script called `prep.sh`.
@@ -124,11 +116,7 @@ build and install, or alternatively you can run the prep script called `prep.sh`
 
 The script will take the following command line options, should you need them:
 
-* `-E`: Forcibly purge all existing libevent packages. You would only do this
-        if there is some apparent conflict (see remarks about building libevent
-        from source).
-* `-f`: Force a build even if the binary appears to be installed. This can be useful
-        on repeat builds.
+* `-D`: Skip database initialization.
 * `-S`: Skip updating and installing dependencies through apt-get. This too can be
         useful on repeated builds.
 
@@ -151,17 +139,9 @@ For instructions, you can skip to "[Camera configuration and hard disk mounting]
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
-    $ mkdir release
-    $ cd release
-    $ cmake -DCMAKE_BUILD_TYPE=Release ..
-    $ make
-    $ sudo make install
-
-Alternatively, if you do have a sufficiently new apt-installed libevent
-installed, you may be able to prepare a `.deb` package:
-
-    $ sudo apt-get install devscripts dh-systemd
-    $ debuild -us -uc
+    $ RUST_TEST_THREADS=1 cargo test
+    $ cargo build --release
+    $ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
 
 # Further configuration
 
@@ -282,9 +262,10 @@ been done for you. If not, Create
 
     [Service]
     ExecStart=/usr/local/bin/moonfire-nvr \
-        --sample_file_dir=/var/lib/moonfire-nvr/sample \
-        --db_dir=/var/lib/moonfire-nvr/db \
-        --http_port=8080
+        --sample-file-dir=/var/lib/moonfire-nvr/sample \
+        --db-dir=/var/lib/moonfire-nvr/db \
+        --http-addr=0.0.0.0:8080
+    Environment=RUST_LOG=info
     Type=simple
     User=moonfire-nvr
     Nice=-20
@@ -313,10 +294,16 @@ and `systemctl` may be of particular interest.
 
 # Troubleshooting
 
-While Moonfire NVR is running, logs will be written to `/tmp/moonfire-nvr.INFO`.
-Also available will be `/tmp/moonfire-nvr.WARNING` and `/tmp/moonfire-nvr.ERROR`.
-These latter to contain only warning or more serious messages, respectively only
-error messages.
+While Moonfire NVR is running, logs will be written to stdout. The `RUST_LOG`
+environmental variable controls the log level; `RUST_LOG=info` is recommended.
+If running through systemd, try `sudo journalctl --unit moonfire-nvr` to view
+the logs.
+
+If Moonfire NVR crashes with a `SIGSEGV`, the problem is likely an
+incompatible version of the C `ffmpeg` libraries; use the latest 2.x release
+instead. This is one of the Rust growing pains mentioned above. While most
+code written in Rust is "safe", the foreign function interface is not only
+unsafe but currently error-prone.
 
 # <a name="help"></a> Getting help and getting involved
 
@@ -325,16 +312,10 @@ Please email the
 mailing list with questions, bug reports, feature requests, or just to say
 you love/hate the software and why.
 
-I'd welcome help with testing, development (in C++, JavaScript, and HTML), user
-interface/graphic design, and documentation. Please email the mailing list
-if interested. Patches are welcome, but I encourage you to discuss large
+I'd welcome help with testing, development (in Rust, JavaScript, and HTML),
+user interface/graphic design, and documentation. Please email the mailing
+list if interested. Patches are welcome, but I encourage you to discuss large
 changes on the mailing list first to save effort.
-
-C++ code should be written using C++11 features, should follow the [Google C++
-style guide](https://google.github.io/styleguide/cppguide.html) for
-consistency, and should be automatically tested where practical. But don't
-worry about this too much; I'm much happier to work with you to refine a rough
-draft patch than never see your contribution at all!
 
 # License
 

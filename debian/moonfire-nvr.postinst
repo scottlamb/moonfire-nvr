@@ -1,8 +1,0 @@
-#!/bin/sh
-
-set -e
-adduser --system moonfire-nvr
-
-#DEBHELPER#
-
-exit 0

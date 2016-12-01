@@ -34,7 +34,7 @@
 # Script to prepare for moonfire-nvr operations
 #
 # Command line options:
-# -f: Force clean build, even if binary already installed
+# -D: Skip database initialization
 # -S: Skip apt-get update and install
 #
 
@@ -112,13 +112,9 @@ SERVICE_BIN="${SERVICE_BIN:-/usr/local/bin/moonfire-nvr}"
 
 # Process command line options
 #
-while getopts ":DEfS" opt; do
+while getopts ":DS" opt; do
 	case $opt in
 	  D)	SKIP_DB=1
-		;;
-	  E)	PURGE_LIBEVENT=1
-		;;
-	  f)	FORCE_BUILD=1
 		;;
 	  S)	SKIP_APT=1
 		;;
@@ -133,45 +129,34 @@ while getopts ":DEfS" opt; do
 	esac
 done
 
-# Setup all packages we need
+# Setup all apt packages we need
 #
 echo 'Preparing and downloading packages we need...'; echo
 if [ "${SKIP_APT:-0}" != 1 ]; then
 	sudo apt-get update
-	[ "${PURGE_LIBEVENT:-0}" == 1 ] && sudo apt-get --purge remove libevent-*
 	sudo apt-get install \
 		build-essential \
-		cmake \
 		libavcodec-dev \
 		libavformat-dev \
 		libavutil-dev \
-		libgflags-dev \
-		libgoogle-glog-dev \
-		libgoogle-perftools-dev \
-		libjsoncpp-dev \
-		libre2-dev \
-		libssl-dev \
 		sqlite3 \
 		libsqlite3-dev \
-		pkgconf \
-		uuid-runtime \
-		uuid-dev
+		uuid-runtime
 fi
 
 # Check if binary is installed. Setup for build if it is not
 #
 if [ ! -x "${SERVICE_BIN}" ]; then
 	echo "Binary not installed, building..."; echo
-	FORCE_BUILD=1
-fi
-
-# Build if requested
-#
-if [ "${FORCE_BUILD:-0}" -eq 1 ]; then
-	# Remove previous build, if any
-	[ -d release ] && rm -fr release 2>/dev/null
-	mkdir release; cd release
-	cmake -DCMAKE_BUILD_TYPE=Release .. && make && sudo make install
+	if ! cargo --version; then
+		echo "cargo not installed/working."
+		echo "Install a nightly Rust (see http://rustup.us) first."
+		echo
+		exit 1
+	fi
+	RUST_TEST_THREADS=1 cargo test
+	cargo build --release
+	sudo install -m 755 target/release/moonfire-nvr ${SERVICE_BIN}
 	if [ -x "${SERVICE_BIN}" ]; then
 		echo "Binary installed..."; echo
 	else
@@ -233,9 +218,10 @@ After=network-online.target
 
 [Service]
 ExecStart=${SERVICE_BIN} \\
-    --sample_file_dir=${SAMPLES_PATH} \\
-    --db_dir=${DB_DIR} \\
-    --http_port=${NVR_PORT}
+    --sample-file-dir=${SAMPLES_PATH} \\
+    --db-dir=${DB_DIR} \\
+    --http-addr=0.0.0.0:${NVR_PORT}
+Environment=RUST_LOG=info
 Type=simple
 User=${NVR_USER}
 Nice=-20

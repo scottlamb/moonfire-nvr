@@ -110,6 +110,7 @@ create index recording_cover on recording (
   -- to consult the underlying row.
   duration_90k,
   video_samples,
+  video_sync_samples,
   video_sample_entry_id,
   sample_file_bytes
 );

@@ -1,5 +1,5 @@
-// This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 Lamb <slamb@slamb.org>
+// This file is part of Moonfire NVR, a security camera digital video recorder.
+// Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -27,55 +27,28 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
-//
-// uuid.h: small wrapper around the C UUID library for generating/parsing
-// RFC 4122 UUIDs.
 
-#ifndef MOONFIRE_NVR_UUID_H
-#define MOONFIRE_NVR_UUID_H
+use std::env;
+use std::sync;
+use slog::{self, DrainExt};
+use slog_envlogger;
+use slog_stdlog;
+use slog_term;
+use time;
 
-#include <re2/stringpiece.h>
-#include <uuid/uuid.h>
+static INIT: sync::Once = sync::ONCE_INIT;
 
-namespace moonfire_nvr {
-
-class Uuid {
- public:
-  // Create a null uuid.
-  Uuid() { uuid_clear(me_); }
-
-  // Parse the text UUID. Returns success.
-  bool ParseText(re2::StringPiece input);
-
-  // Parse a binary UUID. In practice any 16-byte string is considered valid.
-  bool ParseBinary(re2::StringPiece input);
-
-  // Return a 36-byte lowercase text representation, such as
-  // 1b4e28ba-2fa1-11d2-883f-0016d3cca427.
-  std::string UnparseText() const;
-
-  // Return a reference to the 16-byte binary form.
-  // Invalidated by any change to the Uuid object.
-  re2::StringPiece binary_view() const;
-
-  bool operator==(const Uuid &) const;
-  bool operator<(const Uuid &) const;
-
-  bool is_null() const { return uuid_is_null(me_); }
-
- private:
-  friend class RealUuidGenerator;
-  uuid_t me_;
-};
-
-class UuidGenerator {
- public:
-  virtual ~UuidGenerator() {}
-  virtual Uuid Generate() = 0;
-};
-
-UuidGenerator *GetRealUuidGenerator();
-
-}  // namespace moonfire_nvr
-
-#endif  // MOONFIRE_NVR_CODING_H
+/// Performs global initialization for tests.
+///    * set up logging. (Note the output can be confusing unless `RUST_TEST_THREADS=1` is set in
+///      the program's environment prior to running.)
+///    * set `TZ=America/Los_Angeles` so that tests that care about calendar time get the expected
+///      results regardless of machine setup.)
+pub fn init() {
+    INIT.call_once(|| {
+        let drain = slog_term::StreamerBuilder::new().async().full().build();
+        let drain = slog_envlogger::new(drain);
+        slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
+        env::set_var("TZ", "America/Los_Angeles");
+        time::tzset();
+    });
+}
