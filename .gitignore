@@ -4,3 +4,4 @@ Cargo.lock
 .settings
 *.swp
 target
+prep.config

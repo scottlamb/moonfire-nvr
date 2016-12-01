@@ -39,8 +39,12 @@
 #
 
 # Configuration variables. Should only need minimal, or zero, changes.
-# Empty values will use defaults.
+# Empty values will use defaults. For convenience, we attempt to read
+# customizations from prep.config first
 #
+if [ -r prep.config ]; then
+	. prep.config
+fi
 
 # User and group
 # Default: or whatever is in $NVR_USER (default "moonfire-nvr")
@@ -61,7 +65,7 @@
 
 # Set to mountpoint of media directory, empty to stay in home directory
 # Default: empty
-#SAMPLES_DIR=
+#SAMPLES_DIR=/media/nvr/samples
 
 # Set to path for media directory relative to mountpoint
 # Default: "samples"
@@ -71,7 +75,7 @@
 # Binary location
 # Default: "/usr/local/bin/moonfire-nvr"
 #
-#SERVICE_BIN=
+SERVICE_BIN=/usr/local/bin/moonfire-nvr-rust
 
 # Service name
 # Default: "moonfire-nvr"
@@ -155,7 +159,12 @@ if [ ! -x "${SERVICE_BIN}" ]; then
 		exit 1
 	fi
 	RUST_TEST_THREADS=1 cargo test
-	cargo build --release
+	if ! cargo build --release; then
+		echo "test failed. Try to run the following manually for more info"
+		echo "RUST_TEST_THREADS=1 cargo test --verbose"
+		echo
+		exit 1
+	fi
 	sudo install -m 755 target/release/moonfire-nvr ${SERVICE_BIN}
 	if [ -x "${SERVICE_BIN}" ]; then
 		echo "Binary installed..."; echo
