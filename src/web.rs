@@ -123,8 +123,8 @@ impl<'a> fmt::Display for HtmlEscaped<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut last_end = 0;
         for (start, part) in self.0.match_indices(|c| c == '<' || c == '&') {
-            try!(f.write_str(&self.0[last_end..start]));
-            try!(f.write_str(if part == "<" { "&lt;" } else { "&amp;" }));
+            f.write_str(&self.0[last_end..start])?;
+            f.write_str(if part == "<" { "&lt;" } else { "&amp;" })?;
             last_end = start + 1;
         }
         f.write_str(&self.0[last_end..])
@@ -169,7 +169,7 @@ impl fmt::Display for HumanizedTimestamp {
             Some(t) => {
                 let tm = time::at(time::Timespec{sec: t.unix_seconds(), nsec: 0});
                 write!(f, "{}",
-                       try!(tm.strftime("%a, %d %b %Y %H:%M:%S %Z").or_else(|_| Err(fmt::Error))))
+                       tm.strftime("%a, %d %b %Y %H:%M:%S %Z").or_else(|_| Err(fmt::Error))?)
             }
         }
     }
@@ -191,9 +191,9 @@ impl<'a> ListCameras<'a> {
     fn serialize_cameras<S>(cameras: &BTreeMap<i32, db::Camera>,
                             serializer: &mut S) -> result::Result<(), S::Error>
     where S: Serializer {
-        let mut state = try!(serializer.serialize_seq(Some(cameras.len())));
+        let mut state = serializer.serialize_seq(Some(cameras.len()))?;
         for c in cameras.values() {
-            try!(serializer.serialize_seq_elt(&mut state, c));
+            serializer.serialize_seq_elt(&mut state, c)?;
         }
         serializer.serialize_seq_end(state)
     }
@@ -206,7 +206,7 @@ impl Handler {
 
     fn not_found(&self, mut res: server::Response) -> Result<()> {
         *res.status_mut() = status::StatusCode::NotFound;
-        try!(res.send(b"not found"));
+        res.send(b"not found")?;
         Ok(())
     }
 
@@ -215,13 +215,13 @@ impl Handler {
         let buf = {
             let db = self.db.lock();
             if json {
-                try!(serde_json::to_vec(&ListCameras{cameras: db.cameras_by_id()}))
+                serde_json::to_vec(&ListCameras{cameras: db.cameras_by_id()})?
             } else {
-                try!(self.list_cameras_html(db))
+                self.list_cameras_html(db)?
             }
         };
         res.headers_mut().set(header::ContentType(if json { JSON.clone() } else { HTML.clone() }));
-        try!(res.send(&buf));
+        res.send(&buf)?;
         Ok(())
     }
 
@@ -241,7 +241,7 @@ impl Handler {
             <body>\n\
             <table>\n");
         for row in db.cameras_by_id().values() {
-            try!(write!(&mut buf, "\
+            write!(&mut buf, "\
                 <tr class=header><td colspan=2><a href=\"/cameras/{}/\">{}</a></td></tr>\n\
                 <tr><td>description</td><td>{}</td></tr>\n\
                 <tr><td>space</td><td>{:b}B / {:b}B ({:.1}%)</td></tr>\n\
@@ -254,7 +254,7 @@ impl Handler {
                 100. * row.sample_file_bytes as f32 / row.retain_bytes as f32,
                 row.uuid, HumanizedTimestamp(row.range.as_ref().map(|r| r.start)),
                 HumanizedTimestamp(row.range.as_ref().map(|r| r.end)),
-                row.duration));
+                row.duration)?;
         }
         Ok(buf)
     }
@@ -264,23 +264,23 @@ impl Handler {
         let buf = {
             let db = self.db.lock();
             if json {
-                let camera = try!(db.get_camera(uuid)
-                                    .ok_or_else(|| Error::new("no such camera".to_owned())));
-                try!(serde_json::to_vec(&camera))
+                let camera = db.get_camera(uuid)
+                               .ok_or_else(|| Error::new("no such camera".to_owned()))?;
+                serde_json::to_vec(&camera)?
             } else {
-                try!(self.camera_html(db, uuid))
+                self.camera_html(db, uuid)?
             }
         };
         res.headers_mut().set(header::ContentType(if json { JSON.clone() } else { HTML.clone() }));
-        try!(res.send(&buf));
+        res.send(&buf)?;
         Ok(())
     }
 
     fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, uuid: Uuid) -> Result<Vec<u8>> {
-        let camera = try!(db.get_camera(uuid)
-                            .ok_or_else(|| Error::new("no such camera".to_owned())));
+        let camera = db.get_camera(uuid)
+                       .ok_or_else(|| Error::new("no such camera".to_owned()))?;
         let mut buf = Vec::new();
-        try!(write!(&mut buf, "\
+        write!(&mut buf, "\
             <!DOCTYPE html>\n\
             <html>\n\
             <head>\n\
@@ -298,7 +298,7 @@ impl Handler {
             <tr><th>start</th><th>end</th><th>resolution</th>\
             <th>fps</th><th>size</th><th>bitrate</th>\
             </tr>\n",
-            HtmlEscaped(&camera.short_name), HtmlEscaped(&camera.description)));
+            HtmlEscaped(&camera.short_name), HtmlEscaped(&camera.description))?;
         let r = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
 
         // Rather than listing each 60-second recording, generate a HTML row for aggregated .mp4
@@ -306,9 +306,9 @@ impl Handler {
         // parameters between recordings.
         static FORCE_SPLIT_DURATION: recording::Duration =
             recording::Duration(60 * 60 * recording::TIME_UNITS_PER_SEC);
-        try!(db.list_aggregated_recordings(camera.id, &r, FORCE_SPLIT_DURATION, |row| {
+        db.list_aggregated_recordings(camera.id, &r, FORCE_SPLIT_DURATION, |row| {
             let seconds = (row.range.end.0 - row.range.start.0) / recording::TIME_UNITS_PER_SEC;
-            try!(write!(&mut buf, "\
+            write!(&mut buf, "\
                 <tr><td><a href=\"view.mp4?start_time_90k={}&end_time_90k={}\">{}</a></td>\
                 <td>{}</td><td>{}x{}</td><td>{:.0}</td><td>{:b}B</td><td>{}bps</td></tr>\n",
                 row.range.start.0, row.range.end.0,
@@ -317,9 +317,9 @@ impl Handler {
                 row.video_sample_entry.height,
                 if seconds == 0 { 0. } else { row.video_samples as f32 / seconds as f32 },
                 Humanized(row.sample_file_bytes),
-                Humanized(if seconds == 0 { 0 } else { row.sample_file_bytes * 8 / seconds })));
+                Humanized(if seconds == 0 { 0 } else { row.sample_file_bytes * 8 / seconds }))?;
             Ok(())
-        }));
+        })?;
         buf.extend_from_slice(b"</table>\n</html>\n");
         Ok(buf)
     }
@@ -327,7 +327,7 @@ impl Handler {
     fn camera_recordings(&self, _uuid: Uuid, _req: &server::Request,
                          mut res: server::Response) -> Result<()> {
         *res.status_mut() = status::StatusCode::NotImplemented;
-        try!(res.send(b"not implemented"));
+        res.send(b"not implemented")?;
         Ok(())
     }
 
@@ -335,8 +335,8 @@ impl Handler {
                        res: server::Response) -> Result<()> {
         let camera_id = {
             let db = self.db.lock();
-            let camera = try!(db.get_camera(uuid)
-                                .ok_or_else(|| Error::new("no such camera".to_owned())));
+            let camera = db.get_camera(uuid)
+                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
             camera.id
         };
         let mut start = None;
@@ -345,14 +345,14 @@ impl Handler {
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
             let (key, value) = (key.borrow(), value.borrow());
             match key {
-                "start_time_90k" => start = Some(recording::Time(try!(i64::from_str(value)))),
-                "end_time_90k" => end = Some(recording::Time(try!(i64::from_str(value)))),
+                "start_time_90k" => start = Some(recording::Time(i64::from_str(value)?)),
+                "end_time_90k" => end = Some(recording::Time(i64::from_str(value)?)),
                 "ts" => { include_ts = value == "true"; },
                 _ => {},
             }
         };
-        let start = try!(start.ok_or_else(|| Error::new("start_time_90k missing".to_owned())));
-        let end = try!(end.ok_or_else(|| Error::new("end_time_90k missing".to_owned())));
+        let start = start.ok_or_else(|| Error::new("start_time_90k missing".to_owned()))?;
+        let end = end.ok_or_else(|| Error::new("end_time_90k missing".to_owned()))?;
         let desired_range = start .. end;
         let mut builder = mp4::Mp4FileBuilder::new();
 
@@ -367,7 +367,7 @@ impl Handler {
         builder.reserve(est_records);
         {
             let db = self.db.lock();
-            try!(db.list_recordings(camera_id, &desired_range, |r| {
+            db.list_recordings(camera_id, &desired_range, |r| {
                 if builder.len() == 0 && r.start > next_start {
                     return Err(Error::new(format!("recording started late ({} vs requested {})",
                                                   r.start, start)));
@@ -390,7 +390,7 @@ impl Handler {
                 };
                 builder.append(&db, r, rel_start .. rel_end)?;
                 Ok(())
-            }));
+            })?;
         }
         if next_start < end {
             return Err(Error::new(format!(
@@ -406,7 +406,7 @@ impl Handler {
         }
         builder.include_timestamp_subtitle_track(include_ts);
         let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
-        try!(resource::serve(&mp4, req, res));
+        resource::serve(&mp4, req, res)?;
         Ok(())
     }
 }
