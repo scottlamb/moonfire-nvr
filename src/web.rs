@@ -388,7 +388,7 @@ impl Handler {
                 } else {
                     r.duration_90k
                 };
-                builder.append(r, rel_start .. rel_end);
+                builder.append(&db, r, rel_start .. rel_end)?;
                 Ok(())
             }));
         }
@@ -405,7 +405,7 @@ impl Handler {
                    est_records, start, end, builder.len());
         }
         builder.include_timestamp_subtitle_track(include_ts);
-        let mp4 = try!(builder.build(self.db.clone(), self.dir.clone()));
+        let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
         try!(resource::serve(&mp4, req, res));
         Ok(())
     }

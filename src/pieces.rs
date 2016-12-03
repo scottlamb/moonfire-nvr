@@ -70,7 +70,8 @@ impl<W, C> fmt::Debug for Slices<W, C> where W: fmt::Debug {
         write!(f, "{} slices with overall length {}:", self.slices.len(), self.len)?;
         let mut start = 0;
         for (i, s) in self.slices.iter().enumerate() {
-            write!(f, "\n{:7}: [{:12}, {:12}): {:?}", i, start, s.end, s.writer)?;
+            write!(f, "\ni {:7}: range [{:12}, {:12}) len {:12}: {:?}",
+                   i, start, s.end, s.end - start, s.writer)?;
             start = s.end;
         }
         Ok(())

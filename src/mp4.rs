@@ -32,14 +32,56 @@
 //!
 //! The `mp4` module builds virtual files representing ISO/IEC 14496-12 (ISO base media format /
 //! MPEG-4 / `.mp4`) video. These can be constructed from one or more recordings and are suitable
-//! for HTTP range serving or download.
+//! for HTTP range serving or download. The generated `.mp4` file has the `moov` box before the
+//! `mdat` box for fast start. More specifically, boxes are arranged in the order suggested by
+//! ISO/IEC 14496-12 section 6.2.3 (Table 1):
+//!
+//! * ftyp (file type and compatibility)
+//! * moov (container for all the metadata)
+//! ** mvhd (movie header, overall declarations)
+//!
+//! ** trak (video: container for an individual track or stream)
+//! *** tkhd (track header, overall information about the track)
+//! *** (optional) edts (edit list container)
+//! **** elst (an edit list)
+//! *** mdia (container for the media information in a track)
+//! **** mdhd (media header, overall information about the media)
+//! *** minf (media information container)
+//! **** vmhd (video media header, overall information (video track only))
+//! **** dinf (data information box, container)
+//! ***** dref (data reference box, declares source(s) of media data in track)
+//! **** stbl (sample table box, container for the time/space map)
+//! ***** stsd (sample descriptions (codec types, initilization etc.)
+//! ***** stts ((decoding) time-to-sample)
+//! ***** stsc (sample-to-chunk, partial data-offset information)
+//! ***** stsz (samples sizes (framing))
+//! ***** co64 (64-bit chunk offset)
+//! ***** stss (sync sample table)
+//!
+//! ** (optional) trak (subtitle: container for an individual track or stream)
+//! *** tkhd (track header, overall information about the track)
+//! *** mdia (container for the media information in a track)
+//! **** mdhd (media header, overall information about the media)
+//! *** minf (media information container)
+//! **** nmhd (null media header, overall information)
+//! **** dinf (data information box, container)
+//! ***** dref (data reference box, declares source(s) of media data in track)
+//! **** stbl (sample table box, container for the time/space map)
+//! ***** stsd (sample descriptions (codec types, initilization etc.)
+//! ***** stts ((decoding) time-to-sample)
+//! ***** stsc (sample-to-chunk, partial data-offset information)
+//! ***** stsz (samples sizes (framing))
+//! ***** co64 (64-bit chunk offset)
+//!
+//! * mdat (media data container)
+//! ```
 
 extern crate byteorder;
 extern crate time;
 
 use alloc::raw_vec::RawVec;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use db::{Database, ListCameraRecordingsRow, VideoSampleEntry};
+use db;
 use dir;
 use error::{Error, Result};
 use hyper::header;
@@ -57,13 +99,13 @@ use std::cmp;
 use std::io;
 use std::ops::Range;
 use std::mem;
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
 use time::Timespec;
 
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
 /// cause the etag to change as well.
-const FORMAT_VERSION: [u8; 1] = [0x02];
+const FORMAT_VERSION: [u8; 1] = [0x03];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
 const FTYP_BOX: &'static [u8] = &[
@@ -77,7 +119,7 @@ const FTYP_BOX: &'static [u8] = &[
     b'm',  b'p',  b'4',  b'1',  // compatible_brands[3]
 ];
 
-/// An `hdlr` (ISO/IEC 14496-12 section 8.4.3 `HandlerBox`) box suitable for a video track.
+/// An `hdlr` (ISO/IEC 14496-12 section 8.4.3 `HandlerBox`) box suitable for video.
 const VIDEO_HDLR_BOX: &'static [u8] = &[
     0x00, 0x00, 0x00, 0x21,  // length == sizeof(kHdlrBox)
     b'h', b'd', b'l', b'r',  // type == hdlr, ISO/IEC 14496-12 section 8.4.3.
@@ -90,7 +132,7 @@ const VIDEO_HDLR_BOX: &'static [u8] = &[
     0x00,                    // name, zero-terminated (empty)
 ];
 
-/// An `hdlr` (ISO/IEC 14496-12 section 8.4.3 `HandlerBox`) box suitable for a subtitle track.
+/// An `hdlr` (ISO/IEC 14496-12 section 8.4.3 `HandlerBox`) box suitable for subtitles.
 const SUBTITLE_HDLR_BOX: &'static [u8] = &[
     0x00, 0x00, 0x00, 0x21,  // length == sizeof(kHdlrBox)
     b'h', b'd', b'l', b'r',  // type == hdlr, ISO/IEC 14496-12 section 8.4.3.
@@ -282,16 +324,17 @@ struct Mp4SegmentIndex {
     /// &buf[stsz_start .. stss_start] is stsz.
     /// &buf[stss_start ..] is stss.
     buf: Box<[u8]>,
-    stsz_start: usize,
-    stss_start: usize,
+    stsz_start: u32,
+    stss_start: u32,
 }
 
 impl Mp4SegmentIndex {
-    fn stts(&self) -> &[u8] { &self.buf[.. self.stsz_start] }
-    fn stsz(&self) -> &[u8] { &self.buf[self.stsz_start .. self.stss_start] }
-    fn stss(&self) -> &[u8] { &self.buf[self.stss_start ..] }
+    fn stts(&self) -> &[u8] { &self.buf[.. self.stsz_start as usize] }
+    fn stsz(&self) -> &[u8] { &self.buf[self.stsz_start as usize .. self.stss_start as usize] }
+    fn stss(&self) -> &[u8] { &self.buf[self.stss_start as usize ..] }
 }
 
+/// A wrapper around `recording::Segment` that keeps some additional `.mp4`-specific state.
 struct Mp4Segment {
     s: recording::Segment,
 
@@ -305,7 +348,7 @@ struct Mp4Segment {
 }
 
 impl Mp4Segment {
-    fn with_index<F, R>(&self, db: &Database, f: F) -> Result<R>
+    fn with_index<F, R>(&self, db: &db::Database, f: F) -> Result<R>
     where F: FnOnce(&Mp4SegmentIndex) -> Result<R> {
         let mut i = self.index.borrow_mut();
         if let Some(ref i) = *i {
@@ -317,7 +360,7 @@ impl Mp4Segment {
         r
     }
 
-    fn build_index(&self, db: &Database) -> Result<Mp4SegmentIndex> {
+    fn build_index(&self, db: &db::Database) -> Result<Mp4SegmentIndex> {
         let s = &self.s;
         let stts_len = mem::size_of::<u32>() * 2 * (s.frames as usize);
         let stsz_len = mem::size_of::<u32>() * s.frames as usize;
@@ -343,8 +386,6 @@ impl Mp4Segment {
                 frame += 1;
                 Ok(())
             })?;
-            assert_eq!(s.frames, frame as i32);
-            assert_eq!(s.key_frames, key_frame as i32);
 
             // Fix up the final frame's duration.
             // Doing this after the fact is more efficient than having a condition on every
@@ -356,8 +397,8 @@ impl Mp4Segment {
         }
         Ok(Mp4SegmentIndex{
             buf: buf,
-            stsz_start: stts_len,
-            stss_start: (stts_len + stsz_len),
+            stsz_start: stts_len as u32,
+            stss_start: (stts_len + stsz_len) as u32,
         })
     }
 }
@@ -366,7 +407,7 @@ pub struct Mp4FileBuilder {
     /// Segments of video: one per "recording" table entry as they should
     /// appear in the video.
     segments: Vec<Mp4Segment>,
-    video_sample_entries: SmallVec<[Arc<VideoSampleEntry>; 1]>,
+    video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
     next_frame_num: u32,
     duration_90k: u32,
     num_subtitle_samples: u32,
@@ -387,81 +428,74 @@ struct BodyState {
     buf: Vec<u8>,
 }
 
+/// A single slice of a `Mp4File`, for use with a `Slices` object. Each slice is responsible for
+/// some portion of the generated `.mp4` file. The box headers and such are generally in `Static`
+/// or `Buf` slices; the others generally represent a single segment's contribution to the
+/// like-named box.
 #[derive(Debug)]
 enum Mp4FileSlice {
-    Static(StaticBytestring),  // index into STATIC_BYTESTRINGS
-    Buf(u32),                  // index into m.buf
-    VideoSampleEntry(u32),     // index into m.video_sample_entries
-    Stts(u32),                 // index into m.segments
-    Stsz(u32),                 // index into m.segments
+    Static(StaticBytestring),  // param is index into STATIC_BYTESTRINGS
+    Buf(u32),                  // param is index into m.buf
+    VideoSampleEntry(u32),     // param is index into m.video_sample_entries
+    Stts(u32),                 // param is index into m.segments
+    Stsz(u32),                 // param is index into m.segments
     Co64,
-    Stss(u32),                 // index into m.segments
-    VideoSampleData(u32),      // index into m.segments
-    SubtitleSampleData(u32),   // index into m.segments
+    Stss(u32),                 // param is index into m.segments
+    VideoSampleData(u32),      // param is index into m.segments
+    SubtitleSampleData(u32),   // param is index into m.segments
 }
 
 impl ContextWriter<Mp4File> for Mp4FileSlice {
     fn write_to(&self, f: &Mp4File, r: Range<u64>, l: u64, out: &mut io::Write)
                 -> Result<()> {
+        trace!("write {:?}, range {:?} out of len {}", self, r, l);
         match *self {
             Mp4FileSlice::Static(off) => {
                 let s = STATIC_BYTESTRINGS[off as usize];
-                debug!("write static data, range: {:?} slice len: {}", r, s.len());
                 let part = &s[r.start as usize .. r.end as usize];
                 out.write_all(part)?;
                 Ok(())
             },
             Mp4FileSlice::Buf(off) => {
                 let off = off as usize;
-                debug!("write data from buf starting at offset {}/{}, range: {:?}",
-                       off, f.buf.len(), r);
                 out.write_all(
                     &f.buf[off+r.start as usize .. off+r.end as usize])?;
                 Ok(())
             },
             Mp4FileSlice::VideoSampleEntry(off) => {
                 let e = &f.video_sample_entries[off as usize];
-                debug!("write video sample entry data, range: {:?} data len: {}", r, e.data.len());
                 let part = &e.data[r.start as usize .. r.end as usize];
                 out.write_all(part)?;
                 Ok(())
             },
             Mp4FileSlice::Stts(index) => {
-                debug!("write stts for segment {}/{}, range: {:?}", index, f.segments.len(), r);
                 f.write_stts(index as usize, r, l, out)
             },
             Mp4FileSlice::Stsz(index) => {
-                debug!("write stsz for segment {}/{}, range: {:?}", index, f.segments.len(), r);
                 f.write_stsz(index as usize, r, l, out)
             },
             Mp4FileSlice::Co64 => {
-                debug!("write co64, range: {:?}", r);
                 f.write_co64(r, l, out)
             },
             Mp4FileSlice::Stss(index) => {
-                debug!("write stss for segment {}/{}, range: {:?}", index, f.segments.len(), r);
                 f.write_stss(index as usize, r, l, out)
             },
             Mp4FileSlice::VideoSampleData(index) => {
-                debug!("write video data for segment {}/{}, range: {:?}",
-                       index, f.segments.len(), r);
                 f.write_video_sample_data(index as usize, r, out)
             },
             Mp4FileSlice::SubtitleSampleData(index) => {
-                debug!("write subtitle data for segment {}/{}, range: {:?}",
-                       index, f.segments.len(), r);
                 f.write_subtitle_sample_data(index as usize, r, l, out)
             }
         }
     }
 }
 
-// Convert from 90kHz units since 1970-01-01 00:00:00 UTC to
-// seconds since 1904-01-01 00:00:00 UTC.
+/// Converts from 90kHz units since Unix epoch (1970-01-01 00:00:00 UTC) to seconds since
+/// ISO-14496 epoch (1904-01-01 00:00:00 UTC).
 fn to_iso14496_timestamp(t: recording::Time) -> u32 { (t.unix_seconds() + 24107 * 86400) as u32 }
 
-// Used only within Mp4FileBuilder::build (and methods it calls internally).
-// Writes a box length for everything appended in the supplied scope.
+/// Writes a box length for everything appended in the supplied scope.
+/// Used only within Mp4FileBuilder::build (and methods it calls internally).
 macro_rules! write_length {
     ($_self:ident, $b:block) => {{
         let len_pos = $_self.body.buf.len();
@@ -476,6 +510,7 @@ macro_rules! write_length {
     }}
 }
 
+/// Returns a hex-encoded version of the input.
 fn hex(raw: &[u8]) -> String {
     const HEX_CHARS: [u8; 16] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7',
                                  b'8', b'9', b'a', b'b', b'c', b'd', b'e', b'f'];
@@ -505,19 +540,24 @@ impl Mp4FileBuilder {
         }
     }
 
+    /// Sets if the generated `.mp4` should include a subtitle track with second-level timestamps.
+    /// Default is false.
     pub fn include_timestamp_subtitle_track(&mut self, b: bool) {
         self.include_timestamp_subtitle_track = b;
     }
 
+    /// Reserves space for the given number of additional segments.
     pub fn reserve(&mut self, additional: usize) {
         self.segments.reserve(additional);
     }
 
     pub fn len(&self) -> usize { self.segments.len() }
 
-    pub fn append(&mut self, row: ListCameraRecordingsRow, rel_range_90k: Range<i32>) {
+    /// Appends a segment for (a subset of) the given recording.
+    pub fn append(&mut self, db: &MutexGuard<db::LockedDatabase>, row: db::ListCameraRecordingsRow,
+                  rel_range_90k: Range<i32>) -> Result<()> {
         self.segments.push(Mp4Segment{
-            s: recording::Segment::new(&row, rel_range_90k),
+            s: recording::Segment::new(db, &row, rel_range_90k)?,
             index: RefCell::new(None),
             first_frame_num: self.next_frame_num,
             num_subtitle_samples: 0,
@@ -526,9 +566,11 @@ impl Mp4FileBuilder {
         if !self.video_sample_entries.iter().any(|e| e.id == row.video_sample_entry.id) {
             self.video_sample_entries.push(row.video_sample_entry);
         }
+        Ok(())
     }
 
-    pub fn build(mut self, db: Arc<Database>, dir: Arc<dir::SampleFileDir>) -> Result<Mp4File> {
+    /// Builds the `Mp4File`, consuming the builder.
+    pub fn build(mut self, db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>) -> Result<Mp4File> {
         let mut max_end = None;
         let mut etag = hash::Hasher::new(hash::Type::SHA1)?;
         etag.update(&FORMAT_VERSION[..])?;
@@ -536,7 +578,6 @@ impl Mp4FileBuilder {
             etag.update(b":ts:")?;
         }
         for s in &mut self.segments {
-            s.s.init(&db)?;
             let d = &s.s.desired_range_90k;
             self.duration_90k += (d.end - d.start) as u32;
             let end = s.s.start + recording::Duration(d.end as i64);
@@ -629,7 +670,7 @@ impl Mp4FileBuilder {
         })
     }
 
-    // MovieBox, ISO/IEC 14496-12 section 8.2.1.
+    /// Appends a `MovieBox` (ISO/IEC 14496-12 section 8.2.1).
     fn append_moov(&mut self, creation_ts: u32) -> Result<()> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"moov");
@@ -642,7 +683,7 @@ impl Mp4FileBuilder {
         Ok(())
     }
 
-    // MovieHeaderBox version 0, ISO/IEC 14496-12 section 8.2.2.
+    /// Appends a `MovieHeaderBox` version 0 (ISO/IEC 14496-12 section 8.2.2).
     fn append_mvhd(&mut self, creation_ts: u32) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mvhd\x00\x00\x00\x00");
@@ -652,12 +693,12 @@ impl Mp4FileBuilder {
             let d = self.duration_90k;
             self.body.append_u32(d);
             self.body.append_static(StaticBytestring::MvhdJunk);
-            // TODO: caption track?
-            self.body.append_u32(2);           // next_track_id
+            let next_track_id = if self.include_timestamp_subtitle_track { 3 } else { 2 };
+            self.body.append_u32(next_track_id);
         });
     }
 
-    // ISO/IEC 14496-12 section 8.3.1, trak.
+    /// Appends a `TrackBox` (ISO/IEC 14496-12 section 8.3.1) suitable for video.
     fn append_video_trak(&mut self, creation_ts: u32) -> Result<()> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"trak");
@@ -668,7 +709,7 @@ impl Mp4FileBuilder {
         Ok(())
     }
 
-    // ISO/IEC 14496-12 section 8.3.1, trak.
+    /// Appends a `TrackBox` (ISO/IEC 14496-12 section 8.3.1) suitable for subtitles.
     fn append_subtitle_trak(&mut self, creation_ts: u32) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"trak");
@@ -677,7 +718,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.3.2.
+    /// Appends a `TrackHeaderBox` (ISO/IEC 14496-12 section 8.3.2) suitable for video.
     fn append_video_tkhd(&mut self, creation_ts: u32) {
         write_length!(self, {
             // flags 7: track_enabled | track_in_movie | track_in_preview
@@ -695,7 +736,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.3.2.
+    /// Appends a `TrackHeaderBox` (ISO/IEC 14496-12 section 8.3.2) suitable for subtitles.
     fn append_subtitle_tkhd(&mut self, creation_ts: u32) {
         write_length!(self, {
             // flags 7: track_enabled | track_in_movie | track_in_preview
@@ -711,7 +752,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.6.5.
+    /// Appends an `EditBox` (ISO/IEC 14496-12 section 8.6.5) suitable for video, if necessary.
     fn maybe_append_video_edts(&mut self) -> Result<()> {
         #[derive(Debug, Default)]
         struct Entry {
@@ -771,7 +812,7 @@ impl Mp4FileBuilder {
         Ok(())
     }
 
-    // ISO/IEC 14496-12 section 8.4.1.
+    /// Appends a `MediaBox` (ISO/IEC 14496-12 section 8.4.1) suitable for video.
     fn append_video_mdia(&mut self, creation_ts: u32) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mdia");
@@ -781,19 +822,18 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.4.1.
+    /// Appends a `MediaBox` (ISO/IEC 14496-12 section 8.4.1) suitable for subtitles.
     fn append_subtitle_mdia(&mut self, creation_ts: u32) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mdia");
             self.append_mdhd(creation_ts);
             self.body.append_static(StaticBytestring::SubtitleHdlrBox);
             self.append_subtitle_minf();
-            // TODO: nmhddinf
         });
     }
 
-    /// Appends a mdhd suitable for either the video or subtitle track.
-    /// See ISO/IEC 14496-12 section 8.4.2.
+    /// Appends a `MediaHeaderBox` (ISO/IEC 14496-12 section 8.4.2.) suitable for either the video
+    /// or subtitle track.
     fn append_mdhd(&mut self, creation_ts: u32) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mdhd\x00\x00\x00\x00");
@@ -805,7 +845,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.4.4.
+    /// Appends a `MediaInformationBox` (ISO/IEC 14496-12 section 8.4.4) suitable for video.
     fn append_video_minf(&mut self) {
         write_length!(self, {
             self.body.append_static(StaticBytestring::VideoMinfJunk);
@@ -813,7 +853,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.4.4.
+    /// Appends a `MediaInformationBox` (ISO/IEC 14496-12 section 8.4.4) suitable for subtitles.
     fn append_subtitle_minf(&mut self) {
         write_length!(self, {
             self.body.append_static(StaticBytestring::SubtitleMinfJunk);
@@ -821,7 +861,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.5.1.
+    /// Appends a `SampleTableBox` (ISO/IEC 14496-12 section 8.5.1) suitable for video.
     fn append_video_stbl(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stbl");
@@ -834,7 +874,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.5.1.
+    /// Appends a `SampleTableBox` (ISO/IEC 14496-12 section 8.5.1) suitable for subtitles.
     fn append_subtitle_stbl(&mut self) {
         write_length!(self, {
             self.body.append_static(StaticBytestring::SubtitleStblJunk);
@@ -845,7 +885,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.5.2.
+    /// Appends a `SampleDescriptionBox` (ISO/IEC 14496-12 section 8.5.2) suitable for video.
     fn append_video_stsd(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsd\x00\x00\x00\x00");
@@ -859,7 +899,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.6.1.
+    /// Appends a `TimeToSampleBox` (ISO/IEC 14496-12 section 8.6.1) suitable for video.
     fn append_video_stts(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stts\x00\x00\x00\x00");
@@ -877,7 +917,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.6.1.
+    /// Appends a `TimeToSampleBox` (ISO/IEC 14496-12 section 8.6.1) suitable for subtitles.
     fn append_subtitle_stts(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stts\x00\x00\x00\x00");
@@ -923,7 +963,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.7.4.
+    /// Appends a `SampleToChunkBox` (ISO/IEC 14496-12 section 8.7.4) suitable for video.
     fn append_video_stsc(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsc\x00\x00\x00\x00");
@@ -940,7 +980,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.7.4.
+    /// Appends a `SampleToChunkBox` (ISO/IEC 14496-12 section 8.7.4) suitable for subtitles.
     fn append_subtitle_stsc(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(
@@ -950,7 +990,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.7.3.
+    /// Appends a `SampleSizeBox` (ISO/IEC 14496-12 section 8.7.3) suitable for video.
     fn append_video_stsz(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsz\x00\x00\x00\x00\x00\x00\x00\x00");
@@ -968,7 +1008,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.7.3.
+    /// Appends a `SampleSizeBox` (ISO/IEC 14496-12 section 8.7.3) suitable for subtitles.
     fn append_subtitle_stsz(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsz\x00\x00\x00\x00");
@@ -977,7 +1017,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.7.5.
+    /// Appends a `ChunkLargeOffsetBox` (ISO/IEC 14496-12 section 8.7.5) suitable for video.
     fn append_video_co64(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"co64\x00\x00\x00\x00");
@@ -989,7 +1029,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.7.5.
+    /// Appends a `ChunkLargeOffsetBox` (ISO/IEC 14496-12 section 8.7.5) suitable for subtitles.
     fn append_subtitle_co64(&mut self) {
         write_length!(self, {
             // Write a placeholder; the actual value will be filled in later.
@@ -999,7 +1039,7 @@ impl Mp4FileBuilder {
         });
     }
 
-    // ISO/IEC 14496-12 section 8.6.2.
+    /// Appends a `SyncSampleBox` (ISO/IEC 14496-12 section 8.6.2) suitable for video.
     fn append_video_stss(&mut self) {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stss\x00\x00\x00\x00");
@@ -1027,6 +1067,9 @@ impl BodyState {
         self.buf.write_u64::<BigEndian>(v).expect("Vec write shouldn't fail");
     }
 
+    /// Flushes the buffer: appends a slice for everything written into the buffer so far,
+    /// noting the position which has been flushed. Call this method prior to adding any non-buffer
+    /// slice.
     fn flush_buf(&mut self) {
         let len = self.buf.len();
         if self.unflushed_buf_pos < len {
@@ -1036,6 +1079,7 @@ impl BodyState {
         }
     }
 
+    /// Appends a static bytestring, flushing the buffer if necessary.
     fn append_static(&mut self, which: StaticBytestring) {
         self.flush_buf();
         let s = STATIC_BYTESTRINGS[which as usize];
@@ -1044,12 +1088,12 @@ impl BodyState {
 }
 
 pub struct Mp4File {
-    db: Arc<Database>,
+    db: Arc<db::Database>,
     dir: Arc<dir::SampleFileDir>,
     segments: Vec<Mp4Segment>,
     slices: Slices<Mp4FileSlice, Mp4File>,
     buf: Vec<u8>,
-    video_sample_entries: SmallVec<[Arc<VideoSampleEntry>; 1]>,
+    video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
     initial_sample_byte_pos: u64,
     last_modified: header::HttpDate,
     etag: header::EntityTag,
@@ -1127,9 +1171,18 @@ impl resource::Resource for Mp4File {
     }
 }
 
+/// Tests. There are two general strategies used to validate the resulting files:
+///
+///    * basic tests that ffmpeg can read the generated mp4s. This ensures compatibility with
+///      popular software, though it's hard to test specifics. ffmpeg provides an abstraction layer
+///      over the encapsulation format, so mp4-specific details are hard to see. Also, ffmpeg might
+///      paper over errors in the mp4 or have its own bugs.
+///
+///    * tests using the `BoxCursor` type to inspect the generated mp4s more closely. These don't
+///      detect misunderstandings of the specification or incompatibilities, but they can be used
+///      to verify the output is byte-for-byte as expected.
 #[cfg(test)]
 mod tests {
-    extern crate tempdir;
     extern crate test;
 
     use db;
@@ -1139,20 +1192,19 @@ mod tests {
     use openssl::crypto::hash;
     use recording::{self, TIME_UNITS_PER_SEC};
     use resource::{self, Resource};
-    use rusqlite;
     use self::test::Bencher;
     use std::fs;
     use std::io;
     use std::mem;
     use std::path::Path;
     use std::sync::Arc;
-    use std::thread;
+    use std::str;
     use super::*;
     use stream::StreamSource;
-    use self::tempdir::TempDir;
-    use testutil;
+    use testutil::{self, TestDb};
     use uuid::Uuid;
 
+    /// A wrapper around openssl's SHA-1 hashing that implements the `Write` trait.
     struct Sha1(hash::Hasher);
 
     impl Sha1 {
@@ -1168,62 +1220,179 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> { Ok(()) }
     }
 
+    /// Returns the SHA-1 digest of the given `Resource`.
     fn digest(r: &Resource) -> Vec<u8> {
         let mut sha1 = Sha1::new();
         r.write_to(0 .. r.len(), &mut sha1).unwrap();
         sha1.finish()
     }
 
-    lazy_static! {
-        static ref TEST_CAMERA_UUID: Uuid =
-            Uuid::parse_str("ce2d9bc2-0cd3-4204-9324-7b5ccb07183c").unwrap();
-    }
-
     const TEST_CAMERA_ID: i32 = 1;
 
-    struct TestDb {
-        db: Arc<db::Database>,
-        dir: Arc<dir::SampleFileDir>,
-        syncer_channel: dir::SyncerChannel,
-        syncer_join: thread::JoinHandle<()>,
-        tmpdir: TempDir,
+    /// Information used within `BoxCursor` to describe a box on the stack.
+    #[derive(Clone)]
+    struct Mp4Box {
+        interior: Range<u64>,
+        boxtype: [u8; 4],
     }
 
-    // TODO: this seems like an integration test util; move to tests/common/*.rs file?
-    fn setup_db() -> TestDb {
-        let tmpdir = TempDir::new("mp4-test").unwrap();
+    /// A cursor over the boxes in a `.mp4` file. Supports moving forward and up/down the box
+    /// stack, not backward. Panics on error.
+    #[derive(Clone)]
+    struct BoxCursor<'a> {
+        mp4: &'a resource::Resource,
+        stack: Vec<Mp4Box>,
+    }
 
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        let schema = include_str!("schema.sql");
-        conn.execute_batch(schema).unwrap();
-        let uuid_bytes = &TEST_CAMERA_UUID.as_bytes()[..];
-        conn.execute_named(r#"
-            insert into camera (uuid,  short_name,  description,  host,  username,  password,
-                                main_rtsp_path,  sub_rtsp_path,  retain_bytes)
-                        values (:uuid, :short_name, :description, :host, :username, :password,
-                                :main_rtsp_path, :sub_rtsp_path, :retain_bytes)
-        "#, &[
-            (":uuid", &uuid_bytes),
-            (":short_name", &"test camera"),
-            (":description", &""),
-            (":host", &"test-camera"),
-            (":username", &"foo"),
-            (":password", &"bar"),
-            (":main_rtsp_path", &"/main"),
-            (":sub_rtsp_path", &"/sub"),
-            (":retain_bytes", &1048576i64),
-        ]).unwrap();
-        assert_eq!(TEST_CAMERA_ID as i64, conn.last_insert_rowid());
-        let db = Arc::new(db::Database::new(conn).unwrap());
-        let path = tmpdir.path().to_str().unwrap().to_owned();
-        let dir = dir::SampleFileDir::new(&path, db.clone()).unwrap();
-        let (syncer_channel, syncer_join) = dir::start_syncer(dir.clone()).unwrap();
-        TestDb{
-            db: db,
-            dir: dir,
-            syncer_channel: syncer_channel,
-            syncer_join: syncer_join,
-            tmpdir: tmpdir,
+    impl<'a> BoxCursor<'a> {
+        pub fn new(mp4: &'a resource::Resource) -> BoxCursor<'a> {
+            BoxCursor{
+                mp4: mp4,
+                stack: Vec::new(),
+            }
+        }
+
+        /// Pushes the box at the given position onto the stack (returning true), or returns
+        /// false if pos == max.
+        fn internal_push(&mut self, pos: u64, max: u64) -> bool {
+            if pos == max { return false; }
+            let mut hdr = [0u8; 16];
+            self.mp4.write_to(pos .. pos+8, &mut &mut hdr[..]).unwrap();
+            let (len, hdr_len, boxtype_slice) = match BigEndian::read_u32(&hdr[..4]) {
+                0 => (self.mp4.len() - pos, 8, &hdr[4..8]),
+                1 => {
+                    self.mp4.write_to(pos+8 .. pos+12, &mut &mut hdr[..]).unwrap();
+                    (BigEndian::read_u64(&hdr[4..12]), 16, &hdr[12..])
+                },
+                l => (l as u64, 8, &hdr[4..8]),
+            };
+            let mut boxtype = [0u8; 4];
+            assert!(pos + (hdr_len as u64) <= max);
+            assert!(pos + len <= max);
+            boxtype[..].copy_from_slice(boxtype_slice);
+            self.stack.push(Mp4Box{
+                interior: pos + hdr_len as u64 .. pos + len,
+                boxtype: boxtype,
+            });
+            trace!("positioned at {}", self.path());
+            true
+        }
+
+        fn path(&self) -> String {
+            let mut s = String::with_capacity(5 * self.stack.len());
+            for b in &self.stack {
+                s.push('/');
+                s.push_str(str::from_utf8(&b.boxtype[..]).unwrap());
+            }
+            s
+        }
+
+        /// Gets the specified byte range within the current box, starting after the box type.
+        /// Must not be at EOF.
+        pub fn get(&self, r: Range<u64>, mut buf: &mut [u8]) {
+            let interior = &self.stack.last().expect("at root").interior;
+            assert!(r.end < interior.end - interior.start);
+            self.mp4.write_to(r.start+interior.start .. r.end+interior.start, &mut buf).unwrap();
+        }
+
+        pub fn get_all(&self) -> Vec<u8> {
+            let interior = self.stack.last().expect("at root").interior.clone();
+            let len = (interior.end - interior.start) as usize;
+            let mut out = Vec::with_capacity(len);
+            self.mp4.write_to(interior, &mut out).unwrap();
+            out
+        }
+
+        /// Gets the specified u32 within the current box, starting after the box type.
+        /// Must not be at EOF.
+        pub fn get_u32(&self, p: u64) -> u32 {
+            let mut buf = [0u8; 4];
+            self.get(p .. p+4, &mut buf);
+            BigEndian::read_u32(&buf[..])
+        }
+
+        /// Navigates to the next box after the current one, or up if the current one is last.
+        #[allow(should_implement_trait)]
+        pub fn next(&mut self) -> bool {
+            let old = self.stack.pop().expect("positioned at root; there is no next");
+            let max = self.stack.last().map(|b| b.interior.end).unwrap_or_else(|| self.mp4.len());
+            self.internal_push(old.interior.end, max)
+        }
+
+        /// Finds the next box of the given type after the current one, or navigates up if absent.
+        pub fn find(&mut self, boxtype: &[u8]) -> bool {
+            trace!("looking for {}", str::from_utf8(boxtype).unwrap());
+            loop {
+                if &self.stack.last().unwrap().boxtype[..] == boxtype {
+                    return true;
+                }
+                if !self.next() {
+                    return false;
+                }
+            }
+        }
+
+        /// Moves up the stack. Must not be at root.
+        pub fn up(&mut self) { self.stack.pop(); }
+
+        /// Moves down the stack. Must be positioned on a box with children.
+        pub fn down(&mut self) {
+            let range = self.stack.last().map(|b| b.interior.clone())
+                                         .unwrap_or_else(|| 0 .. self.mp4.len());
+            assert!(self.internal_push(range.start, range.end), "no children in {}", self.path());
+        }
+    }
+
+    /// Information returned by `find_track`.
+    struct Track<'a> {
+        edts_cursor: Option<BoxCursor<'a>>,
+        stbl_cursor: BoxCursor<'a>,
+    }
+
+    /// Finds the `moov/trak` that has a `tkhd` associated with the given `track_id`, which must
+    /// exist.
+    fn find_track(mp4: & resource::Resource, track_id: u32) -> Track {
+        let mut cursor = BoxCursor::new(mp4);
+        cursor.down();
+        assert!(cursor.find(b"moov"));
+        cursor.down();
+        loop {
+            assert!(cursor.find(b"trak"));
+            cursor.down();
+            assert!(cursor.find(b"tkhd"));
+            let mut version = [0u8; 1];
+            cursor.get(0 .. 1, &mut version);
+
+            // Let id_pos be the offset after the FullBox section of the track_id.
+            let id_pos = match version[0] {
+                0 => 8,   // track_id follows 32-bit creation_time and modification_time
+                1 => 16,  // ...64-bit times...
+                v => panic!("unexpected tkhd version {}", v),
+            };
+            let cur_track_id = cursor.get_u32(4 + id_pos);
+            trace!("found moov/trak/tkhd with id {}; want {}", cur_track_id, track_id);
+            if cur_track_id == track_id {
+                break;
+            }
+            cursor.up();
+            assert!(cursor.next());
+        }
+        let edts_cursor;
+        if cursor.find(b"edts") {
+            edts_cursor = Some(cursor.clone());
+            cursor.up();
+        } else {
+            edts_cursor = None;
+        };
+        cursor.down();
+        assert!(cursor.find(b"mdia"));
+        cursor.down();
+        assert!(cursor.find(b"minf"));
+        cursor.down();
+        assert!(cursor.find(b"stbl"));
+        Track{
+            edts_cursor: edts_cursor,
+            stbl_cursor: cursor,
         }
     }
 
@@ -1285,12 +1454,15 @@ mod tests {
         let mut builder = Mp4FileBuilder::new();
         builder.include_timestamp_subtitle_track(include_subtitles);
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
-        db.lock().list_recordings(TEST_CAMERA_ID, &all_time, |r| {
-            let d = r.duration_90k;
-            assert!(skip_90k + shorten_90k < d);
-            builder.append(r, skip_90k .. d - shorten_90k);
-            Ok(())
-        }).unwrap();
+        {
+            let db = db.lock();
+            db.list_recordings(TEST_CAMERA_ID, &all_time, |r| {
+                let d = r.duration_90k;
+                assert!(skip_90k + shorten_90k < d);
+                builder.append(&db, r, skip_90k .. d - shorten_90k).unwrap();
+                Ok(())
+            }).unwrap();
+        }
         builder.build(db, dir).unwrap()
     }
 
@@ -1340,10 +1512,136 @@ mod tests {
         }
     }
 
+    /// Makes a `.mp4` file which is only good for exercising the `Mp4FileSlice` logic for
+    /// producing sample tables that match the supplied encoder.
+    fn make_mp4_from_encoder(db: &TestDb, encoder: recording::SampleIndexEncoder,
+                             desired_range_90k: Range<i32>) -> Mp4File {
+        let row = db.create_recording_from_encoder(encoder);
+        let mut builder = Mp4FileBuilder::new();
+        builder.append(&db.db.lock(), row, desired_range_90k).unwrap();
+        builder.build(db.db.clone(), db.dir.clone()).unwrap()
+    }
+
+    /// Tests sample table for a simple video index of all sync frames.
+    #[test]
+    fn test_all_sync_frames() {
+        testutil::init();
+        let db = TestDb::new();
+        let mut encoder = recording::SampleIndexEncoder::new();
+        for i in 1..6 {
+            let duration_90k = 2 * i;
+            let bytes = 3 * i;
+            encoder.add_sample(duration_90k, bytes, true);
+        }
+
+        // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
+        let mp4 = make_mp4_from_encoder(&db, encoder, 2 .. 2+4+6+8);
+        let track = find_track(&mp4, 1);
+        assert!(track.edts_cursor.is_none());
+        let mut cursor = track.stbl_cursor;
+        cursor.down();
+        cursor.find(b"stts");
+        assert_eq!(cursor.get_all(), &[
+            0x00, 0x00, 0x00, 0x00,  // version + flags
+            0x00, 0x00, 0x00, 0x03,  // entry_count
+
+            // entries
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04,  // run length / timestamps.
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x08,
+        ]);
+
+        cursor.find(b"stsz");
+        assert_eq!(cursor.get_all(), &[
+            0x00, 0x00, 0x00, 0x00,  // version + flags
+            0x00, 0x00, 0x00, 0x00,  // sample_size
+            0x00, 0x00, 0x00, 0x03,  // sample_count
+
+            // entries
+            0x00, 0x00, 0x00, 0x06,  // size
+            0x00, 0x00, 0x00, 0x09,
+            0x00, 0x00, 0x00, 0x0c,
+        ]);
+
+        cursor.find(b"stss");
+        assert_eq!(cursor.get_all(), &[
+            0x00, 0x00, 0x00, 0x00,  // version + flags
+            0x00, 0x00, 0x00, 0x03,  // entry_count
+
+            // entries
+            0x00, 0x00, 0x00, 0x01,  // sample_number
+            0x00, 0x00, 0x00, 0x02,
+            0x00, 0x00, 0x00, 0x03,
+        ]);
+    }
+
+    /// Tests sample table and edit list for a video index with half sync frames.
+    #[test]
+    fn test_half_sync_frames() {
+        testutil::init();
+        let db = TestDb::new();
+        let mut encoder = recording::SampleIndexEncoder::new();
+        for i in 1..6 {
+            let duration_90k = 2 * i;
+            let bytes = 3 * i;
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1);
+        }
+
+        // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
+        // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
+        let mp4 = make_mp4_from_encoder(&db, encoder, 2+4+6 .. 2+4+6+8);
+        let track = find_track(&mp4, 1);
+
+        // Examine edts. It should skip the 3rd frame.
+        let mut cursor = track.edts_cursor.unwrap();
+        cursor.down();
+        cursor.find(b"elst");
+        assert_eq!(cursor.get_all(), &[
+            0x01, 0x00, 0x00, 0x00,                          // version + flags
+            0x00, 0x00, 0x00, 0x01,                          // length
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,  // segment_duration
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06,  // media_time
+            0x00, 0x01, 0x00, 0x01,                          // media_rate_{integer,fraction}
+        ]);
+
+        // Examine stbl.
+        let mut cursor = track.stbl_cursor;
+        cursor.down();
+        cursor.find(b"stts");
+        assert_eq!(cursor.get_all(), &[
+            0x00, 0x00, 0x00, 0x00,  // version + flags
+            0x00, 0x00, 0x00, 0x02,  // entry_count
+
+            // entries
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06,  // run length / timestamps.
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x08,
+        ]);
+
+        cursor.find(b"stsz");
+        assert_eq!(cursor.get_all(), &[
+            0x00, 0x00, 0x00, 0x00,  // version + flags
+            0x00, 0x00, 0x00, 0x00,  // sample_size
+            0x00, 0x00, 0x00, 0x02,  // sample_count
+
+            // entries
+            0x00, 0x00, 0x00, 0x09,  // size
+            0x00, 0x00, 0x00, 0x0c,
+        ]);
+
+        cursor.find(b"stss");
+        assert_eq!(cursor.get_all(), &[
+            0x00, 0x00, 0x00, 0x00,  // version + flags
+            0x00, 0x00, 0x00, 0x01,  // entry_count
+
+            // entries
+            0x00, 0x00, 0x00, 0x01,  // sample_number
+        ]);
+    }
+
     #[test]
     fn test_round_trip() {
         testutil::init();
-        let db = setup_db();
+        let db = TestDb::new();
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
@@ -1354,7 +1652,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", super::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "191730a3c41adc9c5394b4516638ee6fda05649c";
+        const EXPECTED_ETAG: &'static str = "3c48af4dbce2024db07f27a00789b6af774a8c89";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -1363,7 +1661,7 @@ mod tests {
     #[test]
     fn test_round_trip_with_subtitles() {
         testutil::init();
-        let db = setup_db();
+        let db = TestDb::new();
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, true);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
@@ -1373,8 +1671,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("0081a442ba73092027fc580eeac2ebf25cb1ef50", super::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "d7aedccfae063219974086c43efdc6fda5a7e889";
+        assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", super::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "c24d7af372e5d8f66f4feb6e3a5cd43828392371";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -1383,7 +1681,7 @@ mod tests {
     #[test]
     fn test_round_trip_with_edit_list() {
         testutil::init();
-        let db = setup_db();
+        let db = TestDb::new();
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 1, 0, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
@@ -1394,7 +1692,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("685e026af44204bc9cc52115c5e17058e9fb7c70", super::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "4cd904b6746330e63590a60d3bd254df3987caee";
+        const EXPECTED_ETAG: &'static str = "870e2b3cfef4a988951344b32e53af0d4496894d";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -1403,7 +1701,7 @@ mod tests {
     #[test]
     fn test_round_trip_with_shorten() {
         testutil::init();
-        let db = setup_db();
+        let db = TestDb::new();
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 1, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
@@ -1414,7 +1712,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", super::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "d2e75438be6c3a747bf0d9aa86332604340d2b82";
+        const EXPECTED_ETAG: &'static str = "71c329188a2cd175c8d61492a9789e242af06c05";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -1451,7 +1749,7 @@ mod tests {
             let server = hyper::Server::new(listener);
             let url = hyper::Url::parse(
                 format!("http://{}:{}/", addr.ip(), addr.port()).as_str()).unwrap();
-            let db = setup_db();
+            let db = TestDb::new();
             add_dummy_recordings_to_db(&db.db);
             let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
             let p = mp4.initial_sample_byte_pos;
@@ -1525,7 +1823,7 @@ mod tests {
     #[bench]
     fn mp4_construction(b: &mut Bencher) {
         testutil::init();
-        let db = setup_db();
+        let db = TestDb::new();
         add_dummy_recordings_to_db(&db.db);
         b.iter(|| {
             create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
