@@ -124,7 +124,9 @@ fn none_match(etag: Option<&header::EntityTag>, req: &Request) -> bool {
 /// Returns true if `req` has no `If-Match` header or one which matches `etag`.
 fn any_match(etag: Option<&header::EntityTag>, req: &Request) -> bool {
     match req.headers.get::<header::IfMatch>() {
-        Some(&header::IfMatch::Any) => true,
+        // The absent header and "If-Match: *" cases differ only when there is no entity to serve.
+        // We always have an entity to serve, so consider them identical.
+        None | Some(&header::IfMatch::Any) => true,
         Some(&header::IfMatch::Items(ref items)) => {
             if let Some(some_etag) = etag {
                 for item in items {
@@ -135,7 +137,6 @@ fn any_match(etag: Option<&header::EntityTag>, req: &Request) -> bool {
             }
             false
         },
-        None => false,
     }
 }
 
@@ -173,7 +174,7 @@ pub fn serve(rsrc: &Resource, req: &Request, mut res: Response<Fresh>) -> Result
         }
     }
 
-    if any_match(etag, req) {
+    if !any_match(etag, req) {
         *res.status_mut() = hyper::status::StatusCode::PreconditionFailed;
         res.send(b"Precondition failed")?;
         return Ok(());
@@ -438,6 +439,27 @@ mod tests {
         resp.read_to_end(&mut buf).unwrap();
         assert_eq!(b"01234", &buf[..]);
 
+        // If-Match any should still send the full body.
+        let mut resp = client.get(&*SERVER)
+                             .header(header::IfMatch::Any)
+                             .send()
+                             .unwrap();
+        assert_eq!(hyper::status::StatusCode::Ok, resp.status);
+        assert_eq!(Some(&header::ContentType(mime!(Application/OctetStream))),
+                   resp.headers.get::<header::ContentType>());
+        assert_eq!(None, resp.headers.get::<header::ContentRange>());
+        buf.clear();
+        resp.read_to_end(&mut buf).unwrap();
+        assert_eq!(b"01234", &buf[..]);
+
+        // If-Match by etag doesn't match (as this request has no etag).
+        let resp =
+            client.get(&*SERVER)
+                  .header(header::IfMatch::Items(vec![EntityTag::strong("foo".to_owned())]))
+                  .send()
+                  .unwrap();
+        assert_eq!(hyper::status::StatusCode::PreconditionFailed, resp.status);
+
         // If-None-Match any.
         let mut resp = client.get(&*SERVER)
                              .header(header::IfNoneMatch::Any)
@@ -571,6 +593,41 @@ mod tests {
         let client = hyper::Client::new();
         let mut buf = Vec::new();
 
+        // If-Match any should still send the full body.
+        let mut resp = client.get(&*SERVER)
+                             .header(header::IfMatch::Any)
+                             .send()
+                             .unwrap();
+        assert_eq!(hyper::status::StatusCode::Ok, resp.status);
+        assert_eq!(Some(&header::ContentType(mime!(Application/OctetStream))),
+                   resp.headers.get::<header::ContentType>());
+        assert_eq!(None, resp.headers.get::<header::ContentRange>());
+        buf.clear();
+        resp.read_to_end(&mut buf).unwrap();
+        assert_eq!(b"01234", &buf[..]);
+
+        // If-Match by matching etag should send the full body.
+        let mut resp =
+            client.get(&*SERVER)
+                  .header(header::IfMatch::Items(vec![EntityTag::strong("foo".to_owned())]))
+                  .send()
+                  .unwrap();
+        assert_eq!(hyper::status::StatusCode::Ok, resp.status);
+        assert_eq!(Some(&header::ContentType(mime!(Application/OctetStream))),
+                   resp.headers.get::<header::ContentType>());
+        assert_eq!(None, resp.headers.get::<header::ContentRange>());
+        buf.clear();
+        resp.read_to_end(&mut buf).unwrap();
+        assert_eq!(b"01234", &buf[..]);
+
+        // If-Match by etag which doesn't match.
+        let resp =
+            client.get(&*SERVER)
+                  .header(header::IfMatch::Items(vec![EntityTag::strong("bar".to_owned())]))
+                  .send()
+                  .unwrap();
+        assert_eq!(hyper::status::StatusCode::PreconditionFailed, resp.status);
+
         // If-None-Match by etag which matches.
         let mut resp =
             client.get(&*SERVER)
@@ -639,6 +696,27 @@ mod tests {
         });
         let client = hyper::Client::new();
         let mut buf = Vec::new();
+
+        // If-Match any should still send the full body.
+        let mut resp = client.get(&*SERVER)
+                             .header(header::IfMatch::Any)
+                             .send()
+                             .unwrap();
+        assert_eq!(hyper::status::StatusCode::Ok, resp.status);
+        assert_eq!(Some(&header::ContentType(mime!(Application/OctetStream))),
+                   resp.headers.get::<header::ContentType>());
+        assert_eq!(None, resp.headers.get::<header::ContentRange>());
+        buf.clear();
+        resp.read_to_end(&mut buf).unwrap();
+        assert_eq!(b"01234", &buf[..]);
+
+        // If-Match by etag doesn't match because matches use the strong comparison function.
+        let resp =
+            client.get(&*SERVER)
+                  .header(header::IfMatch::Items(vec![EntityTag::weak("foo".to_owned())]))
+                  .send()
+                  .unwrap();
+        assert_eq!(hyper::status::StatusCode::PreconditionFailed, resp.status);
 
         // If-None-Match by identical weak etag is sufficient.
         let mut resp =
