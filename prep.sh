@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 #
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
@@ -39,8 +39,12 @@
 #
 
 # Configuration variables. Should only need minimal, or zero, changes.
-# Empty values will use defaults.
+# Empty values will use defaults. For convenience, we attempt to read
+# customizations from prep.config first
 #
+if [ -r prep.config ]; then
+	. prep.config
+fi
 
 # User and group
 # Default: or whatever is in $NVR_USER (default "moonfire-nvr")
@@ -61,7 +65,7 @@
 
 # Set to mountpoint of media directory, empty to stay in home directory
 # Default: empty
-#SAMPLES_DIR=
+#SAMPLES_DIR=/media/nvr/samples
 
 # Set to path for media directory relative to mountpoint
 # Default: "samples"
@@ -154,8 +158,18 @@ if [ ! -x "${SERVICE_BIN}" ]; then
 		echo
 		exit 1
 	fi
-	RUST_TEST_THREADS=1 cargo test
-	cargo build --release
+	if ! RUST_TEST_THREADS=1 cargo test; then
+		echo "test failed. Try to run the following manually for more info"
+		echo "RUST_TEST_THREADS=1 cargo test --verbose"
+		echo
+		exit 1
+	fi
+	if ! cargo build --release; then
+		echo "Build failed."
+		echo "RUST_TEST_THREADS=1 cargo build --release --verbose"
+		echo
+		exit 1
+	fi
 	sudo install -m 755 target/release/moonfire-nvr ${SERVICE_BIN}
 	if [ -x "${SERVICE_BIN}" ]; then
 		echo "Binary installed..."; echo

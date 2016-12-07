@@ -3,3 +3,4 @@ cameras.sql
 .settings
 *.swp
 target
+prep.config
