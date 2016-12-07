@@ -71,6 +71,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
+mod clock;
 mod db;
 mod dir;
 mod error;
@@ -157,11 +158,18 @@ fn main() {
         let (syncer_channel, syncer_join) = dir::start_syncer(dir.clone()).unwrap();
         let l = db.lock();
         let cameras = l.cameras_by_id().len();
+        let env = streamer::Environment{
+            db: &db,
+            dir: &dir,
+            clock: &clock::REAL,
+            opener: &*stream::FFMPEG,
+            shutdown: &shutdown,
+        };
         for (i, (id, camera)) in l.cameras_by_id().iter().enumerate() {
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / cameras as i64;
-            let mut streamer = streamer::Streamer::new(
-                db.clone(), dir.clone(), syncer_channel.clone(), shutdown.clone(), *id, camera,
-                rotate_offset_sec);
+            let mut streamer = streamer::Streamer::new(&env, syncer_channel.clone(), *id, camera,
+                                                       rotate_offset_sec,
+                                                       streamer::ROTATE_INTERVAL_SEC);
             let name = format!("stream-{}", streamer.short_name());
             streamers.push(thread::Builder::new().name(name).spawn(move|| {
                 streamer.run();

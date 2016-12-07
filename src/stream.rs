@@ -41,7 +41,11 @@ use std::sync;
 
 static START: sync::Once = sync::ONCE_INIT;
 
-pub enum StreamSource<'a> {
+lazy_static! {
+    pub static ref FFMPEG: Ffmpeg = Ffmpeg::new();
+}
+
+pub enum Source<'a> {
     #[cfg(test)]
     File(&'a str),  // filename, for testing.
 
@@ -76,21 +80,36 @@ extern "C" fn lock_callback(untyped_ptr: *mut *mut c_void, op: AVLockOp) -> c_in
     0
 }
 
-impl<'a> StreamSource<'a> {
-    pub fn open(&self) -> Result<Stream, Error> {
+pub trait Opener<S : Stream> : Sync {
+    fn open(&self, src: Source) -> Result<S, Error>;
+}
+
+pub trait Stream {
+    fn get_extra_data(&self) -> Result<h264::ExtraData, Error>;
+    fn get_next(&mut self) -> Result<ffmpeg::Packet, ffmpeg::Error>;
+}
+
+pub struct Ffmpeg {}
+
+impl Ffmpeg {
+    fn new() -> Ffmpeg {
         START.call_once(|| {
             unsafe { ffmpeg_sys::av_lockmgr_register(lock_callback); };
             ffmpeg::init().unwrap();
             ffmpeg::format::network::init();
-
         });
+        Ffmpeg{}
+    }
+}
 
-        let (input, discard_first) = match *self {
+impl Opener<FfmpegStream> for Ffmpeg {
+    fn open(&self, src: Source) -> Result<FfmpegStream, Error> {
+        let (input, discard_first) = match src {
             #[cfg(test)]
-            StreamSource::File(filename) =>
+            Source::File(filename) =>
                 (format::input_with(&format!("file:{}", filename), ffmpeg::Dictionary::new())?,
                  false),
-            StreamSource::Rtsp(url) => {
+            Source::Rtsp(url) => {
                 let open_options = dict![
                     "rtsp_transport" => "tcp",
                     // https://trac.ffmpeg.org/ticket/5018 workaround attempt.
@@ -117,7 +136,7 @@ impl<'a> StreamSource<'a> {
             None => { return Err(Error::new("no video stream".to_owned())) },
         };
 
-        let mut stream = Stream{
+        let mut stream = FfmpegStream{
             input: input,
             video_i: video_i,
         };
@@ -131,13 +150,13 @@ impl<'a> StreamSource<'a> {
     }
 }
 
-pub struct Stream {
+pub struct FfmpegStream {
     input: format::context::Input,
     video_i: usize,
 }
 
-impl Stream {
-    pub fn get_extra_data(&self) -> Result<h264::ExtraData, Error> {
+impl Stream for FfmpegStream {
+    fn get_extra_data(&self) -> Result<h264::ExtraData, Error> {
         let video = self.input.stream(self.video_i).expect("can't get video stream known to exist");
         let codec = video.codec();
         let (extradata, width, height) = unsafe {
@@ -150,7 +169,7 @@ impl Stream {
         h264::ExtraData::parse(extradata, width, height)
     }
 
-    pub fn get_next(&mut self) -> Result<ffmpeg::Packet, ffmpeg::Error> {
+    fn get_next(&mut self) -> Result<ffmpeg::Packet, ffmpeg::Error> {
         let mut pkt = ffmpeg::Packet::empty();
         loop {
             pkt.read(&mut self.input)?;

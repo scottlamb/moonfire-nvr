@@ -35,15 +35,11 @@ extern crate uuid;
 use db;
 use std::ops;
 use error::Error;
-use openssl::crypto::hash;
 use std::fmt;
-use std::fs;
-use std::io::Write;
 use std::ops::Range;
 use std::string::String;
 use std::sync::MutexGuard;
 use time;
-use uuid::Uuid;
 
 pub const TIME_UNITS_PER_SEC: i64 = 90000;
 pub const DESIRED_RECORDING_DURATION: i64 = 60 * TIME_UNITS_PER_SEC;
@@ -168,18 +164,6 @@ pub struct SampleIndexEncoder {
     pub video_samples: i32,
     pub video_sync_samples: i32,
     pub video_index: Vec<u8>,
-}
-
-pub struct Writer {
-    f: fs::File,
-    index: SampleIndexEncoder,
-    uuid: Uuid,
-    corrupt: bool,
-    hasher: hash::Hasher,
-    start_time: Time,
-    local_time: Time,
-    camera_id: i32,
-    video_sample_entry_id: i32,
 }
 
 /// Zigzag-encodes a signed integer, as in [protocol buffer
@@ -352,72 +336,6 @@ impl SampleIndexEncoder {
         };
         append_varint32((zigzag32(duration_delta) << 1) | (is_key as u32), &mut self.video_index);
         append_varint32(zigzag32(bytes_delta), &mut self.video_index);
-    }
-}
-
-impl Writer {
-    pub fn open(f: fs::File, uuid: Uuid, start_time: Time, local_time: Time,
-                camera_id: i32, video_sample_entry_id: i32) -> Result<Self, Error> {
-        Ok(Writer{
-            f: f,
-            index: SampleIndexEncoder::new(),
-            uuid: uuid,
-            corrupt: false,
-            hasher: hash::Hasher::new(hash::Type::SHA1)?,
-            start_time: start_time,
-            local_time: local_time,
-            camera_id: camera_id,
-            video_sample_entry_id: video_sample_entry_id,
-        })
-    }
-
-    pub fn write(&mut self, pkt: &[u8], duration_90k: i32, is_key: bool) -> Result<(), Error> {
-        let mut remaining = pkt;
-        while !remaining.is_empty() {
-            let written = match self.f.write(remaining) {
-                Ok(b) => b,
-                Err(e) => {
-                    if remaining.len() < pkt.len() {
-                        // Partially written packet. Truncate if possible.
-                        if let Err(e2) = self.f.set_len(self.index.sample_file_bytes as u64) {
-                            error!("After write to {} failed with {}, truncate failed with {}; \
-                                    sample file is corrupt.", self.uuid.hyphenated(), e, e2);
-                            self.corrupt = true;
-                        }
-                    }
-                    return Err(Error::from(e));
-                },
-            };
-            remaining = &remaining[written..];
-        }
-        self.index.add_sample(duration_90k, pkt.len() as i32, is_key);
-        self.hasher.update(pkt)?;
-        Ok(())
-    }
-
-    pub fn end(&self) -> Time {
-        self.start_time + Duration(self.index.total_duration_90k as i64)
-    }
-
-    // TODO: clean up this interface.
-    pub fn close(mut self) -> Result<(db::RecordingToInsert, fs::File), Error> {
-        if self.corrupt {
-            return Err(Error::new(format!("recording {} is corrupt", self.uuid)));
-        }
-        let mut sha1_bytes = [0u8; 20];
-        sha1_bytes.copy_from_slice(&self.hasher.finish()?[..]);
-        Ok((db::RecordingToInsert{
-            camera_id: self.camera_id,
-            sample_file_bytes: self.index.sample_file_bytes,
-            time: self.start_time .. self.end(),
-            local_time: self.local_time,
-            video_samples: self.index.video_samples,
-            video_sync_samples: self.index.video_sync_samples,
-            video_sample_entry_id: self.video_sample_entry_id,
-            sample_file_uuid: self.uuid,
-            video_index: self.index.video_index,
-            sample_file_sha1: sha1_bytes,
-        }, self.f))
     }
 }
 

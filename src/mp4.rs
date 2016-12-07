@@ -1200,7 +1200,7 @@ mod tests {
     use std::sync::Arc;
     use std::str;
     use super::*;
-    use stream::StreamSource;
+    use stream::{self, Opener, Stream};
     use testutil::{self, TestDb};
     use uuid::Uuid;
 
@@ -1397,25 +1397,34 @@ mod tests {
     }
 
     fn copy_mp4_to_db(db: &TestDb) {
-        let mut input = StreamSource::File("src/testdata/clip.mp4").open().unwrap();
+        let mut input =
+            stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
 
         // 2015-04-26 00:00:00 UTC.
         const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
         let extra_data = input.get_extra_data().unwrap();
         let video_sample_entry_id = db.db.lock().insert_video_sample_entry(
             extra_data.width, extra_data.height, &extra_data.sample_entry).unwrap();
-        let mut output = db.dir.create_writer(START_TIME, START_TIME, TEST_CAMERA_ID,
-                                              video_sample_entry_id).unwrap();
+        let mut output = db.dir.create_writer(&db.syncer_channel, START_TIME, START_TIME,
+                                              TEST_CAMERA_ID, video_sample_entry_id).unwrap();
+
+        // end_pts is the pts of the end of the most recent frame (start + duration).
+        // It's needed because dir::Writer calculates a packet's duration from its pts and the
+        // next packet's pts. That's more accurate for RTSP than ffmpeg's estimate of duration.
+        // To write the final packet of this sample .mp4 with a full duration, we need to fake a
+        // next packet's pts from the ffmpeg-supplied duration.
+        let mut end_pts = None;
         loop {
             let pkt = match input.get_next() {
                 Ok(p) => p,
                 Err(ffmpeg::Error::Eof) => { break; },
                 Err(e) => { panic!("unexpected input error: {}", e); },
             };
-            output.write(pkt.data().expect("packet without data"), pkt.duration() as i32,
+            output.write(pkt.data().expect("packet without data"), pkt.pts().unwrap(),
                          pkt.is_key()).unwrap();
+            end_pts = Some(pkt.pts().unwrap() + pkt.duration());
         }
-        db.syncer_channel.async_save_writer(output).unwrap();
+        output.close(end_pts).unwrap();
         db.syncer_channel.flush();
     }
 
@@ -1475,8 +1484,8 @@ mod tests {
     }
 
     fn compare_mp4s(new_filename: &str, pts_offset: i64, shorten: i64) {
-        let mut orig = StreamSource::File("src/testdata/clip.mp4").open().unwrap();
-        let mut new = StreamSource::File(new_filename).open().unwrap();
+        let mut orig = stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
+        let mut new = stream::FFMPEG.open(stream::Source::File(new_filename)).unwrap();
         assert_eq!(orig.get_extra_data().unwrap(), new.get_extra_data().unwrap());
         let mut final_durations = None;
         loop {
