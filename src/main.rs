@@ -29,10 +29,9 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #![cfg_attr(test, feature(test))]
-#![feature(alloc, box_syntax, conservative_impl_trait, plugin, proc_macro)]
+#![feature(conservative_impl_trait, plugin, proc_macro)]
 #![plugin(clippy)]
 
-extern crate alloc;
 extern crate byteorder;
 extern crate core;
 #[macro_use] extern crate chan;

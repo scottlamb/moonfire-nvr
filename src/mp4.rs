@@ -79,7 +79,6 @@
 extern crate byteorder;
 extern crate time;
 
-use alloc::raw_vec::RawVec;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db;
 use dir;
@@ -366,7 +365,11 @@ impl Mp4Segment {
         let stsz_len = mem::size_of::<u32>() * s.frames as usize;
         let stss_len = mem::size_of::<u32>() * s.key_frames as usize;
         let len = stts_len + stsz_len + stss_len;
-        let mut buf = unsafe { RawVec::with_capacity(len).into_box() };
+        let mut buf = unsafe {
+            let mut v = Vec::with_capacity(len);
+            v.set_len(len);
+            v.into_boxed_slice()
+        };
         {
             let (stts, mut rest) = buf.split_at_mut(stts_len);
             let (stsz, stss) = rest.split_at_mut(stsz_len);
