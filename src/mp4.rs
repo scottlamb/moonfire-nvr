@@ -99,6 +99,7 @@ use std::io;
 use std::ops::Range;
 use std::mem;
 use std::sync::{Arc, MutexGuard};
+use strutil;
 use time::Timespec;
 
 /// This value should be incremented any time a change is made to this file that causes different
@@ -513,18 +514,6 @@ macro_rules! write_length {
     }}
 }
 
-/// Returns a hex-encoded version of the input.
-fn hex(raw: &[u8]) -> String {
-    const HEX_CHARS: [u8; 16] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7',
-                                 b'8', b'9', b'a', b'b', b'c', b'd', b'e', b'f'];
-    let mut hex = Vec::with_capacity(2 * raw.len());
-    for b in raw {
-        hex.push(HEX_CHARS[((b & 0xf0) >> 4) as usize]);
-        hex.push(HEX_CHARS[( b & 0x0f      ) as usize]);
-    }
-    unsafe { String::from_utf8_unchecked(hex) }
-}
-
 impl Mp4FileBuilder {
     pub fn new() -> Self {
         Mp4FileBuilder{
@@ -669,7 +658,7 @@ impl Mp4FileBuilder {
             video_sample_entries: self.video_sample_entries,
             initial_sample_byte_pos: initial_sample_byte_pos,
             last_modified: header::HttpDate(time::at(Timespec::new(max_end.unix_seconds(), 0))),
-            etag: header::EntityTag::strong(hex(&etag.finish()?)),
+            etag: header::EntityTag::strong(strutil::hex(&etag.finish()?)),
         })
     }
 
@@ -1202,6 +1191,7 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
     use std::str;
+    use strutil;
     use super::*;
     use stream::{self, Opener, Stream};
     use testutil::{self, TestDb};
@@ -1663,7 +1653,7 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", super::hex(&sha1[..]));
+        assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "3c48af4dbce2024db07f27a00789b6af774a8c89";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
@@ -1683,7 +1673,7 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", super::hex(&sha1[..]));
+        assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "c24d7af372e5d8f66f4feb6e3a5cd43828392371";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
@@ -1703,7 +1693,7 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("685e026af44204bc9cc52115c5e17058e9fb7c70", super::hex(&sha1[..]));
+        assert_eq!("685e026af44204bc9cc52115c5e17058e9fb7c70", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "870e2b3cfef4a988951344b32e53af0d4496894d";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
@@ -1723,7 +1713,7 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", super::hex(&sha1[..]));
+        assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "71c329188a2cd175c8d61492a9789e242af06c05";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);

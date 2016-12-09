@@ -52,7 +52,6 @@ extern crate openssl;
 extern crate regex;
 extern crate rustc_serialize;
 extern crate serde;
-#[macro_use] extern crate serde_derive;
 extern crate serde_json;
 extern crate slog;
 extern crate slog_envlogger;
@@ -82,6 +81,7 @@ mod recording;
 mod resource;
 mod stream;
 mod streamer;
+mod strutil;
 #[cfg(test)] mod testutil;
 mod web;
 

@@ -2,6 +2,7 @@
 name = "moonfire-nvr"
 version = "0.1.0"
 authors = ["Scott Lamb <slamb@slamb.org>"]
+build = "build.rs"
 
 [dependencies]
 byteorder = "0.5"
@@ -23,7 +24,6 @@ rusqlite = "0.7"
 rustc-serialize = "0.3"
 serde = "0.8"
 serde_json = "0.8"
-serde_derive = "0.8"
 slog = "1.2"
 slog-envlogger = "0.5"
 slog-stdlog = "1.1"
@@ -32,6 +32,9 @@ smallvec = "0.2"
 time = "0.1"
 url = "1.2"
 uuid = { version = "0.3", features = ["serde", "v4"] }
+
+[build-dependencies]
+serde_codegen = "0.8"
 
 [dev-dependencies]
 tempdir = "0.3"

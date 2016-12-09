@@ -42,12 +42,11 @@ use mp4;
 use recording;
 use resource;
 use serde_json;
-use serde::ser::Serializer;
-use std::collections::BTreeMap;
 use std::fmt;
 use std::io::Write;
-use std::result;
+use std::ops::Range;
 use std::sync::{Arc,MutexGuard};
+use strutil;
 use time;
 use url::form_urlencoded;
 use uuid::Uuid;
@@ -59,6 +58,8 @@ lazy_static! {
     static ref JSON: mime::Mime = mime!(Application/Json);
     static ref HTML: mime::Mime = mime!(Text/Html);
 }
+
+mod json { include!(concat!(env!("OUT_DIR"), "/serde_types.rs")); }
 
 enum Path {
     CamerasList,              // "/" or "/cameras/"
@@ -180,25 +181,6 @@ pub struct Handler {
     dir: Arc<SampleFileDir>,
 }
 
-#[derive(Serialize)]
-struct ListCameras<'a> {
-    // Use a custom serializer which presents the map's values as a sequence.
-    #[serde(serialize_with = "ListCameras::serialize_cameras")]
-    cameras: &'a BTreeMap<i32, db::Camera>,
-}
-
-impl<'a> ListCameras<'a> {
-    fn serialize_cameras<S>(cameras: &BTreeMap<i32, db::Camera>,
-                            serializer: &mut S) -> result::Result<(), S::Error>
-    where S: Serializer {
-        let mut state = serializer.serialize_seq(Some(cameras.len()))?;
-        for c in cameras.values() {
-            serializer.serialize_seq_elt(&mut state, c)?;
-        }
-        serializer.serialize_seq_end(state)
-    }
-}
-
 impl Handler {
     pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>) -> Self {
         Handler{db: db, dir: dir}
@@ -215,7 +197,7 @@ impl Handler {
         let buf = {
             let db = self.db.lock();
             if json {
-                serde_json::to_vec(&ListCameras{cameras: db.cameras_by_id()})?
+                serde_json::to_vec(&json::ListCameras{cameras: db.cameras_by_id()})?
             } else {
                 self.list_cameras_html(db)?
             }
@@ -259,16 +241,17 @@ impl Handler {
         Ok(buf)
     }
 
-    fn camera(&self, uuid: Uuid, req: &server::Request, mut res: server::Response) -> Result<()> {
+    fn camera(&self, uuid: Uuid, query: &str, req: &server::Request, mut res: server::Response)
+              -> Result<()> {
         let json = is_json(req);
         let buf = {
             let db = self.db.lock();
             if json {
                 let camera = db.get_camera(uuid)
                                .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-                serde_json::to_vec(&camera)?
+                serde_json::to_vec(&json::Camera::new(camera, true))?
             } else {
-                self.camera_html(db, uuid)?
+                self.camera_html(db, query, uuid)?
             }
         };
         res.headers_mut().set(header::ContentType(if json { JSON.clone() } else { HTML.clone() }));
@@ -276,7 +259,9 @@ impl Handler {
         Ok(())
     }
 
-    fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, uuid: Uuid) -> Result<Vec<u8>> {
+    fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, query: &str,
+                   uuid: Uuid) -> Result<Vec<u8>> {
+        let r = Handler::get_optional_range(query)?;
         let camera = db.get_camera(uuid)
                        .ok_or_else(|| Error::new("no such camera".to_owned()))?;
         let mut buf = Vec::new();
@@ -299,7 +284,6 @@ impl Handler {
             <th>fps</th><th>size</th><th>bitrate</th>\
             </tr>\n",
             HtmlEscaped(&camera.short_name), HtmlEscaped(&camera.description))?;
-        let r = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
 
         // Rather than listing each 60-second recording, generate a HTML row for aggregated .mp4
         // files of up to FORCE_SPLIT_DURATION each, provided there is no gap or change in video
@@ -324,10 +308,36 @@ impl Handler {
         Ok(buf)
     }
 
-    fn camera_recordings(&self, _uuid: Uuid, _req: &server::Request,
+    fn camera_recordings(&self, uuid: Uuid, query: &str, req: &server::Request,
                          mut res: server::Response) -> Result<()> {
-        *res.status_mut() = status::StatusCode::NotImplemented;
-        res.send(b"not implemented")?;
+        let r = Handler::get_optional_range(query)?;
+        if !is_json(req) {
+            *res.status_mut() = status::StatusCode::NotAcceptable;
+            res.send(b"only available for JSON requests")?;
+            return Ok(());
+        }
+        let mut out = json::ListRecordings{recordings: Vec::new()};
+        {
+            let db = self.db.lock();
+            let camera = db.get_camera(uuid)
+                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
+            db.list_aggregated_recordings(camera.id, &r, recording::Duration(i64::max_value()),
+                                          |row| {
+                out.recordings.push(json::Recording{
+                    start_time_90k: row.range.start.0,
+                    end_time_90k: row.range.end.0,
+                    sample_file_bytes: row.sample_file_bytes,
+                    video_samples: row.video_samples,
+                    video_sample_entry_width: row.video_sample_entry.width,
+                    video_sample_entry_height: row.video_sample_entry.height,
+                    video_sample_entry_sha1: strutil::hex(&row.video_sample_entry.sha1),
+                });
+                Ok(())
+            })?;
+        }
+        let buf = serde_json::to_vec(&out)?;
+        res.headers_mut().set(header::ContentType(JSON.clone()));
+        res.send(&buf)?;
         Ok(())
     }
 
@@ -409,6 +419,22 @@ impl Handler {
         resource::serve(&mp4, req, res)?;
         Ok(())
     }
+
+    /// Parses optional `start_time_90k` and `end_time_90k` query parameters, defaulting to the
+    /// full range of possible values.
+    fn get_optional_range(query: &str) -> Result<Range<recording::Time>> {
+        let mut start = i64::min_value();
+        let mut end = i64::max_value();
+        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+            let (key, value) = (key.borrow(), value.borrow());
+            match key {
+                "start_time_90k" => start = i64::from_str(value)?,
+                "end_time_90k" => end = i64::from_str(value)?,
+                _ => {},
+            }
+        };
+        Ok(recording::Time(start) .. recording::Time(end))
+    }
 }
 
 impl server::Handler for Handler {
@@ -416,8 +442,8 @@ impl server::Handler for Handler {
         let (path, query) = get_path_and_query(&req.uri);
         let res = match decode_path(path) {
             Path::CamerasList => self.list_cameras(&req, res),
-            Path::Camera(uuid) => self.camera(uuid, &req, res),
-            Path::CameraRecordings(uuid) => self.camera_recordings(uuid, &req, res),
+            Path::Camera(uuid) => self.camera(uuid, query, &req, res),
+            Path::CameraRecordings(uuid) => self.camera_recordings(uuid, query, &req, res),
             Path::CameraViewMp4(uuid) => self.camera_view_mp4(uuid, query, &req, res),
             Path::NotFound => self.not_found(res),
         };

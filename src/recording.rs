@@ -46,7 +46,7 @@ pub const DESIRED_RECORDING_DURATION: i64 = 60 * TIME_UNITS_PER_SEC;
 pub const MAX_RECORDING_DURATION: i64 = 5 * 60 * TIME_UNITS_PER_SEC;
 
 /// A time specified as 90,000ths of a second since 1970-01-01 00:00:00 UTC.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Time(pub i64);
 
 impl Time {
@@ -86,7 +86,7 @@ impl fmt::Display for Time {
 
 /// A duration specified in 1/90,000ths of a second.
 /// Durations are typically non-negative, but a `db::CameraDayValue::duration` may be negative.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Duration(pub i64);
 
 impl fmt::Display for Duration {

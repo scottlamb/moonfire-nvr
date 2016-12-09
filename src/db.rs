@@ -61,7 +61,6 @@ use lru_cache::LruCache;
 use openssl::crypto::hash;
 use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
-use serde::ser::{Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::cell::RefCell;
 use std::cmp;
@@ -231,18 +230,26 @@ impl CameraDayKey {
         write!(&mut s.0[..], "{}", tm.strftime("%Y-%m-%d")?)?;
         Ok(s)
     }
-}
 
-impl Serialize for CameraDayKey {
-    /// Serializes as a string, not as the default bytes.
-    /// serde_json will only allow string keys for objects.
-    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error> where S: Serializer {
-        serializer.serialize_str(str::from_utf8(&self.0[..]).expect("days are always UTF-8"))
+    pub fn bounds(&self) -> Range<recording::Time> {
+        let mut my_tm = time::strptime(self.as_ref(), "%Y-%m-%d").expect("days must be parseable");
+        let start = recording::Time(my_tm.to_timespec().sec * recording::TIME_UNITS_PER_SEC);
+        my_tm.tm_isdst = -1;
+        my_tm.tm_hour = 0;
+        my_tm.tm_min = 0;
+        my_tm.tm_sec = 0;
+        my_tm.tm_mday += 1;
+        let end = recording::Time(my_tm.to_timespec().sec * recording::TIME_UNITS_PER_SEC);
+        start .. end
     }
 }
 
+impl AsRef<str> for CameraDayKey {
+    fn as_ref(&self) -> &str { str::from_utf8(&self.0[..]).expect("days are always UTF-8") }
+}
+
 /// In-memory state about a particular camera on a particular day.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CameraDayValue {
     /// The number of recordings that overlap with this day. Note that `adjust_day` automatically
     /// prunes days with 0 recordings.
@@ -255,7 +262,7 @@ pub struct CameraDayValue {
 }
 
 /// In-memory state about a camera.
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 pub struct Camera {
     pub id: i32,
     pub uuid: Uuid,
@@ -270,7 +277,6 @@ pub struct Camera {
 
     /// The time range of recorded data associated with this camera (minimum start time and maximum
     /// end time). `None` iff there are no recordings for this camera.
-    #[serde(skip_serializing)]
     pub range: Option<Range<recording::Time>>,
     pub sample_file_bytes: i64,
 
