@@ -40,7 +40,8 @@ serde_codegen = "0.8"
 tempdir = "0.3"
 
 [dependencies.ffmpeg]
-version = "0.2.0-alpha.1"
+git = "https://github.com/scottlamb/rust-ffmpeg"
+branch = "2.x"
 default-features = false
 features = ["codec", "format"]
 

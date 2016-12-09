@@ -7,7 +7,7 @@ dependencies = [
  "chan-signal 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "clippy 0.0.103 (registry+https://github.com/rust-lang/crates.io-index)",
  "docopt 0.6.86 (registry+https://github.com/rust-lang/crates.io-index)",
- "ffmpeg 0.2.0-alpha.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ffmpeg 0.2.0-alpha.2 (git+https://github.com/scottlamb/rust-ffmpeg?branch=2.x)",
  "ffmpeg-sys 2.8.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "fnv 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper 0.9.13 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -155,8 +155,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "ffmpeg"
-version = "0.2.0-alpha.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.2.0-alpha.2"
+source = "git+https://github.com/scottlamb/rust-ffmpeg?branch=2.x#a67d25cb85369597e0e4820172330e8a3168589f"
 dependencies = [
  "bitflags 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "ffmpeg-sys 2.8.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -877,7 +877,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum crossbeam 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)" = "0c5ea215664ca264da8a9d9c3be80d2eaf30923c259d03e870388eb927508f97"
 "checksum docopt 0.6.86 (registry+https://github.com/rust-lang/crates.io-index)" = "4a7ef30445607f6fc8720f0a0a2c7442284b629cf0d049286860fae23e71c4d9"
 "checksum dtoa 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "0dd841b58510c9618291ffa448da2e4e0f699d984d436122372f446dae62263d"
-"checksum ffmpeg 0.2.0-alpha.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b22b6649d826b61f2e8a51fb840b323972fe8ad112a2addff3f9a81b0f0ce17c"
+"checksum ffmpeg 0.2.0-alpha.2 (git+https://github.com/scottlamb/rust-ffmpeg?branch=2.x)" = "<none>"
 "checksum ffmpeg-sys 2.8.9 (registry+https://github.com/rust-lang/crates.io-index)" = "683f0fa41ebe43e7162184d172190e24318af66f7065006a36c2cc877f0e0edd"
 "checksum fnv 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)" = "6cc484842f1e2884faf56f529f960cc12ad8c71ce96cc7abba0a067c98fee344"
 "checksum fs2 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)" = "bcd414e5a1a979b931bb92f41b7a54106d3f6d2e6c253e9ce943b7cd468251ef"
