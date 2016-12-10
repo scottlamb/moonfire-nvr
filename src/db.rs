@@ -51,11 +51,7 @@
 //!   * the `Transaction` interface allows callers to batch write operations to reduce latency and
 //!     SSD write samples.
 
-// Suppress false positive warnings caused by using the word SQLite in a docstring.
-// clippy thinks this is an identifier which should be enclosed in backticks.
-#![allow(doc_markdown)]
-
-use error::Error;
+use error::{Error, ResultExt};
 use fnv;
 use lru_cache::LruCache;
 use openssl::crypto::hash;
@@ -999,12 +995,12 @@ impl Database {
         }));
         {
             let mut l = &mut *db.0.lock().unwrap();
-            l.init_video_sample_entries().map_err(Error::annotator("init_video_sample_entries"))?;
-            l.init_cameras().map_err(Error::annotator("init_cameras"))?;
+            l.init_video_sample_entries().annotate_err("init_video_sample_entries")?;
+            l.init_cameras().annotate_err("init_cameras")?;
             for (&camera_id, ref mut camera) in &mut l.state.cameras_by_id {
                 // TODO: we could use one thread per camera if we had multiple db conns.
                 init_recordings(&mut l.conn, camera_id, camera)
-                    .map_err(Error::annotator("init_recordings"))?;
+                    .annotate_err("init_recordings")?;
             }
         }
         Ok(db)
@@ -1024,8 +1020,6 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    extern crate test;
-
     use core::cmp::Ord;
     use recording::{self, TIME_UNITS_PER_SEC};
     use rusqlite::Connection;

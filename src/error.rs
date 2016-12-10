@@ -55,11 +55,20 @@ impl Error {
     pub fn new(description: String) -> Self {
         Error{description: description, cause: None }
     }
+}
 
-    // Returns a function to pass to std::result::Result::map_err which annotates the given error
-    // with a prefix.
-    pub fn annotator(prefix: &'static str) -> impl Fn(Error) -> Error {
-        move |e| { Error{description: format!("{}: {}", prefix, e.description), cause: e.cause} }
+pub trait ResultExt<T> {
+    /// Returns a new `Result` like this one except that errors are of type `Error` and annotated
+    /// with the given prefix.
+    fn annotate_err(self, prefix: &'static str) -> Result<T>;
+}
+
+impl<T, E> ResultExt<T> for result::Result<T, E> where E: 'static + error::Error + Send + Sync {
+    fn annotate_err(self, prefix: &'static str) -> Result<T> {
+        self.map_err(|e| Error{
+            description: format!("{}: {}", prefix, e.description()),
+            cause: Some(Box::new(e)),
+        })
     }
 }
 

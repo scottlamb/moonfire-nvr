@@ -1175,19 +1175,22 @@ impl resource::Resource for Mp4File {
 ///      to verify the output is byte-for-byte as expected.
 #[cfg(test)]
 mod tests {
-    extern crate test;
+    #[cfg(nightly)] extern crate test;
 
+    use byteorder::{BigEndian, ByteOrder};
     use db;
     use dir;
     use ffmpeg;
-    use hyper::{self, header};
+    #[cfg(nightly)] use hyper;
+    use hyper::header;
     use openssl::crypto::hash;
     use recording::{self, TIME_UNITS_PER_SEC};
     use resource::{self, Resource};
-    use self::test::Bencher;
+    #[cfg(nightly)] use self::test::Bencher;
     use std::fs;
     use std::io;
     use std::mem;
+    use std::ops::Range;
     use std::path::Path;
     use std::sync::Arc;
     use std::str;
@@ -1195,7 +1198,7 @@ mod tests {
     use super::*;
     use stream::{self, Opener, Stream};
     use testutil::{self, TestDb};
-    use uuid::Uuid;
+    #[cfg(nightly)] use uuid::Uuid;
 
     /// A wrapper around openssl's SHA-1 hashing that implements the `Write` trait.
     struct Sha1(hash::Hasher);
@@ -1305,7 +1308,6 @@ mod tests {
         }
 
         /// Navigates to the next box after the current one, or up if the current one is last.
-        #[allow(should_implement_trait)]
         pub fn next(&mut self) -> bool {
             let old = self.stack.pop().expect("positioned at root; there is no next");
             let max = self.stack.last().map(|b| b.interior.end).unwrap_or_else(|| self.mp4.len());
@@ -1421,6 +1423,7 @@ mod tests {
         db.syncer_channel.flush();
     }
 
+    #[cfg(nightly)]
     fn add_dummy_recordings_to_db(db: &db::Database) {
         let mut data = Vec::new();
         data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
@@ -1738,11 +1741,13 @@ mod tests {
     /// Currently this only serves a single `.mp4` file but we could set up variations to benchmark
     /// different scenarios: with/without subtitles and edit lists, different lengths, serving
     /// different fractions of the file, etc.
+    #[cfg(nightly)]
     struct BenchServer {
         url: hyper::Url,
         generated_len: u64,
     }
 
+    #[cfg(nightly)]
     impl BenchServer {
         fn new() -> BenchServer {
             let mut listener = hyper::net::HttpListener::new("127.0.0.1:0").unwrap();
@@ -1771,11 +1776,13 @@ mod tests {
         }
     }
 
+    #[cfg(nightly)]
     lazy_static! {
         static ref SERVER: BenchServer = { BenchServer::new() };
     }
 
     /// Benchmarks serving the generated part of a `.mp4` file (up to the first byte from disk).
+    #[cfg(nightly)]
     #[bench]
     fn serve_generated_bytes_fresh_client(b: &mut Bencher) {
         testutil::init();
@@ -1801,6 +1808,7 @@ mod tests {
     /// This should be faster than the `fresh` version, but see
     /// [this hyper issue](https://github.com/hyperium/hyper/issues/944) relating to Nagle's
     /// algorithm.
+    #[cfg(nightly)]
     #[bench]
     fn serve_generated_bytes_reuse_client(b: &mut Bencher) {
         testutil::init();
@@ -1822,6 +1830,7 @@ mod tests {
         });
     }
 
+    #[cfg(nightly)]
     #[bench]
     fn mp4_construction(b: &mut Bencher) {
         testutil::init();

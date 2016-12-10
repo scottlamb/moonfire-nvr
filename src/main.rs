@@ -28,9 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#![cfg_attr(test, feature(test))]
-#![feature(conservative_impl_trait, plugin, proc_macro)]
-#![plugin(clippy)]
+#![cfg_attr(all(nightly, test), feature(test))]
 
 extern crate byteorder;
 extern crate core;

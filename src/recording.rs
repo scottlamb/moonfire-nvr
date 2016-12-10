@@ -28,8 +28,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(inline_always)]
-
 extern crate uuid;
 
 use db;
@@ -484,11 +482,12 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(nightly)]
     extern crate test;
 
     use super::{append_varint32, decode_varint32, unzigzag32, zigzag32};
     use super::*;
-    use self::test::Bencher;
+    #[cfg(nightly)] use self::test::Bencher;
     use testutil::TestDb;
 
     #[test]
@@ -746,6 +745,7 @@ mod tests {
     // TODO: test segment error cases involving mismatch between row frames/key_frames and index.
 
     /// Benchmarks the decoder, which is performance-critical for .mp4 serving.
+    #[cfg(nightly)]
     #[bench]
     fn bench_decoder(b: &mut Bencher) {
         let data = include_bytes!("testdata/video_sample_index.bin");
