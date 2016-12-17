@@ -28,19 +28,31 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+//! Tools for implementing a `resource::Resource` body composed from many "slices".
+
 use error::{Error, Result};
 use std::fmt;
 use std::io;
 use std::marker::PhantomData;
 use std::ops::Range;
 
+/// Information needed by `Slices` about a single slice.
 #[derive(Debug)]
 struct SliceInfo<W> {
+    /// The byte position (relative to the start of the `Slices`) beyond the end of this slice.
+    /// Note the starting position (and thus length) are inferred from the previous slice.
     end: u64,
+
+    /// Should be an implementation of `ContextWriter<Ctx>` for some `Ctx`.
     writer: W,
 }
 
+/// Writes a byte range to the given `io::Write` given a context argument; meant for use with
+/// `Slices`.
 pub trait ContextWriter<Ctx> {
+    /// Writes `r` to `out`, as in `resource::Resource::write_to`.
+    /// The additional argument `ctx` is as supplied to the `Slices`.
+    /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
     fn write_to(&self, ctx: &Ctx, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<()>;
 }
 
@@ -59,13 +71,22 @@ where F: FnMut(&mut Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-pub struct Slices<W, C> {
+/// Helper to serve byte ranges from a body which is broken down into many "slices".
+/// This is used to implement `.mp4` serving in `mp4::Mp4File` from `mp4::Mp4FileSlice` enums.
+pub struct Slices<W, C> where W: ContextWriter<C> {
+    /// The total byte length of the `Slices`.
+    /// Equivalent to `self.slices.back().map(|s| s.end).unwrap_or(0)`; kept for convenience and to
+    /// avoid a branch.
     len: u64,
+
+    /// 0 or more slices of this file.
     slices: Vec<SliceInfo<W>>,
+
+    /// Marker so that `C` is part of the type.
     phantom: PhantomData<C>,
 }
 
-impl<W, C> fmt::Debug for Slices<W, C> where W: fmt::Debug {
+impl<W, C> fmt::Debug for Slices<W, C> where W: fmt::Debug + ContextWriter<C> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} slices with overall length {}:", self.slices.len(), self.len)?;
         let mut start = 0;
@@ -83,10 +104,12 @@ impl<W, C> Slices<W, C> where W: ContextWriter<C> {
         Slices{len: 0, slices: Vec::new(), phantom: PhantomData}
     }
 
+    /// Reserves space for at least `additional` more slices to be appended.
     pub fn reserve(&mut self, additional: usize) {
         self.slices.reserve(additional)
     }
 
+    /// Appends the given slice.
     pub fn append(&mut self, len: u64, writer: W) {
         self.len += len;
         self.slices.push(SliceInfo{end: self.len, writer: writer});
@@ -98,8 +121,9 @@ impl<W, C> Slices<W, C> where W: ContextWriter<C> {
     /// Returns the number of slices.
     pub fn num(&self) -> usize { self.slices.len() }
 
-    pub fn write_to(&self, ctx: &C, range: Range<u64>, out: &mut io::Write)
-                    -> Result<()> {
+    /// Writes `range` to `out`.
+    /// This interface mirrors `resource::Resource::write_to`, with the additional `ctx` argument.
+    pub fn write_to(&self, ctx: &C, range: Range<u64>, out: &mut io::Write) -> Result<()> {
         if range.start > range.end || range.end > self.len {
             return Err(Error{
                 description: format!("Bad range {:?} for slice of length {}", range, self.len),
@@ -116,6 +140,7 @@ impl<W, C> Slices<W, C> where W: ContextWriter<C> {
             Err(i) => (i, self.slices[i-1].end),  // desired start < slice i's end; first is i.
         };
 
+        // There is at least one slice to write.
         // Iterate through and write each slice until the end.
         let mut start_pos = range.start - slice_start;
         loop {
@@ -126,7 +151,7 @@ impl<W, C> Slices<W, C> where W: ContextWriter<C> {
             }
             s.writer.write_to(ctx, start_pos .. s.end - slice_start, l, out)?;
 
-            // setup next iteration.
+            // Setup next iteration.
             start_pos = 0;
             slice_start = s.end;
             i += 1;
