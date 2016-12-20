@@ -69,6 +69,9 @@ use std::vec::Vec;
 use time;
 use uuid::Uuid;
 
+/// Expected schema version. See `guide/schema.md` for more information.
+pub const EXPECTED_VERSION: i32 = 0;
+
 const GET_RECORDING_SQL: &'static str =
     "select sample_file_uuid, video_index from recording where id = :id";
 
@@ -414,6 +417,7 @@ fn init_recordings(conn: &mut rusqlite::Connection, camera_id: i32, camera: &mut
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct LockedDatabase {
     conn: rusqlite::Connection,
     state: State,
@@ -422,6 +426,7 @@ pub struct LockedDatabase {
 /// In-memory state from the database.
 /// This is separated out of `LockedDatabase` so that `Transaction` can mutably borrow `state`
 /// while its underlying `rusqlite::Transaction` is borrowing `conn`.
+#[derive(Debug)]
 struct State {
     cameras_by_id: BTreeMap<i32, Camera>,
     cameras_by_uuid: BTreeMap<Uuid, i32>,
@@ -959,6 +964,7 @@ impl LockedDatabase {
 /// The recording database. Abstracts away SQLite queries. Also maintains in-memory state
 /// (loaded on startup, and updated on successful commit) to avoid expensive scans over the
 /// recording table on common queries.
+#[derive(Debug)]
 pub struct Database(Mutex<LockedDatabase>);
 
 impl Database {
@@ -983,6 +989,36 @@ impl Database {
             order by
                 recording.start_time_90k
         "#, recording::MAX_RECORDING_DURATION);
+        {
+            use std::error::Error as E;
+            let ver: i32 = match conn.query_row("select max(id) from version", &[],
+                                                |row| row.get_checked::<_, i32>(0)) {
+                Ok(r) => r?,
+                Err(ref e) if e.description().starts_with("no such table: version") => {
+                    return Err(Error::new("no such table: version. \
+                                          \
+                                          If you are starting from an \
+                                          empty database, see README.md to complete the \
+                                          installation. If you are starting from 
+                                          complete the schema. If you are starting from a database \
+                                          that predates schema versioning, see guide/schema.md."
+                                          .to_owned()));
+                },
+                Err(e) => return Err(e.into()),
+            };
+            if ver < EXPECTED_VERSION {
+                return Err(Error::new(format!(
+                            "Database schema version {} is too old (expected {}); \
+                            see upgrade instructions in guide/upgrade.md.",
+                            ver, EXPECTED_VERSION)));
+            } else if ver > EXPECTED_VERSION {
+                return Err(Error::new(format!(
+                            "Database schema version {} is too new (expected {}); \
+                            must use a newer binary to match.", ver,
+                            EXPECTED_VERSION)));
+
+            }
+        }
         let db = Database(Mutex::new(LockedDatabase{
             conn: conn,
             state: State{
@@ -1024,6 +1060,7 @@ mod tests {
     use recording::{self, TIME_UNITS_PER_SEC};
     use rusqlite::Connection;
     use std::collections::BTreeMap;
+    use std::error::Error as E;
     use std::fmt::Debug;
     use testutil;
     use super::*;
@@ -1203,9 +1240,37 @@ mod tests {
         assert_eq!(0, m.len());
     }
 
-    /// Basic test of running some queries on an empty database.
     #[test]
-    fn test_empty_db() {
+    fn test_no_version() {
+        testutil::init();
+        let e = Database::new(Connection::open_in_memory().unwrap()).unwrap_err();
+        assert!(e.description().starts_with("no such table: version"));
+    }
+
+    #[test]
+    fn test_version_too_old() {
+        testutil::init();
+        let c = setup_conn();
+        c.execute_batch("delete from version; insert into version values (-1, 0, '');").unwrap();
+        let e = Database::new(c).unwrap_err();
+        assert!(e.description().starts_with(
+                "Database schema version -1 is too old (expected 0)"), "got: {:?}",
+                e.description());
+    }
+
+    #[test]
+    fn test_version_too_new() {
+        testutil::init();
+        let c = setup_conn();
+        c.execute_batch("delete from version; insert into version values (1, 0, '');").unwrap();
+        let e = Database::new(c).unwrap_err();
+        assert!(e.description().starts_with(
+                "Database schema version 1 is too new (expected 0)"), "got: {:?}", e.description());
+    }
+
+    /// Basic test of running some queries on a fresh database.
+    #[test]
+    fn test_fresh_db() {
         testutil::init();
         let conn = setup_conn();
         let db = Database::new(conn).unwrap();

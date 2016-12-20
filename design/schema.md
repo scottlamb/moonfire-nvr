@@ -3,6 +3,10 @@
 Status: **current**. This is largely implemented; there is optimization and
 testing work left to do.
 
+This is the initial design for the most fundamental parts of the Moonfire NVR
+storage schema. See also [guide/schema.md](../guide/schema.md) for more
+administrator-focused documentation.
+
 ## Objective
 
 Goals:
@@ -39,8 +43,6 @@ Possible future goals:
 
 * record audio and/or other types of timestamped samples (such as
   [Xandem][xandem] tomography data).
-
-## Background
 
 ### Cameras
 

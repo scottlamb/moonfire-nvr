@@ -148,15 +148,18 @@ Once prerequisites are installed, Moonfire NVR can be built as follows:
 Moonfire NVR should be run under a dedicated user. It keeps two kinds of
 state:
 
-* a SQLite database, typically <1 GiB. It should be stored on flash if
-  available.
-* the "sample file directory", which holds the actual samples/frames of H.264
-  video. This should be quite large and typically is stored on a hard drive.
+   * a SQLite database, typically <1 GiB. It should be stored on flash if
+     available.
+   * the "sample file directory", which holds the actual samples/frames of
+     H.264 video. This should be quite large and typically is stored on a hard
+     drive.
 
-Both are intended to be accessed only by Moonfire NVR itself. However, the
-interface for adding new cameras is not yet written, so you will have to
-manually create the database and insert cameras with the `sqlite3` command line
-tool prior to starting Moonfire NVR.
+(See [guide/schema.md](guide/schema.md) for more information.)
+
+Both kinds of state are intended to be accessed only by Moonfire NVR itself.
+However, the interface for adding new cameras is not yet written, so you will
+have to manually create the database and insert cameras with the `sqlite3`
+command line tool prior to starting Moonfire NVR.
 
 Manual commands would look something like this:
 

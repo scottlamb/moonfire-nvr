@@ -33,6 +33,20 @@
 
 --pragma journal_mode = wal;
 
+-- This table tracks the schema version.
+-- There is one row for the initial database creation (inserted below, after the
+-- create statements) and one for each upgrade procedure (if any).
+create table version (
+  id integer primary key,
+
+  -- The unix time as of the creation/upgrade, as determined by
+  -- cast(strftime('%s', 'now') as int).
+  unix_time integer not null,
+
+  -- Optional notes on the creation/upgrade; could include the binary version.
+  notes text
+);
+
 create table camera (
   id integer primary key,
   uuid blob unique,-- not null check (length(uuid) = 16),
@@ -140,3 +154,6 @@ create table video_sample_entry (
   -- the case of H.264).
   data blob not null check (length(data) > 86)
 );
+
+insert into version (id, unix_time,                           notes)
+             values (0,  cast(strftime('%s', 'now') as int), 'db creation');
