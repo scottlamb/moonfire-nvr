@@ -83,6 +83,7 @@ use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db;
 use dir;
 use error::{Error, Result};
+use http_entity;
 use hyper::header;
 use mmapfile;
 use mime;
@@ -91,7 +92,6 @@ use pieces;
 use pieces::ContextWriter;
 use pieces::Slices;
 use recording::{self, TIME_UNITS_PER_SEC};
-use resource;
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::cmp;
@@ -1153,7 +1153,7 @@ impl Mp4File {
     }
 }
 
-impl resource::Resource for Mp4File {
+impl http_entity::Entity<Error> for Mp4File {
     fn content_type(&self) -> mime::Mime { "video/mp4".parse().unwrap() }
     fn last_modified(&self) -> &header::HttpDate { &self.last_modified }
     fn etag(&self) -> Option<&header::EntityTag> { Some(&self.etag) }
@@ -1181,11 +1181,12 @@ mod tests {
     use db;
     use dir;
     use ffmpeg;
+    use error::Error;
     #[cfg(nightly)] use hyper;
     use hyper::header;
     use openssl::crypto::hash;
     use recording::{self, TIME_UNITS_PER_SEC};
-    use resource::{self, Resource};
+    use http_entity::{self, Entity};
     #[cfg(nightly)] use self::test::Bencher;
     use std::fs;
     use std::io;
@@ -1217,7 +1218,7 @@ mod tests {
     }
 
     /// Returns the SHA-1 digest of the given `Resource`.
-    fn digest(r: &Resource) -> Vec<u8> {
+    fn digest(r: &http_entity::Entity<Error>) -> Vec<u8> {
         let mut sha1 = Sha1::new();
         r.write_to(0 .. r.len(), &mut sha1).unwrap();
         sha1.finish()
@@ -1236,12 +1237,12 @@ mod tests {
     /// stack, not backward. Panics on error.
     #[derive(Clone)]
     struct BoxCursor<'a> {
-        mp4: &'a resource::Resource,
+        mp4: &'a http_entity::Entity<Error>,
         stack: Vec<Mp4Box>,
     }
 
     impl<'a> BoxCursor<'a> {
-        pub fn new(mp4: &'a resource::Resource) -> BoxCursor<'a> {
+        pub fn new(mp4: &'a http_entity::Entity<Error>) -> BoxCursor<'a> {
             BoxCursor{
                 mp4: mp4,
                 stack: Vec::new(),
@@ -1346,7 +1347,7 @@ mod tests {
 
     /// Finds the `moov/trak` that has a `tkhd` associated with the given `track_id`, which must
     /// exist.
-    fn find_track(mp4: & resource::Resource, track_id: u32) -> Track {
+    fn find_track(mp4: &http_entity::Entity<Error>, track_id: u32) -> Track {
         let mut cursor = BoxCursor::new(mp4);
         cursor.down();
         assert!(cursor.find(b"moov"));
@@ -1766,7 +1767,7 @@ mod tests {
                 let (db, dir) = (db.db.clone(), db.dir.clone());
                 let _ = server.handle(move |req: Request, res: Response<Fresh>| {
                     let mp4 = create_mp4_from_db(db.clone(), dir.clone(), 0, 0, false);
-                    resource::serve(&mp4, &req, res).unwrap();
+                    http_entity::serve(&mp4, &req, res).unwrap();
                 });
             });
             BenchServer{

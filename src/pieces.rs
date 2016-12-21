@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Tools for implementing a `resource::Resource` body composed from many "slices".
+//! Tools for implementing a `http_entity::Entity` body composed from many "slices".
 
 use error::{Error, Result};
 use std::fmt;
@@ -50,7 +50,7 @@ struct SliceInfo<W> {
 /// Writes a byte range to the given `io::Write` given a context argument; meant for use with
 /// `Slices`.
 pub trait ContextWriter<Ctx> {
-    /// Writes `r` to `out`, as in `resource::Resource::write_to`.
+    /// Writes `r` to `out`, as in `http_entity::Entity::write_to`.
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
     fn write_to(&self, ctx: &Ctx, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<()>;
@@ -122,7 +122,7 @@ impl<W, C> Slices<W, C> where W: ContextWriter<C> {
     pub fn num(&self) -> usize { self.slices.len() }
 
     /// Writes `range` to `out`.
-    /// This interface mirrors `resource::Resource::write_to`, with the additional `ctx` argument.
+    /// This interface mirrors `http_entity::Entity::write_to`, with the additional `ctx` argument.
     pub fn write_to(&self, ctx: &C, range: Range<u64>, out: &mut io::Write) -> Result<()> {
         if range.start > range.end || range.end > self.len {
             return Err(Error{

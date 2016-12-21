@@ -35,12 +35,12 @@ use core::str::FromStr;
 use db;
 use dir::SampleFileDir;
 use error::{Error, Result};
+use http_entity;
 use hyper::{header,server,status};
 use hyper::uri::RequestUri;
 use mime;
 use mp4;
 use recording;
-use resource;
 use serde_json;
 use std::fmt;
 use std::io::Write;
@@ -416,7 +416,7 @@ impl Handler {
         }
         builder.include_timestamp_subtitle_track(include_ts);
         let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
-        resource::serve(&mp4, req, res)?;
+        http_entity::serve(&mp4, req, res)?;
         Ok(())
     }
 

@@ -139,7 +139,7 @@ For instructions, you can skip to "[Camera configuration and hard disk mounting]
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
-    $ RUST_TEST_THREADS=1 cargo test
+    $ cargo test
     $ cargo build --release
     $ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
 

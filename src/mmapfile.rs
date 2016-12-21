@@ -38,7 +38,7 @@ use std::io;
 use std::ops::Range;
 
 /// Memory-mapped file slice.
-/// This struct is meant to be used in constructing an implementation of the `resource::Resource`
+/// This struct is meant to be used in constructing an implementation of the `http_entity::Entity`
 /// or `pieces::ContextWriter` traits. The file in question should be immutable, as files shrinking
 /// during `mmap` will cause the process to fail with `SIGBUS`. Moonfire NVR sample files satisfy
 /// this requirement:
