@@ -17,7 +17,8 @@ support for motion detection, no authentication, and no config UI.
 
 This is version 0.1, the initial release. Until version 1.0, there will be no
 compatibility guarantees: configuration and storage formats may change from
-version to version.
+version to version. There is an [upgrade procedure](guide/schema.md) but it is
+not for the faint of heart.
 
 I hope to add features such as salient motion detection. It's way too early to
 make promises, but it seems possible to build a full-featured
@@ -209,11 +210,12 @@ each camera you insert using this method.
     $ sudo -u moonfire-nvr sqlite3 ~moonfire-nvr/db/db
     sqlite3> insert into camera (
         ...>     uuid, short_name, description, host, username, password,
-        ...>     main_rtsp_path, sub_rtsp_path, retain_bytes) values (
+        ...>     main_rtsp_path, sub_rtsp_path, retain_bytes,
+        ...>     next_recording_id) values (
         ...>     X'b47f48706d91414591cd6c931bf836b4', 'driveway',
         ...>     'Longer description of this camera', '192.168.1.101',
         ...>     'admin', '12345', '/Streaming/Channels/1',
-        ...>     '/Streaming/Channels/2', 104857600);
+        ...>     '/Streaming/Channels/2', 104857600, 0);
     sqlite3> ^D
 
 ### Using automatic camera configuration inclusion with `prep.sh`
@@ -226,29 +228,29 @@ for easy reading, and editing, and does not have to be altered in formatting,
 but can if you wish and know what you are doing):
 
     insert into camera (
-    		uuid,
-    		short_name, description,
-    		host, username, password,
-    		main_rtsp_path, sub_rtsp_path,
-    		retain_bytes
-    	)
-    	values
-    	(
-    		X'1c944181b8074b8083eb579c8e194451',
-    		'Front Left', 'Front Left Driveway',
-    		'192.168.1.41',
-    		'admin', 'secret',
-    		'/Streaming/Channels/1', '/Streaming/Channels/2',
-    		346870912000
-    	),
-    	(
-    		X'da5921f493ac4279aafe68e69e174026',
-    		'Front Right', 'Front Right Driveway',
-    		'192.168.1.42',
-    		'admin', 'secret',
-    		'/Streaming/Channels/1', '/Streaming/Channels/2',
-    		346870912000
-    	);
+            uuid,
+            short_name, description,
+            host, username, password,
+            main_rtsp_path, sub_rtsp_path,
+            retain_bytes, next_recording_id
+        )
+        values
+        (
+            X'1c944181b8074b8083eb579c8e194451',
+            'Front Left', 'Front Left Driveway',
+            '192.168.1.41',
+            'admin', 'secret',
+            '/Streaming/Channels/1', '/Streaming/Channels/2',
+            346870912000, 0
+        ),
+        (
+            X'da5921f493ac4279aafe68e69e174026',
+            'Front Right', 'Front Right Driveway',
+            '192.168.1.42',
+            'admin', 'secret',
+            '/Streaming/Channels/1', '/Streaming/Channels/2',
+            346870912000, 0
+        );
 
 You'll still have to find the correct rtsp paths, usernames and passwords, and
 set retained byte counts, as explained above.

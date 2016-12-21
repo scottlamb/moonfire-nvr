@@ -33,9 +33,9 @@
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
 use db;
+use error::Error;
 use libc;
 use recording;
-use error::Error;
 use openssl::crypto::hash;
 use std::ffi;
 use std::fs;
@@ -121,7 +121,7 @@ impl SampleFileDir {
     /// directory has sufficient space for a couple recordings per camera in addition to the
     /// cameras' total `retain_bytes`.
     pub fn create_writer<'a>(&self, channel: &'a SyncerChannel, start: recording::Time,
-                             local_start: recording::Time, camera_id: i32,
+                             local_start: recording::Time, run_offset: i32, camera_id: i32,
                              video_sample_entry_id: i32) -> Result<Writer<'a>, Error> {
         // Grab the next uuid. Typically one is cached—a sync has usually completed since the last
         // writer was created, and syncs ensure `next_uuid` is filled while performing their
@@ -145,7 +145,8 @@ impl SampleFileDir {
                 return Err(e.into());
             },
         };
-        Writer::open(f, uuid, start, local_start, camera_id, video_sample_entry_id, channel)
+        Writer::open(f, uuid, start, local_start, run_offset, camera_id, video_sample_entry_id,
+                     channel)
     }
 
     /// Opens a sample file within this directory with the given flags and (if creating) mode.
@@ -428,6 +429,7 @@ struct InnerWriter<'a> {
     local_time: recording::Time,
     camera_id: i32,
     video_sample_entry_id: i32,
+    run_offset: i32,
 
     /// A sample which has been written to disk but not added to `index`. Index writes are one
     /// sample behind disk writes because the duration of a sample is the difference between its
@@ -446,8 +448,8 @@ struct UnflushedSample {
 impl<'a> Writer<'a> {
     /// Opens the writer; for use by `SampleFileDir` (which should supply `f`).
     fn open(f: fs::File, uuid: Uuid, start_time: recording::Time, local_time: recording::Time,
-            camera_id: i32, video_sample_entry_id: i32, syncer_channel: &'a SyncerChannel)
-            -> Result<Self, Error> {
+            run_offset: i32, camera_id: i32, video_sample_entry_id: i32,
+            syncer_channel: &'a SyncerChannel) -> Result<Self, Error> {
         Ok(Writer(Some(InnerWriter{
             syncer_channel: syncer_channel,
             f: f,
@@ -459,6 +461,7 @@ impl<'a> Writer<'a> {
             local_time: local_time,
             camera_id: camera_id,
             video_sample_entry_id: video_sample_entry_id,
+            run_offset: run_offset,
             unflushed_sample: None,
         })))
     }
@@ -530,6 +533,8 @@ impl<'a> InnerWriter<'a> {
             sample_file_uuid: self.uuid,
             video_index: self.index.video_index,
             sample_file_sha1: sha1_bytes,
+            run_offset: self.run_offset,
+            flags: 0,  // TODO
         };
         self.syncer_channel.async_save_recording(recording, self.f);
         Ok(end)

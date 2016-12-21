@@ -340,7 +340,8 @@ impl SampleIndexEncoder {
 /// A segment represents a view of some or all of a single recording, starting from a key frame.
 /// Used by the `Mp4FileBuilder` class to splice together recordings into a single virtual .mp4.
 pub struct Segment {
-    pub id: i64,
+    pub camera_id: i32,
+    pub recording_id: i32,
     pub start: Time,
     begin: SampleIndexIterator,
     pub file_end: i32,
@@ -349,6 +350,7 @@ pub struct Segment {
     pub frames: i32,
     pub key_frames: i32,
     pub video_sample_entry_id: i32,
+    pub have_trailing_zero: bool,
 }
 
 impl Segment {
@@ -360,10 +362,11 @@ impl Segment {
     /// undesired portion.) It will end at the first frame after the desired range (unless the
     /// desired range extends beyond the recording).
     pub fn new(db: &MutexGuard<db::LockedDatabase>,
-               recording: &db::ListCameraRecordingsRow,
+               recording: &db::ListRecordingsRow,
                desired_range_90k: Range<i32>) -> Result<Segment, Error> {
         let mut self_ = Segment{
-            id: recording.id,
+            camera_id: recording.camera_id,
+            recording_id: recording.id,
             start: recording.start,
             begin: SampleIndexIterator::new(),
             file_end: recording.sample_file_bytes,
@@ -372,6 +375,7 @@ impl Segment {
             frames: recording.video_samples,
             key_frames: recording.video_sync_samples,
             video_sample_entry_id: recording.video_sample_entry.id,
+            have_trailing_zero: (recording.flags & db::RecordingFlags::TrailingZero as i32) != 0,
         };
 
         if self_.desired_range_90k.start > self_.desired_range_90k.end ||
@@ -388,8 +392,8 @@ impl Segment {
         }
 
         // Slow path. Need to iterate through the index.
-        let extra = db.get_recording(self_.id)?;
-        let data = &(&extra).video_index;
+        let playback = db.get_recording_playback(self_.camera_id, self_.recording_id)?;
+        let data = &(&playback).video_index;
         let mut it = SampleIndexIterator::new();
         if !it.next(data)? {
             return Err(Error{description: String::from("no index"),
@@ -429,6 +433,7 @@ impl Segment {
         }
         self_.file_end = it.pos;
         self_.actual_end_90k = it.start_90k;
+        self_.have_trailing_zero = it.duration_90k == 0;
         Ok(self_)
     }
 
@@ -443,38 +448,44 @@ impl Segment {
     pub fn foreach<F>(&self, db: &db::Database, mut f: F) -> Result<(), Error>
     where F: FnMut(&SampleIndexIterator) -> Result<(), Error>
     {
-        let extra = db.lock().get_recording(self.id)?;
-        let data = &(&extra).video_index;
+        trace!("foreach on recording {}/{}: {} frames, actual_time_90k: {:?}",
+              self.camera_id, self.recording_id, self.frames, self.actual_time_90k());
+        let playback = db.lock().get_recording_playback(self.camera_id, self.recording_id)?;
+        let data = &(&playback).video_index;
         let mut it = self.begin;
         if it.i == 0 {
             if !it.next(data)? {
-                return Err(Error::new(format!("recording {}: no frames", self.id)));
+                return Err(Error::new(format!("recording {}/{}: no frames",
+                                              self.camera_id, self.recording_id)));
             }
             if !it.is_key {
-                return Err(Error::new(format!("recording {}: doesn't start with key frame",
-                                              self.id)));
+                return Err(Error::new(format!("recording {}/{}: doesn't start with key frame",
+                                              self.camera_id, self.recording_id)));
             }
         }
         let mut have_frame = true;
         let mut key_frame = 0;
         for i in 0 .. self.frames {
             if !have_frame {
-                return Err(Error::new(format!("recording {}: expected {} frames, found only {}",
-                                              self.id, self.frames, i+1)));
+                return Err(Error::new(format!("recording {}/{}: expected {} frames, found only {}",
+                                              self.camera_id, self.recording_id, self.frames,
+                                              i+1)));
             }
             if it.is_key {
                 key_frame += 1;
                 if key_frame > self.key_frames {
-                    return Err(Error::new(format!("recording {}: more than expected {} key frames",
-                                                  self.id, self.key_frames)));
+                    return Err(Error::new(format!(
+                        "recording {}/{}: more than expected {} key frames",
+                        self.camera_id, self.recording_id, self.key_frames)));
                 }
             }
             f(&it)?;
             have_frame = it.next(data)?;
         }
         if key_frame < self.key_frames {
-            return Err(Error::new(format!("recording {}: expected {} key frames, found only {}",
-                                          self.id, self.key_frames, key_frame)));
+            return Err(Error::new(format!("recording {}/{}: expected {} key frames, found only {}",
+                                          self.camera_id, self.recording_id, self.key_frames,
+                                          key_frame)));
         }
         Ok(())
     }

@@ -117,6 +117,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
         let mut writer: Option<dir::Writer> = None;
         let mut transformed = Vec::new();
         let mut next_start = None;
+        let mut run_index = -1;
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = stream.get_next()?;
             let pts = pkt.pts().ok_or_else(|| Error::new("packet with no pts".to_owned()))?;
@@ -144,9 +145,10 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
                         if r <= frame_realtime.sec { r + self.rotate_interval_sec } else { r });
                     let local_realtime = recording::Time::new(frame_realtime);
 
+                    run_index += 1;
                     self.dir.create_writer(&self.syncer_channel,
                                            next_start.unwrap_or(local_realtime), local_realtime,
-                                           self.camera_id, video_sample_entry_id)?
+                                           run_index, self.camera_id, video_sample_entry_id)?
                 },
             };
             let orig_data = match pkt.data() {
@@ -276,8 +278,9 @@ mod tests {
         is_key: bool,
     }
 
-    fn get_frames(db: &MutexGuard<db::LockedDatabase>, recording_id: i64) -> Vec<Frame> {
-        let rec = db.get_recording(recording_id).unwrap();
+    fn get_frames(db: &MutexGuard<db::LockedDatabase>, camera_id: i32, recording_id: i32)
+                  -> Vec<Frame> {
+        let rec = db.get_recording_playback(camera_id, recording_id).unwrap();
         let mut it = recording::SampleIndexIterator::new();
         let mut frames = Vec::new();
         while it.next(&rec.video_index).unwrap() {
@@ -328,7 +331,7 @@ mod tests {
         // Compare frame-by-frame. Note below that while the rotation is scheduled to happen near
         // 5-second boundaries (such as 2016-04-26 00:00:05), it gets deferred until the next key
         // frame, which in this case is 00:00:07.
-        assert_eq!(get_frames(&db, 1), &[
+        assert_eq!(get_frames(&db, testutil::TEST_CAMERA_ID, 1), &[
             Frame{start_90k:      0, duration_90k: 90379, is_key:  true},
             Frame{start_90k:  90379, duration_90k: 89884, is_key: false},
             Frame{start_90k: 180263, duration_90k: 89749, is_key: false},
@@ -338,7 +341,7 @@ mod tests {
             Frame{start_90k: 540015, duration_90k: 90021, is_key: false},
             Frame{start_90k: 630036, duration_90k: 89958, is_key: false},
         ]);
-        assert_eq!(get_frames(&db, 2), &[
+        assert_eq!(get_frames(&db, testutil::TEST_CAMERA_ID, 2), &[
             Frame{start_90k:      0, duration_90k: 90011, is_key:  true},
             Frame{start_90k:  90011, duration_90k:     0, is_key: false},
         ]);

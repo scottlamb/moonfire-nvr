@@ -543,11 +543,16 @@ impl Mp4FileBuilder {
         self.segments.reserve(additional);
     }
 
-    pub fn len(&self) -> usize { self.segments.len() }
-
     /// Appends a segment for (a subset of) the given recording.
-    pub fn append(&mut self, db: &MutexGuard<db::LockedDatabase>, row: db::ListCameraRecordingsRow,
+    pub fn append(&mut self, db: &MutexGuard<db::LockedDatabase>, row: db::ListRecordingsRow,
                   rel_range_90k: Range<i32>) -> Result<()> {
+        if let Some(prev) = self.segments.last() {
+            if prev.s.have_trailing_zero {
+                return Err(Error::new(format!(
+                    "unable to append recording {}/{} after recording {}/{} with trailing zero",
+                    row.camera_id, row.id, prev.s.camera_id, prev.s.recording_id)));
+            }
+        }
         self.segments.push(Mp4Segment{
             s: recording::Segment::new(db, &row, rel_range_90k)?,
             index: RefCell::new(None),
@@ -591,7 +596,8 @@ impl Mp4FileBuilder {
             // Update the etag to reflect this segment.
             let mut data = [0_u8; 24];
             let mut cursor = io::Cursor::new(&mut data[..]);
-            cursor.write_i64::<BigEndian>(s.s.id)?;
+            cursor.write_i32::<BigEndian>(s.s.camera_id)?;
+            cursor.write_i32::<BigEndian>(s.s.recording_id)?;
             cursor.write_i64::<BigEndian>(s.s.start.0)?;
             cursor.write_i32::<BigEndian>(d.start)?;
             cursor.write_i32::<BigEndian>(d.end)?;
@@ -1129,7 +1135,8 @@ impl Mp4File {
 
     fn write_video_sample_data(&self, i: usize, r: Range<u64>, out: &mut io::Write) -> Result<()> {
         let s = &self.segments[i];
-        let f = self.dir.open_sample_file(self.db.lock().get_recording(s.s.id)?.sample_file_uuid)?;
+        let rec = self.db.lock().get_recording_playback(s.s.camera_id, s.s.recording_id)?;
+        let f = self.dir.open_sample_file(rec.sample_file_uuid)?;
         mmapfile::MmapFileSlice::new(f, s.s.sample_file_range()).write_to(r, out)
     }
 
@@ -1180,8 +1187,8 @@ mod tests {
     use byteorder::{BigEndian, ByteOrder};
     use db;
     use dir;
-    use ffmpeg;
     use error::Error;
+    use ffmpeg;
     #[cfg(nightly)] use hyper;
     use hyper::header;
     use openssl::crypto::hash;
@@ -1217,10 +1224,10 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> { Ok(()) }
     }
 
-    /// Returns the SHA-1 digest of the given `Resource`.
-    fn digest(r: &http_entity::Entity<Error>) -> Vec<u8> {
+    /// Returns the SHA-1 digest of the given `Entity`.
+    fn digest(e: &http_entity::Entity<Error>) -> Vec<u8> {
         let mut sha1 = Sha1::new();
-        r.write_to(0 .. r.len(), &mut sha1).unwrap();
+        e.write_to(0 .. e.len(), &mut sha1).unwrap();
         sha1.finish()
     }
 
@@ -1401,7 +1408,7 @@ mod tests {
         let extra_data = input.get_extra_data().unwrap();
         let video_sample_entry_id = db.db.lock().insert_video_sample_entry(
             extra_data.width, extra_data.height, &extra_data.sample_entry).unwrap();
-        let mut output = db.dir.create_writer(&db.syncer_channel, START_TIME, START_TIME,
+        let mut output = db.dir.create_writer(&db.syncer_channel, START_TIME, START_TIME, 0,
                                               TEST_CAMERA_ID, video_sample_entry_id).unwrap();
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
@@ -1435,6 +1442,7 @@ mod tests {
         let mut recording = db::RecordingToInsert{
             camera_id: TEST_CAMERA_ID,
             sample_file_bytes: 30104460,
+            flags: 0,
             time: START_TIME .. (START_TIME + DURATION),
             local_time: START_TIME,
             video_samples: 1800,
@@ -1443,6 +1451,7 @@ mod tests {
             sample_file_uuid: Uuid::nil(),
             video_index: data,
             sample_file_sha1: [0; 20],
+            run_index: 0,
         };
         let mut tx = db.tx().unwrap();
         tx.bypass_reservation_for_testing = true;
@@ -1451,6 +1460,7 @@ mod tests {
             recording.time.start += DURATION;
             recording.local_time += DURATION;
             recording.time.end += DURATION;
+            recording.run_index += 1;
         }
         tx.commit().unwrap();
     }
@@ -1462,7 +1472,7 @@ mod tests {
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
         {
             let db = db.lock();
-            db.list_recordings(TEST_CAMERA_ID, &all_time, |r| {
+            db.list_recordings_by_time(TEST_CAMERA_ID, all_time, |r| {
                 let d = r.duration_90k;
                 assert!(skip_90k + shorten_90k < d);
                 builder.append(&db, r, skip_90k .. d - shorten_90k).unwrap();
@@ -1658,7 +1668,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "3c48af4dbce2024db07f27a00789b6af774a8c89";
+        const EXPECTED_ETAG: &'static str = "908ae8ac303f66f2f4a1f8f52dba8f6ea9fdb442";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -1678,7 +1688,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "c24d7af372e5d8f66f4feb6e3a5cd43828392371";
+        const EXPECTED_ETAG: &'static str = "e21c6a6dfede1081db3701cc595ec267c43c2bff";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -1698,7 +1708,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("685e026af44204bc9cc52115c5e17058e9fb7c70", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "870e2b3cfef4a988951344b32e53af0d4496894d";
+        const EXPECTED_ETAG: &'static str = "1d5c5980f6ba08a4dd52dfd785667d42cdb16992";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -1718,7 +1728,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "71c329188a2cd175c8d61492a9789e242af06c05";
+        const EXPECTED_ETAG: &'static str = "555de64b39615e1a1cbe5bdd565ff197f5f126c5";
         assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
