@@ -121,6 +121,12 @@ information:
 
 The camera records video frames as in the diagram below:
 
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xl="http://www.w3.org/1999/xlink"
+     version="1.1" viewBox="59 18 476 224" width="476pt" height="224pt">
+  <use xlink:href="time-frames.svg"></use>
+</svg>
+
 ![Video frame timeline](time-frames.svg)
 
 Each frame has an associated RTP timestamp. It's unclear from skimming RFC
