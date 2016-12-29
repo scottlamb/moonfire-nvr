@@ -1408,7 +1408,7 @@ mod tests {
         let extra_data = input.get_extra_data().unwrap();
         let video_sample_entry_id = db.db.lock().insert_video_sample_entry(
             extra_data.width, extra_data.height, &extra_data.sample_entry).unwrap();
-        let mut output = db.dir.create_writer(&db.syncer_channel, START_TIME, START_TIME, 0,
+        let mut output = db.dir.create_writer(&db.syncer_channel, None, 0,
                                               TEST_CAMERA_ID, video_sample_entry_id).unwrap();
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
@@ -1417,15 +1417,20 @@ mod tests {
         // To write the final packet of this sample .mp4 with a full duration, we need to fake a
         // next packet's pts from the ffmpeg-supplied duration.
         let mut end_pts = None;
+
+        let mut frame_time = START_TIME;
+
         loop {
             let pkt = match input.get_next() {
                 Ok(p) => p,
                 Err(ffmpeg::Error::Eof) => { break; },
                 Err(e) => { panic!("unexpected input error: {}", e); },
             };
-            output.write(pkt.data().expect("packet without data"), pkt.pts().unwrap(),
+            let pts = pkt.pts().unwrap();
+            frame_time += recording::Duration(pkt.duration());
+            output.write(pkt.data().expect("packet without data"), frame_time, pts,
                          pkt.is_key()).unwrap();
-            end_pts = Some(pkt.pts().unwrap() + pkt.duration());
+            end_pts = Some(pts + pkt.duration());
         }
         output.close(end_pts).unwrap();
         db.syncer_channel.flush();

@@ -68,6 +68,13 @@ pub struct Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
     redacted_url: String,
 }
 
+struct WriterState<'a> {
+    writer: dir::Writer<'a>,
+
+    /// Seconds since epoch at which to next rotate.
+    rotate: i64,
+}
+
 impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
     pub fn new<'b>(env: &Environment<'a, 'b, C, S>, syncer_channel: dir::SyncerChannel,
                    camera_id: i32, c: &Camera, rotate_offset_sec: i64,
@@ -113,10 +120,9 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
                                                      &extra_data.sample_entry)?;
         debug!("{}: video_sample_entry_id={}", self.short_name, video_sample_entry_id);
         let mut seen_key_frame = false;
-        let mut rotate = None;
-        let mut writer: Option<dir::Writer> = None;
+        let mut state: Option<WriterState> = None;
         let mut transformed = Vec::new();
-        let mut next_start = None;
+        let mut prev_end = None;
         let mut run_index = -1;
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = stream.get_next()?;
@@ -128,27 +134,37 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
                 seen_key_frame = true;
             }
             let frame_realtime = self.clock.get_time();
-            if let Some(r) = rotate {
-                if frame_realtime.sec > r && pkt.is_key() {
-                    let w = writer.take().expect("rotate set implies writer is set");
+            let local_time = recording::Time::new(frame_realtime);
+            state = if let Some(s) = state {
+                if frame_realtime.sec > s.rotate && pkt.is_key() {
                     trace!("{}: write on normal rotation", self.short_name);
-                    next_start = Some(w.close(Some(pts))?);
+                    prev_end = Some(s.writer.close(Some(pts))?);
+                    None
+                } else {
+                    Some(s)
                 }
-            };
-            let mut w = match writer {
-                Some(w) => w,
+            } else { None };
+            let mut s = match state {
+                Some(s) => s,
                 None => {
-                    let r = frame_realtime.sec -
-                            (frame_realtime.sec % self.rotate_interval_sec) +
-                            self.rotate_offset_sec;
-                    rotate = Some(
-                        if r <= frame_realtime.sec { r + self.rotate_interval_sec } else { r });
-                    let local_realtime = recording::Time::new(frame_realtime);
+                    // Set rotate time to not the next rotate offset, but the one after.
+                    // The first recording interval is longer than usual rather than shorter
+                    // than usual so that there's plenty of frame times to use when calculating the
+                    // start time.
+                    let sec = frame_realtime.sec;
+                    let r = sec - (sec % self.rotate_interval_sec) + self.rotate_offset_sec;
+                    let r = r + if r <= sec { /*2**/self.rotate_interval_sec }
+                                else { 0/*self.rotate_interval_sec*/ };
 
                     run_index += 1;
-                    self.dir.create_writer(&self.syncer_channel,
-                                           next_start.unwrap_or(local_realtime), local_realtime,
-                                           run_index, self.camera_id, video_sample_entry_id)?
+
+                    let w = self.dir.create_writer(&self.syncer_channel, prev_end,
+                                                   run_index, self.camera_id,
+                                                   video_sample_entry_id)?;
+                    WriterState{
+                        writer: w,
+                        rotate: r,
+                    }
                 },
             };
             let orig_data = match pkt.data() {
@@ -161,11 +177,11 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
             } else {
                 orig_data
             };
-            w.write(transformed_data, pts, pkt.is_key())?;
-            writer = Some(w);
+            s.writer.write(transformed_data, local_time, pts, pkt.is_key())?;
+            state = Some(s);
         }
-        if let Some(w) = writer {
-            w.close(None)?;
+        if let Some(s) = state {
+            s.writer.close(None)?;
         }
         Ok(())
     }
