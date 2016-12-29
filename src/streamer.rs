@@ -122,8 +122,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
         let mut seen_key_frame = false;
         let mut state: Option<WriterState> = None;
         let mut transformed = Vec::new();
-        let mut prev_end = None;
-        let mut run_index = -1;
+        let mut prev = None;
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = stream.get_next()?;
             let pts = pkt.pts().ok_or_else(|| Error::new("packet with no pts".to_owned()))?;
@@ -138,7 +137,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
             state = if let Some(s) = state {
                 if frame_realtime.sec > s.rotate && pkt.is_key() {
                     trace!("{}: write on normal rotation", self.short_name);
-                    prev_end = Some(s.writer.close(Some(pts))?);
+                    prev = Some(s.writer.close(Some(pts))?);
                     None
                 } else {
                     Some(s)
@@ -156,10 +155,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
                     let r = r + if r <= sec { /*2**/self.rotate_interval_sec }
                                 else { 0/*self.rotate_interval_sec*/ };
 
-                    run_index += 1;
-
-                    let w = self.dir.create_writer(&self.syncer_channel, prev_end,
-                                                   run_index, self.camera_id,
+                    let w = self.dir.create_writer(&self.syncer_channel, prev, self.camera_id,
                                                    video_sample_entry_id)?;
                     WriterState{
                         writer: w,
