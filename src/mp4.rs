@@ -1408,7 +1408,7 @@ mod tests {
         let extra_data = input.get_extra_data().unwrap();
         let video_sample_entry_id = db.db.lock().insert_video_sample_entry(
             extra_data.width, extra_data.height, &extra_data.sample_entry).unwrap();
-        let mut output = db.dir.create_writer(&db.syncer_channel, None, 0,
+        let mut output = db.dir.create_writer(&db.syncer_channel, None,
                                               TEST_CAMERA_ID, video_sample_entry_id).unwrap();
 
         // end_pts is the pts of the end of the most recent frame (start + duration).

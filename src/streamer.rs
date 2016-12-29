@@ -152,8 +152,8 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
                     // start time.
                     let sec = frame_realtime.sec;
                     let r = sec - (sec % self.rotate_interval_sec) + self.rotate_offset_sec;
-                    let r = r + if r <= sec { /*2**/self.rotate_interval_sec }
-                                else { 0/*self.rotate_interval_sec*/ };
+                    let r = r + if r <= sec { 2*self.rotate_interval_sec }
+                                else { self.rotate_interval_sec };
 
                     let w = self.dir.create_writer(&self.syncer_channel, prev, self.camera_id,
                                                    video_sample_entry_id)?;
@@ -333,7 +333,7 @@ mod tests {
             let l = db.db.lock();
             let camera = l.cameras_by_id().get(&testutil::TEST_CAMERA_ID).unwrap();
             stream = super::Streamer::new(&env, db.syncer_channel.clone(), testutil::TEST_CAMERA_ID,
-                                          camera, 0, 5);
+                                          camera, 0, 3);
         }
         stream.run();
         assert!(opener.streams.lock().unwrap().is_empty());
@@ -341,16 +341,17 @@ mod tests {
         let db = db.db.lock();
 
         // Compare frame-by-frame. Note below that while the rotation is scheduled to happen near
-        // 5-second boundaries (such as 2016-04-26 00:00:05), it gets deferred until the next key
-        // frame, which in this case is 00:00:07.
+        // 3-second boundaries (such as 2016-04-26 00:00:03), rotation happens somewhat later:
+        // * the first rotation is always skipped
+        // * the second rotation is deferred until a key frame.
         assert_eq!(get_frames(&db, testutil::TEST_CAMERA_ID, 1), &[
             Frame{start_90k:      0, duration_90k: 90379, is_key:  true},
             Frame{start_90k:  90379, duration_90k: 89884, is_key: false},
             Frame{start_90k: 180263, duration_90k: 89749, is_key: false},
-            Frame{start_90k: 270012, duration_90k: 89981, is_key: false},
+            Frame{start_90k: 270012, duration_90k: 89981, is_key: false},  // pts_time 3.0001...
             Frame{start_90k: 359993, duration_90k: 90055, is_key:  true},
-            Frame{start_90k: 450048, duration_90k: 89967, is_key: false},  // pts_time 5.0005333...
-            Frame{start_90k: 540015, duration_90k: 90021, is_key: false},
+            Frame{start_90k: 450048, duration_90k: 89967, is_key: false},
+            Frame{start_90k: 540015, duration_90k: 90021, is_key: false},  // pts_time 6.0001...
             Frame{start_90k: 630036, duration_90k: 89958, is_key: false},
         ]);
         assert_eq!(get_frames(&db, testutil::TEST_CAMERA_ID, 2), &[
