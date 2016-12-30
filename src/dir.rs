@@ -554,6 +554,8 @@ impl<'a> InnerWriter<'a> {
         sha1_bytes.copy_from_slice(&self.hasher.finish()?[..]);
         let start_time = self.prev_end.unwrap_or(local_start);
         let end = start_time + recording::Duration(self.index.total_duration_90k as i64);
+        let flags = if self.index.has_trailing_zero() { db::RecordingFlags::TrailingZero as i32 }
+                    else { 0 };
         let recording = db::RecordingToInsert{
             camera_id: self.camera_id,
             sample_file_bytes: self.index.sample_file_bytes,
@@ -566,7 +568,7 @@ impl<'a> InnerWriter<'a> {
             video_index: self.index.video_index,
             sample_file_sha1: sha1_bytes,
             run_offset: self.run_offset,
-            flags: 0,  // TODO
+            flags: flags,
         };
         self.syncer_channel.async_save_recording(recording, self.f);
         Ok(PreviousWriter{

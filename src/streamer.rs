@@ -192,6 +192,7 @@ mod tests {
     use ffmpeg::packet::Mut;
     use h264;
     use recording;
+    use std::cmp;
     use std::sync::{Arc, Mutex, MutexGuard};
     use std::sync::atomic::{AtomicBool, Ordering};
     use stream::{self, Opener, Stream};
@@ -201,18 +202,22 @@ mod tests {
     struct ProxyingStream<'a> {
         clock: &'a clock::SimulatedClock,
         inner: stream::FfmpegStream,
-        last_duration: time::Duration,
+        buffered: time::Duration,
+        slept: time::Duration,
         ts_offset: i64,
         ts_offset_pkts_left: u32,
         pkts_left: u32,
     }
 
     impl<'a> ProxyingStream<'a> {
-        fn new(clock: &'a clock::SimulatedClock, inner: stream::FfmpegStream) -> ProxyingStream {
+        fn new(clock: &'a clock::SimulatedClock, buffered: time::Duration,
+               inner: stream::FfmpegStream) -> ProxyingStream {
+            clock.sleep(buffered);
             ProxyingStream {
                 clock: clock,
                 inner: inner,
-                last_duration: time::Duration::seconds(0),
+                buffered: buffered,
+                slept: time::Duration::seconds(0),
                 ts_offset: 0,
                 ts_offset_pkts_left: 0,
                 pkts_left: 0,
@@ -227,13 +232,21 @@ mod tests {
             }
             self.pkts_left -= 1;
 
-            // Advance clock to when this packet starts.
-            self.clock.sleep(self.last_duration);
-
             let mut pkt = self.inner.get_next()?;
 
-            self.last_duration = time::Duration::nanoseconds(
-                pkt.duration() * 1_000_000_000 / recording::TIME_UNITS_PER_SEC);
+            // Advance clock to the end of this frame.
+            // Avoid accumulating conversion error by tracking the total amount to sleep and how
+            // much we've already slept, rather than considering each frame in isolation.
+            {
+                let goal = pkt.pts().unwrap() + pkt.duration();
+                let goal = time::Duration::nanoseconds(
+                    goal * 1_000_000_000 / recording::TIME_UNITS_PER_SEC);
+                let duration = goal - self.slept;
+                let buf_part = cmp::min(self.buffered, duration);
+                self.buffered = self.buffered - buf_part;
+                self.clock.sleep(duration - buf_part);
+                self.slept = goal;
+            }
 
             if self.ts_offset_pkts_left > 0 {
                 self.ts_offset_pkts_left -= 1;
@@ -309,9 +322,10 @@ mod tests {
     fn basic() {
         testutil::init();
         let clock = clock::SimulatedClock::new();
+
         clock.sleep(time::Duration::seconds(1430006400));  // 2015-04-26 00:00:00 UTC
         let stream = stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
-        let mut stream = ProxyingStream::new(&clock, stream);
+        let mut stream = ProxyingStream::new(&clock, time::Duration::seconds(2), stream);
         stream.ts_offset = 180000;  // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::max_value();
         stream.pkts_left = u32::max_value();
@@ -358,5 +372,17 @@ mod tests {
             Frame{start_90k:      0, duration_90k: 90011, is_key:  true},
             Frame{start_90k:  90011, duration_90k:     0, is_key: false},
         ]);
+        let mut recordings = Vec::new();
+        db.list_recordings_by_id(testutil::TEST_CAMERA_ID, 1..3, |r| {
+            recordings.push(r);
+            Ok(())
+        }).unwrap();
+        assert_eq!(2, recordings.len());
+        assert_eq!(1, recordings[0].id);
+        assert_eq!(recording::Time(128700575999999), recordings[0].start);
+        assert_eq!(0, recordings[0].flags);
+        assert_eq!(2, recordings[1].id);
+        assert_eq!(recording::Time(128700576719993), recordings[1].start);
+        assert_eq!(db::RecordingFlags::TrailingZero as i32, recordings[1].flags);
     }
 }

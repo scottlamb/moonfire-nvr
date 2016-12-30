@@ -335,6 +335,8 @@ impl SampleIndexEncoder {
         append_varint32((zigzag32(duration_delta) << 1) | (is_key as u32), &mut self.video_index);
         append_varint32(zigzag32(bytes_delta), &mut self.video_index);
     }
+
+    pub fn has_trailing_zero(&self) -> bool { self.prev_duration_90k == 0 }
 }
 
 /// A segment represents a view of some or all of a single recording, starting from a key frame.
