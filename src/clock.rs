@@ -59,7 +59,7 @@ impl RealClocks {
         unsafe {
             let mut ts = mem::uninitialized();
             assert_eq!(0, libc::clock_gettime(clock, &mut ts));
-            Timespec::new(ts.tv_sec, ts.tv_nsec as i32)
+            Timespec::new(ts.tv_sec as i64, ts.tv_nsec as i32)
         }
     }
 }
