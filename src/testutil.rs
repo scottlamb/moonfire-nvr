@@ -131,7 +131,7 @@ impl TestDb {
                 sample_file_bytes: encoder.sample_file_bytes,
                 time: START_TIME ..
                       START_TIME + recording::Duration(encoder.total_duration_90k as i64),
-                local_time: START_TIME,
+                local_time_delta: recording::Duration(0),
                 video_samples: encoder.video_samples,
                 video_sync_samples: encoder.video_sync_samples,
                 video_sample_entry_id: video_sample_entry_id,

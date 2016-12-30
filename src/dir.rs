@@ -438,6 +438,8 @@ struct InnerWriter<'a> {
     /// information. This will be used as the official start time iff `prev_end` is None.
     local_start: Option<recording::Time>,
 
+    adjuster: ClockAdjuster,
+
     camera_id: i32,
     video_sample_entry_id: i32,
     run_offset: i32,
@@ -450,6 +452,51 @@ struct InnerWriter<'a> {
     unflushed_sample: Option<UnflushedSample>,
 }
 
+/// Adjusts durations given by the camera to correct its clock frequency error.
+struct ClockAdjuster {
+    /// Every `every_minus_1 + 1` units, add `-ndir`.
+    /// Note i32::max_value() disables adjustment.
+    every_minus_1: i32,
+
+    /// Should be 1 or -1 (unless disabled).
+    ndir: i32,
+
+    /// Keeps accumulated difference from previous values.
+    cur: i32,
+}
+
+impl ClockAdjuster {
+    fn new(local_time_delta: Option<i64>) -> Self {
+        // Correct up to 500 ppm, or 2,700/90,000ths of a second over the course of a minute.
+        let (every, ndir) = match local_time_delta {
+            None | Some(0) => (i32::max_value(), 0),
+            Some(d) if d <= -2700 => (2000,  1),
+            Some(d) if d >=  2700 => (2000, -1),
+            Some(d) if d < -60 => ((60 * 90000) / -(d as i32),  1),
+            Some(d)            => ((60 * 90000) /  (d as i32), -1),
+        };
+        ClockAdjuster{
+            every_minus_1: every - 1,
+            ndir: ndir,
+            cur: 0,
+        }
+    }
+
+    fn adjust(&mut self, mut val: i32) -> i32 {
+        self.cur += val;
+
+        // The "val > self.ndir" here is so that if decreasing durations (ndir == 1), we don't
+        // cause a duration of 1 to become a duration of 0. It has no effect when increasing
+        // durations. (There's no danger of a duration of 0 becoming a duration of 1; cur wouldn't
+        // be newly > self.every_minus_1.)
+        while self.cur > self.every_minus_1 && val > self.ndir {
+            val -= self.ndir;
+            self.cur -= self.every_minus_1 + 1;
+        }
+        val
+    }
+}
+
 struct UnflushedSample {
     local_time: recording::Time,
     pts_90k: i64,
@@ -460,6 +507,7 @@ struct UnflushedSample {
 #[derive(Copy, Clone)]
 pub struct PreviousWriter {
     end_time: recording::Time,
+    local_time_delta: recording::Duration,
     run_offset: i32,
 }
 
@@ -476,9 +524,10 @@ impl<'a> Writer<'a> {
             hasher: hash::Hasher::new(hash::Type::SHA1)?,
             prev_end: prev.map(|p| p.end_time),
             local_start: None,
+            adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
             camera_id: camera_id,
             video_sample_entry_id: video_sample_entry_id,
-            run_offset: prev.map(|p| p.run_offset).unwrap_or(0),
+            run_offset: prev.map(|p| p.run_offset + 1).unwrap_or(0),
             unflushed_sample: None,
         })))
     }
@@ -489,7 +538,7 @@ impl<'a> Writer<'a> {
                  is_key: bool) -> Result<(), Error> {
         let w = self.0.as_mut().unwrap();
         if let Some(unflushed) = w.unflushed_sample.take() {
-            let duration = (pts_90k - unflushed.pts_90k) as i32;
+            let duration = w.adjuster.adjust((pts_90k - unflushed.pts_90k) as i32);
             w.index.add_sample(duration, unflushed.len, unflushed.is_key);
             w.local_start = Some(w.extend_local_start(unflushed.local_time));
         }
@@ -544,23 +593,24 @@ impl<'a> InnerWriter<'a> {
         }
         let unflushed =
             self.unflushed_sample.take().ok_or_else(|| Error::new("no packets!".to_owned()))?;
-        let duration = match next_pts {
+        let duration = self.adjuster.adjust(match next_pts {
             None => 0,
             Some(p) => (p - unflushed.pts_90k) as i32,
-        };
+        });
         self.index.add_sample(duration, unflushed.len, unflushed.is_key);
         let local_start = self.extend_local_start(unflushed.local_time);
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&self.hasher.finish()?[..]);
-        let start_time = self.prev_end.unwrap_or(local_start);
-        let end = start_time + recording::Duration(self.index.total_duration_90k as i64);
+        let start = self.prev_end.unwrap_or(local_start);
+        let end = start + recording::Duration(self.index.total_duration_90k as i64);
         let flags = if self.index.has_trailing_zero() { db::RecordingFlags::TrailingZero as i32 }
                     else { 0 };
+        let local_start_delta = local_start - start;
         let recording = db::RecordingToInsert{
             camera_id: self.camera_id,
             sample_file_bytes: self.index.sample_file_bytes,
-            time: start_time .. end,
-            local_time: local_start,
+            time: start .. end,
+            local_time_delta: local_start_delta,
             video_samples: self.index.video_samples,
             video_sync_samples: self.index.video_sync_samples,
             video_sample_entry_id: self.video_sample_entry_id,
@@ -573,6 +623,7 @@ impl<'a> InnerWriter<'a> {
         self.syncer_channel.async_save_recording(recording, self.f);
         Ok(PreviousWriter{
             end_time: end,
+            local_time_delta: local_start_delta,
             run_offset: self.run_offset,
         })
     }
@@ -586,5 +637,50 @@ impl<'a> Drop for Writer<'a> {
             // complaining again.
             let _ = w.close(None);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClockAdjuster;
+    use testutil;
+
+    #[test]
+    fn adjust() {
+        testutil::init();
+
+        // no-ops.
+        let mut a = ClockAdjuster::new(None);
+        for _ in 0..1800 {
+            assert_eq!(3000, a.adjust(3000));
+        }
+        a = ClockAdjuster::new(Some(0));
+        for _ in 0..1800 {
+            assert_eq!(3000, a.adjust(3000));
+        }
+
+        // typical, 100 ppm adjustment.
+        a = ClockAdjuster::new(Some(-540));
+        let mut total = 0;
+        for _ in 0..1800 {
+            let new = a.adjust(3000);
+            assert!(new == 2999 || new == 3000);
+            total += new;
+        }
+        let expected = 1800*3000 - 540;
+        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
+                total, expected);
+
+        // capped at 500 ppm (change of 2,700/90,000ths over 1 minute).
+        a = ClockAdjuster::new(Some(-1_000_000));
+        total = 0;
+        for _ in 0..1800 {
+            let new = a.adjust(3000);
+            assert!(new == 2998 || new == 2999, "new={}", new);
+            total += new;
+        }
+        let expected = 1800*3000 - 2700;
+        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
+                total, expected);
     }
 }

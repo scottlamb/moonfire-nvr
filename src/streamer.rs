@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use clock::Clock;
+use clock::Clocks;
 use db::{Camera, Database};
 use dir;
 use error::Error;
@@ -43,15 +43,15 @@ use time;
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
 
 /// Common state that can be used by multiple `Streamer` instances.
-pub struct Environment<'a, 'b, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
-    pub clock: &'a C,
+pub struct Environment<'a, 'b, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
+    pub clocks: &'a C,
     pub opener: &'a stream::Opener<S>,
     pub db: &'b Arc<Database>,
     pub dir: &'b Arc<dir::SampleFileDir>,
     pub shutdown: &'b Arc<AtomicBool>,
 }
 
-pub struct Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
+pub struct Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     shutdown: Arc<AtomicBool>,
 
     // State below is only used by the thread in Run.
@@ -60,7 +60,7 @@ pub struct Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
     db: Arc<Database>,
     dir: Arc<dir::SampleFileDir>,
     syncer_channel: dir::SyncerChannel,
-    clock: &'a C,
+    clocks: &'a C,
     opener: &'a stream::Opener<S>,
     camera_id: i32,
     short_name: String,
@@ -75,7 +75,7 @@ struct WriterState<'a> {
     rotate: i64,
 }
 
-impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
+impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     pub fn new<'b>(env: &Environment<'a, 'b, C, S>, syncer_channel: dir::SyncerChannel,
                    camera_id: i32, c: &Camera, rotate_offset_sec: i64,
                    rotate_interval_sec: i64) -> Self {
@@ -86,7 +86,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
             db: env.db.clone(),
             dir: env.dir.clone(),
             syncer_channel: syncer_channel,
-            clock: env.clock,
+            clocks: env.clocks,
             opener: env.opener,
             camera_id: camera_id,
             short_name: c.short_name.to_owned(),
@@ -102,7 +102,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
             if let Err(e) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
                 warn!("{}: sleeping for {:?} after error: {}", self.short_name, sleep_time, e);
-                self.clock.sleep(sleep_time);
+                self.clocks.sleep(sleep_time);
             }
         }
         info!("{}: shutting down", self.short_name);
@@ -112,6 +112,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
         info!("{}: Opening input: {}", self.short_name, self.redacted_url);
 
         let mut stream = self.opener.open(stream::Source::Rtsp(&self.url))?;
+        let realtime_offset = self.clocks.realtime() - self.clocks.monotonic();
         // TODO: verify time base.
         // TODO: verify width/height.
         let extra_data = stream.get_extra_data()?;
@@ -132,7 +133,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
                 debug!("{}: have first key frame", self.short_name);
                 seen_key_frame = true;
             }
-            let frame_realtime = self.clock.get_time();
+            let frame_realtime = self.clocks.monotonic() + realtime_offset;
             let local_time = recording::Time::new(frame_realtime);
             state = if let Some(s) = state {
                 if frame_realtime.sec > s.rotate && pkt.is_key() {
@@ -185,7 +186,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
 
 #[cfg(test)]
 mod tests {
-    use clock::{self, Clock};
+    use clock::{self, Clocks};
     use db;
     use error::Error;
     use ffmpeg;
@@ -200,7 +201,7 @@ mod tests {
     use time;
 
     struct ProxyingStream<'a> {
-        clock: &'a clock::SimulatedClock,
+        clocks: &'a clock::SimulatedClocks,
         inner: stream::FfmpegStream,
         buffered: time::Duration,
         slept: time::Duration,
@@ -210,11 +211,11 @@ mod tests {
     }
 
     impl<'a> ProxyingStream<'a> {
-        fn new(clock: &'a clock::SimulatedClock, buffered: time::Duration,
+        fn new(clocks: &'a clock::SimulatedClocks, buffered: time::Duration,
                inner: stream::FfmpegStream) -> ProxyingStream {
-            clock.sleep(buffered);
+            clocks.sleep(buffered);
             ProxyingStream {
-                clock: clock,
+                clocks: clocks,
                 inner: inner,
                 buffered: buffered,
                 slept: time::Duration::seconds(0),
@@ -244,7 +245,7 @@ mod tests {
                 let duration = goal - self.slept;
                 let buf_part = cmp::min(self.buffered, duration);
                 self.buffered = self.buffered - buf_part;
-                self.clock.sleep(duration - buf_part);
+                self.clocks.sleep(duration - buf_part);
                 self.slept = goal;
             }
 
@@ -321,11 +322,12 @@ mod tests {
     #[test]
     fn basic() {
         testutil::init();
-        let clock = clock::SimulatedClock::new();
+        // 2015-04-25 00:00:00 UTC
+        let clocks = clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0));
+        clocks.sleep(time::Duration::seconds(86400));  // to 2015-04-26 00:00:00 UTC
 
-        clock.sleep(time::Duration::seconds(1430006400));  // 2015-04-26 00:00:00 UTC
         let stream = stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
-        let mut stream = ProxyingStream::new(&clock, time::Duration::seconds(2), stream);
+        let mut stream = ProxyingStream::new(&clocks, time::Duration::seconds(2), stream);
         stream.ts_offset = 180000;  // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::max_value();
         stream.pkts_left = u32::max_value();
@@ -336,7 +338,7 @@ mod tests {
         };
         let db = testutil::TestDb::new();
         let env = super::Environment{
-            clock: &clock,
+            clocks: &clocks,
             opener: &opener,
             db: &db.db,
             dir: &db.dir,

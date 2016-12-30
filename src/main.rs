@@ -181,7 +181,7 @@ fn run(args: Args, conn: rusqlite::Connection, signal: &chan::Receiver<chan_sign
         let env = streamer::Environment{
             db: &db,
             dir: &dir,
-            clock: &clock::REAL,
+            clocks: &clock::REAL,
             opener: &*stream::FFMPEG,
             shutdown: &shutdown,
         };
