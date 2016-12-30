@@ -147,14 +147,15 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             let mut s = match state {
                 Some(s) => s,
                 None => {
-                    // Set rotate time to not the next rotate offset, but the one after.
-                    // The first recording interval is longer than usual rather than shorter
-                    // than usual so that there's plenty of frame times to use when calculating the
-                    // start time.
                     let sec = frame_realtime.sec;
                     let r = sec - (sec % self.rotate_interval_sec) + self.rotate_offset_sec;
-                    let r = r + if r <= sec { 2*self.rotate_interval_sec }
-                                else { self.rotate_interval_sec };
+                    let r = r + if r <= sec { self.rotate_interval_sec } else { 0 };
+
+                    // On the first recording, set rotate time to not the next rotate offset, but
+                    // the one after, so that it's longer than usual rather than shorter than
+                    // usual.  This ensures there's plenty of frame times to use when calculating
+                    // the start time.
+                    let r = r + if prev.is_none() { self.rotate_interval_sec } else { 0 };
 
                     let w = self.dir.create_writer(&self.syncer_channel, prev, self.camera_id,
                                                    video_sample_entry_id)?;
