@@ -433,10 +433,11 @@ struct InnerWriter<'a> {
     prev_end: Option<recording::Time>,
 
     /// The start time of this segment, based solely on examining the local clock after frames in
-    /// this segment were received. This is initially `None`, filled in on the second packet in
-    /// the segment, and refined as more packets are received. See `design/time.md` for more
-    /// information. This will be used as the official start time iff `prev_end` is None.
-    local_start: Option<recording::Time>,
+    /// this segment were received. Frames can suffer from various kinds of delay (initial
+    /// buffering, encoding, and network transmission), so this time is set to far in the future on
+    /// construction, given a real value on the first packet, and decreased as less-delayed packets
+    /// are discovered. See design/time.md for details.
+    local_start: recording::Time,
 
     adjuster: ClockAdjuster,
 
@@ -523,7 +524,7 @@ impl<'a> Writer<'a> {
             corrupt: false,
             hasher: hash::Hasher::new(hash::Type::SHA1)?,
             prev_end: prev.map(|p| p.end_time),
-            local_start: None,
+            local_start: recording::Time(i64::max_value()),
             adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
             camera_id: camera_id,
             video_sample_entry_id: video_sample_entry_id,
@@ -540,7 +541,7 @@ impl<'a> Writer<'a> {
         if let Some(unflushed) = w.unflushed_sample.take() {
             let duration = w.adjuster.adjust((pts_90k - unflushed.pts_90k) as i32);
             w.index.add_sample(duration, unflushed.len, unflushed.is_key);
-            w.local_start = Some(w.extend_local_start(unflushed.local_time));
+            w.extend_local_start(unflushed.local_time);
         }
         let mut remaining = pkt;
         while !remaining.is_empty() {
@@ -578,12 +579,9 @@ impl<'a> Writer<'a> {
 }
 
 impl<'a> InnerWriter<'a> {
-    fn extend_local_start(&mut self, pkt_local_time: recording::Time) -> recording::Time {
+    fn extend_local_start(&mut self, pkt_local_time: recording::Time) {
         let new = pkt_local_time - recording::Duration(self.index.total_duration_90k as i64);
-        match self.local_start {
-            None => new,
-            Some(old) => cmp::min(old, new),
-        }
+        self.local_start = cmp::min(self.local_start, new);
     }
 
     fn close(mut self, next_pts: Option<i64>) -> Result<PreviousWriter, Error> {
@@ -598,14 +596,14 @@ impl<'a> InnerWriter<'a> {
             Some(p) => (p - unflushed.pts_90k) as i32,
         });
         self.index.add_sample(duration, unflushed.len, unflushed.is_key);
-        let local_start = self.extend_local_start(unflushed.local_time);
+        self.extend_local_start(unflushed.local_time);
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&self.hasher.finish()?[..]);
-        let start = self.prev_end.unwrap_or(local_start);
+        let start = self.prev_end.unwrap_or(self.local_start);
         let end = start + recording::Duration(self.index.total_duration_90k as i64);
         let flags = if self.index.has_trailing_zero() { db::RecordingFlags::TrailingZero as i32 }
                     else { 0 };
-        let local_start_delta = local_start - start;
+        let local_start_delta = self.local_start - start;
         let recording = db::RecordingToInsert{
             camera_id: self.camera_id,
             sample_file_bytes: self.index.sample_file_bytes,
