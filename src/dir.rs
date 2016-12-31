@@ -468,7 +468,10 @@ struct ClockAdjuster {
 
 impl ClockAdjuster {
     fn new(local_time_delta: Option<i64>) -> Self {
-        // Correct up to 500 ppm, or 2,700/90,000ths of a second over the course of a minute.
+        // Pick an adjustment rate to correct local_time_delta over the next minute (the
+        // desired duration of a single recording). Cap the rate at 500 ppm (which corrects
+        // 2,700/90,000ths of a second over a minute) to prevent noticeably speeding up or slowing
+        // down playback.
         let (every, ndir) = match local_time_delta {
             None | Some(0) => (i32::max_value(), 0),
             Some(d) if d <= -2700 => (2000,  1),
