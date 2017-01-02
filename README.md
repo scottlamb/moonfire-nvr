@@ -62,7 +62,9 @@ edge version from the command line via git:
 There are no binary packages of Moonfire NVR available yet, so it must be built
 from source.
 
-The `rust` branch contains a rewrite into the [Rust Programming
+
+
+Moonfire NVR is written in the [Rust Programming
 Language](https://www.rust-lang.org/en-US/). In the long term, I expect this
 will result in a more secure, full-featured, easy-to-install software. In the
 short term, there will be growing pains. Rust is a new programming language.
