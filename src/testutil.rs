@@ -88,9 +88,9 @@ impl TestDb {
         let uuid_bytes = &TEST_CAMERA_UUID.as_bytes()[..];
         conn.execute_named(r#"
             insert into camera (uuid,  short_name,  description,  host,  username,  password,
-                                main_rtsp_path,  sub_rtsp_path,  retain_bytes)
+                                main_rtsp_path,  sub_rtsp_path,  retain_bytes,  next_recording_id)
                         values (:uuid, :short_name, :description, :host, :username, :password,
-                                :main_rtsp_path, :sub_rtsp_path, :retain_bytes)
+                                :main_rtsp_path, :sub_rtsp_path, :retain_bytes, :next_recording_id)
         "#, &[
             (":uuid", &uuid_bytes),
             (":short_name", &"test camera"),
@@ -101,6 +101,7 @@ impl TestDb {
             (":main_rtsp_path", &"/main"),
             (":sub_rtsp_path", &"/sub"),
             (":retain_bytes", &1048576i64),
+            (":next_recording_id", &1i64),
         ]).unwrap();
         assert_eq!(TEST_CAMERA_ID as i64, conn.last_insert_rowid());
         let db = sync::Arc::new(db::Database::new(conn).unwrap());
@@ -117,7 +118,7 @@ impl TestDb {
     }
 
     pub fn create_recording_from_encoder(&self, encoder: recording::SampleIndexEncoder)
-                                         -> db::ListCameraRecordingsRow {
+                                         -> db::ListRecordingsRow {
         let mut db = self.db.lock();
         let video_sample_entry_id =
             db.insert_video_sample_entry(1920, 1080, &[0u8; 100]).unwrap();
@@ -130,19 +131,22 @@ impl TestDb {
                 sample_file_bytes: encoder.sample_file_bytes,
                 time: START_TIME ..
                       START_TIME + recording::Duration(encoder.total_duration_90k as i64),
-                local_time: START_TIME,
+                local_time_delta: recording::Duration(0),
                 video_samples: encoder.video_samples,
                 video_sync_samples: encoder.video_sync_samples,
                 video_sample_entry_id: video_sample_entry_id,
                 sample_file_uuid: Uuid::nil(),
                 video_index: encoder.video_index,
                 sample_file_sha1: [0u8; 20],
+                run_offset: 0,  // TODO
+                flags: 0,  // TODO
             }).unwrap();
             tx.commit().unwrap();
         }
         let mut row = None;
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
-        db.list_recordings(TEST_CAMERA_ID, &all_time, |r| { row = Some(r); Ok(()) }).unwrap();
+        db.list_recordings_by_time(TEST_CAMERA_ID, all_time,
+                                   |r| { row = Some(r); Ok(()) }).unwrap();
         row.unwrap()
     }
 }

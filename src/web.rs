@@ -34,14 +34,16 @@ use core::borrow::Borrow;
 use core::str::FromStr;
 use db;
 use dir::SampleFileDir;
-use error::{Error, Result};
+use error::Error;
 use http_entity;
 use hyper::{header,server,status};
 use hyper::uri::RequestUri;
 use mime;
 use mp4;
 use recording;
+use regex::Regex;
 use serde_json;
+use std::cmp;
 use std::fmt;
 use std::io::Write;
 use std::ops::Range;
@@ -57,6 +59,11 @@ const DECIMAL_PREFIXES: &'static [&'static str] =&[" ", " k", " M", " G", " T", 
 lazy_static! {
     static ref JSON: mime::Mime = mime!(Application/Json);
     static ref HTML: mime::Mime = mime!(Text/Html);
+
+    /// Regex used to parse the `s` query parameter to `view.mp4`.
+    /// As described in `design/api.md`, this is of the form
+    /// `START_ID[-END_ID][.[REL_START_TIME]-[REL_END_TIME]]`.
+    static ref SEGMENTS_RE: Regex = Regex::new(r"^(\d+)(-\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
 }
 
 mod json { include!(concat!(env!("OUT_DIR"), "/serde_types.rs")); }
@@ -181,18 +188,58 @@ pub struct Handler {
     dir: Arc<SampleFileDir>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct Segments {
+    ids: Range<i32>,
+    start_time: i64,
+    end_time: Option<i64>,
+}
+
+impl Segments {
+    pub fn parse(input: &str) -> Result<Segments, ()> {
+        let caps = SEGMENTS_RE.captures(input).ok_or(())?;
+        let ids_start = i32::from_str(caps.at(1).unwrap()).map_err(|_| ())?;
+        let ids_end = match caps.at(2) {
+            Some(e) => i32::from_str(&e[1..]).map_err(|_| ())?,
+            None => ids_start,
+        } + 1;
+        if ids_start < 0 || ids_end <= ids_start {
+            return Err(());
+        }
+        let start_time = caps.at(3).map_or(Ok(0), i64::from_str).map_err(|_| ())?;
+        if start_time < 0 {
+            return Err(());
+        }
+        let end_time = match caps.at(4) {
+            Some(v) => {
+                let e = i64::from_str(v).map_err(|_| ())?;
+                if e <= start_time {
+                    return Err(());
+                }
+                Some(e)
+            },
+            None => None
+        };
+        Ok(Segments{
+            ids: ids_start .. ids_end,
+            start_time: start_time,
+            end_time: end_time,
+        })
+    }
+}
+
 impl Handler {
     pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>) -> Self {
         Handler{db: db, dir: dir}
     }
 
-    fn not_found(&self, mut res: server::Response) -> Result<()> {
+    fn not_found(&self, mut res: server::Response) -> Result<(), Error> {
         *res.status_mut() = status::StatusCode::NotFound;
         res.send(b"not found")?;
         Ok(())
     }
 
-    fn list_cameras(&self, req: &server::Request, mut res: server::Response) -> Result<()> {
+    fn list_cameras(&self, req: &server::Request, mut res: server::Response) -> Result<(), Error> {
         let json = is_json(req);
         let buf = {
             let db = self.db.lock();
@@ -207,7 +254,7 @@ impl Handler {
         Ok(())
     }
 
-    fn list_cameras_html(&self, db: MutexGuard<db::LockedDatabase>) -> Result<Vec<u8>> {
+    fn list_cameras_html(&self, db: MutexGuard<db::LockedDatabase>) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::new();
         buf.extend_from_slice(b"\
             <!DOCTYPE html>\n\
@@ -242,7 +289,7 @@ impl Handler {
     }
 
     fn camera(&self, uuid: Uuid, query: &str, req: &server::Request, mut res: server::Response)
-              -> Result<()> {
+              -> Result<(), Error> {
         let json = is_json(req);
         let buf = {
             let db = self.db.lock();
@@ -260,8 +307,22 @@ impl Handler {
     }
 
     fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, query: &str,
-                   uuid: Uuid) -> Result<Vec<u8>> {
-        let r = Handler::get_optional_range(query)?;
+                   uuid: Uuid) -> Result<Vec<u8>, Error> {
+        let (r, trim) = {
+            let mut start = i64::min_value();
+            let mut end = i64::max_value();
+            let mut trim = false;
+            for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+                let (key, value) = (key.borrow(), value.borrow());
+                match key {
+                    "start_time_90k" => start = i64::from_str(value)?,
+                    "end_time_90k" => end = i64::from_str(value)?,
+                    "trim" if value == "true" => trim = true,
+                    _ => {},
+                }
+            };
+            (recording::Time(start) .. recording::Time(end), trim)
+        };
         let camera = db.get_camera(uuid)
                        .ok_or_else(|| Error::new("no such camera".to_owned()))?;
         let mut buf = Vec::new();
@@ -290,26 +351,54 @@ impl Handler {
         // parameters between recordings.
         static FORCE_SPLIT_DURATION: recording::Duration =
             recording::Duration(60 * 60 * recording::TIME_UNITS_PER_SEC);
-        db.list_aggregated_recordings(camera.id, &r, FORCE_SPLIT_DURATION, |row| {
-            let seconds = (row.range.end.0 - row.range.start.0) / recording::TIME_UNITS_PER_SEC;
+        let mut rows = Vec::new();
+        db.list_aggregated_recordings(camera.id, r.clone(), FORCE_SPLIT_DURATION, |row| {
+            rows.push(row.clone());
+            Ok(())
+        })?;
+
+        // Display newest recording first.
+        rows.sort_by(|r1, r2| r2.ids.start.cmp(&r1.ids.start));
+
+        for row in &rows {
+            let seconds = (row.time.end.0 - row.time.start.0) / recording::TIME_UNITS_PER_SEC;
+            let url = {
+                let mut url = String::with_capacity(64);
+                use std::fmt::Write;
+                write!(&mut url, "view.mp4?s={}", row.ids.start)?;
+                if row.ids.end != row.ids.start + 1 {
+                    write!(&mut url, "-{}", row.ids.end - 1)?;
+                }
+                if trim {
+                    let rel_start = if row.time.start < r.start { Some(r.start - row.time.start) }
+                                    else { None };
+                    let rel_end = if row.time.end > r.end { Some(r.end - row.time.start) }
+                                  else { None };
+                    if rel_start.is_some() || rel_end.is_some() {
+                        url.push('.');
+                        if let Some(s) = rel_start { write!(&mut url, "{}", s.0)?; }
+                        url.push('-');
+                        if let Some(e) = rel_end { write!(&mut url, "{}", e.0)?; }
+                    }
+                }
+                url
+            };
             write!(&mut buf, "\
-                <tr><td><a href=\"view.mp4?start_time_90k={}&end_time_90k={}\">{}</a></td>\
+                <tr><td><a href=\"{}\">{}</a></td>\
                 <td>{}</td><td>{}x{}</td><td>{:.0}</td><td>{:b}B</td><td>{}bps</td></tr>\n",
-                row.range.start.0, row.range.end.0,
-                HumanizedTimestamp(Some(row.range.start)),
-                HumanizedTimestamp(Some(row.range.end)), row.video_sample_entry.width,
+                url, HumanizedTimestamp(Some(row.time.start)),
+                HumanizedTimestamp(Some(row.time.end)), row.video_sample_entry.width,
                 row.video_sample_entry.height,
                 if seconds == 0 { 0. } else { row.video_samples as f32 / seconds as f32 },
                 Humanized(row.sample_file_bytes),
                 Humanized(if seconds == 0 { 0 } else { row.sample_file_bytes * 8 / seconds }))?;
-            Ok(())
-        })?;
+        };
         buf.extend_from_slice(b"</table>\n</html>\n");
         Ok(buf)
     }
 
     fn camera_recordings(&self, uuid: Uuid, query: &str, req: &server::Request,
-                         mut res: server::Response) -> Result<()> {
+                         mut res: server::Response) -> Result<(), Error> {
         let r = Handler::get_optional_range(query)?;
         if !is_json(req) {
             *res.status_mut() = status::StatusCode::NotAcceptable;
@@ -321,11 +410,11 @@ impl Handler {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            db.list_aggregated_recordings(camera.id, &r, recording::Duration(i64::max_value()),
+            db.list_aggregated_recordings(camera.id, r, recording::Duration(i64::max_value()),
                                           |row| {
                 out.recordings.push(json::Recording{
-                    start_time_90k: row.range.start.0,
-                    end_time_90k: row.range.end.0,
+                    start_time_90k: row.time.start.0,
+                    end_time_90k: row.time.end.0,
                     sample_file_bytes: row.sample_file_bytes,
                     video_samples: row.video_samples,
                     video_sample_entry_width: row.video_sample_entry.width,
@@ -342,79 +431,90 @@ impl Handler {
     }
 
     fn camera_view_mp4(&self, uuid: Uuid, query: &str, req: &server::Request,
-                       res: server::Response) -> Result<()> {
+                       res: server::Response) -> Result<(), Error> {
         let camera_id = {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
             camera.id
         };
-        let mut start = None;
-        let mut end = None;
-        let mut include_ts = false;
+        let mut builder = mp4::Mp4FileBuilder::new();
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
             let (key, value) = (key.borrow(), value.borrow());
             match key {
-                "start_time_90k" => start = Some(recording::Time(i64::from_str(value)?)),
-                "end_time_90k" => end = Some(recording::Time(i64::from_str(value)?)),
-                "ts" => { include_ts = value == "true"; },
-                _ => {},
+                "s" => {
+                    let s = Segments::parse(value).map_err(
+                        |_| Error::new(format!("invalid s parameter: {}", value)))?;
+                    debug!("camera_view_mp4: appending s={:?}", s);
+                    let mut est_segments = (s.ids.end - s.ids.start) as usize;
+                    if let Some(end) = s.end_time {
+                        // There should be roughly ceil((end - start) / desired_recording_duration)
+                        // recordings in the desired timespan if there are no gaps or overlap,
+                        // possibly another for misalignment of the requested timespan with the
+                        // rotate offset and another because rotation only happens at key frames.
+                        let ceil_durations = (end - s.start_time +
+                                              recording::DESIRED_RECORDING_DURATION - 1) /
+                                             recording::DESIRED_RECORDING_DURATION;
+                        est_segments = cmp::min(est_segments, (ceil_durations + 2) as usize);
+                    }
+                    builder.reserve(est_segments);
+                    let db = self.db.lock();
+                    let mut prev = None;
+                    let mut cur_off = 0;
+                    db.list_recordings_by_id(camera_id, s.ids.clone(), |r| {
+                        // Check for missing recordings.
+                        match prev {
+                            None if r.id == s.ids.start => {},
+                            None => return Err(Error::new(format!("no such recording {}/{}",
+                                                                  camera_id, s.ids.start))),
+                            Some(id) if r.id != id + 1 => {
+                                return Err(Error::new(format!("no such recording {}/{}",
+                                                              camera_id, id + 1)));
+                            },
+                            _ => {},
+                        };
+                        prev = Some(r.id);
+
+                        // Add a segment for the relevant part of the recording, if any.
+                        let end_time = s.end_time.unwrap_or(i64::max_value());
+                        let d = r.duration_90k as i64;
+                        if s.start_time <= cur_off + d && cur_off < end_time {
+                            let start = cmp::max(0, s.start_time - cur_off);
+                            let end = cmp::min(d, end_time - cur_off);
+                            let times = start as i32 .. end as i32;
+                            debug!("...appending recording {}/{} with times {:?} (out of dur {})",
+                                   r.camera_id, r.id, times, d);
+                            builder.append(&db, r, start as i32 .. end as i32)?;
+                        } else {
+                            debug!("...skipping recording {}/{} dur {}", r.camera_id, r.id, d);
+                        }
+                        cur_off += d;
+                        Ok(())
+                    })?;
+
+                    // Check for missing recordings.
+                    match prev {
+                        Some(id) if s.ids.end != id + 1 => {
+                            return Err(Error::new(format!("no such recording {}/{}",
+                                                          camera_id, s.ids.end - 1)));
+                        },
+                        None => {
+                            return Err(Error::new(format!("no such recording {}/{}",
+                                                          camera_id, s.ids.start)));
+                        },
+                        _ => {},
+                    };
+                    if let Some(end) = s.end_time {
+                        if end > cur_off {
+                            return Err(Error::new(
+                                    format!("end time {} is beyond specified recordings", end)));
+                        }
+                    }
+                },
+                "ts" => builder.include_timestamp_subtitle_track(value == "true"),
+                _ => return Err(Error::new(format!("parameter {} not understood", key))),
             }
         };
-        let start = start.ok_or_else(|| Error::new("start_time_90k missing".to_owned()))?;
-        let end = end.ok_or_else(|| Error::new("end_time_90k missing".to_owned()))?;
-        let desired_range = start .. end;
-        let mut builder = mp4::Mp4FileBuilder::new();
-
-        // There should be roughly ceil((end - start) / desired_recording_duration) recordings
-        // in the desired timespan if there are no gaps or overlap. Add a couple more to be safe:
-        // one for misalignment of the requested timespan with the rotate offset, another because
-        // rotation only happens at key frames.
-        let ceil_durations = ((end - start).0 + recording::DESIRED_RECORDING_DURATION - 1) /
-                             recording::DESIRED_RECORDING_DURATION;
-        let est_records = (ceil_durations + 2) as usize;
-        let mut next_start = start;
-        builder.reserve(est_records);
-        {
-            let db = self.db.lock();
-            db.list_recordings(camera_id, &desired_range, |r| {
-                if builder.len() == 0 && r.start > next_start {
-                    return Err(Error::new(format!("recording started late ({} vs requested {})",
-                                                  r.start, start)));
-                } else if builder.len() != 0 && r.start != next_start {
-                    return Err(Error::new(format!("gap/overlap in recording: {} to {} after row {}",
-                                                  next_start, r.start, builder.len())));
-                }
-                next_start = r.start + recording::Duration(r.duration_90k as i64);
-                // TODO: check for inconsistent video sample entries.
-
-                let rel_start = if r.start < start {
-                    (start - r.start).0 as i32
-                } else {
-                    0
-                };
-                let rel_end = if r.start + recording::Duration(r.duration_90k as i64) > end {
-                    (end - r.start).0 as i32
-                } else {
-                    r.duration_90k
-                };
-                builder.append(&db, r, rel_start .. rel_end)?;
-                Ok(())
-            })?;
-        }
-        if next_start < end {
-            return Err(Error::new(format!(
-                        "recording ends early: {}, not requested: {} after {} rows.",
-                        next_start, end, builder.len())))
-        }
-        if builder.len() > est_records {
-            warn!("Estimated {} records for time [{}, {}); actually were {}",
-                  est_records, start, end, builder.len());
-        } else {
-            debug!("Estimated {} records for time [{}, {}); actually were {}",
-                   est_records, start, end, builder.len());
-        }
-        builder.include_timestamp_subtitle_track(include_ts);
         let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
         http_entity::serve(&mp4, req, res)?;
         Ok(())
@@ -422,7 +522,7 @@ impl Handler {
 
     /// Parses optional `start_time_90k` and `end_time_90k` query parameters, defaulting to the
     /// full range of possible values.
-    fn get_optional_range(query: &str) -> Result<Range<recording::Time>> {
+    fn get_optional_range(query: &str) -> Result<Range<recording::Time>, Error> {
         let mut start = i64::min_value();
         let mut end = i64::max_value();
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
@@ -455,10 +555,12 @@ impl server::Handler for Handler {
 
 #[cfg(test)]
 mod tests {
-    use super::{HtmlEscaped, Humanized};
+    use super::{HtmlEscaped, Humanized, Segments};
+    use testutil;
 
     #[test]
     fn test_humanize() {
+        testutil::init();
         assert_eq!("1.0 B",    format!("{:b}B", Humanized(1)));
         assert_eq!("1.0 EiB",  format!("{:b}B", Humanized(1i64 << 60)));
         assert_eq!("1.5 EiB",  format!("{:b}B", Humanized((1i64 << 60) + (1i64 << 59))));
@@ -468,8 +570,30 @@ mod tests {
 
     #[test]
     fn test_html_escaped() {
+        testutil::init();
         assert_eq!("", format!("{}", HtmlEscaped("")));
         assert_eq!("no special chars", format!("{}", HtmlEscaped("no special chars")));
         assert_eq!("a &lt;tag> &amp; text", format!("{}", HtmlEscaped("a <tag> & text")));
+    }
+
+    #[test]
+    fn test_segments() {
+        testutil::init();
+        assert_eq!(Segments{ids: 1..2, start_time: 0, end_time: None},
+                   Segments::parse("1").unwrap());
+        assert_eq!(Segments{ids: 1..2, start_time: 26, end_time: None},
+                   Segments::parse("1.26-").unwrap());
+        assert_eq!(Segments{ids: 1..2, start_time: 0, end_time: Some(42)},
+                   Segments::parse("1.-42").unwrap());
+        assert_eq!(Segments{ids: 1..2, start_time: 26, end_time: Some(42)},
+                   Segments::parse("1.26-42").unwrap());
+        assert_eq!(Segments{ids: 1..6, start_time: 0, end_time: None},
+                   Segments::parse("1-5").unwrap());
+        assert_eq!(Segments{ids: 1..6, start_time: 26, end_time: None},
+                   Segments::parse("1-5.26-").unwrap());
+        assert_eq!(Segments{ids: 1..6, start_time: 0, end_time: Some(42)},
+                   Segments::parse("1-5.-42").unwrap());
+        assert_eq!(Segments{ids: 1..6, start_time: 26, end_time: Some(42)},
+                   Segments::parse("1-5.26-42").unwrap());
     }
 }

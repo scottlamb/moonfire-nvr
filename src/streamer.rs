@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use clock::Clock;
+use clock::Clocks;
 use db::{Camera, Database};
 use dir;
 use error::Error;
@@ -43,15 +43,15 @@ use time;
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
 
 /// Common state that can be used by multiple `Streamer` instances.
-pub struct Environment<'a, 'b, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
-    pub clock: &'a C,
+pub struct Environment<'a, 'b, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
+    pub clocks: &'a C,
     pub opener: &'a stream::Opener<S>,
     pub db: &'b Arc<Database>,
     pub dir: &'b Arc<dir::SampleFileDir>,
     pub shutdown: &'b Arc<AtomicBool>,
 }
 
-pub struct Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
+pub struct Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     shutdown: Arc<AtomicBool>,
 
     // State below is only used by the thread in Run.
@@ -60,7 +60,7 @@ pub struct Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
     db: Arc<Database>,
     dir: Arc<dir::SampleFileDir>,
     syncer_channel: dir::SyncerChannel,
-    clock: &'a C,
+    clocks: &'a C,
     opener: &'a stream::Opener<S>,
     camera_id: i32,
     short_name: String,
@@ -68,7 +68,14 @@ pub struct Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
     redacted_url: String,
 }
 
-impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
+struct WriterState<'a> {
+    writer: dir::Writer<'a>,
+
+    /// Seconds since epoch at which to next rotate.
+    rotate: i64,
+}
+
+impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     pub fn new<'b>(env: &Environment<'a, 'b, C, S>, syncer_channel: dir::SyncerChannel,
                    camera_id: i32, c: &Camera, rotate_offset_sec: i64,
                    rotate_interval_sec: i64) -> Self {
@@ -79,7 +86,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
             db: env.db.clone(),
             dir: env.dir.clone(),
             syncer_channel: syncer_channel,
-            clock: env.clock,
+            clocks: env.clocks,
             opener: env.opener,
             camera_id: camera_id,
             short_name: c.short_name.to_owned(),
@@ -95,7 +102,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
             if let Err(e) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
                 warn!("{}: sleeping for {:?} after error: {}", self.short_name, sleep_time, e);
-                self.clock.sleep(sleep_time);
+                self.clocks.sleep(sleep_time);
             }
         }
         info!("{}: shutting down", self.short_name);
@@ -105,6 +112,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
         info!("{}: Opening input: {}", self.short_name, self.redacted_url);
 
         let mut stream = self.opener.open(stream::Source::Rtsp(&self.url))?;
+        let realtime_offset = self.clocks.realtime() - self.clocks.monotonic();
         // TODO: verify time base.
         // TODO: verify width/height.
         let extra_data = stream.get_extra_data()?;
@@ -113,10 +121,9 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
                                                      &extra_data.sample_entry)?;
         debug!("{}: video_sample_entry_id={}", self.short_name, video_sample_entry_id);
         let mut seen_key_frame = false;
-        let mut rotate = None;
-        let mut writer: Option<dir::Writer> = None;
+        let mut state: Option<WriterState> = None;
         let mut transformed = Vec::new();
-        let mut next_start = None;
+        let mut prev = None;
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = stream.get_next()?;
             let pts = pkt.pts().ok_or_else(|| Error::new("packet with no pts".to_owned()))?;
@@ -126,27 +133,36 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
                 debug!("{}: have first key frame", self.short_name);
                 seen_key_frame = true;
             }
-            let frame_realtime = self.clock.get_time();
-            if let Some(r) = rotate {
-                if frame_realtime.sec > r && pkt.is_key() {
-                    let w = writer.take().expect("rotate set implies writer is set");
+            let frame_realtime = self.clocks.monotonic() + realtime_offset;
+            let local_time = recording::Time::new(frame_realtime);
+            state = if let Some(s) = state {
+                if frame_realtime.sec > s.rotate && pkt.is_key() {
                     trace!("{}: write on normal rotation", self.short_name);
-                    next_start = Some(w.close(Some(pts))?);
+                    prev = Some(s.writer.close(Some(pts))?);
+                    None
+                } else {
+                    Some(s)
                 }
-            };
-            let mut w = match writer {
-                Some(w) => w,
+            } else { None };
+            let mut s = match state {
+                Some(s) => s,
                 None => {
-                    let r = frame_realtime.sec -
-                            (frame_realtime.sec % self.rotate_interval_sec) +
-                            self.rotate_offset_sec;
-                    rotate = Some(
-                        if r <= frame_realtime.sec { r + self.rotate_interval_sec } else { r });
-                    let local_realtime = recording::Time::new(frame_realtime);
+                    let sec = frame_realtime.sec;
+                    let r = sec - (sec % self.rotate_interval_sec) + self.rotate_offset_sec;
+                    let r = r + if r <= sec { self.rotate_interval_sec } else { 0 };
 
-                    self.dir.create_writer(&self.syncer_channel,
-                                           next_start.unwrap_or(local_realtime), local_realtime,
-                                           self.camera_id, video_sample_entry_id)?
+                    // On the first recording, set rotate time to not the next rotate offset, but
+                    // the one after, so that it's longer than usual rather than shorter than
+                    // usual.  This ensures there's plenty of frame times to use when calculating
+                    // the start time.
+                    let r = r + if prev.is_none() { self.rotate_interval_sec } else { 0 };
+
+                    let w = self.dir.create_writer(&self.syncer_channel, prev, self.camera_id,
+                                                   video_sample_entry_id)?;
+                    WriterState{
+                        writer: w,
+                        rotate: r,
+                    }
                 },
             };
             let orig_data = match pkt.data() {
@@ -159,11 +175,11 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
             } else {
                 orig_data
             };
-            w.write(transformed_data, pts, pkt.is_key())?;
-            writer = Some(w);
+            s.writer.write(transformed_data, local_time, pts, pkt.is_key())?;
+            state = Some(s);
         }
-        if let Some(w) = writer {
-            w.close(None)?;
+        if let Some(s) = state {
+            s.writer.close(None)?;
         }
         Ok(())
     }
@@ -171,13 +187,14 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clock, S: 'a + stream::Stream {
 
 #[cfg(test)]
 mod tests {
-    use clock::{self, Clock};
+    use clock::{self, Clocks};
     use db;
     use error::Error;
     use ffmpeg;
     use ffmpeg::packet::Mut;
     use h264;
     use recording;
+    use std::cmp;
     use std::sync::{Arc, Mutex, MutexGuard};
     use std::sync::atomic::{AtomicBool, Ordering};
     use stream::{self, Opener, Stream};
@@ -185,20 +202,24 @@ mod tests {
     use time;
 
     struct ProxyingStream<'a> {
-        clock: &'a clock::SimulatedClock,
+        clocks: &'a clock::SimulatedClocks,
         inner: stream::FfmpegStream,
-        last_duration: time::Duration,
+        buffered: time::Duration,
+        slept: time::Duration,
         ts_offset: i64,
         ts_offset_pkts_left: u32,
         pkts_left: u32,
     }
 
     impl<'a> ProxyingStream<'a> {
-        fn new(clock: &'a clock::SimulatedClock, inner: stream::FfmpegStream) -> ProxyingStream {
+        fn new(clocks: &'a clock::SimulatedClocks, buffered: time::Duration,
+               inner: stream::FfmpegStream) -> ProxyingStream {
+            clocks.sleep(buffered);
             ProxyingStream {
-                clock: clock,
+                clocks: clocks,
                 inner: inner,
-                last_duration: time::Duration::seconds(0),
+                buffered: buffered,
+                slept: time::Duration::seconds(0),
                 ts_offset: 0,
                 ts_offset_pkts_left: 0,
                 pkts_left: 0,
@@ -213,13 +234,21 @@ mod tests {
             }
             self.pkts_left -= 1;
 
-            // Advance clock to when this packet starts.
-            self.clock.sleep(self.last_duration);
-
             let mut pkt = self.inner.get_next()?;
 
-            self.last_duration = time::Duration::nanoseconds(
-                pkt.duration() * 1_000_000_000 / recording::TIME_UNITS_PER_SEC);
+            // Advance clock to the end of this frame.
+            // Avoid accumulating conversion error by tracking the total amount to sleep and how
+            // much we've already slept, rather than considering each frame in isolation.
+            {
+                let goal = pkt.pts().unwrap() + pkt.duration();
+                let goal = time::Duration::nanoseconds(
+                    goal * 1_000_000_000 / recording::TIME_UNITS_PER_SEC);
+                let duration = goal - self.slept;
+                let buf_part = cmp::min(self.buffered, duration);
+                self.buffered = self.buffered - buf_part;
+                self.clocks.sleep(duration - buf_part);
+                self.slept = goal;
+            }
 
             if self.ts_offset_pkts_left > 0 {
                 self.ts_offset_pkts_left -= 1;
@@ -276,8 +305,9 @@ mod tests {
         is_key: bool,
     }
 
-    fn get_frames(db: &MutexGuard<db::LockedDatabase>, recording_id: i64) -> Vec<Frame> {
-        let rec = db.get_recording(recording_id).unwrap();
+    fn get_frames(db: &MutexGuard<db::LockedDatabase>, camera_id: i32, recording_id: i32)
+                  -> Vec<Frame> {
+        let rec = db.get_recording_playback(camera_id, recording_id).unwrap();
         let mut it = recording::SampleIndexIterator::new();
         let mut frames = Vec::new();
         while it.next(&rec.video_index).unwrap() {
@@ -293,10 +323,12 @@ mod tests {
     #[test]
     fn basic() {
         testutil::init();
-        let clock = clock::SimulatedClock::new();
-        clock.sleep(time::Duration::seconds(1430006400));  // 2015-04-26 00:00:00 UTC
+        // 2015-04-25 00:00:00 UTC
+        let clocks = clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0));
+        clocks.sleep(time::Duration::seconds(86400));  // to 2015-04-26 00:00:00 UTC
+
         let stream = stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
-        let mut stream = ProxyingStream::new(&clock, stream);
+        let mut stream = ProxyingStream::new(&clocks, time::Duration::seconds(2), stream);
         stream.ts_offset = 180000;  // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::max_value();
         stream.pkts_left = u32::max_value();
@@ -307,7 +339,7 @@ mod tests {
         };
         let db = testutil::TestDb::new();
         let env = super::Environment{
-            clock: &clock,
+            clocks: &clocks,
             opener: &opener,
             db: &db.db,
             dir: &db.dir,
@@ -318,7 +350,7 @@ mod tests {
             let l = db.db.lock();
             let camera = l.cameras_by_id().get(&testutil::TEST_CAMERA_ID).unwrap();
             stream = super::Streamer::new(&env, db.syncer_channel.clone(), testutil::TEST_CAMERA_ID,
-                                          camera, 0, 5);
+                                          camera, 0, 3);
         }
         stream.run();
         assert!(opener.streams.lock().unwrap().is_empty());
@@ -326,21 +358,34 @@ mod tests {
         let db = db.db.lock();
 
         // Compare frame-by-frame. Note below that while the rotation is scheduled to happen near
-        // 5-second boundaries (such as 2016-04-26 00:00:05), it gets deferred until the next key
-        // frame, which in this case is 00:00:07.
-        assert_eq!(get_frames(&db, 1), &[
+        // 3-second boundaries (such as 2016-04-26 00:00:03), rotation happens somewhat later:
+        // * the first rotation is always skipped
+        // * the second rotation is deferred until a key frame.
+        assert_eq!(get_frames(&db, testutil::TEST_CAMERA_ID, 1), &[
             Frame{start_90k:      0, duration_90k: 90379, is_key:  true},
             Frame{start_90k:  90379, duration_90k: 89884, is_key: false},
             Frame{start_90k: 180263, duration_90k: 89749, is_key: false},
-            Frame{start_90k: 270012, duration_90k: 89981, is_key: false},
+            Frame{start_90k: 270012, duration_90k: 89981, is_key: false},  // pts_time 3.0001...
             Frame{start_90k: 359993, duration_90k: 90055, is_key:  true},
-            Frame{start_90k: 450048, duration_90k: 89967, is_key: false},  // pts_time 5.0005333...
-            Frame{start_90k: 540015, duration_90k: 90021, is_key: false},
+            Frame{start_90k: 450048, duration_90k: 89967, is_key: false},
+            Frame{start_90k: 540015, duration_90k: 90021, is_key: false},  // pts_time 6.0001...
             Frame{start_90k: 630036, duration_90k: 89958, is_key: false},
         ]);
-        assert_eq!(get_frames(&db, 2), &[
+        assert_eq!(get_frames(&db, testutil::TEST_CAMERA_ID, 2), &[
             Frame{start_90k:      0, duration_90k: 90011, is_key:  true},
             Frame{start_90k:  90011, duration_90k:     0, is_key: false},
         ]);
+        let mut recordings = Vec::new();
+        db.list_recordings_by_id(testutil::TEST_CAMERA_ID, 1..3, |r| {
+            recordings.push(r);
+            Ok(())
+        }).unwrap();
+        assert_eq!(2, recordings.len());
+        assert_eq!(1, recordings[0].id);
+        assert_eq!(recording::Time(128700575999999), recordings[0].start);
+        assert_eq!(0, recordings[0].flags);
+        assert_eq!(2, recordings[1].id);
+        assert_eq!(recording::Time(128700576719993), recordings[1].start);
+        assert_eq!(db::RecordingFlags::TrailingZero as i32, recordings[1].flags);
     }
 }

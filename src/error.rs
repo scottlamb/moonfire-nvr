@@ -40,6 +40,7 @@ use serde_json;
 use std::boxed::Box;
 use std::convert::From;
 use std::error;
+use std::error::Error as E;
 use std::fmt;
 use std::io;
 use std::result;
@@ -92,56 +93,49 @@ impl fmt::Display for Error {
 
 impl From<rusqlite::Error> for Error {
     fn from(err: rusqlite::Error) -> Self {
-        use std::error::{Error as E};
-        Error{description: String::from(err.description()),
-              cause: Some(Box::new(err))}
+        Error{description: String::from(err.description()), cause: Some(Box::new(err))}
+    }
+}
+
+impl From<fmt::Error> for Error {
+    fn from(err: fmt::Error) -> Self {
+        Error{description: String::from(err.description()), cause: Some(Box::new(err))}
     }
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
-        use std::error::{Error as E};
-        Error{description: String::from(err.description()),
-              cause: Some(Box::new(err))}
+        Error{description: String::from(err.description()), cause: Some(Box::new(err))}
     }
 }
 
 impl From<time::ParseError> for Error {
     fn from(err: time::ParseError) -> Self {
-        use std::error::{Error as E};
-        Error{description: String::from(err.description()),
-              cause: Some(Box::new(err))}
+        Error{description: String::from(err.description()), cause: Some(Box::new(err))}
     }
 }
 
 impl From<num::ParseIntError> for Error {
     fn from(err: num::ParseIntError) -> Self {
-        use std::error::{Error as E};
-        Error{description: err.description().to_owned(),
-              cause: Some(Box::new(err))}
+        Error{description: err.description().to_owned(), cause: Some(Box::new(err))}
     }
 }
 
 impl From<serde_json::Error> for Error {
     fn from(err: serde_json::Error) -> Self {
-        use std::error::{Error as E};
-        Error{description: format!("{} ({})", err.description(), err),
-              cause: Some(Box::new(err))}
+        Error{description: format!("{} ({})", err.description(), err), cause: Some(Box::new(err))}
     }
 }
 
 impl From<ffmpeg::Error> for Error {
     fn from(err: ffmpeg::Error) -> Self {
-        use std::error::{Error as E};
-        Error{description: format!("{} ({})", err.description(), err),
-              cause: Some(Box::new(err))}
+        Error{description: format!("{} ({})", err.description(), err), cause: Some(Box::new(err))}
     }
 }
 
 impl From<uuid::ParseError> for Error {
     fn from(_: uuid::ParseError) -> Self {
-        Error{description: String::from("UUID parse error"),
-              cause: None}
+        Error{description: String::from("UUID parse error"), cause: None}
     }
 }
 

@@ -30,29 +30,45 @@
 
 //! Clock interface and implementations for testability.
 
+use libc;
 #[cfg(test)] use std::sync::Mutex;
+use std::mem;
 use std::thread;
-use time;
+use time::{Duration, Timespec};
 
-/// Abstract interface to the system clock. This is for testability.
-pub trait Clock : Sync {
-    /// Gets the current time.
-    fn get_time(&self) -> time::Timespec;
+/// Abstract interface to the system clocks. This is for testability.
+pub trait Clocks : Sync {
+    /// Gets the current time from `CLOCK_REALTIME`.
+    fn realtime(&self) -> Timespec;
+
+    /// Gets the current time from `CLOCK_MONOTONIC`.
+    fn monotonic(&self) -> Timespec;
 
     /// Causes the current thread to sleep for the specified time.
-    fn sleep(&self, how_long: time::Duration);
+    fn sleep(&self, how_long: Duration);
 }
 
-/// Singleton "real" clock.
-pub static REAL: RealClock = RealClock {};
+/// Singleton "real" clocks.
+pub static REAL: RealClocks = RealClocks {};
 
-/// Real clock; see static `REAL` instance.
-pub struct RealClock {}
+/// Real clocks; see static `REAL` instance.
+pub struct RealClocks {}
 
-impl Clock for RealClock {
-    fn get_time(&self) -> time::Timespec { time::get_time() }
+impl RealClocks {
+    fn get(&self, clock: libc::clockid_t) -> Timespec {
+        unsafe {
+            let mut ts = mem::uninitialized();
+            assert_eq!(0, libc::clock_gettime(clock, &mut ts));
+            Timespec::new(ts.tv_sec as i64, ts.tv_nsec as i32)
+        }
+    }
+}
 
-    fn sleep(&self, how_long: time::Duration) {
+impl Clocks for RealClocks {
+    fn realtime(&self) -> Timespec { self.get(libc::CLOCK_REALTIME) }
+    fn monotonic(&self) -> Timespec { self.get(libc::CLOCK_MONOTONIC) }
+
+    fn sleep(&self, how_long: Duration) {
         match how_long.to_std() {
             Ok(d) => thread::sleep(d),
             Err(e) => warn!("Invalid duration {:?}: {}", how_long, e),
@@ -62,20 +78,29 @@ impl Clock for RealClock {
 
 /// Simulated clock for testing.
 #[cfg(test)]
-pub struct SimulatedClock(Mutex<time::Timespec>);
-
-#[cfg(test)]
-impl SimulatedClock {
-    pub fn new() -> SimulatedClock { SimulatedClock(Mutex::new(time::Timespec::new(0, 0))) }
+pub struct SimulatedClocks {
+    boot: Timespec,
+    uptime: Mutex<Duration>,
 }
 
 #[cfg(test)]
-impl Clock for SimulatedClock {
-    fn get_time(&self) -> time::Timespec { *self.0.lock().unwrap() }
+impl SimulatedClocks {
+    pub fn new(boot: Timespec) -> SimulatedClocks {
+        SimulatedClocks {
+            boot: boot,
+            uptime: Mutex::new(Duration::seconds(0)),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Clocks for SimulatedClocks {
+    fn realtime(&self) -> Timespec { self.boot + *self.uptime.lock().unwrap() }
+    fn monotonic(&self) -> Timespec { Timespec::new(0, 0) + *self.uptime.lock().unwrap() }
 
     /// Advances the clock by the specified amount without actually sleeping.
-    fn sleep(&self, how_long: time::Duration) {
-        let mut l = self.0.lock().unwrap();
+    fn sleep(&self, how_long: Duration) {
+        let mut l = self.uptime.lock().unwrap();
         *l = *l + how_long;
     }
 }

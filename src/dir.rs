@@ -33,10 +33,11 @@
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
 use db;
+use error::Error;
 use libc;
 use recording;
-use error::Error;
 use openssl::crypto::hash;
+use std::cmp;
 use std::ffi;
 use std::fs;
 use std::io::{self, Write};
@@ -120,9 +121,12 @@ impl SampleFileDir {
     /// Note this doesn't wait for previous rotation to complete; it's assumed the sample file
     /// directory has sufficient space for a couple recordings per camera in addition to the
     /// cameras' total `retain_bytes`.
-    pub fn create_writer<'a>(&self, channel: &'a SyncerChannel, start: recording::Time,
-                             local_start: recording::Time, camera_id: i32,
-                             video_sample_entry_id: i32) -> Result<Writer<'a>, Error> {
+    ///
+    /// The new recording will continue from `prev` if specified; this should be as returned from
+    /// a previous `close` call.
+    pub fn create_writer<'a>(&self, channel: &'a SyncerChannel, prev: Option<PreviousWriter>,
+                             camera_id: i32, video_sample_entry_id: i32)
+                             -> Result<Writer<'a>, Error> {
         // Grab the next uuid. Typically one is cached—a sync has usually completed since the last
         // writer was created, and syncs ensure `next_uuid` is filled while performing their
         // transaction. But if not, perform an extra database transaction to reserve a new one.
@@ -145,7 +149,7 @@ impl SampleFileDir {
                 return Err(e.into());
             },
         };
-        Writer::open(f, uuid, start, local_start, camera_id, video_sample_entry_id, channel)
+        Writer::open(f, uuid, prev, camera_id, video_sample_entry_id, channel)
     }
 
     /// Opens a sample file within this directory with the given flags and (if creating) mode.
@@ -424,10 +428,22 @@ struct InnerWriter<'a> {
     uuid: Uuid,
     corrupt: bool,
     hasher: hash::Hasher,
-    start_time: recording::Time,
-    local_time: recording::Time,
+
+    /// The end time of the previous segment in this run, if any.
+    prev_end: Option<recording::Time>,
+
+    /// The start time of this segment, based solely on examining the local clock after frames in
+    /// this segment were received. Frames can suffer from various kinds of delay (initial
+    /// buffering, encoding, and network transmission), so this time is set to far in the future on
+    /// construction, given a real value on the first packet, and decreased as less-delayed packets
+    /// are discovered. See design/time.md for details.
+    local_start: recording::Time,
+
+    adjuster: ClockAdjuster,
+
     camera_id: i32,
     video_sample_entry_id: i32,
+    run_offset: i32,
 
     /// A sample which has been written to disk but not added to `index`. Index writes are one
     /// sample behind disk writes because the duration of a sample is the difference between its
@@ -437,17 +453,72 @@ struct InnerWriter<'a> {
     unflushed_sample: Option<UnflushedSample>,
 }
 
+/// Adjusts durations given by the camera to correct its clock frequency error.
+struct ClockAdjuster {
+    /// Every `every_minus_1 + 1` units, add `-ndir`.
+    /// Note i32::max_value() disables adjustment.
+    every_minus_1: i32,
+
+    /// Should be 1 or -1 (unless disabled).
+    ndir: i32,
+
+    /// Keeps accumulated difference from previous values.
+    cur: i32,
+}
+
+impl ClockAdjuster {
+    fn new(local_time_delta: Option<i64>) -> Self {
+        // Pick an adjustment rate to correct local_time_delta over the next minute (the
+        // desired duration of a single recording). Cap the rate at 500 ppm (which corrects
+        // 2,700/90,000ths of a second over a minute) to prevent noticeably speeding up or slowing
+        // down playback.
+        let (every, ndir) = match local_time_delta {
+            None | Some(0) => (i32::max_value(), 0),
+            Some(d) if d <= -2700 => (2000,  1),
+            Some(d) if d >=  2700 => (2000, -1),
+            Some(d) if d < -60 => ((60 * 90000) / -(d as i32),  1),
+            Some(d)            => ((60 * 90000) /  (d as i32), -1),
+        };
+        ClockAdjuster{
+            every_minus_1: every - 1,
+            ndir: ndir,
+            cur: 0,
+        }
+    }
+
+    fn adjust(&mut self, mut val: i32) -> i32 {
+        self.cur += val;
+
+        // The "val > self.ndir" here is so that if decreasing durations (ndir == 1), we don't
+        // cause a duration of 1 to become a duration of 0. It has no effect when increasing
+        // durations. (There's no danger of a duration of 0 becoming a duration of 1; cur wouldn't
+        // be newly > self.every_minus_1.)
+        while self.cur > self.every_minus_1 && val > self.ndir {
+            val -= self.ndir;
+            self.cur -= self.every_minus_1 + 1;
+        }
+        val
+    }
+}
+
 struct UnflushedSample {
+    local_time: recording::Time,
     pts_90k: i64,
     len: i32,
     is_key: bool,
 }
 
+#[derive(Copy, Clone)]
+pub struct PreviousWriter {
+    end_time: recording::Time,
+    local_time_delta: recording::Duration,
+    run_offset: i32,
+}
+
 impl<'a> Writer<'a> {
     /// Opens the writer; for use by `SampleFileDir` (which should supply `f`).
-    fn open(f: fs::File, uuid: Uuid, start_time: recording::Time, local_time: recording::Time,
-            camera_id: i32, video_sample_entry_id: i32, syncer_channel: &'a SyncerChannel)
-            -> Result<Self, Error> {
+    fn open(f: fs::File, uuid: Uuid, prev: Option<PreviousWriter>, camera_id: i32,
+            video_sample_entry_id: i32, syncer_channel: &'a SyncerChannel) -> Result<Self, Error> {
         Ok(Writer(Some(InnerWriter{
             syncer_channel: syncer_channel,
             f: f,
@@ -455,19 +526,25 @@ impl<'a> Writer<'a> {
             uuid: uuid,
             corrupt: false,
             hasher: hash::Hasher::new(hash::Type::SHA1)?,
-            start_time: start_time,
-            local_time: local_time,
+            prev_end: prev.map(|p| p.end_time),
+            local_start: recording::Time(i64::max_value()),
+            adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
             camera_id: camera_id,
             video_sample_entry_id: video_sample_entry_id,
+            run_offset: prev.map(|p| p.run_offset + 1).unwrap_or(0),
             unflushed_sample: None,
         })))
     }
 
-    pub fn write(&mut self, pkt: &[u8], pts_90k: i64, is_key: bool) -> Result<(), Error> {
+    /// Writes a new frame to this segment.
+    /// `local_time` should be the local clock's time as of when this packet was received.
+    pub fn write(&mut self, pkt: &[u8], local_time: recording::Time, pts_90k: i64,
+                 is_key: bool) -> Result<(), Error> {
         let w = self.0.as_mut().unwrap();
         if let Some(unflushed) = w.unflushed_sample.take() {
-            let duration = (pts_90k - unflushed.pts_90k) as i32;
+            let duration = w.adjuster.adjust((pts_90k - unflushed.pts_90k) as i32);
             w.index.add_sample(duration, unflushed.len, unflushed.is_key);
+            w.extend_local_start(unflushed.local_time);
         }
         let mut remaining = pkt;
         while !remaining.is_empty() {
@@ -488,6 +565,7 @@ impl<'a> Writer<'a> {
             remaining = &remaining[written..];
         }
         w.unflushed_sample = Some(UnflushedSample{
+            local_time: local_time,
             pts_90k: pts_90k,
             len: pkt.len() as i32,
             is_key: is_key});
@@ -498,41 +576,57 @@ impl<'a> Writer<'a> {
     /// Cleanly closes the writer, using a supplied pts of the next sample for the last sample's
     /// duration (if known). If `close` is not called, the `Drop` trait impl will close the trait,
     /// swallowing errors and using a zero duration for the last sample.
-    pub fn close(mut self, next_pts: Option<i64>) -> Result<recording::Time, Error> {
+    pub fn close(mut self, next_pts: Option<i64>) -> Result<PreviousWriter, Error> {
         self.0.take().unwrap().close(next_pts)
     }
 }
 
 impl<'a> InnerWriter<'a> {
-    fn close(mut self, next_pts: Option<i64>) -> Result<recording::Time, Error> {
+    fn extend_local_start(&mut self, pkt_local_time: recording::Time) {
+        let new = pkt_local_time - recording::Duration(self.index.total_duration_90k as i64);
+        self.local_start = cmp::min(self.local_start, new);
+    }
+
+    fn close(mut self, next_pts: Option<i64>) -> Result<PreviousWriter, Error> {
         if self.corrupt {
             self.syncer_channel.async_abandon_recording(self.uuid);
             return Err(Error::new(format!("recording {} is corrupt", self.uuid)));
         }
-        if let Some(unflushed) = self.unflushed_sample.take() {
-            let duration = match next_pts {
-                None => 0,
-                Some(p) => (p - unflushed.pts_90k) as i32,
-            };
-            self.index.add_sample(duration, unflushed.len, unflushed.is_key);
-        }
+        let unflushed =
+            self.unflushed_sample.take().ok_or_else(|| Error::new("no packets!".to_owned()))?;
+        let duration = self.adjuster.adjust(match next_pts {
+            None => 0,
+            Some(p) => (p - unflushed.pts_90k) as i32,
+        });
+        self.index.add_sample(duration, unflushed.len, unflushed.is_key);
+        self.extend_local_start(unflushed.local_time);
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&self.hasher.finish()?[..]);
-        let end = self.start_time + recording::Duration(self.index.total_duration_90k as i64);
+        let start = self.prev_end.unwrap_or(self.local_start);
+        let end = start + recording::Duration(self.index.total_duration_90k as i64);
+        let flags = if self.index.has_trailing_zero() { db::RecordingFlags::TrailingZero as i32 }
+                    else { 0 };
+        let local_start_delta = self.local_start - start;
         let recording = db::RecordingToInsert{
             camera_id: self.camera_id,
             sample_file_bytes: self.index.sample_file_bytes,
-            time: self.start_time .. end,
-            local_time: self.local_time,
+            time: start .. end,
+            local_time_delta: local_start_delta,
             video_samples: self.index.video_samples,
             video_sync_samples: self.index.video_sync_samples,
             video_sample_entry_id: self.video_sample_entry_id,
             sample_file_uuid: self.uuid,
             video_index: self.index.video_index,
             sample_file_sha1: sha1_bytes,
+            run_offset: self.run_offset,
+            flags: flags,
         };
         self.syncer_channel.async_save_recording(recording, self.f);
-        Ok(end)
+        Ok(PreviousWriter{
+            end_time: end,
+            local_time_delta: local_start_delta,
+            run_offset: self.run_offset,
+        })
     }
 }
 
@@ -544,5 +638,50 @@ impl<'a> Drop for Writer<'a> {
             // complaining again.
             let _ = w.close(None);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClockAdjuster;
+    use testutil;
+
+    #[test]
+    fn adjust() {
+        testutil::init();
+
+        // no-ops.
+        let mut a = ClockAdjuster::new(None);
+        for _ in 0..1800 {
+            assert_eq!(3000, a.adjust(3000));
+        }
+        a = ClockAdjuster::new(Some(0));
+        for _ in 0..1800 {
+            assert_eq!(3000, a.adjust(3000));
+        }
+
+        // typical, 100 ppm adjustment.
+        a = ClockAdjuster::new(Some(-540));
+        let mut total = 0;
+        for _ in 0..1800 {
+            let new = a.adjust(3000);
+            assert!(new == 2999 || new == 3000);
+            total += new;
+        }
+        let expected = 1800*3000 - 540;
+        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
+                total, expected);
+
+        // capped at 500 ppm (change of 2,700/90,000ths over 1 minute).
+        a = ClockAdjuster::new(Some(-1_000_000));
+        total = 0;
+        for _ in 0..1800 {
+            let new = a.adjust(3000);
+            assert!(new == 2998 || new == 2999, "new={}", new);
+            total += new;
+        }
+        let expected = 1800*3000 - 2700;
+        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
+                total, expected);
     }
 }

@@ -125,31 +125,28 @@ Valid request parameters:
 TODO(slamb): once we support annotations, should they be included in the same
 URI or as a separate `/annotations`?
 
-TODO(slamb): There might be some irregularity in the order if there are
-overlapping recordings (such as if the server's clock jumped while running)
-but I haven't thought about the details. In general, I'm not really sure how
-to handle this case, other than ideally to keep recording stuff no matter what
-and present some UI to help the user to fix it after the
-fact.
+In the property `recordings`, returns a list of recordings in arbitrary order.
+Each recording object has the following properties:
 
-In the property `recordings`, returns a list of recordings. Each recording
-object has the following properties:
-
-*   `start_time_90k`
-*   `end_time_90k`
+*   `start_id`. The id of this recording, which can be used with `/view.mp4`
+    to retrieve its content.
+*   `end_id` (optional). If absent, this object describes a single recording.
+    If present, this indicates that recordings `start_id-end_id` (inclusive)
+    together are as described. Adjacent recordings from the same RTSP session
+    may be coalesced in this fashion to reduce the amount of redundant data
+    transferred.
+*   `start_time_90k`: the start time of the given recording. Note this may be
+    less than the requested `start_time_90k` if this recording was ongoing
+    at the requested time.
+*   `end_time_90k`: the end time of the given recording. Note this may be
+    greater than the requested `end_time_90k` if this recording was ongoing at
+    the requested time.
 *   `sample_file_bytes`
 *   `video_sample_entry_sha1`
 *   `video_sample_entry_width`
 *   `video_sample_entry_height`
 *   `video_samples`: the number of samples (aka frames) of video in this
     recording.
-*   TODO: recording id(s)? interior split points for coalesced recordings?
-
-Recordings may be coalesced if they are adjacent and have the same
-`video_sample_entry_*` data. That is, if recording A spans times [t, u) and
-recording B spans times [u, v), they may be returned as a single recording
-AB spanning times [t, v). Arbitrarily many recordings may be coalesced in this
-fashion.
 
 Example request URI (with added whitespace between parameters):
 
@@ -165,8 +162,9 @@ Example response:
 {
   "recordings": [
     {
-      "end_time_90k": 130985466591817,
+      "start_id": 1,
       "start_time_90k": 130985461191810,
+      "end_time_90k": 130985466591817,
       "sample_file_bytes": 8405564,
       "video_sample_entry_sha1": "81710c9c51a02cc95439caa8dd3bc12b77ffe767",
       "video_sample_entry_width": 1280,
@@ -184,18 +182,38 @@ Example response:
 
 ### `/camera/<uuid>/view.mp4`
 
-A GET returns a .mp4 file, with an etag and support for range requests.
+A GET returns a `.mp4` file, with an etag and support for range requests.
 
 Expected query parameters:
 
-*   `start_time_90k`
-*   `end_time_90k`
-*   `ts`: should be set to `true` to request a subtitle track be added with
-    human-readable recording timestamps.
-*   TODO(slamb): possibly `overlap` to indicate what to do about segments of
-    recording with overlapping wall times. Values might include:
-    *   `error` (return an HTTP error)
-    *   `include_all` (include all, in order of the recording ids)
-    *   `include_latest` (include only the latest by recording id for a
-        particular segment of time)
-*   TODO(slamb): gaps allowed or not? maybe a parameter for this also?
+*   `s` (one or more): a string of the form
+    `START_ID[-END_ID][.[REL_START_TIME]-[REL_END_TIME]]`. This specifies
+    recording segments to include. The produced `.mp4` file will be a
+    concatenation of the segments indicated by all `s` parameters.  The ids to
+    retrieve are as returned by the `/recordings` URL. The optional start and
+    end times are in 90k units and relative to the start of the first specified
+    id. These can be used to clip the returned segments. Note they can be used
+    to skip over some ids entirely; this is allowed so that the caller doesn't
+    need to know the start time of each interior id.
+*   `ts` (optional): should be set to `true` to request a subtitle track be
+    added with human-readable recording timestamps.
+
+Example request URI to retrieve all of recording id 1 from the given camera:
+
+```
+    /camera/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1
+```
+
+Example request URI to retrieve all of recording ids 1–5 from the given camera,
+with timestamp subtitles:
+
+```
+    /camera/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1-5&ts=true
+```
+
+Example request URI to retrieve recording id 1, skipping its first 26
+90,000ths of a second:
+
+```
+    /camera/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1.26
+```

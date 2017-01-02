@@ -81,6 +81,7 @@ mod stream;
 mod streamer;
 mod strutil;
 #[cfg(test)] mod testutil;
+mod upgrade;
 mod web;
 
 /// Commandline usage string. This is in the particular format expected by the `docopt` crate.
@@ -88,20 +89,30 @@ mod web;
 /// allowed commandline arguments and their defaults.
 const USAGE: &'static str = "
 Usage: moonfire-nvr [options]
+       moonfire-nvr --upgrade [options]
        moonfire-nvr (--help | --version)
 
 Options:
     -h, --help             Show this message.
     --version              Show the version of moonfire-nvr.
-    --db-dir DIR           Set the directory holding the SQLite3 index database.
+    --db-dir=DIR           Set the directory holding the SQLite3 index database.
                            This is typically on a flash device.
                            [default: /var/lib/moonfire-nvr/db]
-    --sample-file-dir DIR  Set the directory holding video data.
+    --sample-file-dir=DIR  Set the directory holding video data.
                            This is typically on a hard drive.
                            [default: /var/lib/moonfire-nvr/sample]
-    --http-addr ADDR       Set the bind address for the unencrypted HTTP server.
+    --http-addr=ADDR       Set the bind address for the unencrypted HTTP server.
                            [default: 0.0.0.0:8080]
     --read-only            Forces read-only mode / disables recording.
+    --preset-journal=MODE  With --upgrade, resets the SQLite journal_mode to
+                           the specified mode prior to the upgrade. The default,
+                           delete, is recommended. off is very dangerous but
+                           may be desirable in some circumstances. See
+                           guide/schema.md for more information. The journal
+                           mode will be reset to wal after the upgrade.
+                           [default: delete]
+    --no-vacuum            With --upgrade, skips the normal post-upgrade vacuum
+                           operation.
 ";
 
 /// Commandline arguments corresponding to `USAGE`; automatically filled by the `docopt` crate.
@@ -111,9 +122,18 @@ struct Args {
     flag_sample_file_dir: String,
     flag_http_addr: String,
     flag_read_only: bool,
+    flag_upgrade: bool,
+    flag_no_vacuum: bool,
+    flag_preset_journal: String,
 }
 
 fn main() {
+    // Parse commandline arguments.
+    let version = "Moonfire NVR 0.1.0".to_owned();
+    let args: Args = docopt::Docopt::new(USAGE)
+                                    .and_then(|d| d.version(Some(version)).decode())
+                                    .unwrap_or_else(|e| e.exit());
+
     // Watch for termination signals.
     // This must be started before any threads are spawned (such as the async logger thread) so
     // that signals will be blocked in all threads.
@@ -123,12 +143,6 @@ fn main() {
     let drain = slog_term::StreamerBuilder::new().async().full().build();
     let drain = slog_envlogger::new(drain);
     slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
-
-    // Parse commandline arguments.
-    let version = "Moonfire NVR 0.1.0".to_owned();
-    let args: Args = docopt::Docopt::new(USAGE)
-                                    .and_then(|d| d.version(Some(version)).decode())
-                                    .unwrap_or_else(|e| e.exit());
 
     // Open the database and populate cached state.
     let db_dir = dir::Fd::open(&args.flag_db_dir).unwrap();
@@ -144,6 +158,15 @@ fn main() {
         // rusqlite::Connection is not Sync, so there's no reason to tell SQLite3 to use the
         // serialized threading mode.
         rusqlite::SQLITE_OPEN_NO_MUTEX).unwrap();
+
+    if args.flag_upgrade {
+        upgrade::run(conn, &args.flag_preset_journal, args.flag_no_vacuum).unwrap();
+    } else {
+        run(args, conn, &signal);
+    }
+}
+
+fn run(args: Args, conn: rusqlite::Connection, signal: &chan::Receiver<chan_signal::Signal>) {
     let db = Arc::new(db::Database::new(conn).unwrap());
     let dir = dir::SampleFileDir::new(&args.flag_sample_file_dir, db.clone()).unwrap();
     info!("Database is loaded.");
@@ -158,7 +181,7 @@ fn main() {
         let env = streamer::Environment{
             db: &db,
             dir: &dir,
-            clock: &clock::REAL,
+            clocks: &clock::REAL,
             opener: &*stream::FFMPEG,
             shutdown: &shutdown,
         };
