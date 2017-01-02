@@ -1144,8 +1144,7 @@ impl Database {
                                           \
                                           If you are starting from an \
                                           empty database, see README.md to complete the \
-                                          installation. If you are starting from
-                                          complete the schema. If you are starting from a database \
+                                          installation. If you are starting from a database \
                                           that predates schema versioning, see guide/schema.md."
                                           .to_owned()));
                 },

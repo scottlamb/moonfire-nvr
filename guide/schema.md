@@ -23,7 +23,7 @@ read-only mode prior to deleting the old database.
 
 ### Procedure
 
-First ensure there is sufficient space available for three copies of the
+First ensure there is sufficient space available for four copies of the
 SQLite database:
 
    # the primary copy, which will be upgraded
@@ -31,10 +31,11 @@ SQLite database:
      discover a problem while running the new software against the upgraded
      database in read-only mode. If disk space is tight, you can save this
      to a different filesystem than the primary copy.
-   # an internal copy made and destroyed by Moonfire NVR and SQLite during the
+   # internal copies made and destroyed by Moonfire NVR and SQLite during the
      upgrade:
-        * a write-ahead log or rollback journal during earlier stages
-        * a complete database copy during the final vacuum step
+        * during earlier steps, possibly duplicate copies of tables, which
+          may occupy space both in the main database and the journal
+        * during the final vacuum step, a complete database copy
      If disk space is tight, and you are _very careful_, you can skip these
      copies with the `--preset-journal=off --no-vacuum` arguments to
      the updater. If you aren't confident in your ability to do this, *don't
