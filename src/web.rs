@@ -308,7 +308,21 @@ impl Handler {
 
     fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, query: &str,
                    uuid: Uuid) -> Result<Vec<u8>, Error> {
-        let r = Handler::get_optional_range(query)?;
+        let (r, trim) = {
+            let mut start = i64::min_value();
+            let mut end = i64::max_value();
+            let mut trim = false;
+            for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+                let (key, value) = (key.borrow(), value.borrow());
+                match key {
+                    "start_time_90k" => start = i64::from_str(value)?,
+                    "end_time_90k" => end = i64::from_str(value)?,
+                    "trim" if value == "true" => trim = true,
+                    _ => {},
+                }
+            };
+            (recording::Time(start) .. recording::Time(end), trim)
+        };
         let camera = db.get_camera(uuid)
                        .ok_or_else(|| Error::new("no such camera".to_owned()))?;
         let mut buf = Vec::new();
@@ -338,17 +352,41 @@ impl Handler {
         static FORCE_SPLIT_DURATION: recording::Duration =
             recording::Duration(60 * 60 * recording::TIME_UNITS_PER_SEC);
         let mut rows = Vec::new();
-        db.list_aggregated_recordings(camera.id, r, FORCE_SPLIT_DURATION, |row| {
+        db.list_aggregated_recordings(camera.id, r.clone(), FORCE_SPLIT_DURATION, |row| {
             rows.push(row.clone());
             Ok(())
         })?;
-        rows.sort_by(|r1, r2| r1.time.start.cmp(&r2.time.start));
+
+        // Display newest recording first.
+        rows.sort_by(|r1, r2| r2.ids.start.cmp(&r1.ids.start));
+
         for row in &rows {
             let seconds = (row.time.end.0 - row.time.start.0) / recording::TIME_UNITS_PER_SEC;
+            let url = {
+                let mut url = String::with_capacity(64);
+                use std::fmt::Write;
+                write!(&mut url, "view.mp4?s={}", row.ids.start)?;
+                if row.ids.end != row.ids.start + 1 {
+                    write!(&mut url, "-{}", row.ids.end - 1)?;
+                }
+                if trim {
+                    let rel_start = if row.time.start < r.start { Some(r.start - row.time.start) }
+                                    else { None };
+                    let rel_end = if row.time.end > r.end { Some(r.end - row.time.start) }
+                                  else { None };
+                    if rel_start.is_some() || rel_end.is_some() {
+                        url.push('.');
+                        if let Some(s) = rel_start { write!(&mut url, "{}", s.0)?; }
+                        url.push('-');
+                        if let Some(e) = rel_end { write!(&mut url, "{}", e.0)?; }
+                    }
+                }
+                url
+            };
             write!(&mut buf, "\
-                <tr><td><a href=\"view.mp4?s={}-{}\">{}</a></td>\
+                <tr><td><a href=\"{}\">{}</a></td>\
                 <td>{}</td><td>{}x{}</td><td>{:.0}</td><td>{:b}B</td><td>{}bps</td></tr>\n",
-                row.ids.start, row.ids.end - 1, HumanizedTimestamp(Some(row.time.start)),
+                url, HumanizedTimestamp(Some(row.time.start)),
                 HumanizedTimestamp(Some(row.time.end)), row.video_sample_entry.width,
                 row.video_sample_entry.height,
                 if seconds == 0 { 0. } else { row.video_samples as f32 / seconds as f32 },
