@@ -69,6 +69,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 mod clock;
+mod coding;
 mod db;
 mod dir;
 mod error;
