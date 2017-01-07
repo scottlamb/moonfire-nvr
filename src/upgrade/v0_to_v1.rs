@@ -35,6 +35,7 @@ use error::Error;
 use recording;
 use rusqlite;
 use std::collections::HashMap;
+use strutil;
 
 pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
     // These create statements match the schema.sql when version 1 was the latest.
@@ -101,6 +102,12 @@ struct CameraState {
     next_recording_id: i32,
 }
 
+fn has_trailing_zero(video_index: &[u8]) -> Result<bool, Error> {
+    let mut it = recording::SampleIndexIterator::new();
+    while it.next(video_index)? {}
+    Ok(it.duration_90k == 0)
+}
+
 /// Fills the `recording` and `recording_playback` tables from `old_recording`, returning
 /// the `camera_state` map for use by a following call to `fill_cameras`.
 fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState>, Error> {
@@ -116,7 +123,8 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
         video_sample_entry_id,
         sample_file_uuid,
         sample_file_sha1,
-        video_index
+        video_index,
+        id
       from
         old_recording
     "#)?;
@@ -153,11 +161,13 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
         let sample_file_uuid: Vec<u8> = row.get_checked(8)?;
         let sample_file_sha1: Vec<u8> = row.get_checked(9)?;
         let video_index: Vec<u8> = row.get_checked(10)?;
-        let trailing_zero = {
-            let mut it = recording::SampleIndexIterator::new();
-            while it.next(&video_index)? {}
-            it.duration_90k == 0
-        };
+        let old_id: i32 = row.get_checked(11)?;
+        let trailing_zero = has_trailing_zero(&video_index).unwrap_or_else(|e| {
+            warn!("recording {}/{} (sample file {}, formerly recording {}) has corrupt \
+                  video_index: {}",
+                  camera_id, composite_id & 0xFFFF, strutil::hex(&sample_file_uuid), old_id, e);
+            false
+        });
         let run_id = match camera_state.current_run {
             Some((run_id, expected_start)) if expected_start == start_time_90k => run_id,
             _ => composite_id,
