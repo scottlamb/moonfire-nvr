@@ -68,6 +68,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
+mod check;
 mod clock;
 mod coding;
 mod db;
@@ -91,6 +92,7 @@ mod web;
 const USAGE: &'static str = "
 Usage: moonfire-nvr [options]
        moonfire-nvr --upgrade [options]
+       moonfire-nvr --check [options]
        moonfire-nvr (--help | --version)
 
 Options:
@@ -123,6 +125,7 @@ struct Args {
     flag_sample_file_dir: String,
     flag_http_addr: String,
     flag_read_only: bool,
+    flag_check: bool,
     flag_upgrade: bool,
     flag_no_vacuum: bool,
     flag_preset_journal: String,
@@ -141,8 +144,12 @@ fn main() {
     let signal = chan_signal::notify(&[chan_signal::Signal::INT, chan_signal::Signal::TERM]);
 
     // Initialize logging.
-    let drain = slog_term::StreamerBuilder::new().async().full().build();
-    let drain = slog_envlogger::new(drain);
+    // Use async logging for serving because otherwise it blocks useful work.
+    // Use sync logging for other modes because async apparently is never flushed before the
+    // program exits, and partial output from these tools is very confusing.
+    let drain = slog_term::StreamerBuilder::new();
+    let drain = slog_envlogger::new(if args.flag_upgrade || args.flag_check { drain }
+                                    else { drain.async() }.full().build());
     slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
 
     // Open the database and populate cached state.
@@ -162,6 +169,8 @@ fn main() {
 
     if args.flag_upgrade {
         upgrade::run(conn, &args.flag_preset_journal, args.flag_no_vacuum).unwrap();
+    } else if args.flag_check {
+        check::run(conn, &args.flag_sample_file_dir).unwrap();
     } else {
         run(args, conn, &signal);
     }
