@@ -542,7 +542,12 @@ impl<'a> Writer<'a> {
                  is_key: bool) -> Result<(), Error> {
         let w = self.0.as_mut().unwrap();
         if let Some(unflushed) = w.unflushed_sample.take() {
-            let duration = w.adjuster.adjust((pts_90k - unflushed.pts_90k) as i32);
+            let duration = (pts_90k - unflushed.pts_90k) as i32;
+            if duration <= 0 {
+                return Err(Error::new(format!("pts not monotonically increasing; got {} then {}",
+                                              unflushed.pts_90k, pts_90k)));
+            }
+            let duration = w.adjuster.adjust(duration);
             w.index.add_sample(duration, unflushed.len, unflushed.is_key);
             w.extend_local_start(unflushed.local_time);
         }
