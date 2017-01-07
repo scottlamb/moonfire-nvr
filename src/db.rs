@@ -783,8 +783,8 @@ impl LockedDatabase {
         }
     }
 
-    /// Lists the specified recordings in ascending order, passing them to a supplied function.
-    /// Given that the function is called with the database lock held, it should be quick.
+    /// Lists the specified recordings in ascending order by start time, passing them to a supplied
+    /// function. Given that the function is called with the database lock held, it should be quick.
     pub fn list_recordings_by_time<F>(&self, camera_id: i32, desired_time: Range<recording::Time>,
                                       f: F) -> Result<(), Error>
     where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
@@ -796,6 +796,7 @@ impl LockedDatabase {
         self.list_recordings_inner(camera_id, rows, f)
     }
 
+    /// Lists the specified recordigs in ascending order by id.
     pub fn list_recordings_by_id<F>(&self, camera_id: i32, desired_ids: Range<i32>, f: F)
                                     -> Result<(), Error>
     where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
@@ -1132,7 +1133,7 @@ impl Database {
                 recording.start_time_90k < :end_time_90k and
                 recording.start_time_90k + recording.duration_90k > :start_time_90k
             order by
-                recording.composite_id
+                recording.start_time_90k
         "#, recording::MAX_RECORDING_DURATION);
         {
             use std::error::Error as E;
