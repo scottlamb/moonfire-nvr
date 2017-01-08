@@ -93,7 +93,7 @@ create table recording (
   -- fields to make up the primary key, but
   -- <https://www.sqlite.org/withoutrowid.html> points out that "without rowid"
   -- is not appropriate when the average row size is in excess of 50 bytes.
-  -- These rows are typically 1--5 KiB.
+  -- recording_cover rows (which match this id format) are typically 1--5 KiB.
   composite_id integer primary key,
 
   -- This field is redundant with id above, but used to enforce the reference
@@ -132,14 +132,14 @@ create table recording (
   local_time_delta_90k integer not null,
 
   video_samples integer not null check (video_samples > 0),
-  video_sync_samples integer not null check (video_samples > 0),
+  video_sync_samples integer not null check (video_sync_samples > 0),
   video_sample_entry_id integer references video_sample_entry (id),
 
   check (composite_id >> 32 = camera_id)
 );
 
 create index recording_cover on recording (
-  -- Typical queries use "where camera_id = ? order by start_time_90k (desc)?".
+  -- Typical queries use "where camera_id = ? order by start_time_90k".
   camera_id,
   start_time_90k,
 
@@ -152,10 +152,23 @@ create index recording_cover on recording (
   sample_file_bytes
 );
 
+-- Large fields for a recording which are not needed when simply listing all
+-- of the recordings in a given range. In particular, when serving a byte
+-- range within a .mp4 file, the recording_playback row is needed for the
+-- recording(s) corresponding to that particular byte range, needed, but the
+-- recording rows suffice for all other recordings in the .mp4.
 create table recording_playback (
+  -- See description on recording table.
   composite_id integer primary key references recording (composite_id),
+
+  -- The binary representation of the sample file's uuid. The canonical text
+  -- representation of this uuid is the filename within the sample file dir.
   sample_file_uuid blob not null check (length(sample_file_uuid) = 16),
+
+  -- The sha1 hash of the contents of the sample file.
   sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
+
+  -- See design/schema.md#video_index for a description of this field.
   video_index blob not null check (length(video_index) > 0)
 );
 
