@@ -102,7 +102,8 @@ impl Fd {
 
 impl SampleFileDir {
     pub fn new(path: &str, db: Arc<db::Database>) -> Result<Arc<SampleFileDir>, Error> {
-        let fd = Fd::open(path)?;
+        let fd = Fd::open(path)
+            .map_err(|e| Error::new(format!("unable to open sample file dir {}: {}", path, e)))?;
         Ok(Arc::new(SampleFileDir{
             db: db,
             fd: fd,
