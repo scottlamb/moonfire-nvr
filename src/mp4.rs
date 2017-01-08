@@ -1182,19 +1182,15 @@ impl http_entity::Entity<Error> for Mp4File {
 ///      to verify the output is byte-for-byte as expected.
 #[cfg(test)]
 mod tests {
-    #[cfg(nightly)] extern crate test;
-
     use byteorder::{BigEndian, ByteOrder};
     use db;
     use dir;
     use error::Error;
     use ffmpeg;
-    #[cfg(nightly)] use hyper;
     use hyper::header;
     use openssl::crypto::hash;
     use recording::{self, TIME_UNITS_PER_SEC};
     use http_entity::{self, Entity};
-    #[cfg(nightly)] use self::test::Bencher;
     use std::fs;
     use std::io;
     use std::mem;
@@ -1205,8 +1201,7 @@ mod tests {
     use strutil;
     use super::*;
     use stream::{self, Opener, Stream};
-    use testutil::{self, TestDb};
-    #[cfg(nightly)] use uuid::Uuid;
+    use testutil::{self, TestDb, TEST_CAMERA_ID};
 
     /// A wrapper around openssl's SHA-1 hashing that implements the `Write` trait.
     struct Sha1(hash::Hasher);
@@ -1230,8 +1225,6 @@ mod tests {
         e.write_to(0 .. e.len(), &mut sha1).unwrap();
         sha1.finish()
     }
-
-    const TEST_CAMERA_ID: i32 = 1;
 
     /// Information used within `BoxCursor` to describe a box on the stack.
     #[derive(Clone)]
@@ -1436,42 +1429,8 @@ mod tests {
         db.syncer_channel.flush();
     }
 
-    #[cfg(nightly)]
-    fn add_dummy_recordings_to_db(db: &db::Database) {
-        let mut data = Vec::new();
-        data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
-        let mut db = db.lock();
-        let video_sample_entry_id = db.insert_video_sample_entry(1920, 1080, &[0u8; 100]).unwrap();
-        const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-        const DURATION: recording::Duration = recording::Duration(5399985);
-        let mut recording = db::RecordingToInsert{
-            camera_id: TEST_CAMERA_ID,
-            sample_file_bytes: 30104460,
-            flags: 0,
-            time: START_TIME .. (START_TIME + DURATION),
-            local_time: START_TIME,
-            video_samples: 1800,
-            video_sync_samples: 60,
-            video_sample_entry_id: video_sample_entry_id,
-            sample_file_uuid: Uuid::nil(),
-            video_index: data,
-            sample_file_sha1: [0; 20],
-            run_index: 0,
-        };
-        let mut tx = db.tx().unwrap();
-        tx.bypass_reservation_for_testing = true;
-        for _ in 0..60 {
-            tx.insert_recording(&recording).unwrap();
-            recording.time.start += DURATION;
-            recording.local_time += DURATION;
-            recording.time.end += DURATION;
-            recording.run_index += 1;
-        }
-        tx.commit().unwrap();
-    }
-
-    fn create_mp4_from_db(db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>, skip_90k: i32,
-                          shorten_90k: i32, include_subtitles: bool) -> Mp4File {
+    pub fn create_mp4_from_db(db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>, skip_90k: i32,
+                              shorten_90k: i32, include_subtitles: bool) -> Mp4File {
         let mut builder = Mp4FileBuilder::new();
         builder.include_timestamp_subtitle_track(include_subtitles);
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
@@ -1743,6 +1702,54 @@ mod tests {
     fn mp4_file_slice_size() {
         assert_eq!(8, mem::size_of::<super::Mp4FileSlice>());
     }
+}
+
+#[cfg(all(test, feature="nightly"))]
+mod bench {
+    extern crate test;
+
+    use db;
+    use hyper;
+    use hyper::header;
+    use recording::{self, TIME_UNITS_PER_SEC};
+    use http_entity;
+    use self::test::Bencher;
+    use std::str;
+    use super::tests::create_mp4_from_db;
+    use testutil::{self, TestDb, TEST_CAMERA_ID};
+    #[cfg(feature="nightly")] use uuid::Uuid;
+
+    fn add_dummy_recordings_to_db(db: &db::Database) {
+        let mut data = Vec::new();
+        data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
+        let mut db = db.lock();
+        let video_sample_entry_id = db.insert_video_sample_entry(1920, 1080, &[0u8; 100]).unwrap();
+        const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
+        const DURATION: recording::Duration = recording::Duration(5399985);
+        let mut recording = db::RecordingToInsert{
+            camera_id: TEST_CAMERA_ID,
+            sample_file_bytes: 30104460,
+            flags: 0,
+            time: START_TIME .. (START_TIME + DURATION),
+            local_time_delta: recording::Duration(0),
+            video_samples: 1800,
+            video_sync_samples: 60,
+            video_sample_entry_id: video_sample_entry_id,
+            sample_file_uuid: Uuid::nil(),
+            video_index: data,
+            sample_file_sha1: [0; 20],
+            run_offset: 0,
+        };
+        let mut tx = db.tx().unwrap();
+        tx.bypass_reservation_for_testing = true;
+        for _ in 0..60 {
+            tx.insert_recording(&recording).unwrap();
+            recording.time.start += DURATION;
+            recording.time.end += DURATION;
+            recording.run_offset += 1;
+        }
+        tx.commit().unwrap();
+    }
 
     /// An HTTP server for benchmarking.
     /// It's used as a singleton via `lazy_static!` for two reasons:
@@ -1757,13 +1764,11 @@ mod tests {
     /// Currently this only serves a single `.mp4` file but we could set up variations to benchmark
     /// different scenarios: with/without subtitles and edit lists, different lengths, serving
     /// different fractions of the file, etc.
-    #[cfg(nightly)]
     struct BenchServer {
         url: hyper::Url,
         generated_len: u64,
     }
 
-    #[cfg(nightly)]
     impl BenchServer {
         fn new() -> BenchServer {
             let mut listener = hyper::net::HttpListener::new("127.0.0.1:0").unwrap();
@@ -1792,13 +1797,11 @@ mod tests {
         }
     }
 
-    #[cfg(nightly)]
     lazy_static! {
         static ref SERVER: BenchServer = { BenchServer::new() };
     }
 
     /// Benchmarks serving the generated part of a `.mp4` file (up to the first byte from disk).
-    #[cfg(nightly)]
     #[bench]
     fn serve_generated_bytes_fresh_client(b: &mut Bencher) {
         testutil::init();
@@ -1824,7 +1827,6 @@ mod tests {
     /// This should be faster than the `fresh` version, but see
     /// [this hyper issue](https://github.com/hyperium/hyper/issues/944) relating to Nagle's
     /// algorithm.
-    #[cfg(nightly)]
     #[bench]
     fn serve_generated_bytes_reuse_client(b: &mut Bencher) {
         testutil::init();
@@ -1846,7 +1848,6 @@ mod tests {
         });
     }
 
-    #[cfg(nightly)]
     #[bench]
     fn mp4_construction(b: &mut Bencher) {
         testutil::init();

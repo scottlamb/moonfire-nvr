@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#![cfg_attr(all(nightly, test), feature(test))]
+#![cfg_attr(all(feature="nightly", test), feature(test))]
 
 extern crate byteorder;
 extern crate core;

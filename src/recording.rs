@@ -419,11 +419,7 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(nightly)]
-    extern crate test;
-
     use super::*;
-    #[cfg(nightly)] use self::test::Bencher;
     use testutil::TestDb;
 
     #[test]
@@ -601,9 +597,15 @@ mod tests {
     }
 
     // TODO: test segment error cases involving mismatch between row frames/key_frames and index.
+}
+
+#[cfg(all(test, feature="nightly"))]
+mod bench {
+    extern crate test;
+    use self::test::Bencher;
+    use super::*;
 
     /// Benchmarks the decoder, which is performance-critical for .mp4 serving.
-    #[cfg(nightly)]
     #[bench]
     fn bench_decoder(b: &mut Bencher) {
         let data = include_bytes!("testdata/video_sample_index.bin");
