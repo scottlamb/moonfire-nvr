@@ -198,21 +198,21 @@ struct Segments {
 impl Segments {
     pub fn parse(input: &str) -> Result<Segments, ()> {
         let caps = SEGMENTS_RE.captures(input).ok_or(())?;
-        let ids_start = i32::from_str(caps.at(1).unwrap()).map_err(|_| ())?;
-        let ids_end = match caps.at(2) {
-            Some(e) => i32::from_str(&e[1..]).map_err(|_| ())?,
+        let ids_start = i32::from_str(caps.get(1).unwrap().as_str()).map_err(|_| ())?;
+        let ids_end = match caps.get(2) {
+            Some(e) => i32::from_str(&e.as_str()[1..]).map_err(|_| ())?,
             None => ids_start,
         } + 1;
         if ids_start < 0 || ids_end <= ids_start {
             return Err(());
         }
-        let start_time = caps.at(3).map_or(Ok(0), i64::from_str).map_err(|_| ())?;
+        let start_time = caps.get(3).map_or(Ok(0), |m| i64::from_str(m.as_str())).map_err(|_| ())?;
         if start_time < 0 {
             return Err(());
         }
-        let end_time = match caps.at(4) {
+        let end_time = match caps.get(4) {
             Some(v) => {
-                let e = i64::from_str(v).map_err(|_| ())?;
+                let e = i64::from_str(v.as_str()).map_err(|_| ())?;
                 if e <= start_time {
                     return Err(());
                 }
@@ -309,19 +309,18 @@ impl Handler {
     fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, query: &str,
                    uuid: Uuid) -> Result<Vec<u8>, Error> {
         let (r, trim) = {
-            let mut start = i64::min_value();
-            let mut end = i64::max_value();
+            let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
             let mut trim = false;
             for (key, value) in form_urlencoded::parse(query.as_bytes()) {
                 let (key, value) = (key.borrow(), value.borrow());
                 match key {
-                    "start_time_90k" => start = i64::from_str(value)?,
-                    "end_time_90k" => end = i64::from_str(value)?,
+                    "start_time" => time.start = recording::Time::parse(value)?,
+                    "end_time" => time.end = recording::Time::parse(value)?,
                     "trim" if value == "true" => trim = true,
                     _ => {},
                 }
             };
-            (recording::Time(start) .. recording::Time(end), trim)
+            (time, trim)
         };
         let camera = db.get_camera(uuid)
                        .ok_or_else(|| Error::new("no such camera".to_owned()))?;
@@ -383,12 +382,13 @@ impl Handler {
                 }
                 url
             };
+            let start = if trim && row.time.start < r.start { r.start } else { row.time.start };
+            let end = if trim && row.time.end > r.end { r.end } else { row.time.end };
             write!(&mut buf, "\
                 <tr><td><a href=\"{}\">{}</a></td>\
                 <td>{}</td><td>{}x{}</td><td>{:.0}</td><td>{:b}B</td><td>{}bps</td></tr>\n",
-                url, HumanizedTimestamp(Some(row.time.start)),
-                HumanizedTimestamp(Some(row.time.end)), row.video_sample_entry.width,
-                row.video_sample_entry.height,
+                url, HumanizedTimestamp(Some(start)), HumanizedTimestamp(Some(end)),
+                row.video_sample_entry.width, row.video_sample_entry.height,
                 if seconds == 0 { 0. } else { row.video_samples as f32 / seconds as f32 },
                 Humanized(row.sample_file_bytes),
                 Humanized(if seconds == 0 { 0 } else { row.sample_file_bytes * 8 / seconds }))?;
@@ -540,6 +540,7 @@ impl Handler {
 impl server::Handler for Handler {
     fn handle(&self, req: server::Request, res: server::Response) {
         let (path, query) = get_path_and_query(&req.uri);
+        error!("path={:?}, query={:?}", path, query);
         let res = match decode_path(path) {
             Path::CamerasList => self.list_cameras(&req, res),
             Path::Camera(uuid) => self.camera(uuid, query, &req, res),

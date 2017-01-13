@@ -93,6 +93,7 @@ const USAGE: &'static str = "
 Usage: moonfire-nvr [options]
        moonfire-nvr --upgrade [options]
        moonfire-nvr --check [options]
+       moonfire-nvr --ts <ts>...
        moonfire-nvr (--help | --version)
 
 Options:
@@ -127,8 +128,10 @@ struct Args {
     flag_read_only: bool,
     flag_check: bool,
     flag_upgrade: bool,
+    flag_ts: bool,
     flag_no_vacuum: bool,
     flag_preset_journal: String,
+    arg_ts: Vec<String>,
 }
 
 fn main() {
@@ -171,9 +174,19 @@ fn main() {
         upgrade::run(conn, &args.flag_preset_journal, args.flag_no_vacuum).unwrap();
     } else if args.flag_check {
         check::run(conn, &args.flag_sample_file_dir).unwrap();
+    } else if args.flag_ts {
+        run_ts(args.arg_ts).unwrap();
     } else {
         run(args, conn, &signal);
     }
+}
+
+fn run_ts(timestamps: Vec<String>) -> Result<(), error::Error> {
+    for timestamp in &timestamps {
+        let t = recording::Time::parse(timestamp)?;
+        println!("{} == {}", t, t.0);
+    }
+    Ok(())
 }
 
 fn run(args: Args, conn: rusqlite::Connection, signal: &chan::Receiver<chan_signal::Signal>) {

@@ -31,9 +31,11 @@
 extern crate uuid;
 
 use coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
+use core::str::FromStr;
 use db;
-use std::ops;
 use error::Error;
+use regex::Regex;
+use std::ops;
 use std::fmt;
 use std::ops::Range;
 use std::string::String;
@@ -51,6 +53,74 @@ pub struct Time(pub i64);
 impl Time {
     pub fn new(tm: time::Timespec) -> Self {
         Time(tm.sec * TIME_UNITS_PER_SEC + tm.nsec as i64 * TIME_UNITS_PER_SEC / 1_000_000_000)
+    }
+
+    /// Parses a time as either 90,000ths of a second since epoch or a RFC 3339-like string.
+    ///
+    /// The former is 90,000ths of a second since 1970-01-01T00:00:00 UTC, excluding leap seconds.
+    ///
+    /// The latter is a string such as `2006-01-02T15:04:05`, followed by an optional 90,000ths of
+    /// a second such as `:00001`, followed by an optional time zone offset such as `Z` or
+    /// `-07:00`. A missing fraction is assumed to be 0. A missing time zone offset implies the
+    /// local time zone.
+    pub fn parse(s: &str) -> Result<Self, Error> {
+        lazy_static! {
+            static ref RE: Regex = Regex::new(r#"(?x)
+                ^
+                ([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})
+                (?::([0-9]{5}))?
+                (Z|[+-]([0-9]{2}):([0-9]{2}))?
+                $"#).unwrap();
+        }
+
+        // First try parsing as 90,000ths of a second since epoch.
+        match i64::from_str(s) {
+            Ok(i) => return Ok(Time(i)),
+            Err(_) => {},
+        }
+
+        // If that failed, parse as a time string or bust.
+        let c = RE.captures(s).ok_or_else(|| Error::new(format!("unparseable time {:?}", s)))?;
+        let mut tm = time::Tm{
+            tm_sec: i32::from_str(c.get(6).unwrap().as_str()).unwrap(),
+            tm_min: i32::from_str(c.get(5).unwrap().as_str()).unwrap(),
+            tm_hour: i32::from_str(c.get(4).unwrap().as_str()).unwrap(),
+            tm_mday: i32::from_str(c.get(3).unwrap().as_str()).unwrap(),
+            tm_mon: i32::from_str(c.get(2).unwrap().as_str()).unwrap(),
+            tm_year: i32::from_str(c.get(1).unwrap().as_str()).unwrap(),
+            tm_wday: 0,
+            tm_yday: 0,
+            tm_isdst: -1,
+            tm_utcoff: 0,
+            tm_nsec: 0,
+        };
+        if tm.tm_mon == 0 {
+            return Err(Error::new(format!("time {:?} has month 0", s)));
+        }
+        tm.tm_mon -= 1;
+        if tm.tm_year < 1900 {
+            return Err(Error::new(format!("time {:?} has year before 1900", s)));
+        }
+        tm.tm_year -= 1900;
+
+        // The time crate doesn't use tm_utcoff properly; it just calls timegm() if tm_utcoff == 0,
+        // mktime() otherwise. If a zone is specified, use the timegm path and a manual offset.
+        // If no zone is specified, use the tm_utcoff path. This is pretty lame, but follow the
+        // chrono crate's lead and just use 0 or 1 to choose between these functions.
+        let sec = if let Some(zone) = c.get(8) {
+            tm.to_timespec().sec + if zone.as_str() == "Z" {
+                0
+            } else {
+                let off = i64::from_str(c.get(9).unwrap().as_str()).unwrap() * 3600 +
+                          i64::from_str(c.get(10).unwrap().as_str()).unwrap() * 60;
+                if zone.as_str().as_bytes()[0] == b'-' { off } else { -off }
+            }
+        } else {
+            tm.tm_utcoff = 1;
+            tm.to_timespec().sec
+        };
+        let fraction = if let Some(f) = c.get(7) { i64::from_str(f.as_str()).unwrap() } else { 0 };
+        Ok(Time(sec * TIME_UNITS_PER_SEC + fraction))
     }
 
     pub fn unix_seconds(&self) -> i64 { self.0 / TIME_UNITS_PER_SEC }
@@ -78,8 +148,10 @@ impl ops::Sub<Duration> for Time {
 impl fmt::Display for Time {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let tm = time::at(time::Timespec{sec: self.0 / TIME_UNITS_PER_SEC, nsec: 0});
-        write!(f, "{}:{:05}", tm.strftime("%FT%T%Z").or_else(|_| Err(fmt::Error))?,
-               self.0 % TIME_UNITS_PER_SEC)
+        let zone_minutes = tm.tm_utcoff.abs() / 60;
+        write!(f, "{}:{:05}{}{:02}:{:02}", tm.strftime("%FT%T").or_else(|_| Err(fmt::Error))?,
+               self.0 % TIME_UNITS_PER_SEC,
+               if tm.tm_utcoff > 0 { '+' } else { '-' }, zone_minutes / 60, zone_minutes % 60)
     }
 }
 
@@ -421,6 +493,28 @@ impl Segment {
 mod tests {
     use super::*;
     use testutil::TestDb;
+
+    #[test]
+    fn test_parse_time() {
+        let tests = &[
+            ("2006-01-02T15:04:05-07:00",       102261550050000),
+            ("2006-01-02T15:04:05:00001-07:00", 102261550050001),
+            ("2006-01-02T15:04:05-08:00",       102261874050000),
+            ("2006-01-02T15:04:05",             102261874050000),  // implied -08:00
+            ("2006-01-02T15:04:05:00001",       102261874050001),  // implied -08:00
+            ("2006-01-02T15:04:05-00:00",       102259282050000),
+            ("2006-01-02T15:04:05Z",            102259282050000),
+            ("102261550050000",                 102261550050000),
+        ];
+        for test in tests {
+            assert_eq!(test.1, Time::parse(test.0).unwrap().0, "parsing {}", test.0);
+        }
+    }
+
+    #[test]
+    fn test_format_time() {
+        assert_eq!("2006-01-02T15:04:05:00000-08:00", format!("{}", Time(102261874050000)));
+    }
 
     #[test]
     fn test_display_duration() {
