@@ -268,7 +268,7 @@ been done for you. If not, Create
     After=network-online.target
 
     [Service]
-    ExecStart=/usr/local/bin/moonfire-nvr \
+    ExecStart=/usr/local/bin/moonfire-nvr run \
         --sample-file-dir=/var/lib/moonfire-nvr/sample \
         --db-dir=/var/lib/moonfire-nvr/db \
         --http-addr=0.0.0.0:8080

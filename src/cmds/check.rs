@@ -33,9 +33,32 @@
 use db;
 use error::Error;
 use recording;
-use rusqlite;
 use std::fs;
 use uuid::Uuid;
+
+static USAGE: &'static str = r#"
+Checks database integrity.
+
+Usage:
+
+    moonfire-nvr check [options]
+    moonfire-nvr check --help
+
+Options:
+
+    --db-dir=DIR           Set the directory holding the SQLite3 index database.
+                           This is typically on a flash device.
+                           [default: /var/lib/moonfire-nvr/db]
+    --sample-file-dir=DIR  Set the directory holding video data.
+                           This is typically on a hard drive.
+                           [default: /var/lib/moonfire-nvr/sample]
+"#;
+
+#[derive(Debug, RustcDecodable)]
+struct Args {
+    flag_db_dir: String,
+    flag_sample_file_dir: String,
+}
 
 #[derive(Debug, Eq, PartialEq)]
 struct RecordingSummary {
@@ -73,9 +96,12 @@ struct File {
     composite_id: Option<i64>,
 }
 
-pub fn run(conn: rusqlite::Connection, sample_file_dir: &str) -> Result<(), Error> {
+pub fn run() -> Result<(), Error> {
+    let args: Args = super::parse_args(USAGE)?;
+    super::install_logger(false);
+    let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, true)?;
     let mut files = Vec::new();
-    for e in fs::read_dir(sample_file_dir)? {
+    for e in fs::read_dir(&args.flag_sample_file_dir)? {
         let e = e?;
         let uuid = match e.file_name().to_str().and_then(|f| Uuid::parse_str(f).ok()) {
             Some(f) => f,

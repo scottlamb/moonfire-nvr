@@ -61,16 +61,9 @@ extern crate time;
 extern crate url;
 extern crate uuid;
 
-use hyper::server::Server;
-use slog::DrainExt;
-use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
-
-mod check;
 mod clock;
 mod coding;
+mod cmds;
 mod db;
 mod dir;
 mod error;
@@ -83,164 +76,54 @@ mod stream;
 mod streamer;
 mod strutil;
 #[cfg(test)] mod testutil;
-mod upgrade;
 mod web;
 
 /// Commandline usage string. This is in the particular format expected by the `docopt` crate.
 /// Besides being printed on --help or argument parsing error, it's actually parsed to define the
 /// allowed commandline arguments and their defaults.
 const USAGE: &'static str = "
-Usage: moonfire-nvr [options]
-       moonfire-nvr --upgrade [options]
-       moonfire-nvr --check [options]
-       moonfire-nvr --ts <ts>...
+Usage: moonfire-nvr <command> [<args>...]
        moonfire-nvr (--help | --version)
 
 Options:
     -h, --help             Show this message.
     --version              Show the version of moonfire-nvr.
-    --db-dir=DIR           Set the directory holding the SQLite3 index database.
-                           This is typically on a flash device.
-                           [default: /var/lib/moonfire-nvr/db]
-    --sample-file-dir=DIR  Set the directory holding video data.
-                           This is typically on a hard drive.
-                           [default: /var/lib/moonfire-nvr/sample]
-    --http-addr=ADDR       Set the bind address for the unencrypted HTTP server.
-                           [default: 0.0.0.0:8080]
-    --read-only            Forces read-only mode / disables recording.
-    --preset-journal=MODE  With --upgrade, resets the SQLite journal_mode to
-                           the specified mode prior to the upgrade. The default,
-                           delete, is recommended. off is very dangerous but
-                           may be desirable in some circumstances. See
-                           guide/schema.md for more information. The journal
-                           mode will be reset to wal after the upgrade.
-                           [default: delete]
-    --no-vacuum            With --upgrade, skips the normal post-upgrade vacuum
-                           operation.
+
+Commands:
+    run                    Run the daemon: record from cameras and handle HTTP requests
+    upgrade                Upgrade the database to the latest schema
+    check                  Check database integrity
+    ts                     Translate between human-readable and numeric timestamps
 ";
 
 /// Commandline arguments corresponding to `USAGE`; automatically filled by the `docopt` crate.
-#[derive(RustcDecodable)]
+#[derive(Debug, RustcDecodable)]
 struct Args {
-    flag_db_dir: String,
-    flag_sample_file_dir: String,
-    flag_http_addr: String,
-    flag_read_only: bool,
-    flag_check: bool,
-    flag_upgrade: bool,
-    flag_ts: bool,
-    flag_no_vacuum: bool,
-    flag_preset_journal: String,
-    arg_ts: Vec<String>,
+    arg_command: Option<cmds::Command>,
+}
+
+fn version() -> String {
+    let major = option_env!("CARGO_PKG_VERSION_MAJOR");
+    let minor = option_env!("CARGO_PKG_VERSION_MAJOR");
+    let patch = option_env!("CARGO_PKG_VERSION_MAJOR");
+    match (major, minor, patch) {
+        (Some(major), Some(minor), Some(patch)) => format!("{}.{}.{}", major, minor, patch),
+        _ => "".to_owned(),
+    }
 }
 
 fn main() {
     // Parse commandline arguments.
-    let version = "Moonfire NVR 0.1.0".to_owned();
+    // (Note this differs from cmds::parse_args in that it specifies options_first.)
     let args: Args = docopt::Docopt::new(USAGE)
-                                    .and_then(|d| d.version(Some(version)).decode())
+                                    .and_then(|d| d.options_first(true)
+                                                   .version(Some(version()))
+                                                   .decode())
                                     .unwrap_or_else(|e| e.exit());
 
-    // Watch for termination signals.
-    // This must be started before any threads are spawned (such as the async logger thread) so
-    // that signals will be blocked in all threads.
-    let signal = chan_signal::notify(&[chan_signal::Signal::INT, chan_signal::Signal::TERM]);
-
-    // Initialize logging.
-    // Use async logging for serving because otherwise it blocks useful work.
-    // Use sync logging for other modes because async apparently is never flushed before the
-    // program exits, and partial output from these tools is very confusing.
-    let drain = slog_term::StreamerBuilder::new();
-    let drain = slog_envlogger::new(if args.flag_upgrade || args.flag_check { drain }
-                                    else { drain.async() }.full().build());
-    slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
-
-    // Open the database and populate cached state.
-    let db_dir = dir::Fd::open(&args.flag_db_dir).unwrap();
-    db_dir.lock(if args.flag_read_only { libc::LOCK_SH } else { libc::LOCK_EX } | libc::LOCK_NB)
-        .unwrap();
-    let conn = rusqlite::Connection::open_with_flags(
-        Path::new(&args.flag_db_dir).join("db"),
-        if args.flag_read_only {
-            rusqlite::SQLITE_OPEN_READ_ONLY
-        } else {
-            rusqlite::SQLITE_OPEN_READ_WRITE
-        } |
-        // rusqlite::Connection is not Sync, so there's no reason to tell SQLite3 to use the
-        // serialized threading mode.
-        rusqlite::SQLITE_OPEN_NO_MUTEX).unwrap();
-
-    if args.flag_upgrade {
-        upgrade::run(conn, &args.flag_preset_journal, args.flag_no_vacuum).unwrap();
-    } else if args.flag_check {
-        check::run(conn, &args.flag_sample_file_dir).unwrap();
-    } else if args.flag_ts {
-        run_ts(args.arg_ts).unwrap();
-    } else {
-        run(args, conn, &signal);
+    if let Err(e) = args.arg_command.unwrap().run() {
+        use std::io::Write;
+        writeln!(&mut ::std::io::stderr(), "{}", e).unwrap();
+        ::std::process::exit(1);
     }
-}
-
-fn run_ts(timestamps: Vec<String>) -> Result<(), error::Error> {
-    for timestamp in &timestamps {
-        let t = recording::Time::parse(timestamp)?;
-        println!("{} == {}", t, t.0);
-    }
-    Ok(())
-}
-
-fn run(args: Args, conn: rusqlite::Connection, signal: &chan::Receiver<chan_signal::Signal>) {
-    let db = Arc::new(db::Database::new(conn).unwrap());
-    let dir = dir::SampleFileDir::new(&args.flag_sample_file_dir, db.clone()).unwrap();
-    info!("Database is loaded.");
-
-    // Start a streamer for each camera.
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let mut streamers = Vec::new();
-    let syncer = if !args.flag_read_only {
-        let (syncer_channel, syncer_join) = dir::start_syncer(dir.clone()).unwrap();
-        let l = db.lock();
-        let cameras = l.cameras_by_id().len();
-        let env = streamer::Environment{
-            db: &db,
-            dir: &dir,
-            clocks: &clock::REAL,
-            opener: &*stream::FFMPEG,
-            shutdown: &shutdown,
-        };
-        for (i, (id, camera)) in l.cameras_by_id().iter().enumerate() {
-            let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / cameras as i64;
-            let mut streamer = streamer::Streamer::new(&env, syncer_channel.clone(), *id, camera,
-                                                       rotate_offset_sec,
-                                                       streamer::ROTATE_INTERVAL_SEC);
-            let name = format!("stream-{}", streamer.short_name());
-            streamers.push(thread::Builder::new().name(name).spawn(move|| {
-                streamer.run();
-            }).expect("can't create thread"));
-        }
-        Some((syncer_channel, syncer_join))
-    } else { None };
-
-    // Start the web interface.
-    let server = Server::http(args.flag_http_addr.as_str()).unwrap();
-    let h = web::Handler::new(db.clone(), dir.clone());
-    let _guard = server.handle(h);
-    info!("Ready to serve HTTP requests");
-
-    // Wait for a signal and shut down.
-    chan_select! {
-        signal.recv() -> signal => info!("Received signal {:?}; shutting down streamers.", signal),
-    }
-    shutdown.store(true, Ordering::SeqCst);
-    for streamer in streamers.drain(..) {
-        streamer.join().unwrap();
-    }
-    if let Some((syncer_channel, syncer_join)) = syncer {
-        info!("Shutting down syncer.");
-        drop(syncer_channel);
-        syncer_join.join().unwrap();
-    }
-    info!("Exiting.");
-    // TODO: drain the logger.
-    std::process::exit(0);
 }

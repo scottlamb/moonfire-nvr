@@ -38,12 +38,43 @@ use rusqlite;
 
 mod v0_to_v1;
 
+const USAGE: &'static str = r#"
+Upgrade to the latest database schema.
+
+Usage: moonfire-nvr upgrade [options]
+
+Options:
+    -h, --help             Show this message.
+    --db-dir=DIR           Set the directory holding the SQLite3 index database.
+                           This is typically on a flash device.
+                           [default: /var/lib/moonfire-nvr/db]
+    --sample-file-dir=DIR  Set the directory holding video data.
+                           This is typically on a hard drive.
+                           [default: /var/lib/moonfire-nvr/sample]
+    --preset-journal=MODE  Resets the SQLite journal_mode to the specified mode
+                           prior to the upgrade. The default, delete, is
+                           recommended. off is very dangerous but may be
+                           desirable in some circumstances. See guide/schema.md
+                           for more information. The journal mode will be reset
+                           to wal after the upgrade.
+                           [default: delete]
+    --no-vacuum            Skips the normal post-upgrade vacuum operation.
+"#;
+
 const UPGRADE_NOTES: &'static str =
     concat!("upgraded using moonfire-nvr ", env!("CARGO_PKG_VERSION"));
 
 const UPGRADERS: [fn(&rusqlite::Transaction) -> Result<(), Error>; 1] = [
     v0_to_v1::run,
 ];
+
+#[derive(Debug, RustcDecodable)]
+struct Args {
+    flag_db_dir: String,
+    flag_sample_file_dir: String,
+    flag_preset_journal: String,
+    flag_no_vacuum: bool,
+}
 
 fn set_journal_mode(conn: &rusqlite::Connection, requested: &str) -> Result<(), Error> {
     assert!(!requested.contains(';'));  // quick check for accidental sql injection.
@@ -53,8 +84,11 @@ fn set_journal_mode(conn: &rusqlite::Connection, requested: &str) -> Result<(), 
     Ok(())
 }
 
-pub fn run(mut conn: rusqlite::Connection, preset_journal: &str,
-           no_vacuum: bool) -> Result<(), Error> {
+pub fn run() -> Result<(), Error> {
+    let args: Args = super::parse_args(USAGE)?;
+    super::install_logger(false);
+    let (_db_dir, mut conn) = super::open_conn(&args.flag_db_dir, false)?;
+
     {
         assert_eq!(UPGRADERS.len(), db::EXPECTED_VERSION as usize);
         let old_ver =
@@ -66,7 +100,7 @@ pub fn run(mut conn: rusqlite::Connection, preset_journal: &str,
             return Err(Error::new(format!("Database is at negative version {}!", old_ver)));
         }
         info!("Upgrading database from version {} to version {}...", old_ver, db::EXPECTED_VERSION);
-        set_journal_mode(&conn, preset_journal).unwrap();
+        set_journal_mode(&conn, &args.flag_preset_journal).unwrap();
         for ver in old_ver .. db::EXPECTED_VERSION {
             info!("...from version {} to version {}", ver, ver + 1);
             let tx = conn.transaction()?;
@@ -82,7 +116,7 @@ pub fn run(mut conn: rusqlite::Connection, preset_journal: &str,
     // WAL is the preferred journal mode for normal operation; it reduces the number of syncs
     // without compromising safety.
     set_journal_mode(&conn, "wal").unwrap();
-    if !no_vacuum {
+    if !args.flag_no_vacuum {
         info!("...vacuuming database after upgrade.");
         conn.execute_batch(r#"
             pragma page_size = 16384;
