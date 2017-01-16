@@ -40,25 +40,28 @@ use slog_term;
 use std::path::Path;
 
 mod check;
+mod init;
 mod run;
 mod ts;
 mod upgrade;
 
 #[derive(Debug, RustcDecodable)]
 pub enum Command {
-    Run,
-    Upgrade,
     Check,
+    Init,
+    Run,
     Ts,
+    Upgrade,
 }
 
 impl Command {
     pub fn run(&self) -> Result<(), Error> {
         match *self {
-            Command::Run => run::run(),
-            Command::Upgrade => upgrade::run(),
             Command::Check => check::run(),
+            Command::Init => init::run(),
+            Command::Run => run::run(),
             Command::Ts => ts::run(),
+            Command::Upgrade => upgrade::run(),
         }
     }
 }
@@ -73,21 +76,29 @@ fn install_logger(async: bool) {
     slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
 }
 
+#[derive(PartialEq, Eq)]
+enum OpenMode {
+    ReadOnly,
+    ReadWrite,
+    Create
+}
+
 /// Locks and opens the database.
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
-fn open_conn(db_dir: &str, read_only: bool) -> Result<(dir::Fd, rusqlite::Connection), Error> {
+fn open_conn(db_dir: &str, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connection), Error> {
     let dir = dir::Fd::open(db_dir)?;
-    dir.lock(if read_only { libc::LOCK_SH } else { libc::LOCK_EX } | libc::LOCK_NB)
+    let ro = mode == OpenMode::ReadOnly;
+    dir.lock(if ro { libc::LOCK_SH } else { libc::LOCK_EX } | libc::LOCK_NB)
        .map_err(|e| Error{description: format!("db dir {:?} already in use; can't get {} lock",
                                                db_dir,
-                                               if read_only { "shared" } else { "exclusive" }),
+                                               if ro { "shared" } else { "exclusive" }),
                           cause: Some(Box::new(e))})?;
     let conn = rusqlite::Connection::open_with_flags(
         Path::new(&db_dir).join("db"),
-        if read_only {
-            rusqlite::SQLITE_OPEN_READ_ONLY
-        } else {
-            rusqlite::SQLITE_OPEN_READ_WRITE
+        match mode {
+            OpenMode::ReadOnly => rusqlite::SQLITE_OPEN_READ_ONLY,
+            OpenMode::ReadWrite => rusqlite::SQLITE_OPEN_READ_WRITE,
+            OpenMode::Create => rusqlite::SQLITE_OPEN_READ_WRITE | rusqlite::SQLITE_OPEN_CREATE,
         } |
         // rusqlite::Connection is not Sync, so there's no reason to tell SQLite3 to use the
         // serialized threading mode.

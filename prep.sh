@@ -216,7 +216,7 @@ if [ ! -d "${DB_DIR}" ]; then
 fi
 DB_PATH="${DB_DIR}/${DB_NAME}"
 CAMERAS_PATH="${SRC_DIR}/../cameras.sql"
-[ "${SKIP_DB:-0}" == 0 ] && sudo -u ${NVR_USER} -H sqlite3 "${DB_PATH}" < "${SRC_DIR}/schema.sql"
+[ "${SKIP_DB:-0}" == 0 ] && sudo -u ${NVR_USER} -H ${SERVICE_BIN} init --db-dir="${DB_PATH}"
 if [ -r "${CAMERAS_PATH}" ]; then
 	echo 'Add cameras...'; echo
 	sudo -u ${NVR_USER} -H sqlite3 "${DB_PATH}" < "${CAMERAS_PATH}"

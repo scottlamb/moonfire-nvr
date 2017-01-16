@@ -73,7 +73,9 @@ pub fn run() -> Result<(), Error> {
     // that signals will be blocked in all threads.
     let signal = chan_signal::notify(&[chan_signal::Signal::INT, chan_signal::Signal::TERM]);
     super::install_logger(true);
-    let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, args.flag_read_only)?;
+    let (_db_dir, conn) = super::open_conn(
+        &args.flag_db_dir,
+        if args.flag_read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
     let db = Arc::new(db::Database::new(conn).unwrap());
     let dir = dir::SampleFileDir::new(&args.flag_sample_file_dir, db.clone()).unwrap();
     info!("Database is loaded.");

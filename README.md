@@ -161,8 +161,8 @@ state:
 
 Both kinds of state are intended to be accessed only by Moonfire NVR itself.
 However, the interface for adding new cameras is not yet written, so you will
-have to manually create the database and insert cameras with the `sqlite3`
-command line tool prior to starting Moonfire NVR.
+have to manually insert cameras with the `sqlite3` command line tool prior to
+starting Moonfire NVR.
 
 Manual commands would look something like this:
 
@@ -170,7 +170,7 @@ Manual commands would look something like this:
     $ sudo adduser --system moonfire-nvr --home /var/lib/moonfire-nvr
     $ sudo mkdir /var/lib/moonfire-nvr
     $ sudo -u moonfire-nvr -H mkdir db sample
-    $ sudo -u moonfire-nvr sqlite3 ~moonfire-nvr/db/db < path/to/schema.sql
+    $ sudo -u moonfire-nvr moonfire-nvr init
 
 ## <a name="cameras"></a>Camera configuration and hard drive mounting
 

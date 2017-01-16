@@ -90,10 +90,11 @@ Options:
     --version              Show the version of moonfire-nvr.
 
 Commands:
-    run                    Run the daemon: record from cameras and handle HTTP requests
-    upgrade                Upgrade the database to the latest schema
     check                  Check database integrity
+    init                   Initialize a database
+    run                    Run the daemon: record from cameras and handle HTTP requests
     ts                     Translate between human-readable and numeric timestamps
+    upgrade                Upgrade the database to the latest schema
 ";
 
 /// Commandline arguments corresponding to `USAGE`; automatically filled by the `docopt` crate.
