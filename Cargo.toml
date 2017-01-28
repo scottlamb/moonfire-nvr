@@ -8,32 +8,32 @@ build = "build.rs"
 nightly = []
 
 [dependencies]
-byteorder = "0.5"
+byteorder = "1.0"
 chan = "0.1"
-chan-signal = "0.1"
-docopt = "0.6"
+chan-signal = "0.2"
+docopt = "0.7"
 fnv = "1.0"
 http-entity = { git = "https://github.com/scottlamb/http-entity" }
-hyper = "0.9"
+hyper = "0.10"
 lazy_static = "0.2"
 libc = "0.2"
 log = { version = "0.3", features = ["release_max_level_info"] }
 lru-cache = "0.1"
-memmap = "0.3"
+memmap = "0.5"
 mime = "0.2"
-openssl = "0.8"
+openssl = "0.9"
 regex = "0.2"
-rusqlite = "0.7"
+rusqlite = "0.9"
 rustc-serialize = "0.3"
 serde = "0.8"
 serde_json = "0.8"
-slog = "1.2"
+slog = "1.4"
 slog-envlogger = "0.5"
 slog-stdlog = "1.1"
 slog-term = "1.3"
-smallvec = "0.2"
+smallvec = "0.3"
 time = "0.1"
-url = "1.2"
+url = "1.4"
 uuid = { version = "0.3", features = ["serde", "v4"] }
 
 [build-dependencies]

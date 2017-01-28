@@ -87,7 +87,7 @@ use http_entity;
 use hyper::header;
 use mmapfile;
 use mime;
-use openssl::crypto::hash;
+use openssl::hash;
 use pieces;
 use pieces::ContextWriter;
 use pieces::Slices;
@@ -569,7 +569,7 @@ impl Mp4FileBuilder {
     /// Builds the `Mp4File`, consuming the builder.
     pub fn build(mut self, db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>) -> Result<Mp4File> {
         let mut max_end = None;
-        let mut etag = hash::Hasher::new(hash::Type::SHA1)?;
+        let mut etag = hash::Hasher::new(hash::MessageDigest::sha1())?;
         etag.update(&FORMAT_VERSION[..])?;
         if self.include_timestamp_subtitle_track {
             etag.update(b":ts:")?;
@@ -1188,7 +1188,7 @@ mod tests {
     use error::Error;
     use ffmpeg;
     use hyper::header;
-    use openssl::crypto::hash;
+    use openssl::hash;
     use recording::{self, TIME_UNITS_PER_SEC};
     use http_entity::{self, Entity};
     use std::fs;
@@ -1207,7 +1207,7 @@ mod tests {
     struct Sha1(hash::Hasher);
 
     impl Sha1 {
-        fn new() -> Sha1 { Sha1(hash::Hasher::new(hash::Type::SHA1).unwrap()) }
+        fn new() -> Sha1 { Sha1(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap()) }
         fn finish(mut self) -> Vec<u8> { self.0.finish().unwrap() }
     }
 

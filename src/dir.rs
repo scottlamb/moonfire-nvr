@@ -36,7 +36,7 @@ use db;
 use error::Error;
 use libc;
 use recording;
-use openssl::crypto::hash;
+use openssl::hash;
 use std::cmp;
 use std::ffi;
 use std::fs;
@@ -526,7 +526,7 @@ impl<'a> Writer<'a> {
             index: recording::SampleIndexEncoder::new(),
             uuid: uuid,
             corrupt: false,
-            hasher: hash::Hasher::new(hash::Type::SHA1)?,
+            hasher: hash::Hasher::new(hash::MessageDigest::sha1())?,
             prev_end: prev.map(|p| p.end_time),
             local_start: recording::Time(i64::max_value()),
             adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),

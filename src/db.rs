@@ -54,7 +54,7 @@
 use error::{Error, ResultExt};
 use fnv;
 use lru_cache::LruCache;
-use openssl::crypto::hash;
+use openssl::hash;
 use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
 use std::collections::BTreeMap;
@@ -1066,7 +1066,7 @@ impl LockedDatabase {
     /// Inserts the specified video sample entry if absent.
     /// On success, returns the id of a new or existing row.
     pub fn insert_video_sample_entry(&mut self, w: u16, h: u16, data: &[u8]) -> Result<i32, Error> {
-        let sha1 = hash::hash(hash::Type::SHA1, data)?;
+        let sha1 = hash::hash(hash::MessageDigest::sha1(), data)?;
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&sha1);
 
