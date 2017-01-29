@@ -86,7 +86,6 @@ use error::{Error, Result};
 use http_entity;
 use hyper::header;
 use mmapfile;
-use mime;
 use openssl::hash;
 use pieces;
 use pieces::ContextWriter;
@@ -1161,9 +1160,11 @@ impl Mp4File {
 }
 
 impl http_entity::Entity<Error> for Mp4File {
-    fn content_type(&self) -> mime::Mime { "video/mp4".parse().unwrap() }
-    fn last_modified(&self) -> &header::HttpDate { &self.last_modified }
-    fn etag(&self) -> Option<&header::EntityTag> { Some(&self.etag) }
+    fn add_headers(&self, hdrs: &mut header::Headers) {
+        hdrs.set(header::ContentType("video/mp4".parse().unwrap()));
+    }
+    fn last_modified(&self) -> Option<header::HttpDate> { Some(self.last_modified) }
+    fn etag(&self) -> Option<header::EntityTag> { Some(self.etag.clone()) }
     fn len(&self) -> u64 { self.slices.len() }
     fn write_to(&self, range: Range<u64>, out: &mut io::Write) -> Result<()> {
         self.slices.write_to(self, range, out)
@@ -1633,7 +1634,7 @@ mod tests {
         let sha1 = digest(&mp4);
         assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "908ae8ac303f66f2f4a1f8f52dba8f6ea9fdb442";
-        assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
+        assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
     }
@@ -1653,7 +1654,7 @@ mod tests {
         let sha1 = digest(&mp4);
         assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "e21c6a6dfede1081db3701cc595ec267c43c2bff";
-        assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
+        assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
     }
@@ -1673,7 +1674,7 @@ mod tests {
         let sha1 = digest(&mp4);
         assert_eq!("685e026af44204bc9cc52115c5e17058e9fb7c70", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "1d5c5980f6ba08a4dd52dfd785667d42cdb16992";
-        assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
+        assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
     }
@@ -1693,7 +1694,7 @@ mod tests {
         let sha1 = digest(&mp4);
         assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "555de64b39615e1a1cbe5bdd565ff197f5f126c5";
-        assert_eq!(Some(&header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
+        assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
     }
