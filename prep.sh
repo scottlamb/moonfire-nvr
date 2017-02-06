@@ -139,7 +139,8 @@ if [ "${SKIP_APT:-0}" != 1 ]; then
 		libavcodec-dev \
 		libavformat-dev \
 		libavutil-dev \
-		libncurses5w-dev \
+		libncurses5-dev \
+		libncursesw5-dev \
 		libsqlite3-dev
 fi
 
