@@ -89,6 +89,9 @@ You will need the following C libraries installed:
 
 * [SQLite3](https://www.sqlite.org/).
 
+* [`ncursesw`](https://www.gnu.org/software/ncurses/), the UTF-8 version of
+  the `ncurses` library.
+
 On Ubuntu 16.04.1 LTS or Raspbian Jessie, the following command will install
 all non-Rust dependencies:
 
@@ -97,13 +100,8 @@ all non-Rust dependencies:
                    libavcodec-dev \
                    libavformat-dev \
                    libavutil-dev \
-                   sqlite3 \
-                   libsqlite3-dev \
-                   uuid-runtime
-
-uuid-runtime is only necessary if you wish to use the uuid command to generate
-uuids for your cameras (see below). If you obtain them elsewhere, you can skip this
-package.
+                   libncursesw-dev \
+                   libsqlite3-dev
 
 Next, you need Rust and Cargo. The easiest way to install them is by following
 the instructions at [rustup.rs](https://www.rustup.rs/). Note that Rust 1.13
@@ -119,7 +117,6 @@ build and install, or alternatively you can run the prep script called `prep.sh`
 
 The script will take the following command line options, should you need them:
 
-* `-D`: Skip database initialization.
 * `-S`: Skip updating and installing dependencies through apt-get. This too can be
         useful on repeated builds.
 
@@ -133,7 +130,7 @@ store the video samples inside a directory named `samples` there, you would set:
     SAMPLES_DIR=/media/nvr/samples
 
 The script will perform all necessary steps to leave you with a fully built,
-installed moonfire-nvr binary and (running) system service. The only thing
+installed moonfire-nvr binary. The only thing
 you'll have to do manually is add your camera configuration(s) to the database.
 Alternatively, before running the script, you can create a file named `cameras.sql`
 in the same directory as the `prep.sh` script and it will be automatically
@@ -180,82 +177,35 @@ If a dedicated hard drive is available, set up the mount point:
     $ sudo mount /var/lib/moonfire-nvr/sample
 
 Once setup is complete, it is time to add camera configurations to the
-database.  However, the interface for adding new cameras is not yet written,
-so you will have to manually insert cameras configurations with the `sqlite3`
-command line tool prior to starting Moonfire NVR.
+database. If the daemon is running, you will need to stop it temporarily:
 
-Before setting up a camera, it may be helpful to test settings with the
-`ffmpeg` command line tool:
+    $ sudo systemctl stop moonfire-nvr
 
-    $ ffmpeg \
-          -i "rtsp://admin:12345@192.168.1.101:554/Streaming/Channels/1" \
-          -c copy \
-          -map 0:0 \
-          -rtsp_transport tcp \
-          -flags:v +global_header \
-          test.mp4
+You can configure the system through a text-based user interface:
 
-Once you have a working `ffmpeg` command line, insert the camera config as
-follows.  See the schema SQL file's comments for more information.
-Note that the sum of `retain_bytes` for all cameras combined should be
-somewhat less than the available bytes on the sample file directory's
-filesystem, as the currently-writing sample files are not included in
-this sum. Be sure also to subtract out the filesystem's reserve for root
-(typically 5%).
+    $ sudo -u moonfire-nvr moonfire-nvr config
 
-In the following example, we generate a uuid which is then later used
-to uniquely identify this camera. Thus, you will generate a new one for
-each camera you insert using this method.
+In the user interface, add your cameras under the "Edit cameras" dialog.
+There's a "Test" button to verify your settings directly from the dialog.
 
-    $ uuidgen | sed -e 's/-//g'
-    b47f48706d91414591cd6c931bf836b4
-    $ sudo -u moonfire-nvr sqlite3 ~moonfire-nvr/db/db
-    sqlite3> insert into camera (
-        ...>     uuid, short_name, description, host, username, password,
-        ...>     main_rtsp_path, sub_rtsp_path, retain_bytes,
-        ...>     next_recording_id) values (
-        ...>     X'b47f48706d91414591cd6c931bf836b4', 'driveway',
-        ...>     'Longer description of this camera', '192.168.1.101',
-        ...>     'admin', '12345', '/Streaming/Channels/1',
-        ...>     '/Streaming/Channels/2', 104857600, 0);
-    sqlite3> ^D
+After the cameras look correct, go to "Edit retention" to assign disk space to
+each camera. Leave a little slack (at least 100 MB per camera) between the total
+limit and the filesystem capacity, even if you store nothing else on the disk.
+There are several reasons this is needed:
 
-### Using automatic camera configuration inclusion with `prep.sh`
+   * The limit currently controls fully-written files only. There will be up
+     to two minutes of video per camera of additional video.
+   * The rotation happens after the limit is exceeded, not proactively.
+   * Moonfire NVR currently doesn't account for the unused space in the final
+     filesystem block at the end of each file.
+   * Moonfire NVR doesn't account for the space used for directory listings.
+   * If a file is open when it is deleted (such as if a HTTP client is
+     downloading it), it stays around until the file is closed. Moonfire NVR
+     currently doesn't account for this.
 
-Not withstanding the instructions above, you can also prepare a file named
-`cameras.sql` before you run the `prep.sh` script. The format of this file
-should be something like in the example below for two cameras (SQL gives you
-lots of freedom in the use of blank space and newlines, so this is formatted
-for easy reading, and editing, and does not have to be altered in formatting,
-but can if you wish and know what you are doing):
+When finished, start the daemon:
 
-    insert into camera (
-            uuid,
-            short_name, description,
-            host, username, password,
-            main_rtsp_path, sub_rtsp_path,
-            retain_bytes, next_recording_id
-        )
-        values
-        (
-            X'1c944181b8074b8083eb579c8e194451',
-            'Front Left', 'Front Left Driveway',
-            '192.168.1.41',
-            'admin', 'secret',
-            '/Streaming/Channels/1', '/Streaming/Channels/2',
-            346870912000, 0
-        ),
-        (
-            X'da5921f493ac4279aafe68e69e174026',
-            'Front Right', 'Front Right Driveway',
-            '192.168.1.42',
-            'admin', 'secret',
-            '/Streaming/Channels/1', '/Streaming/Channels/2',
-            346870912000, 0
-        );
-
-You'll still have to find the correct rtsp paths, usernames and passwords, and
-set retained byte counts, as explained above.
+    $ sudo systemctl start moonfire-nvr
 
 ## System Service
 
@@ -290,9 +240,9 @@ directly exposed to the Internet.
 Complete the installation through `systemctl` commands:
 
     $ sudo systemctl daemon-reload
-    $ sudo systemctl start moonfire-nvr.service
-    $ sudo systemctl status moonfire-nvr.service
-    $ sudo systemctl enable moonfire-nvr.service
+    $ sudo systemctl start moonfire-nvr
+    $ sudo systemctl status moonfire-nvr
+    $ sudo systemctl enable moonfire-nvr
 
 See the [systemd](http://www.freedesktop.org/wiki/Software/systemd/)
 documentation for more information. The [manual

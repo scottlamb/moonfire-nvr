@@ -43,7 +43,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::mem;
 use std::os::unix::io::FromRawFd;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::thread;
 use uuid::Uuid;
@@ -97,6 +97,16 @@ impl Fd {
             return Err(io::Error::last_os_error().into());
         }
         Ok(())
+    }
+
+    pub fn statfs(&self) -> Result<libc::statvfs, io::Error> {
+        unsafe {
+            let mut stat: libc::statvfs = mem::zeroed();
+            if libc::fstatvfs(self.0, &mut stat) < 0 {
+                return Err(io::Error::last_os_error())
+            }
+            Ok(stat)
+        }
     }
 }
 
@@ -152,6 +162,8 @@ impl SampleFileDir {
         };
         Writer::open(f, uuid, prev, camera_id, video_sample_entry_id, channel)
     }
+
+    pub fn statfs(&self) -> Result<libc::statvfs, io::Error> { self.fd.statfs() }
 
     /// Opens a sample file within this directory with the given flags and (if creating) mode.
     fn open_int(&self, uuid: Uuid, flags: libc::c_int, mode: libc::c_int)
@@ -215,11 +227,10 @@ enum SyncerCommand {
 pub struct SyncerChannel(mpsc::Sender<SyncerCommand>);
 
 /// State of the worker thread.
-struct SyncerState {
+struct Syncer {
     dir: Arc<SampleFileDir>,
     to_unlink: Vec<Uuid>,
     to_mark_deleted: Vec<Uuid>,
-    cmds: mpsc::Receiver<SyncerCommand>,
 }
 
 /// Starts a syncer for the given sample file directory.
@@ -234,15 +245,71 @@ pub fn start_syncer(dir: Arc<SampleFileDir>)
                     -> Result<(SyncerChannel, thread::JoinHandle<()>), Error> {
     let to_unlink = dir.db.lock().list_reserved_sample_files()?;
     let (snd, rcv) = mpsc::channel();
-    let mut state = SyncerState {
+    let mut syncer = Syncer {
         dir: dir,
         to_unlink: to_unlink,
         to_mark_deleted: Vec::new(),
-        cmds: rcv,
     };
-    state.initial_rotation()?;
+    syncer.initial_rotation()?;
     Ok((SyncerChannel(snd),
-        thread::Builder::new().name("syncer".into()).spawn(move || state.run()).unwrap()))
+        thread::Builder::new().name("syncer".into()).spawn(move || syncer.run(rcv)).unwrap()))
+}
+
+pub struct NewLimit {
+    pub camera_id: i32,
+    pub limit: i64,
+}
+
+/// Deletes recordings if necessary to fit within the given new `retain_bytes` limit.
+/// Note this doesn't change the limit in the database; it only deletes files.
+/// Pass a limit of 0 to delete all recordings associated with a camera.
+pub fn lower_retention(dir: Arc<SampleFileDir>, limits: &[NewLimit]) -> Result<(), Error> {
+    let to_unlink = dir.db.lock().list_reserved_sample_files()?;
+    let mut syncer = Syncer {
+        dir: dir,
+        to_unlink: to_unlink,
+        to_mark_deleted: Vec::new(),
+    };
+    syncer.do_rotation(|db| {
+        let mut to_delete = Vec::new();
+        for l in limits {
+            let before = to_delete.len();
+            let camera = db.cameras_by_id().get(&l.camera_id)
+                           .ok_or_else(|| Error::new(format!("no such camera {}", l.camera_id)))?;
+            if l.limit >= camera.sample_file_bytes { continue }
+            get_rows_to_delete(db, l.camera_id, camera, camera.retain_bytes - l.limit,
+                               &mut to_delete)?;
+            info!("camera {}, {}->{}, deleting {} rows", camera.short_name,
+                  camera.sample_file_bytes, l.limit, to_delete.len() - before);
+        }
+        Ok(to_delete)
+    })
+}
+
+/// Gets rows to delete to bring a camera's disk usage within bounds.
+fn get_rows_to_delete(db: &db::LockedDatabase, camera_id: i32,
+                      camera: &db::Camera, extra_bytes_needed: i64,
+                      to_delete: &mut Vec<db::ListOldestSampleFilesRow>) -> Result<(), Error> {
+    let bytes_needed = camera.sample_file_bytes + extra_bytes_needed - camera.retain_bytes;
+    let mut bytes_to_delete = 0;
+    if bytes_needed <= 0 {
+        debug!("{}: have remaining quota of {}", camera.short_name, -bytes_needed);
+        return Ok(());
+    }
+    let mut n = 0;
+    db.list_oldest_sample_files(camera_id, |row| {
+        bytes_to_delete += row.sample_file_bytes as i64;
+        to_delete.push(row);
+        n += 1;
+        bytes_needed > bytes_to_delete  // continue as long as more deletions are needed.
+    })?;
+    if bytes_needed > bytes_to_delete {
+        return Err(Error::new(format!("{}: couldn't find enough files to delete: {} left.",
+                                      camera.short_name, bytes_needed)));
+    }
+    info!("{}: deleting {} bytes in {} recordings ({} bytes needed)",
+          camera.short_name, bytes_to_delete, n, bytes_needed);
+    Ok(())
 }
 
 impl SyncerChannel {
@@ -265,10 +332,10 @@ impl SyncerChannel {
     }
 }
 
-impl SyncerState {
-    fn run(&mut self) {
+impl Syncer {
+    fn run(&mut self, cmds: mpsc::Receiver<SyncerCommand>) {
         loop {
-            match self.cmds.recv() {
+            match cmds.recv() {
                 Err(_) => return,  // all senders have closed the channel; shutdown
                 Ok(SyncerCommand::AsyncSaveRecording(recording, f)) => self.save(recording, f),
                 Ok(SyncerCommand::AsyncAbandonRecording(uuid)) => self.abandon(uuid),
@@ -280,16 +347,25 @@ impl SyncerState {
 
     /// Rotates files for all cameras and deletes stale reserved uuids from previous runs.
     fn initial_rotation(&mut self) -> Result<(), Error> {
-        let mut to_delete = Vec::new();
-        {
-            let mut db = self.dir.db.lock();
+        self.do_rotation(|db| {
+            let mut to_delete = Vec::new();
             for (camera_id, camera) in db.cameras_by_id() {
-                self.get_rows_to_delete(&db, *camera_id, camera, 0, &mut to_delete)?;
+                get_rows_to_delete(&db, *camera_id, camera, 0, &mut to_delete)?;
             }
+            Ok(to_delete)
+        })
+    }
+
+    fn do_rotation<F>(&mut self, get_rows_to_delete: F) -> Result<(), Error>
+    where F: FnOnce(&db::LockedDatabase) -> Result<Vec<db::ListOldestSampleFilesRow>, Error> {
+        let to_delete = {
+            let mut db = self.dir.db.lock();
+            let to_delete = get_rows_to_delete(&*db)?;
             let mut tx = db.tx()?;
             tx.delete_recordings(&to_delete)?;
             tx.commit()?;
-        }
+            to_delete
+        };
         for row in to_delete {
             self.to_unlink.push(row.uuid);
         }
@@ -345,8 +421,8 @@ impl SyncerState {
             let camera =
                 db.cameras_by_id().get(&recording.camera_id)
                   .ok_or_else(|| Error::new(format!("no such camera {}", recording.camera_id)))?;
-            self.get_rows_to_delete(&db, recording.camera_id, camera,
-                                    recording.sample_file_bytes as i64, &mut to_delete)?;
+            get_rows_to_delete(&db, recording.camera_id, camera,
+                               recording.sample_file_bytes as i64, &mut to_delete)?;
         }
         let mut tx = db.tx()?;
         tx.mark_sample_files_deleted(&self.to_mark_deleted)?;
@@ -360,32 +436,6 @@ impl SyncerState {
 
         self.to_mark_deleted.clear();
         self.to_unlink.extend(to_delete.iter().map(|row| row.uuid));
-        Ok(())
-    }
-
-    /// Gets rows to delete to bring a camera's disk usage within bounds.
-    fn get_rows_to_delete(&self, db: &MutexGuard<db::LockedDatabase>, camera_id: i32,
-                          camera: &db::Camera, extra_bytes_needed: i64,
-                          to_delete: &mut Vec<db::ListOldestSampleFilesRow>) -> Result<(), Error> {
-        let bytes_needed = camera.sample_file_bytes + extra_bytes_needed - camera.retain_bytes;
-        let mut bytes_to_delete = 0;
-        if bytes_needed <= 0 {
-            debug!("{}: have remaining quota of {}", camera.short_name, -bytes_needed);
-            return Ok(());
-        }
-        let mut n = 0;
-        db.list_oldest_sample_files(camera_id, |row| {
-            bytes_to_delete += row.sample_file_bytes as i64;
-            to_delete.push(row);
-            n += 1;
-            bytes_needed > bytes_to_delete  // continue as long as more deletions are needed.
-        })?;
-        if bytes_needed > bytes_to_delete {
-            return Err(Error::new(format!("{}: couldn't find enough files to delete: {} left.",
-                                          camera.short_name, bytes_needed)));
-        }
-        info!("{}: deleting {} bytes in {} recordings ({} bytes needed)",
-              camera.short_name, bytes_to_delete, n, bytes_needed);
         Ok(())
     }
 

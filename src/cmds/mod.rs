@@ -40,6 +40,7 @@ use slog_term;
 use std::path::Path;
 
 mod check;
+mod config;
 mod init;
 mod run;
 mod ts;
@@ -48,6 +49,7 @@ mod upgrade;
 #[derive(Debug, RustcDecodable)]
 pub enum Command {
     Check,
+    Config,
     Init,
     Run,
     Ts,
@@ -58,6 +60,7 @@ impl Command {
     pub fn run(&self) -> Result<(), Error> {
         match *self {
             Command::Check => check::run(),
+            Command::Config => config::run(),
             Command::Init => init::run(),
             Command::Run => run::run(),
             Command::Ts => ts::run(),
@@ -71,7 +74,7 @@ impl Command {
 /// Sync logging should be preferred for other modes because async apparently is never flushed
 /// before the program exits, and partial output from these tools is very confusing.
 fn install_logger(async: bool) {
-    let drain = slog_term::StreamerBuilder::new();
+    let drain = slog_term::StreamerBuilder::new().stderr();
     let drain = slog_envlogger::new(if async { drain.async() } else { drain }.full().build());
     slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
 }

@@ -42,6 +42,11 @@ serde_codegen = "0.8"
 [dev-dependencies]
 tempdir = "0.3"
 
+[dependencies.cursive]
+version = "0.4"
+#default-features = false
+#features = ["termion"]
+
 [dependencies.ffmpeg]
 git = "https://github.com/scottlamb/rust-ffmpeg"
 branch = "2.x"

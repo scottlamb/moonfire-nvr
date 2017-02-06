@@ -34,7 +34,6 @@
 # Script to prepare for moonfire-nvr operations
 #
 # Command line options:
-# -D: Skip database initialization
 # -S: Skip apt-get update and install
 #
 
@@ -106,7 +105,6 @@ NVR_GROUP="${NVR_GROUP:-$NVR_USER}"
 NVR_PORT="${NVR_PORT:-8080}"
 NVR_HOME_BASE="${NVR_HOME_BASE:-/var/lib}"
 NVR_HOME="${NVR_HOME_BASE}/${NVR_USER}"
-DB_NAME="${DB_NAME:-db}"
 DB_DIR="${DB_DIR:-$NVR_HOME/db}"
 SAMPLES_DIR_NAME="${SAMPLES_DIR_NAME:-samples}"
 SAMPLES_DIR="${SAMPLES_DIR:-$NVR_HOME/$SAMPLES_DIR_NAME}"
@@ -214,13 +212,7 @@ echo 'Create database...'; echo
 if [ ! -d "${DB_DIR}" ]; then
 	sudo -u ${NVR_USER} -H mkdir "${DB_DIR}"
 fi
-DB_PATH="${DB_DIR}/${DB_NAME}"
-CAMERAS_PATH="${SRC_DIR}/../cameras.sql"
-[ "${SKIP_DB:-0}" == 0 ] && sudo -u ${NVR_USER} -H ${SERVICE_BIN} init --db-dir="${DB_PATH}"
-if [ -r "${CAMERAS_PATH}" ]; then
-	echo 'Add cameras...'; echo
-	sudo -u ${NVR_USER} -H sqlite3 "${DB_PATH}" < "${CAMERAS_PATH}"
-fi
+sudo -u ${NVR_USER} -H ${SERVICE_BIN} init --db-dir="${DB_DIR}"
 
 # Prepare service files
 #

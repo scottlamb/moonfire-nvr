@@ -342,6 +342,18 @@ pub struct Camera {
     next_recording_id: i32,
 }
 
+/// Information about a camera, used by `add_camera` and `update_camera`.
+#[derive(Debug)]
+pub struct CameraChange {
+    pub short_name: String,
+    pub description: String,
+    pub host: String,
+    pub username: String,
+    pub password: String,
+    pub main_rtsp_path: String,
+    pub sub_rtsp_path: String,
+}
+
 /// Adds `delta` to the day represented by `day` in the map `m`.
 /// Inserts a map entry if absent; removes the entry if it has 0 entries on exit.
 fn adjust_day(day: CameraDayKey, delta: CameraDayValue,
@@ -527,6 +539,9 @@ struct CameraModification {
 
     /// Reset the next_recording_id to the specified value.
     new_next_recording_id: Option<i32>,
+
+    /// Reset the retain_bytes to the specified value.
+    new_retain_bytes: Option<i64>,
 }
 
 fn composite_id(camera_id: i32, recording_id: i32) -> i64 {
@@ -667,6 +682,26 @@ impl<'a> Transaction<'a> {
         Ok(())
     }
 
+    /// Updates the `retain_bytes` for the given camera to the specified limit.
+    /// Note this just resets the limit in the database; it's the caller's responsibility to ensure
+    /// current usage is under the new limit if desired.
+    pub fn update_retention(&mut self, camera_id: i32, new_limit: i64) -> Result<(), Error> {
+        if new_limit < 0 {
+            return Err(Error::new(format!("can't set limit for camera {} to {}; must be >= 0",
+                                          camera_id, new_limit)));
+        }
+        self.check_must_rollback()?;
+        let mut stmt =
+            self.tx.prepare_cached("update camera set retain_bytes = :retain where id = :id")?;
+        let changes = stmt.execute_named(&[(":retain", &new_limit), (":id", &camera_id)])?;
+        if changes != 1 {
+            return Err(Error::new(format!("no such camera {}", camera_id)));
+        }
+        let mut m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, camera_id);
+        m.new_retain_bytes = Some(new_limit);
+        Ok(())
+    }
+
     /// Commits these changes, consuming the Transaction.
     pub fn commit(mut self) -> Result<(), Error> {
         self.check_must_rollback()?;
@@ -683,6 +718,9 @@ impl<'a> Transaction<'a> {
             camera.range = m.range.clone();
             if let Some(id) = m.new_next_recording_id {
                 camera.next_recording_id = id;
+            }
+            if let Some(b) = m.new_retain_bytes {
+                camera.retain_bytes = b;
             }
         }
         Ok(())
@@ -706,6 +744,7 @@ impl<'a> Transaction<'a> {
                 range: None,
                 days: BTreeMap::new(),
                 new_next_recording_id: None,
+                new_retain_bytes: None,
             }
         })
     }
@@ -1102,6 +1141,102 @@ impl LockedDatabase {
         }));
 
         Ok(id)
+    }
+
+    /// Adds a camera.
+    pub fn add_camera(&mut self, camera: CameraChange) -> Result<i32, Error> {
+        let uuid = Uuid::new_v4();
+        let uuid_bytes = &uuid.as_bytes()[..];
+        let mut stmt = self.conn.prepare_cached(r#"
+            insert into camera (uuid, short_name, description, host, username, password,
+                                main_rtsp_path, sub_rtsp_path, retain_bytes, next_recording_id)
+                        values (:uuid, :short_name, :description, :host, :username, :password,
+                                :main_rtsp_path, :sub_rtsp_path, 0, 1)
+        "#)?;
+        stmt.execute_named(&[
+            (":uuid", &uuid_bytes),
+            (":short_name", &camera.short_name),
+            (":description", &camera.description),
+            (":host", &camera.host),
+            (":username", &camera.username),
+            (":password", &camera.password),
+            (":main_rtsp_path", &camera.main_rtsp_path),
+            (":sub_rtsp_path", &camera.sub_rtsp_path),
+        ])?;
+        let id = self.conn.last_insert_rowid() as i32;
+        self.state.cameras_by_id.insert(id, Camera{
+            id: id,
+            uuid: uuid,
+            short_name: camera.short_name,
+            description: camera.description,
+            host: camera.host,
+            username: camera.username,
+            password: camera.password,
+            main_rtsp_path: camera.main_rtsp_path,
+            sub_rtsp_path: camera.sub_rtsp_path,
+            retain_bytes: 0,
+            range: None,
+            sample_file_bytes: 0,
+            duration: recording::Duration(0),
+            days: BTreeMap::new(),
+            next_recording_id: 1,
+        });
+        self.state.cameras_by_uuid.insert(uuid, id);
+        Ok(id)
+    }
+
+    /// Updates a camera.
+    pub fn update_camera(&mut self, id: i32, camera: CameraChange) -> Result<(), Error> {
+        let mut stmt = self.conn.prepare_cached(r#"
+            update camera set
+                short_name = :short_name,
+                description = :description,
+                host = :host,
+                username = :username,
+                password = :password,
+                main_rtsp_path = :main_rtsp_path,
+                sub_rtsp_path = :sub_rtsp_path
+            where
+                id = :id
+        "#)?;
+        stmt.execute_named(&[
+            (":id", &id),
+            (":short_name", &camera.short_name),
+            (":description", &camera.description),
+            (":host", &camera.host),
+            (":username", &camera.username),
+            (":password", &camera.password),
+            (":main_rtsp_path", &camera.main_rtsp_path),
+            (":sub_rtsp_path", &camera.sub_rtsp_path),
+        ])?;
+        let c = self.state.cameras_by_id.get_mut(&id).unwrap();
+        c.short_name = camera.short_name;
+        c.description = camera.description;
+        c.host = camera.host;
+        c.username = camera.username;
+        c.password = camera.password;
+        c.main_rtsp_path = camera.main_rtsp_path;
+        c.sub_rtsp_path = camera.sub_rtsp_path;
+        Ok(())
+    }
+
+    /// Deletes a camera. The camera must have no recordings.
+    pub fn delete_camera(&mut self, id: i32) -> Result<(), Error> {
+        let (has_recordings, uuid) =
+            self.state.cameras_by_id.get(&id)
+                .map(|c| (c.range.is_some(), c.uuid))
+                .ok_or_else(|| Error::new(format!("No such camera {} to remove", id)))?;
+        if has_recordings {
+            return Err(Error::new(format!("Can't remove camera {}; has recordings.", id)));
+        };
+        let mut stmt = self.conn.prepare_cached(r"delete from camera where id = :id")?;
+        let rows = stmt.execute_named(&[(":id", &id)])?;
+        if rows != 1 {
+            return Err(Error::new(format!("Camera {} missing from database", id)));
+        }
+        self.state.cameras_by_id.remove(&id);
+        self.state.cameras_by_uuid.remove(&uuid);
+        return Ok(())
     }
 }
 

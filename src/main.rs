@@ -93,6 +93,7 @@ Commands:
     check                  Check database integrity
     init                   Initialize a database
     run                    Run the daemon: record from cameras and handle HTTP requests
+    shell                  Start an interactive shell to modify the database
     ts                     Translate between human-readable and numeric timestamps
     upgrade                Upgrade the database to the latest schema
 ";
