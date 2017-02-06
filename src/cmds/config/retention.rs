@@ -195,8 +195,7 @@ pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &m
             }
         }
         let stat = dir.statfs().unwrap();
-        let fs_capacity = (stat.f_bsize * (stat.f_blocks - stat.f_bfree + stat.f_bavail)) as i64 -
-                          total_used;
+        let fs_capacity = stat.f_bsize as i64 * stat.f_bavail as i64 + total_used;
         Rc::new(RefCell::new(Model{
             dir: dir.clone(),
             db: db.clone(),
