@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use db;
-use serde::ser::Serializer;
+use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -73,23 +73,23 @@ impl<'a> Camera<'a> {
     }
 
     fn serialize_days<S>(days: &Option<&BTreeMap<db::CameraDayKey, db::CameraDayValue>>,
-                         serializer: &mut S) -> Result<(), S::Error>
+                         serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
         let days = match *days {
             Some(d) => d,
-            None => return Ok(()),
+            None => return serializer.serialize_none(),
         };
-        let mut state = serializer.serialize_map(Some(days.len()))?;
+        let mut map = serializer.serialize_map(Some(days.len()))?;
         for (k, v) in days {
-            serializer.serialize_map_key(&mut state, k.as_ref())?;
+            map.serialize_key(k.as_ref())?;
             let bounds = k.bounds();
-            serializer.serialize_map_value(&mut state, &CameraDayValue{
+            map.serialize_value(&CameraDayValue{
                 start_time_90k: bounds.start.0,
                 end_time_90k: bounds.end.0,
                 total_duration_90k: v.duration.0,
             })?;
         }
-        serializer.serialize_map_end(state)
+        map.end()
     }
 }
 
@@ -104,13 +104,13 @@ impl<'a> ListCameras<'a> {
     /// Serializes cameras as a list (rather than a map), wrapping each camera in the
     /// `ListCamerasCamera` type to tweak the data returned.
     fn serialize_cameras<S>(cameras: &BTreeMap<i32, db::Camera>,
-                            serializer: &mut S) -> Result<(), S::Error>
+                            serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
-        let mut state = serializer.serialize_seq(Some(cameras.len()))?;
+        let mut seq = serializer.serialize_seq(Some(cameras.len()))?;
         for c in cameras.values() {
-            serializer.serialize_seq_elt(&mut state, &Camera::new(c, false))?;
+            seq.serialize_element(&Camera::new(c, false))?;
         }
-        serializer.serialize_seq_end(state)
+        seq.end()
     }
 }
 

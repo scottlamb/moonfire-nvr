@@ -103,11 +103,8 @@ all non-Rust dependencies:
                    libncursesw-dev \
                    libsqlite3-dev
 
-Next, you need Rust and Cargo. The easiest way to install them is by following
-the instructions at [rustup.rs](https://www.rustup.rs/). Note that Rust 1.13
-has a serious bug on ARM ([see
-announcement](https://blog.rust-lang.org/2016/11/10/Rust-1.13.html)); on those
-platforms, prefer using Rust 1.14 betas instead.
+Next, you need Rust 1.15+ and Cargo. The easiest way to install them is by following
+the instructions at [rustup.rs](https://www.rustup.rs/).
 
 You can continue to follow the build/install instructions below for a manual
 build and install, or alternatively you can run the prep script called `prep.sh`.

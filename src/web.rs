@@ -35,6 +35,7 @@ use core::str::FromStr;
 use db;
 use dir::SampleFileDir;
 use error::Error;
+use json;
 use http_entity;
 use hyper::{header,server,status};
 use hyper::uri::RequestUri;
@@ -65,8 +66,6 @@ lazy_static! {
     /// `START_ID[-END_ID][.[REL_START_TIME]-[REL_END_TIME]]`.
     static ref SEGMENTS_RE: Regex = Regex::new(r"^(\d+)(-\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
 }
-
-mod json { include!(concat!(env!("OUT_DIR"), "/serde_types.rs")); }
 
 enum Path {
     CamerasList,              // "/" or "/cameras/"
