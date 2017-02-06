@@ -100,7 +100,7 @@ all non-Rust dependencies:
                    libavcodec-dev \
                    libavformat-dev \
                    libavutil-dev \
-                   libncursesw-dev \
+                   libncurses5w-dev \
                    libsqlite3-dev
 
 Next, you need Rust 1.15+ and Cargo. The easiest way to install them is by following

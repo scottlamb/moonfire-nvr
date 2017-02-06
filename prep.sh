@@ -116,8 +116,6 @@ SERVICE_BIN="${SERVICE_BIN:-/usr/local/bin/moonfire-nvr}"
 #
 while getopts ":DS" opt; do
 	case $opt in
-	  D)	SKIP_DB=1
-		;;
 	  S)	SKIP_APT=1
 		;;
 	  :)
@@ -141,9 +139,8 @@ if [ "${SKIP_APT:-0}" != 1 ]; then
 		libavcodec-dev \
 		libavformat-dev \
 		libavutil-dev \
-		sqlite3 \
-		libsqlite3-dev \
-		uuid-runtime
+		libncurses5w-dev \
+		libsqlite3-dev
 fi
 
 # Check if binary is installed. Setup for build if it is not
