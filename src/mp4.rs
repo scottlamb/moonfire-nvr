@@ -1709,48 +1709,13 @@ mod tests {
 mod bench {
     extern crate test;
 
-    use db;
     use hyper;
     use hyper::header;
-    use recording::{self, TIME_UNITS_PER_SEC};
     use http_entity;
     use self::test::Bencher;
     use std::str;
     use super::tests::create_mp4_from_db;
-    use testutil::{self, TestDb, TEST_CAMERA_ID};
-    #[cfg(feature="nightly")] use uuid::Uuid;
-
-    fn add_dummy_recordings_to_db(db: &db::Database) {
-        let mut data = Vec::new();
-        data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
-        let mut db = db.lock();
-        let video_sample_entry_id = db.insert_video_sample_entry(1920, 1080, &[0u8; 100]).unwrap();
-        const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-        const DURATION: recording::Duration = recording::Duration(5399985);
-        let mut recording = db::RecordingToInsert{
-            camera_id: TEST_CAMERA_ID,
-            sample_file_bytes: 30104460,
-            flags: 0,
-            time: START_TIME .. (START_TIME + DURATION),
-            local_time_delta: recording::Duration(0),
-            video_samples: 1800,
-            video_sync_samples: 60,
-            video_sample_entry_id: video_sample_entry_id,
-            sample_file_uuid: Uuid::nil(),
-            video_index: data,
-            sample_file_sha1: [0; 20],
-            run_offset: 0,
-        };
-        let mut tx = db.tx().unwrap();
-        tx.bypass_reservation_for_testing = true;
-        for _ in 0..60 {
-            tx.insert_recording(&recording).unwrap();
-            recording.time.start += DURATION;
-            recording.time.end += DURATION;
-            recording.run_offset += 1;
-        }
-        tx.commit().unwrap();
-    }
+    use testutil::{self, TestDb};
 
     /// An HTTP server for benchmarking.
     /// It's used as a singleton via `lazy_static!` for two reasons:
@@ -1779,7 +1744,7 @@ mod bench {
             let url = hyper::Url::parse(
                 format!("http://{}:{}/", addr.ip(), addr.port()).as_str()).unwrap();
             let db = TestDb::new();
-            add_dummy_recordings_to_db(&db.db);
+            testutil::add_dummy_recordings_to_db(&db.db, 60);
             let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
             let p = mp4.initial_sample_byte_pos;
             use std::thread::spawn;
@@ -1853,7 +1818,7 @@ mod bench {
     fn mp4_construction(b: &mut Bencher) {
         testutil::init();
         let db = TestDb::new();
-        add_dummy_recordings_to_db(&db.db);
+        testutil::add_dummy_recordings_to_db(&db.db, 60);
         b.iter(|| {
             create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
         });

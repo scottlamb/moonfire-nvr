@@ -539,7 +539,6 @@ impl Handler {
 impl server::Handler for Handler {
     fn handle(&self, req: server::Request, res: server::Response) {
         let (path, query) = get_path_and_query(&req.uri);
-        error!("path={:?}, query={:?}", path, query);
         let res = match decode_path(path) {
             Path::CamerasList => self.list_cameras(&req, res),
             Path::Camera(uuid) => self.camera(uuid, query, &req, res),
@@ -595,5 +594,57 @@ mod tests {
                    Segments::parse("1-5.-42").unwrap());
         assert_eq!(Segments{ids: 1..6, start_time: 26, end_time: Some(42)},
                    Segments::parse("1-5.26-42").unwrap());
+    }
+}
+
+#[cfg(all(test, feature="nightly"))]
+mod bench {
+    extern crate test;
+
+    use hyper;
+    use self::test::Bencher;
+    use std::str;
+    use testutil::{self, TestDb};
+
+    struct Server {
+        base_url: String,
+    }
+
+    impl Server {
+        fn new() -> Server {
+            let mut listener = hyper::net::HttpListener::new("127.0.0.1:0").unwrap();
+            use hyper::net::NetworkListener;
+            let addr = listener.local_addr().unwrap();
+            let server = hyper::Server::new(listener);
+            let url = format!("http://{}:{}", addr.ip(), addr.port());
+            let db = TestDb::new();
+            testutil::add_dummy_recordings_to_db(&db.db, 1440);
+            ::std::thread::spawn(move || {
+                let h = super::Handler::new(db.db.clone(), db.dir.clone());
+                let _ = server.handle(h);
+            });
+            Server{base_url: url}
+        }
+    }
+
+    lazy_static! {
+        static ref SERVER: Server = { Server::new() };
+    }
+
+    #[bench]
+    fn serve_camera_html(b: &mut Bencher) {
+        testutil::init();
+        let server = &*SERVER;
+        let url = hyper::Url::parse(&format!("{}/cameras/{}/", server.base_url,
+                                             *testutil::TEST_CAMERA_UUID)).unwrap();
+        let mut buf = Vec::new();
+        b.iter(|| {
+            let client = hyper::Client::new();
+            let mut resp = client.get(url.clone()).send().unwrap();
+            assert_eq!(resp.status, hyper::status::StatusCode::Ok);
+            buf.clear();
+            use std::io::Read;
+            resp.read_to_end(&mut buf).unwrap();
+        });
     }
 }

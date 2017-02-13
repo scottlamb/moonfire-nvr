@@ -72,11 +72,15 @@ pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
           check (composite_id >> 32 = camera_id)
         );
         create index recording_cover on recording (
+          camera_id,
           start_time_90k,
           duration_90k,
           video_samples,
+          video_sync_samples,
           video_sample_entry_id,
-          sample_file_bytes
+          sample_file_bytes,
+          run_offset,
+          flags
         );
         create table recording_playback (
           composite_id integer primary key references recording (composite_id),
