@@ -567,8 +567,8 @@ impl<'a> Transaction<'a> {
     /// `reserved_sample_files` table. The caller should `unlink` the files, then remove the
     /// reservation.
     pub fn delete_recordings(&mut self, rows: &[ListOldestSampleFilesRow]) -> Result<(), Error> {
-        let mut del1 = self.tx.prepare_cached(DELETE_RECORDING_SQL)?;
-        let mut del2 = self.tx.prepare_cached(DELETE_RECORDING_PLAYBACK_SQL)?;
+        let mut del1 = self.tx.prepare_cached(DELETE_RECORDING_PLAYBACK_SQL)?;
+        let mut del2 = self.tx.prepare_cached(DELETE_RECORDING_SQL)?;
         let mut insert = self.tx.prepare_cached(INSERT_RESERVATION_SQL)?;
 
         self.check_must_rollback()?;
@@ -1263,6 +1263,7 @@ pub struct Database(Mutex<LockedDatabase>);
 impl Database {
     /// Creates the database from a caller-supplied SQLite connection.
     pub fn new(conn: rusqlite::Connection) -> Result<Database, Error> {
+        conn.execute("pragma foreign_keys = on", &[])?;
         let list_recordings_by_time_sql = format!(r#"
             select
                 recording.composite_id,
