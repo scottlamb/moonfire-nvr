@@ -190,6 +190,16 @@ const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
         recording.composite_id
 "#;
 
+struct FromSqlUuid(Uuid);
+
+impl rusqlite::types::FromSql for FromSqlUuid {
+    fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
+        let uuid = Uuid::from_bytes(value.as_blob()?)
+            .map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(e)))?;
+        Ok(FromSqlUuid(uuid))
+    }
+}
+
 /// A concrete box derived from a ISO/IEC 14496-12 section 8.5.2 VisualSampleEntry box. Describes
 /// the codec, width, height, etc.
 #[derive(Debug)]
@@ -447,13 +457,6 @@ impl Camera {
         self.sample_file_bytes += sample_file_bytes as i64;
         adjust_days(r, 1, &mut self.days);
     }
-}
-
-/// Gets a uuid from the given SQLite row and column index.
-fn get_uuid<I: rusqlite::RowIndex>(row: &rusqlite::Row, i: I) -> Result<Uuid, Error> {
-    // TODO: avoid this extra allocation+copy into a Vec<u8>.
-    // See <https://github.com/jgallagher/rusqlite/issues/158>.
-    Ok(Uuid::from_bytes(row.get_checked::<_, Vec<u8>>(i)?.as_slice())?)
 }
 
 /// Initializes the recordings associated with the given camera.
@@ -966,8 +969,9 @@ impl LockedDatabase {
         let mut rows = stmt.query_named(&[(":composite_id", &composite_id)])?;
         if let Some(row) = rows.next() {
             let row = row?;
+            let uuid: FromSqlUuid = row.get_checked(0)?;
             let r = Arc::new(RecordingPlayback{
-                sample_file_uuid: get_uuid(&row, 0)?,
+                sample_file_uuid: uuid.0,
                 video_index: row.get_checked(1)?,
             });
             cache.insert(composite_id, r.clone());
@@ -983,7 +987,8 @@ impl LockedDatabase {
         let mut rows = stmt.query_named(&[])?;
         while let Some(row) = rows.next() {
             let row = row?;
-            reserved.push(get_uuid(&row, 0)?);
+            let uuid: FromSqlUuid = row.get_checked(0)?;
+            reserved.push(uuid.0);
         }
         Ok(reserved)
     }
@@ -1002,10 +1007,11 @@ impl LockedDatabase {
             let start = recording::Time(row.get_checked(2)?);
             let duration = recording::Duration(row.get_checked(3)?);
             let composite_id: i64 = row.get_checked(0)?;
+            let uuid: FromSqlUuid = row.get_checked(1)?;
             let should_continue = f(ListOldestSampleFilesRow{
                 recording_id: composite_id as i32,
                 camera_id: (composite_id >> 32) as i32,
-                uuid: get_uuid(&row, 1)?,
+                uuid: uuid.0,
                 time: start .. start + duration,
                 sample_file_bytes: row.get_checked(4)?,
             });
@@ -1078,10 +1084,10 @@ impl LockedDatabase {
         while let Some(row) = rows.next() {
             let row = row?;
             let id = row.get_checked(0)?;
-            let uuid = get_uuid(&row, 1)?;
+            let uuid: FromSqlUuid = row.get_checked(1)?;
             self.state.cameras_by_id.insert(id, Camera{
                 id: id,
-                uuid: uuid,
+                uuid: uuid.0,
                 short_name: row.get_checked(2)?,
                 description: row.get_checked(3)?,
                 host: row.get_checked(4)?,
@@ -1096,7 +1102,7 @@ impl LockedDatabase {
                 days: BTreeMap::new(),
                 next_recording_id: row.get_checked(10)?,
             });
-            self.state.cameras_by_uuid.insert(uuid, id);
+            self.state.cameras_by_uuid.insert(uuid.0, id);
         }
         info!("Loaded {} cameras", self.state.cameras_by_id.len());
         Ok(())
