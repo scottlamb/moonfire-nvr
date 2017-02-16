@@ -364,29 +364,24 @@ pub struct CameraChange {
     pub sub_rtsp_path: String,
 }
 
-/// Adds `delta` to the day represented by `day` in the map `m`.
+/// Adds non-zero `delta` to the day represented by `day` in the map `m`.
 /// Inserts a map entry if absent; removes the entry if it has 0 entries on exit.
 fn adjust_day(day: CameraDayKey, delta: CameraDayValue,
               m: &mut BTreeMap<CameraDayKey, CameraDayValue>) {
-    enum Do {
-        Insert,
-        Remove,
-        Nothing
-    };
-    let what_to_do = match m.get_mut(&day) {
-        None => {
-            Do::Insert
+    use ::std::collections::btree_map::Entry;
+    match m.entry(day) {
+        Entry::Vacant(e) => { e.insert(delta); },
+        Entry::Occupied(mut e) => {
+            let remove = {
+                let v = e.get_mut();
+                v.recordings += delta.recordings;
+                v.duration += delta.duration;
+                v.recordings == 0
+            };
+            if remove {
+                e.remove_entry();
+            }
         },
-        Some(ref mut v) => {
-            v.recordings += delta.recordings;
-            v.duration += delta.duration;
-            if v.recordings == 0 { Do::Remove } else { Do::Nothing }
-        },
-    };
-    match what_to_do {
-        Do::Insert => { m.insert(day, delta); },
-        Do::Remove => { m.remove(&day); },
-        Do::Nothing => {},
     }
 }
 
