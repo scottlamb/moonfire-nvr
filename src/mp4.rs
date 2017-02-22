@@ -82,15 +82,13 @@ extern crate time;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db;
 use dir;
-use error::{Error, Result};
+use error::Error;
 use http_entity;
 use hyper::header;
 use mmapfile;
 use openssl::hash;
-use pieces;
-use pieces::ContextWriter;
-use pieces::Slices;
 use recording::{self, TIME_UNITS_PER_SEC};
+use slices::{self, Slices};
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::cmp;
@@ -295,7 +293,7 @@ const STATIC_BYTESTRINGS: [&'static [u8]; 8] = [
 
 /// Enumeration of the static bytestrings. The order here must match the `STATIC_BYTESTRINGS`
 /// array. The advantage of this enum over direct pointers to the relevant strings is that it
-/// fits into a u32 on 64-bit platforms, allowing an `Mp4FileSlice` to fit into 8 bytes.
+/// fits into `Slice`'s 20-bit `p`.
 #[derive(Copy, Clone, Debug)]
 enum StaticBytestring {
     FtypBox,
@@ -347,8 +345,8 @@ struct Mp4Segment {
 }
 
 impl Mp4Segment {
-    fn with_index<F, R>(&self, db: &db::Database, f: F) -> Result<R>
-    where F: FnOnce(&Mp4SegmentIndex) -> Result<R> {
+    fn with_index<F, R>(&self, db: &db::Database, f: F) -> Result<R, Error>
+    where F: FnOnce(&Mp4SegmentIndex) -> Result<R, Error> {
         let mut i = self.index.borrow_mut();
         if let Some(ref i) = *i {
             return f(i);
@@ -359,7 +357,7 @@ impl Mp4Segment {
         r
     }
 
-    fn build_index(&self, db: &db::Database) -> Result<Mp4SegmentIndex> {
+    fn build_index(&self, db: &db::Database) -> Result<Mp4SegmentIndex, Error> {
         let s = &self.s;
         let stts_len = mem::size_of::<u32>() * 2 * (s.frames as usize);
         let stsz_len = mem::size_of::<u32>() * s.frames as usize;
@@ -423,7 +421,7 @@ pub struct Mp4FileBuilder {
 /// This is separated out from the rest so that it can be borrowed in a loop over
 /// `Mp4FileBuilder::segments`; otherwise this would cause a double-self-borrow.
 struct BodyState {
-    slices: Slices<Mp4FileSlice, Mp4File>,
+    slices: Slices<Slice, Mp4File>,
 
     /// `self.buf[unflushed_buf_pos .. self.buf.len()]` holds bytes that should be
     /// appended to `slices` before any other slice. See `flush_buf()`.
@@ -435,61 +433,86 @@ struct BodyState {
 /// some portion of the generated `.mp4` file. The box headers and such are generally in `Static`
 /// or `Buf` slices; the others generally represent a single segment's contribution to the
 /// like-named box.
-#[derive(Debug)]
-enum Mp4FileSlice {
-    Static(StaticBytestring),  // param is index into STATIC_BYTESTRINGS
-    Buf(u32),                  // param is index into m.buf
-    VideoSampleEntry(u32),     // param is index into m.video_sample_entries
-    Stts(u32),                 // param is index into m.segments
-    Stsz(u32),                 // param is index into m.segments
-    Co64,
-    Stss(u32),                 // param is index into m.segments
-    VideoSampleData(u32),      // param is index into m.segments
-    SubtitleSampleData(u32),   // param is index into m.segments
+///
+/// This is stored in a packed representation to be more cache-efficient:
+///
+///    * low 40 bits: end() (maximum 1 TiB).
+///    * next 4 bits: t(), the SliceType.
+///    * top 20 bits: p(), a parameter specified by the SliceType (maximum 1 Mi).
+struct Slice(u64);
+
+/// The type of a `Slice`.
+#[derive(Copy, Clone, Debug)]
+#[repr(u8)]
+enum SliceType {
+    Static = 0,              // param is index into STATIC_BYTESTRINGS
+    Buf = 1,                 // param is index into m.buf
+    VideoSampleEntry = 2,    // param is index into m.video_sample_entries
+    Stts = 3,                // param is index into m.segments
+    Stsz = 4,                // param is index into m.segments
+    Co64 = 5,                // param is unused
+    Stss = 6,                // param is index into m.segments
+    VideoSampleData = 7,     // param is index into m.segments
+    SubtitleSampleData = 8,  // param is index into m.segments
+
+    // There must be no value > 15, as this is packed into 4 bits in Slice.
 }
 
-impl ContextWriter<Mp4File> for Mp4FileSlice {
+impl Slice {
+    fn new(end: u64, t: SliceType, p: usize) -> Result<Self, Error> {
+        if end >= (1<<40) || p >= (1<<20) {
+            return Err(Error::new(format!("end={} p={} too large for Slice", end, p)));
+        }
+
+        Ok(Slice(end | ((t as u64) << 40) | ((p as u64) << 44)))
+    }
+}
+
+impl Slice {
+    fn t(&self) -> SliceType {
+        // This value is guaranteed to be a valid SliceType because it was copied from a SliceType
+        // in Slice::new.
+        unsafe { ::std::mem::transmute(((self.0 >> 40) & 0xF) as u8) }
+    }
+    fn p(&self) -> usize { (self.0 >> 44) as usize }
+}
+
+impl slices::Slice<Mp4File> for Slice {
+    fn end(&self) -> u64 { return self.0 & 0xFF_FF_FF_FF_FF }
     fn write_to(&self, f: &Mp4File, r: Range<u64>, l: u64, out: &mut io::Write)
-                -> Result<()> {
+                -> Result<(), Error> {
+        let t = self.t();
+        let p = self.p();
         trace!("write {:?}, range {:?} out of len {}", self, r, l);
-        match *self {
-            Mp4FileSlice::Static(off) => {
-                let s = STATIC_BYTESTRINGS[off as usize];
+        match t {
+            SliceType::Static => {
+                let s = STATIC_BYTESTRINGS[p];
                 let part = &s[r.start as usize .. r.end as usize];
                 out.write_all(part)?;
                 Ok(())
             },
-            Mp4FileSlice::Buf(off) => {
-                let off = off as usize;
-                out.write_all(
-                    &f.buf[off+r.start as usize .. off+r.end as usize])?;
+            SliceType::Buf => {
+                out.write_all(&f.buf[p+r.start as usize .. p+r.end as usize])?;
                 Ok(())
             },
-            Mp4FileSlice::VideoSampleEntry(off) => {
-                let e = &f.video_sample_entries[off as usize];
-                let part = &e.data[r.start as usize .. r.end as usize];
-                out.write_all(part)?;
+            SliceType::VideoSampleEntry => {
+                out.write_all(&f.video_sample_entries[p].data[r.start as usize .. r.end as usize])?;
                 Ok(())
             },
-            Mp4FileSlice::Stts(index) => {
-                f.write_stts(index as usize, r, l, out)
-            },
-            Mp4FileSlice::Stsz(index) => {
-                f.write_stsz(index as usize, r, l, out)
-            },
-            Mp4FileSlice::Co64 => {
-                f.write_co64(r, l, out)
-            },
-            Mp4FileSlice::Stss(index) => {
-                f.write_stss(index as usize, r, l, out)
-            },
-            Mp4FileSlice::VideoSampleData(index) => {
-                f.write_video_sample_data(index as usize, r, out)
-            },
-            Mp4FileSlice::SubtitleSampleData(index) => {
-                f.write_subtitle_sample_data(index as usize, r, l, out)
-            }
+            SliceType::Stts => f.write_stts(p, r, l, out),
+            SliceType::Stsz => f.write_stsz(p, r, l, out),
+            SliceType::Co64 => f.write_co64(r, l, out),
+            SliceType::Stss => f.write_stss(p, r, l, out),
+            SliceType::VideoSampleData => f.write_video_sample_data(p, r, out),
+            SliceType::SubtitleSampleData => f.write_subtitle_sample_data(p, r, l, out),
         }
+    }
+}
+
+impl ::std::fmt::Debug for Slice {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
+        // Write an unpacked representation. Omit end(); Slices writes that part.
+        write!(f, "{:?} {}", self.t(), self.p())
     }
 }
 
@@ -510,6 +533,7 @@ macro_rules! write_length {
                       $_self.body.unflushed_buf_pos as u64;
         BigEndian::write_u32(&mut $_self.body.buf[len_pos .. len_pos + 4],
                              (len_end - len_start) as u32);
+        Ok::<_, Error>(())
     }}
 }
 
@@ -544,7 +568,7 @@ impl Mp4FileBuilder {
 
     /// Appends a segment for (a subset of) the given recording.
     pub fn append(&mut self, db: &MutexGuard<db::LockedDatabase>, row: db::ListRecordingsRow,
-                  rel_range_90k: Range<i32>) -> Result<()> {
+                  rel_range_90k: Range<i32>) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero {
                 return Err(Error::new(format!(
@@ -566,7 +590,8 @@ impl Mp4FileBuilder {
     }
 
     /// Builds the `Mp4File`, consuming the builder.
-    pub fn build(mut self, db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>) -> Result<Mp4File> {
+    pub fn build(mut self, db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>)
+                 -> Result<Mp4File, Error> {
         let mut max_end = None;
         let mut etag = hash::Hasher::new(hash::MessageDigest::sha1())?;
         etag.update(&FORMAT_VERSION[..])?;
@@ -614,7 +639,7 @@ impl Mp4FileBuilder {
         self.body.slices.reserve(est_slices);
         const EST_BUF_LEN: usize = 2048;
         self.body.buf.reserve(EST_BUF_LEN);
-        self.body.append_static(StaticBytestring::FtypBox);
+        self.body.append_static(StaticBytestring::FtypBox)?;
         self.append_moov(creation_ts)?;
 
         // Write the mdat header. Use the large format to support files over 2^32-1 bytes long.
@@ -622,19 +647,19 @@ impl Mp4FileBuilder {
         // It'd be nice to use the until-EOF form, but QuickTime Player doesn't support it.
         self.body.buf.extend_from_slice(b"\x00\x00\x00\x01mdat\x00\x00\x00\x00\x00\x00\x00\x00");
         let mdat_len_pos = self.body.buf.len() - 8;
-        self.body.flush_buf();
+        self.body.flush_buf()?;
         let initial_sample_byte_pos = self.body.slices.len();
         for (i, s) in self.segments.iter().enumerate() {
             let r = s.s.sample_file_range();
-            self.body.slices.append(r.end - r.start, Mp4FileSlice::VideoSampleData(i as u32));
+            self.body.append_slice(r.end - r.start, SliceType::VideoSampleData, i)?;
         }
         if let Some(p) = self.subtitle_co64_pos {
             BigEndian::write_u64(&mut self.body.buf[p .. p + 8], self.body.slices.len());
             for (i, s) in self.segments.iter().enumerate() {
-                self.body.slices.append(
+                self.body.append_slice(
                     s.num_subtitle_samples as u64 *
                     (mem::size_of::<u16>() + SUBTITLE_LENGTH) as u64,
-                    Mp4FileSlice::SubtitleSampleData(i as u32));
+                    SliceType::SubtitleSampleData, i)?;
             }
         }
         // Fill in the length left as a placeholder above. Note the 16 here is the length
@@ -668,20 +693,19 @@ impl Mp4FileBuilder {
     }
 
     /// Appends a `MovieBox` (ISO/IEC 14496-12 section 8.2.1).
-    fn append_moov(&mut self, creation_ts: u32) -> Result<()> {
+    fn append_moov(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"moov");
-            self.append_mvhd(creation_ts);
+            self.append_mvhd(creation_ts)?;
             self.append_video_trak(creation_ts)?;
             if self.include_timestamp_subtitle_track {
-                self.append_subtitle_trak(creation_ts);
+                self.append_subtitle_trak(creation_ts)?;
             }
-        });
-        Ok(())
+        })
     }
 
     /// Appends a `MovieHeaderBox` version 0 (ISO/IEC 14496-12 section 8.2.2).
-    fn append_mvhd(&mut self, creation_ts: u32) {
+    fn append_mvhd(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mvhd\x00\x00\x00\x00");
             self.body.append_u32(creation_ts);
@@ -689,34 +713,33 @@ impl Mp4FileBuilder {
             self.body.append_u32(TIME_UNITS_PER_SEC as u32);
             let d = self.duration_90k;
             self.body.append_u32(d);
-            self.body.append_static(StaticBytestring::MvhdJunk);
+            self.body.append_static(StaticBytestring::MvhdJunk)?;
             let next_track_id = if self.include_timestamp_subtitle_track { 3 } else { 2 };
             self.body.append_u32(next_track_id);
-        });
+        })
     }
 
     /// Appends a `TrackBox` (ISO/IEC 14496-12 section 8.3.1) suitable for video.
-    fn append_video_trak(&mut self, creation_ts: u32) -> Result<()> {
+    fn append_video_trak(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"trak");
-            self.append_video_tkhd(creation_ts);
+            self.append_video_tkhd(creation_ts)?;
             self.maybe_append_video_edts()?;
-            self.append_video_mdia(creation_ts);
-        });
-        Ok(())
+            self.append_video_mdia(creation_ts)?;
+        })
     }
 
     /// Appends a `TrackBox` (ISO/IEC 14496-12 section 8.3.1) suitable for subtitles.
-    fn append_subtitle_trak(&mut self, creation_ts: u32) {
+    fn append_subtitle_trak(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"trak");
-            self.append_subtitle_tkhd(creation_ts);
-            self.append_subtitle_mdia(creation_ts);
-        });
+            self.append_subtitle_tkhd(creation_ts)?;
+            self.append_subtitle_mdia(creation_ts)?;
+        })
     }
 
     /// Appends a `TrackHeaderBox` (ISO/IEC 14496-12 section 8.3.2) suitable for video.
-    fn append_video_tkhd(&mut self, creation_ts: u32) {
+    fn append_video_tkhd(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             // flags 7: track_enabled | track_in_movie | track_in_preview
             self.body.buf.extend_from_slice(b"tkhd\x00\x00\x00\x07");
@@ -725,16 +748,16 @@ impl Mp4FileBuilder {
             self.body.append_u32(1);  // track_id
             self.body.append_u32(0);  // reserved
             self.body.append_u32(self.duration_90k);
-            self.body.append_static(StaticBytestring::TkhdJunk);
+            self.body.append_static(StaticBytestring::TkhdJunk)?;
             let width = self.video_sample_entries.iter().map(|e| e.width).max().unwrap();
             let height = self.video_sample_entries.iter().map(|e| e.height).max().unwrap();
             self.body.append_u32((width as u32) << 16);
             self.body.append_u32((height as u32) << 16);
-        });
+        })
     }
 
     /// Appends a `TrackHeaderBox` (ISO/IEC 14496-12 section 8.3.2) suitable for subtitles.
-    fn append_subtitle_tkhd(&mut self, creation_ts: u32) {
+    fn append_subtitle_tkhd(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             // flags 7: track_enabled | track_in_movie | track_in_preview
             self.body.buf.extend_from_slice(b"tkhd\x00\x00\x00\x07");
@@ -743,14 +766,14 @@ impl Mp4FileBuilder {
             self.body.append_u32(2);  // track_id
             self.body.append_u32(0);  // reserved
             self.body.append_u32(self.duration_90k);
-            self.body.append_static(StaticBytestring::TkhdJunk);
+            self.body.append_static(StaticBytestring::TkhdJunk)?;
             self.body.append_u32(0);  // width, unused.
             self.body.append_u32(0);  // height, unused.
-        });
+        })
     }
 
     /// Appends an `EditBox` (ISO/IEC 14496-12 section 8.6.5) suitable for video, if necessary.
-    fn maybe_append_video_edts(&mut self) -> Result<()> {
+    fn maybe_append_video_edts(&mut self) -> Result<(), Error> {
         #[derive(Debug, Default)]
         struct Entry {
             segment_duration: u64,
@@ -804,34 +827,33 @@ impl Mp4FileBuilder {
                     // media_rate_integer + media_rate_fraction: both fixed at 1
                     self.body.buf.extend_from_slice(b"\x00\x01\x00\x01");
                 }
-            });
-        });
-        Ok(())
+            })?;
+        })
     }
 
     /// Appends a `MediaBox` (ISO/IEC 14496-12 section 8.4.1) suitable for video.
-    fn append_video_mdia(&mut self, creation_ts: u32) {
+    fn append_video_mdia(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mdia");
-            self.append_mdhd(creation_ts);
-            self.body.append_static(StaticBytestring::VideoHdlrBox);
-            self.append_video_minf();
-        });
+            self.append_mdhd(creation_ts)?;
+            self.body.append_static(StaticBytestring::VideoHdlrBox)?;
+            self.append_video_minf()?;
+        })
     }
 
     /// Appends a `MediaBox` (ISO/IEC 14496-12 section 8.4.1) suitable for subtitles.
-    fn append_subtitle_mdia(&mut self, creation_ts: u32) {
+    fn append_subtitle_mdia(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mdia");
-            self.append_mdhd(creation_ts);
-            self.body.append_static(StaticBytestring::SubtitleHdlrBox);
-            self.append_subtitle_minf();
-        });
+            self.append_mdhd(creation_ts)?;
+            self.body.append_static(StaticBytestring::SubtitleHdlrBox)?;
+            self.append_subtitle_minf()?;
+        })
     }
 
     /// Appends a `MediaHeaderBox` (ISO/IEC 14496-12 section 8.4.2.) suitable for either the video
     /// or subtitle track.
-    fn append_mdhd(&mut self, creation_ts: u32) {
+    fn append_mdhd(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mdhd\x00\x00\x00\x00");
             self.body.append_u32(creation_ts);
@@ -839,65 +861,64 @@ impl Mp4FileBuilder {
             self.body.append_u32(TIME_UNITS_PER_SEC as u32);
             self.body.append_u32(self.duration_90k);
             self.body.append_u32(0x55c40000);  // language=und + pre_defined
-        });
+        })
     }
 
     /// Appends a `MediaInformationBox` (ISO/IEC 14496-12 section 8.4.4) suitable for video.
-    fn append_video_minf(&mut self) {
+    fn append_video_minf(&mut self) -> Result<(), Error> {
         write_length!(self, {
-            self.body.append_static(StaticBytestring::VideoMinfJunk);
-            self.append_video_stbl();
-        });
+            self.body.append_static(StaticBytestring::VideoMinfJunk)?;
+            self.append_video_stbl()?;
+        })
     }
 
     /// Appends a `MediaInformationBox` (ISO/IEC 14496-12 section 8.4.4) suitable for subtitles.
-    fn append_subtitle_minf(&mut self) {
+    fn append_subtitle_minf(&mut self) -> Result<(), Error> {
         write_length!(self, {
-            self.body.append_static(StaticBytestring::SubtitleMinfJunk);
-            self.append_subtitle_stbl();
-        });
+            self.body.append_static(StaticBytestring::SubtitleMinfJunk)?;
+            self.append_subtitle_stbl()?;
+        })
     }
 
     /// Appends a `SampleTableBox` (ISO/IEC 14496-12 section 8.5.1) suitable for video.
-    fn append_video_stbl(&mut self) {
+    fn append_video_stbl(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stbl");
-            self.append_video_stsd();
-            self.append_video_stts();
-            self.append_video_stsc();
-            self.append_video_stsz();
-            self.append_video_co64();
-            self.append_video_stss();
-        });
+            self.append_video_stsd()?;
+            self.append_video_stts()?;
+            self.append_video_stsc()?;
+            self.append_video_stsz()?;
+            self.append_video_co64()?;
+            self.append_video_stss()?;
+        })
     }
 
     /// Appends a `SampleTableBox` (ISO/IEC 14496-12 section 8.5.1) suitable for subtitles.
-    fn append_subtitle_stbl(&mut self) {
+    fn append_subtitle_stbl(&mut self) -> Result<(), Error> {
         write_length!(self, {
-            self.body.append_static(StaticBytestring::SubtitleStblJunk);
-            self.append_subtitle_stts();
-            self.append_subtitle_stsc();
-            self.append_subtitle_stsz();
-            self.append_subtitle_co64();
-        });
+            self.body.append_static(StaticBytestring::SubtitleStblJunk)?;
+            self.append_subtitle_stts()?;
+            self.append_subtitle_stsc()?;
+            self.append_subtitle_stsz()?;
+            self.append_subtitle_co64()?;
+        })
     }
 
     /// Appends a `SampleDescriptionBox` (ISO/IEC 14496-12 section 8.5.2) suitable for video.
-    fn append_video_stsd(&mut self) {
+    fn append_video_stsd(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsd\x00\x00\x00\x00");
             let n_entries = self.video_sample_entries.len() as u32;
             self.body.append_u32(n_entries);
-            self.body.flush_buf();
+            self.body.flush_buf()?;
             for (i, e) in self.video_sample_entries.iter().enumerate() {
-                self.body.slices.append(e.data.len() as u64,
-                                        Mp4FileSlice::VideoSampleEntry(i as u32));
+                self.body.append_slice(e.data.len() as u64, SliceType::VideoSampleEntry, i)?;
             }
-        });
+        })
     }
 
     /// Appends a `TimeToSampleBox` (ISO/IEC 14496-12 section 8.6.1) suitable for video.
-    fn append_video_stts(&mut self) {
+    fn append_video_stts(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stts\x00\x00\x00\x00");
             let mut entry_count = 0;
@@ -905,17 +926,16 @@ impl Mp4FileBuilder {
                 entry_count += s.s.frames as u32;
             }
             self.body.append_u32(entry_count);
-            self.body.flush_buf();
+            self.body.flush_buf()?;
             for (i, s) in self.segments.iter().enumerate() {
-                self.body.slices.append(
-                    2 * (mem::size_of::<u32>() as u64) * (s.s.frames as u64),
-                    Mp4FileSlice::Stts(i as u32));
+                self.body.append_slice(
+                    2 * (mem::size_of::<u32>() as u64) * (s.s.frames as u64), SliceType::Stts, i)?;
             }
-        });
+        })
     }
 
     /// Appends a `TimeToSampleBox` (ISO/IEC 14496-12 section 8.6.1) suitable for subtitles.
-    fn append_subtitle_stts(&mut self) {
+    fn append_subtitle_stts(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stts\x00\x00\x00\x00");
 
@@ -957,11 +977,11 @@ impl Mp4FileBuilder {
             }
             BigEndian::write_u32(&mut self.body.buf[entry_count_pos .. entry_count_pos + 4],
                                  entry_count);
-        });
+        })
     }
 
     /// Appends a `SampleToChunkBox` (ISO/IEC 14496-12 section 8.7.4) suitable for video.
-    fn append_video_stsc(&mut self) {
+    fn append_video_stsc(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsc\x00\x00\x00\x00");
             self.body.append_u32(self.segments.len() as u32);
@@ -974,21 +994,21 @@ impl Mp4FileBuilder {
                     |e| e.id == s.s.video_sample_entry_id).unwrap();
                 self.body.append_u32((i + 1) as u32);
             }
-        });
+        })
     }
 
     /// Appends a `SampleToChunkBox` (ISO/IEC 14496-12 section 8.7.4) suitable for subtitles.
-    fn append_subtitle_stsc(&mut self) {
+    fn append_subtitle_stsc(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(
                 b"stsc\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01");
             self.body.append_u32(self.num_subtitle_samples);
             self.body.append_u32(1);
-        });
+        })
     }
 
     /// Appends a `SampleSizeBox` (ISO/IEC 14496-12 section 8.7.3) suitable for video.
-    fn append_video_stsz(&mut self) {
+    fn append_video_stsz(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsz\x00\x00\x00\x00\x00\x00\x00\x00");
             let mut entry_count = 0;
@@ -996,48 +1016,47 @@ impl Mp4FileBuilder {
                 entry_count += s.s.frames as u32;
             }
             self.body.append_u32(entry_count);
-            self.body.flush_buf();
+            self.body.flush_buf()?;
             for (i, s) in self.segments.iter().enumerate() {
-                self.body.slices.append(
-                    (mem::size_of::<u32>()) as u64 * (s.s.frames as u64),
-                    Mp4FileSlice::Stsz(i as u32));
+                self.body.append_slice(
+                    (mem::size_of::<u32>()) as u64 * (s.s.frames as u64), SliceType::Stsz, i)?;
             }
-        });
+        })
     }
 
     /// Appends a `SampleSizeBox` (ISO/IEC 14496-12 section 8.7.3) suitable for subtitles.
-    fn append_subtitle_stsz(&mut self) {
+    fn append_subtitle_stsz(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsz\x00\x00\x00\x00");
             self.body.append_u32((mem::size_of::<u16>() + SUBTITLE_LENGTH) as u32);
             self.body.append_u32(self.num_subtitle_samples);
-        });
+        })
     }
 
     /// Appends a `ChunkLargeOffsetBox` (ISO/IEC 14496-12 section 8.7.5) suitable for video.
-    fn append_video_co64(&mut self) {
+    fn append_video_co64(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"co64\x00\x00\x00\x00");
             self.body.append_u32(self.segments.len() as u32);
-            self.body.flush_buf();
-            self.body.slices.append(
+            self.body.flush_buf()?;
+            self.body.append_slice(
                 (mem::size_of::<u64>()) as u64 * (self.segments.len() as u64),
-                Mp4FileSlice::Co64);
-        });
+                SliceType::Co64, 0)?;
+        })
     }
 
     /// Appends a `ChunkLargeOffsetBox` (ISO/IEC 14496-12 section 8.7.5) suitable for subtitles.
-    fn append_subtitle_co64(&mut self) {
+    fn append_subtitle_co64(&mut self) -> Result<(), Error> {
         write_length!(self, {
             // Write a placeholder; the actual value will be filled in later.
             self.body.buf.extend_from_slice(
                 b"co64\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00");
             self.subtitle_co64_pos = Some(self.body.buf.len() - 8);
-        });
+        })
     }
 
     /// Appends a `SyncSampleBox` (ISO/IEC 14496-12 section 8.6.2) suitable for video.
-    fn append_video_stss(&mut self) {
+    fn append_video_stss(&mut self) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stss\x00\x00\x00\x00");
             let mut entry_count = 0;
@@ -1045,13 +1064,13 @@ impl Mp4FileBuilder {
                 entry_count += s.s.key_frames as u32;
             }
             self.body.append_u32(entry_count);
-            self.body.flush_buf();
+            self.body.flush_buf()?;
             for (i, s) in self.segments.iter().enumerate() {
-                self.body.slices.append(
+                self.body.append_slice(
                     (mem::size_of::<u32>() as u64) * (s.s.key_frames as u64),
-                    Mp4FileSlice::Stss(i as u32));
+                    SliceType::Stss, i)?;
             }
-        });
+        })
     }
 }
 
@@ -1067,20 +1086,27 @@ impl BodyState {
     /// Flushes the buffer: appends a slice for everything written into the buffer so far,
     /// noting the position which has been flushed. Call this method prior to adding any non-buffer
     /// slice.
-    fn flush_buf(&mut self) {
+    fn flush_buf(&mut self) -> Result<(), Error> {
         let len = self.buf.len();
         if self.unflushed_buf_pos < len {
-            self.slices.append((len - self.unflushed_buf_pos) as u64,
-                               Mp4FileSlice::Buf(self.unflushed_buf_pos as u32));
+            let p = self.unflushed_buf_pos;
+            self.append_slice((len - p) as u64, SliceType::Buf, p)?;
             self.unflushed_buf_pos = len;
         }
+        Ok(())
+    }
+
+    fn append_slice(&mut self, len: u64, t: SliceType, p: usize) -> Result<(), Error> {
+        let l = self.slices.len();
+        self.slices.append(Slice::new(l + len, t, p)?);
+        Ok(())
     }
 
     /// Appends a static bytestring, flushing the buffer if necessary.
-    fn append_static(&mut self, which: StaticBytestring) {
-        self.flush_buf();
+    fn append_static(&mut self, which: StaticBytestring) -> Result<(), Error> {
+        self.flush_buf()?;
         let s = STATIC_BYTESTRINGS[which as usize];
-        self.slices.append(s.len() as u64, Mp4FileSlice::Static(which));
+        self.append_slice(s.len() as u64, SliceType::Static, which as usize)
     }
 }
 
@@ -1088,7 +1114,7 @@ pub struct Mp4File {
     db: Arc<db::Database>,
     dir: Arc<dir::SampleFileDir>,
     segments: Vec<Mp4Segment>,
-    slices: Slices<Mp4FileSlice, Mp4File>,
+    slices: Slices<Slice, Mp4File>,
     buf: Vec<u8>,
     video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
     initial_sample_byte_pos: u64,
@@ -1098,7 +1124,7 @@ pub struct Mp4File {
 
 impl Mp4File {
     fn write_stts(&self, i: usize, r: Range<u64>, _l: u64, out: &mut io::Write)
-                  -> Result<()> {
+                  -> Result<(), Error> {
         self.segments[i].with_index(&self.db, |i| {
             out.write_all(&i.stts()[r.start as usize .. r.end as usize])?;
             Ok(())
@@ -1106,15 +1132,15 @@ impl Mp4File {
     }
 
     fn write_stsz(&self, i: usize, r: Range<u64>, _l: u64, out: &mut io::Write)
-                  -> Result<()> {
+                  -> Result<(), Error> {
         self.segments[i].with_index(&self.db, |i| {
             out.write_all(&i.stsz()[r.start as usize .. r.end as usize])?;
             Ok(())
         })
     }
 
-    fn write_co64(&self, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<()> {
-        pieces::clip_to_range(r, l, out, |w| {
+    fn write_co64(&self, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<(), Error> {
+        slices::clip_to_range(r, l, out, |w| {
             let mut pos = self.initial_sample_byte_pos;
             for s in &self.segments {
                 w.write_u64::<BigEndian>(pos)?;
@@ -1125,14 +1151,16 @@ impl Mp4File {
         })
     }
 
-    fn write_stss(&self, i: usize, r: Range<u64>, _l: u64, out: &mut io::Write) -> Result<()> {
+    fn write_stss(&self, i: usize, r: Range<u64>, _l: u64, out: &mut io::Write)
+                  -> Result<(), Error> {
         self.segments[i].with_index(&self.db, |i| {
             out.write_all(&i.stss()[r.start as usize .. r.end as usize])?;
             Ok(())
         })
     }
 
-    fn write_video_sample_data(&self, i: usize, r: Range<u64>, out: &mut io::Write) -> Result<()> {
+    fn write_video_sample_data(&self, i: usize, r: Range<u64>, out: &mut io::Write)
+                               -> Result<(), Error> {
         let s = &self.segments[i];
         let rec = self.db.lock().get_recording_playback(s.s.camera_id, s.s.recording_id)?;
         let f = self.dir.open_sample_file(rec.sample_file_uuid)?;
@@ -1140,13 +1168,13 @@ impl Mp4File {
     }
 
     fn write_subtitle_sample_data(&self, i: usize, r: Range<u64>, l: u64, out: &mut io::Write)
-                                  -> Result<()> {
+                                  -> Result<(), Error> {
         let s = &self.segments[i];
         let d = &s.s.desired_range_90k;
         let start_sec = (s.s.start + recording::Duration(d.start as i64)).unix_seconds();
         let end_sec = (s.s.start + recording::Duration(d.end as i64 + TIME_UNITS_PER_SEC - 1))
                       .unix_seconds();
-        pieces::clip_to_range(r, l, out, |w| {
+        slices::clip_to_range(r, l, out, |w| {
             for ts in start_sec .. end_sec {
                 w.write_u16::<BigEndian>(SUBTITLE_LENGTH as u16)?;
                 let tm = time::at(time::Timespec{sec: ts, nsec: 0});
@@ -1166,7 +1194,7 @@ impl http_entity::Entity<Error> for Mp4File {
     fn last_modified(&self) -> Option<header::HttpDate> { Some(self.last_modified) }
     fn etag(&self) -> Option<header::EntityTag> { Some(self.etag.clone()) }
     fn len(&self) -> u64 { self.slices.len() }
-    fn write_to(&self, range: Range<u64>, out: &mut io::Write) -> Result<()> {
+    fn write_to(&self, range: Range<u64>, out: &mut io::Write) -> Result<(), Error> {
         self.slices.write_to(self, range, out)
     }
 }
@@ -1194,7 +1222,6 @@ mod tests {
     use http_entity::{self, Entity};
     use std::fs;
     use std::io;
-    use std::mem;
     use std::ops::Range;
     use std::path::Path;
     use std::sync::Arc;
@@ -1493,8 +1520,8 @@ mod tests {
         }
     }
 
-    /// Makes a `.mp4` file which is only good for exercising the `Mp4FileSlice` logic for
-    /// producing sample tables that match the supplied encoder.
+    /// Makes a `.mp4` file which is only good for exercising the `Slice` logic for producing
+    /// sample tables that match the supplied encoder.
     fn make_mp4_from_encoder(db: &TestDb, encoder: recording::SampleIndexEncoder,
                              desired_range_90k: Range<i32>) -> Mp4File {
         let row = db.create_recording_from_encoder(encoder);
@@ -1697,11 +1724,6 @@ mod tests {
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
-    }
-
-    #[test]
-    fn mp4_file_slice_size() {
-        assert_eq!(8, mem::size_of::<super::Mp4FileSlice>());
     }
 }
 

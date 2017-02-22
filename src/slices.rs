@@ -36,20 +36,13 @@ use std::io;
 use std::marker::PhantomData;
 use std::ops::Range;
 
-/// Information needed by `Slices` about a single slice.
-#[derive(Debug)]
-struct SliceInfo<W> {
-    /// The byte position (relative to the start of the `Slices`) beyond the end of this slice.
-    /// Note the starting position (and thus length) are inferred from the previous slice.
-    end: u64,
-
-    /// Should be an implementation of `ContextWriter<Ctx>` for some `Ctx`.
-    writer: W,
-}
-
 /// Writes a byte range to the given `io::Write` given a context argument; meant for use with
 /// `Slices`.
-pub trait ContextWriter<Ctx> {
+pub trait Slice<Ctx> {
+    /// The byte position (relative to the start of the `Slices`) beyond the end of this slice.
+    /// Note the starting position (and thus length) are inferred from the previous slice.
+    fn end(&self) -> u64;
+
     /// Writes `r` to `out`, as in `http_entity::Entity::write_to`.
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
@@ -72,37 +65,36 @@ where F: FnMut(&mut Vec<u8>) -> Result<()> {
 }
 
 /// Helper to serve byte ranges from a body which is broken down into many "slices".
-/// This is used to implement `.mp4` serving in `mp4::Mp4File` from `mp4::Mp4FileSlice` enums.
-pub struct Slices<W, C> where W: ContextWriter<C> {
+/// This is used to implement `.mp4` serving in `mp4::Mp4File` from `mp4::Slice` enums.
+pub struct Slices<S, C> where S: Slice<C> {
     /// The total byte length of the `Slices`.
-    /// Equivalent to `self.slices.back().map(|s| s.end).unwrap_or(0)`; kept for convenience and to
-    /// avoid a branch.
+    /// Equivalent to `self.slices.back().map(|s| s.end()).unwrap_or(0)`; kept for convenience and
+    /// to avoid a branch.
     len: u64,
 
     /// 0 or more slices of this file.
-    slices: Vec<SliceInfo<W>>,
+    slices: Vec<S>,
 
     /// Marker so that `C` is part of the type.
     phantom: PhantomData<C>,
 }
 
-impl<W, C> fmt::Debug for Slices<W, C> where W: fmt::Debug + ContextWriter<C> {
+impl<S, C> fmt::Debug for Slices<S, C> where S: fmt::Debug + Slice<C> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} slices with overall length {}:", self.slices.len(), self.len)?;
         let mut start = 0;
         for (i, s) in self.slices.iter().enumerate() {
+            let end = s.end();
             write!(f, "\ni {:7}: range [{:12}, {:12}) len {:12}: {:?}",
-                   i, start, s.end, s.end - start, s.writer)?;
-            start = s.end;
+                   i, start, end, end - start, s)?;
+            start = end;
         }
         Ok(())
     }
 }
 
-impl<W, C> Slices<W, C> where W: ContextWriter<C> {
-    pub fn new() -> Slices<W, C> {
-        Slices{len: 0, slices: Vec::new(), phantom: PhantomData}
-    }
+impl<S, C> Slices<S, C> where S: Slice<C> {
+    pub fn new() -> Self { Slices{len: 0, slices: Vec::new(), phantom: PhantomData} }
 
     /// Reserves space for at least `additional` more slices to be appended.
     pub fn reserve(&mut self, additional: usize) {
@@ -110,9 +102,10 @@ impl<W, C> Slices<W, C> where W: ContextWriter<C> {
     }
 
     /// Appends the given slice.
-    pub fn append(&mut self, len: u64, writer: W) {
-        self.len += len;
-        self.slices.push(SliceInfo{end: self.len, writer: writer});
+    pub fn append(&mut self, slice: S) {
+        assert!(slice.end() > self.len);
+        self.len = slice.end();
+        self.slices.push(slice);
     }
 
     /// Returns the total byte length of all slices.
@@ -133,11 +126,11 @@ impl<W, C> Slices<W, C> where W: ContextWriter<C> {
         // Binary search for the first slice of the range to write, determining its index and
         // (from the preceding slice) the start of its range.
         let (mut i, mut slice_start) = match self.slices.binary_search_by_key(&range.start,
-                                                                              |s| s.end) {
+                                                                              |s| s.end()) {
             Ok(i) if i == self.slices.len() - 1 => return Ok(()),  // at end.
-            Ok(i) => (i+1, self.slices[i].end),   // desired start == slice i's end; first is i+1!
-            Err(i) if i == 0 => (i, 0),           // desired start < slice 0's end; first is 0.
-            Err(i) => (i, self.slices[i-1].end),  // desired start < slice i's end; first is i.
+            Ok(i) => (i+1, self.slices[i].end()),   // desired start == slice i's end; first is i+1!
+            Err(i) if i == 0 => (0, 0),             // desired start < slice 0's end; first is 0.
+            Err(i) => (i, self.slices[i-1].end()),  // desired start < slice i's end; first is i.
         };
 
         // There is at least one slice to write.
@@ -145,15 +138,16 @@ impl<W, C> Slices<W, C> where W: ContextWriter<C> {
         let mut start_pos = range.start - slice_start;
         loop {
             let s = &self.slices[i];
-            let l = s.end - slice_start;
-            if range.end <= s.end {  // last slice.
-                return s.writer.write_to(ctx, start_pos .. range.end - slice_start, l, out);
+            let end = s.end();
+            let l = end - slice_start;
+            if range.end <= end {  // last slice.
+                return s.write_to(ctx, start_pos .. range.end - slice_start, l, out);
             }
-            s.writer.write_to(ctx, start_pos .. s.end - slice_start, l, out)?;
+            s.write_to(ctx, start_pos .. end - slice_start, l, out)?;
 
             // Setup next iteration.
             start_pos = 0;
-            slice_start = s.end;
+            slice_start = end;
             i += 1;
         }
     }
@@ -167,7 +161,7 @@ mod tests {
     use std::io::Write;
     use std::ops::Range;
     use std::vec::Vec;
-    use super::{ContextWriter, Slices, clip_to_range};
+    use super::{Slice, Slices, clip_to_range};
 
     #[derive(Debug, Eq, PartialEq)]
     pub struct FakeWrite {
@@ -175,11 +169,14 @@ mod tests {
         range: Range<u64>,
     }
 
-    pub struct FakeWriter {
+    pub struct FakeSlice {
+        end: u64,
         name: &'static str,
     }
 
-    impl ContextWriter<RefCell<Vec<FakeWrite>>> for FakeWriter {
+    impl Slice<RefCell<Vec<FakeWrite>>> for FakeSlice {
+        fn end(&self) -> u64 { self.end }
+
         fn write_to(&self, ctx: &RefCell<Vec<FakeWrite>>, r: Range<u64>, _l: u64, _out: &mut Write)
                     -> Result<()> {
             ctx.borrow_mut().push(FakeWrite{writer: self.name, range: r});
@@ -187,13 +184,13 @@ mod tests {
         }
     }
 
-    pub fn new_slices() -> Slices<FakeWriter, RefCell<Vec<FakeWrite>>> {
+    pub fn new_slices() -> Slices<FakeSlice, RefCell<Vec<FakeWrite>>> {
         let mut s = Slices::new();
-        s.append(5, FakeWriter{name: "a"});
-        s.append(13, FakeWriter{name: "b"});
-        s.append(7, FakeWriter{name: "c"});
-        s.append(17, FakeWriter{name: "d"});
-        s.append(19, FakeWriter{name: "e"});
+        s.append(FakeSlice{end: 5, name: "a"});
+        s.append(FakeSlice{end: 5+13, name: "b"});
+        s.append(FakeSlice{end: 5+13+7, name: "c"});
+        s.append(FakeSlice{end: 5+13+7+17, name: "d"});
+        s.append(FakeSlice{end: 5+13+7+17+19, name: "e"});
         s
     }
 
