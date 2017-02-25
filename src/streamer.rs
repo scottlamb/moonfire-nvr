@@ -195,7 +195,7 @@ mod tests {
     use h264;
     use recording;
     use std::cmp;
-    use std::sync::{Arc, Mutex, MutexGuard};
+    use std::sync::{Arc, Mutex};
     use std::sync::atomic::{AtomicBool, Ordering};
     use stream::{self, Opener, Stream};
     use testutil;
@@ -305,8 +305,7 @@ mod tests {
         is_key: bool,
     }
 
-    fn get_frames(db: &MutexGuard<db::LockedDatabase>, camera_id: i32, recording_id: i32)
-                  -> Vec<Frame> {
+    fn get_frames(db: &db::LockedDatabase, camera_id: i32, recording_id: i32) -> Vec<Frame> {
         let rec = db.get_recording_playback(camera_id, recording_id).unwrap();
         let mut it = recording::SampleIndexIterator::new();
         let mut frames = Vec::new();

@@ -48,7 +48,7 @@ use std::cmp;
 use std::fmt;
 use std::io::Write;
 use std::ops::Range;
-use std::sync::{Arc,MutexGuard};
+use std::sync::Arc;
 use strutil;
 use time;
 use url::form_urlencoded;
@@ -245,7 +245,7 @@ impl Handler {
             if json {
                 serde_json::to_vec(&json::ListCameras{cameras: db.cameras_by_id()})?
             } else {
-                self.list_cameras_html(db)?
+                self.list_cameras_html(&db)?
             }
         };
         res.headers_mut().set(header::ContentType(if json { JSON.clone() } else { HTML.clone() }));
@@ -253,7 +253,7 @@ impl Handler {
         Ok(())
     }
 
-    fn list_cameras_html(&self, db: MutexGuard<db::LockedDatabase>) -> Result<Vec<u8>, Error> {
+    fn list_cameras_html(&self, db: &db::LockedDatabase) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::new();
         buf.extend_from_slice(b"\
             <!DOCTYPE html>\n\
@@ -297,7 +297,7 @@ impl Handler {
                                .ok_or_else(|| Error::new("no such camera".to_owned()))?;
                 serde_json::to_vec(&json::Camera::new(camera, true))?
             } else {
-                self.camera_html(db, query, uuid)?
+                self.camera_html(&db, query, uuid)?
             }
         };
         res.headers_mut().set(header::ContentType(if json { JSON.clone() } else { HTML.clone() }));
@@ -305,8 +305,8 @@ impl Handler {
         Ok(())
     }
 
-    fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, query: &str,
-                   uuid: Uuid) -> Result<Vec<u8>, Error> {
+    fn camera_html(&self, db: &db::LockedDatabase, query: &str, uuid: Uuid)
+                   -> Result<Vec<u8>, Error> {
         let (r, trim) = {
             let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
             let mut trim = false;
@@ -437,7 +437,7 @@ impl Handler {
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
             camera.id
         };
-        let mut builder = mp4::Mp4FileBuilder::new();
+        let mut builder = mp4::FileBuilder::new();
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
             let (key, value) = (key.borrow(), value.borrow());
             match key {

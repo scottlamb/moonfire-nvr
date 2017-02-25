@@ -95,12 +95,12 @@ use std::cmp;
 use std::io;
 use std::ops::Range;
 use std::mem;
-use std::sync::{Arc, MutexGuard};
+use std::sync::Arc;
 use strutil;
 use time::Timespec;
 
 /// This value should be incremented any time a change is made to this file that causes different
-/// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
+/// bytes to be output for a particular set of `Builder` options. Incrementing this value will
 /// cause the etag to change as well.
 const FORMAT_VERSION: [u8; 1] = [0x03];
 
@@ -315,7 +315,7 @@ const SUBTITLE_TEMPLATE: &'static str = "%Y-%m-%d %H:%M:%S %z";
 const SUBTITLE_LENGTH: usize = 25;  // "2015-07-02 17:10:00 -0700".len();
 
 /// Holds the sample indexes for a given video segment: `stts`, `stsz`, and `stss`.
-struct Mp4SegmentIndex {
+struct SegmentIndex {
     /// Holds all three sample indexes:
     /// &buf[.. stsz_start] is stts.
     /// &buf[stsz_start .. stss_start] is stsz.
@@ -325,28 +325,28 @@ struct Mp4SegmentIndex {
     stss_start: u32,
 }
 
-impl Mp4SegmentIndex {
+impl SegmentIndex {
     fn stts(&self) -> &[u8] { &self.buf[.. self.stsz_start as usize] }
     fn stsz(&self) -> &[u8] { &self.buf[self.stsz_start as usize .. self.stss_start as usize] }
     fn stss(&self) -> &[u8] { &self.buf[self.stss_start as usize ..] }
 }
 
 /// A wrapper around `recording::Segment` that keeps some additional `.mp4`-specific state.
-struct Mp4Segment {
+struct Segment {
     s: recording::Segment,
 
     /// Holds the `stts`, `stsz`, and `stss` if they've been generated.
     /// Access only through `with_index`.
-    index: RefCell<Option<Mp4SegmentIndex>>,
+    index: RefCell<Option<SegmentIndex>>,
 
-    /// The 1-indexed frame number in the `Mp4File` of the first frame in this segment.
+    /// The 1-indexed frame number in the `File` of the first frame in this segment.
     first_frame_num: u32,
     num_subtitle_samples: u32,
 }
 
-impl Mp4Segment {
+impl Segment {
     fn with_index<F, R>(&self, db: &db::Database, f: F) -> Result<R, Error>
-    where F: FnOnce(&Mp4SegmentIndex) -> Result<R, Error> {
+    where F: FnOnce(&SegmentIndex) -> Result<R, Error> {
         let mut i = self.index.borrow_mut();
         if let Some(ref i) = *i {
             return f(i);
@@ -357,7 +357,7 @@ impl Mp4Segment {
         r
     }
 
-    fn build_index(&self, db: &db::Database) -> Result<Mp4SegmentIndex, Error> {
+    fn build_index(&self, db: &db::Database) -> Result<SegmentIndex, Error> {
         let s = &self.s;
         let stts_len = mem::size_of::<u32>() * 2 * (s.frames as usize);
         let stsz_len = mem::size_of::<u32>() * s.frames as usize;
@@ -396,7 +396,7 @@ impl Mp4Segment {
                                      cmp::min(s.desired_range_90k.end - last_start, dur) as u32);
             }
         }
-        Ok(Mp4SegmentIndex{
+        Ok(SegmentIndex{
             buf: buf,
             stsz_start: stts_len as u32,
             stss_start: (stts_len + stsz_len) as u32,
@@ -404,10 +404,10 @@ impl Mp4Segment {
     }
 }
 
-pub struct Mp4FileBuilder {
+pub struct FileBuilder {
     /// Segments of video: one per "recording" table entry as they should
     /// appear in the video.
-    segments: Vec<Mp4Segment>,
+    segments: Vec<Segment>,
     video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
     next_frame_num: u32,
     duration_90k: u32,
@@ -417,11 +417,11 @@ pub struct Mp4FileBuilder {
     include_timestamp_subtitle_track: bool,
 }
 
-/// The portion of `Mp4FileBuilder` which is mutated while building the body of the file.
+/// The portion of `FileBuilder` which is mutated while building the body of the file.
 /// This is separated out from the rest so that it can be borrowed in a loop over
-/// `Mp4FileBuilder::segments`; otherwise this would cause a double-self-borrow.
+/// `FileBuilder::segments`; otherwise this would cause a double-self-borrow.
 struct BodyState {
-    slices: Slices<Slice, Mp4File>,
+    slices: Slices<Slice, File>,
 
     /// `self.buf[unflushed_buf_pos .. self.buf.len()]` holds bytes that should be
     /// appended to `slices` before any other slice. See `flush_buf()`.
@@ -429,7 +429,7 @@ struct BodyState {
     buf: Vec<u8>,
 }
 
-/// A single slice of a `Mp4File`, for use with a `Slices` object. Each slice is responsible for
+/// A single slice of a `File`, for use with a `Slices` object. Each slice is responsible for
 /// some portion of the generated `.mp4` file. The box headers and such are generally in `Static`
 /// or `Buf` slices; the others generally represent a single segment's contribution to the
 /// like-named box.
@@ -477,9 +477,9 @@ impl Slice {
     fn p(&self) -> usize { (self.0 >> 44) as usize }
 }
 
-impl slices::Slice<Mp4File> for Slice {
+impl slices::Slice<File> for Slice {
     fn end(&self) -> u64 { return self.0 & 0xFF_FF_FF_FF_FF }
-    fn write_to(&self, f: &Mp4File, r: Range<u64>, l: u64, out: &mut io::Write)
+    fn write_to(&self, f: &File, r: Range<u64>, l: u64, out: &mut io::Write)
                 -> Result<(), Error> {
         let t = self.t();
         let p = self.p();
@@ -521,7 +521,7 @@ impl ::std::fmt::Debug for Slice {
 fn to_iso14496_timestamp(t: recording::Time) -> u32 { (t.unix_seconds() + 24107 * 86400) as u32 }
 
 /// Writes a box length for everything appended in the supplied scope.
-/// Used only within Mp4FileBuilder::build (and methods it calls internally).
+/// Used only within FileBuilder::build (and methods it calls internally).
 macro_rules! write_length {
     ($_self:ident, $b:block) => {{
         let len_pos = $_self.body.buf.len();
@@ -537,9 +537,9 @@ macro_rules! write_length {
     }}
 }
 
-impl Mp4FileBuilder {
+impl FileBuilder {
     pub fn new() -> Self {
-        Mp4FileBuilder{
+        FileBuilder{
             segments: Vec::new(),
             video_sample_entries: SmallVec::new(),
             next_frame_num: 1,
@@ -567,7 +567,7 @@ impl Mp4FileBuilder {
     }
 
     /// Appends a segment for (a subset of) the given recording.
-    pub fn append(&mut self, db: &MutexGuard<db::LockedDatabase>, row: db::ListRecordingsRow,
+    pub fn append(&mut self, db: &db::LockedDatabase, row: db::ListRecordingsRow,
                   rel_range_90k: Range<i32>) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero {
@@ -576,7 +576,7 @@ impl Mp4FileBuilder {
                     row.camera_id, row.id, prev.s.camera_id, prev.s.recording_id)));
             }
         }
-        self.segments.push(Mp4Segment{
+        self.segments.push(Segment{
             s: recording::Segment::new(db, &row, rel_range_90k)?,
             index: RefCell::new(None),
             first_frame_num: self.next_frame_num,
@@ -589,9 +589,9 @@ impl Mp4FileBuilder {
         Ok(())
     }
 
-    /// Builds the `Mp4File`, consuming the builder.
+    /// Builds the `File`, consuming the builder.
     pub fn build(mut self, db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>)
-                 -> Result<Mp4File, Error> {
+                 -> Result<File, Error> {
         let mut max_end = None;
         let mut etag = hash::Hasher::new(hash::MessageDigest::sha1())?;
         etag.update(&FORMAT_VERSION[..])?;
@@ -679,7 +679,7 @@ impl Mp4FileBuilder {
             debug!("Estimated {} buf bytes; actually were {}", EST_BUF_LEN, self.body.buf.len());
         }
         debug!("slices: {:?}", self.body.slices);
-        Ok(Mp4File{
+        Ok(File{
             db: db,
             dir: dir,
             segments: self.segments,
@@ -1110,11 +1110,11 @@ impl BodyState {
     }
 }
 
-pub struct Mp4File {
+pub struct File {
     db: Arc<db::Database>,
     dir: Arc<dir::SampleFileDir>,
-    segments: Vec<Mp4Segment>,
-    slices: Slices<Slice, Mp4File>,
+    segments: Vec<Segment>,
+    slices: Slices<Slice, File>,
     buf: Vec<u8>,
     video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
     initial_sample_byte_pos: u64,
@@ -1122,7 +1122,7 @@ pub struct Mp4File {
     etag: header::EntityTag,
 }
 
-impl Mp4File {
+impl File {
     fn write_stts(&self, i: usize, r: Range<u64>, _l: u64, out: &mut io::Write)
                   -> Result<(), Error> {
         self.segments[i].with_index(&self.db, |i| {
@@ -1187,7 +1187,7 @@ impl Mp4File {
     }
 }
 
-impl http_entity::Entity<Error> for Mp4File {
+impl http_entity::Entity<Error> for File {
     fn add_headers(&self, hdrs: &mut header::Headers) {
         hdrs.set(header::ContentType("video/mp4".parse().unwrap()));
     }
@@ -1458,8 +1458,8 @@ mod tests {
     }
 
     pub fn create_mp4_from_db(db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>, skip_90k: i32,
-                              shorten_90k: i32, include_subtitles: bool) -> Mp4File {
-        let mut builder = Mp4FileBuilder::new();
+                              shorten_90k: i32, include_subtitles: bool) -> File {
+        let mut builder = FileBuilder::new();
         builder.include_timestamp_subtitle_track(include_subtitles);
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
         {
@@ -1474,7 +1474,7 @@ mod tests {
         builder.build(db, dir).unwrap()
     }
 
-    fn write_mp4(mp4: &Mp4File, dir: &Path) -> String {
+    fn write_mp4(mp4: &File, dir: &Path) -> String {
         let mut filename = dir.to_path_buf();
         filename.push("clip.new.mp4");
         let mut out = fs::OpenOptions::new().write(true).create_new(true).open(&filename).unwrap();
@@ -1523,9 +1523,9 @@ mod tests {
     /// Makes a `.mp4` file which is only good for exercising the `Slice` logic for producing
     /// sample tables that match the supplied encoder.
     fn make_mp4_from_encoder(db: &TestDb, encoder: recording::SampleIndexEncoder,
-                             desired_range_90k: Range<i32>) -> Mp4File {
+                             desired_range_90k: Range<i32>) -> File {
         let row = db.create_recording_from_encoder(encoder);
-        let mut builder = Mp4FileBuilder::new();
+        let mut builder = FileBuilder::new();
         builder.append(&db.db.lock(), row, desired_range_90k).unwrap();
         builder.build(db.db.clone(), db.dir.clone()).unwrap()
     }
