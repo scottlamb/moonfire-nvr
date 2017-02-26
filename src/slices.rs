@@ -33,12 +33,13 @@
 use error::{Error, Result};
 use std::fmt;
 use std::io;
-use std::marker::PhantomData;
 use std::ops::Range;
 
 /// Writes a byte range to the given `io::Write` given a context argument; meant for use with
 /// `Slices`.
-pub trait Slice<Ctx> {
+pub trait Slice {
+    type Ctx;
+
     /// The byte position (relative to the start of the `Slices`) beyond the end of this slice.
     /// Note the starting position (and thus length) are inferred from the previous slice.
     fn end(&self) -> u64;
@@ -46,7 +47,7 @@ pub trait Slice<Ctx> {
     /// Writes `r` to `out`, as in `http_entity::Entity::write_to`.
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
-    fn write_to(&self, ctx: &Ctx, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<()>;
+    fn write_to(&self, ctx: &Self::Ctx, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<()>;
 }
 
 /// Calls `f` with an `io::Write` which delegates to `inner` only for the section defined by `r`.
@@ -66,7 +67,7 @@ where F: FnMut(&mut Vec<u8>) -> Result<()> {
 
 /// Helper to serve byte ranges from a body which is broken down into many "slices".
 /// This is used to implement `.mp4` serving in `mp4::Mp4File` from `mp4::Slice` enums.
-pub struct Slices<S, C> where S: Slice<C> {
+pub struct Slices<S> where S: Slice {
     /// The total byte length of the `Slices`.
     /// Equivalent to `self.slices.back().map(|s| s.end()).unwrap_or(0)`; kept for convenience and
     /// to avoid a branch.
@@ -74,12 +75,9 @@ pub struct Slices<S, C> where S: Slice<C> {
 
     /// 0 or more slices of this file.
     slices: Vec<S>,
-
-    /// Marker so that `C` is part of the type.
-    phantom: PhantomData<C>,
 }
 
-impl<S, C> fmt::Debug for Slices<S, C> where S: fmt::Debug + Slice<C> {
+impl<S> fmt::Debug for Slices<S> where S: fmt::Debug + Slice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} slices with overall length {}:", self.slices.len(), self.len)?;
         let mut start = 0;
@@ -93,8 +91,8 @@ impl<S, C> fmt::Debug for Slices<S, C> where S: fmt::Debug + Slice<C> {
     }
 }
 
-impl<S, C> Slices<S, C> where S: Slice<C> {
-    pub fn new() -> Self { Slices{len: 0, slices: Vec::new(), phantom: PhantomData} }
+impl<S> Slices<S> where S: Slice {
+    pub fn new() -> Self { Slices{len: 0, slices: Vec::new()} }
 
     /// Reserves space for at least `additional` more slices to be appended.
     pub fn reserve(&mut self, additional: usize) {
@@ -116,7 +114,7 @@ impl<S, C> Slices<S, C> where S: Slice<C> {
 
     /// Writes `range` to `out`.
     /// This interface mirrors `http_entity::Entity::write_to`, with the additional `ctx` argument.
-    pub fn write_to(&self, ctx: &C, range: Range<u64>, out: &mut io::Write) -> Result<()> {
+    pub fn write_to(&self, ctx: &S::Ctx, range: Range<u64>, out: &mut io::Write) -> Result<()> {
         if range.start > range.end || range.end > self.len {
             return Err(Error{
                 description: format!("Bad range {:?} for slice of length {}", range, self.len),
@@ -174,7 +172,9 @@ mod tests {
         name: &'static str,
     }
 
-    impl Slice<RefCell<Vec<FakeWrite>>> for FakeSlice {
+    impl Slice for FakeSlice {
+        type Ctx = RefCell<Vec<FakeWrite>>;
+
         fn end(&self) -> u64 { self.end }
 
         fn write_to(&self, ctx: &RefCell<Vec<FakeWrite>>, r: Range<u64>, _l: u64, _out: &mut Write)
@@ -184,7 +184,7 @@ mod tests {
         }
     }
 
-    pub fn new_slices() -> Slices<FakeSlice, RefCell<Vec<FakeWrite>>> {
+    pub fn new_slices() -> Slices<FakeSlice> {
         let mut s = Slices::new();
         s.append(FakeSlice{end: 5, name: "a"});
         s.append(FakeSlice{end: 5+13, name: "b"});

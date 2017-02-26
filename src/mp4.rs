@@ -421,7 +421,7 @@ pub struct FileBuilder {
 /// This is separated out from the rest so that it can be borrowed in a loop over
 /// `FileBuilder::segments`; otherwise this would cause a double-self-borrow.
 struct BodyState {
-    slices: Slices<Slice, File>,
+    slices: Slices<Slice>,
 
     /// `self.buf[unflushed_buf_pos .. self.buf.len()]` holds bytes that should be
     /// appended to `slices` before any other slice. See `flush_buf()`.
@@ -477,7 +477,9 @@ impl Slice {
     fn p(&self) -> usize { (self.0 >> 44) as usize }
 }
 
-impl slices::Slice<File> for Slice {
+impl slices::Slice for Slice {
+    type Ctx = File;
+
     fn end(&self) -> u64 { return self.0 & 0xFF_FF_FF_FF_FF }
     fn write_to(&self, f: &File, r: Range<u64>, l: u64, out: &mut io::Write)
                 -> Result<(), Error> {
@@ -1114,7 +1116,7 @@ pub struct File {
     db: Arc<db::Database>,
     dir: Arc<dir::SampleFileDir>,
     segments: Vec<Segment>,
-    slices: Slices<Slice, File>,
+    slices: Slices<Slice>,
     buf: Vec<u8>,
     video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
     initial_sample_byte_pos: u64,
