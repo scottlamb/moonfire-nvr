@@ -210,7 +210,7 @@ impl ops::SubAssign for Duration {
 
 #[derive(Clone, Copy, Debug)]
 pub struct SampleIndexIterator {
-    i: usize,
+    i: u32,
     pub pos: i32,
     pub start_90k: i32,
     pub duration_90k: i32,
@@ -251,10 +251,10 @@ impl SampleIndexIterator {
     pub fn next(&mut self, data: &[u8]) -> Result<bool, Error> {
         self.pos += self.bytes;
         self.start_90k += self.duration_90k;
-        if self.i == data.len() {
+        if self.i as usize == data.len() {
             return Ok(false)
         }
-        let (raw1, i1) = match decode_varint32(data, self.i) {
+        let (raw1, i1) = match decode_varint32(data, self.i as usize) {
             Ok(tuple) => tuple,
             Err(()) => return Err(Error::new(format!("bad varint 1 at offset {}", self.i))),
         };
@@ -262,7 +262,7 @@ impl SampleIndexIterator {
             Ok(tuple) => tuple,
             Err(()) => return Err(Error::new(format!("bad varint 2 at offset {}", i1))),
         };
-        self.i = i2;
+        self.i = i2 as u32;
         let duration_90k_delta = unzigzag32(raw1 >> 1);
         self.duration_90k += duration_90k_delta;
         if self.duration_90k < 0 {
@@ -271,10 +271,10 @@ impl SampleIndexIterator {
                                      self.duration_90k, duration_90k_delta),
                 cause: None});
         }
-        if self.duration_90k == 0 && data.len() > self.i {
+        if self.duration_90k == 0 && data.len() > self.i as usize {
             return Err(Error{
                 description: format!("zero duration only allowed at end; have {} bytes left",
-                                     data.len() - self.i),
+                                     data.len() - self.i as usize),
                 cause: None});
         }
         self.is_key = (raw1 & 1) == 1;

@@ -41,6 +41,7 @@ extern crate fnv;
 extern crate http_entity;
 extern crate hyper;
 #[macro_use] extern crate lazy_static;
+extern crate lazycell;
 extern crate libc;
 #[macro_use] extern crate log;
 extern crate lru_cache;

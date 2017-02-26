@@ -90,7 +90,7 @@ use openssl::hash;
 use recording::{self, TIME_UNITS_PER_SEC};
 use slices::{self, Slices};
 use smallvec::SmallVec;
-use std::cell::RefCell;
+use lazycell::LazyCell;
 use std::cmp;
 use std::io;
 use std::ops::Range;
@@ -314,30 +314,23 @@ const SUBTITLE_TEMPLATE: &'static str = "%Y-%m-%d %H:%M:%S %z";
 /// The length of the output of `SUBTITLE_TEMPLATE`.
 const SUBTITLE_LENGTH: usize = 25;  // "2015-07-02 17:10:00 -0700".len();
 
-/// Holds the sample indexes for a given video segment: `stts`, `stsz`, and `stss`.
-struct SegmentIndex {
-    /// Holds all three sample indexes:
-    /// &buf[.. stsz_start] is stts.
-    /// &buf[stsz_start .. stss_start] is stsz.
-    /// &buf[stss_start ..] is stss.
-    buf: Box<[u8]>,
-    stsz_start: u32,
-    stss_start: u32,
-}
-
-impl SegmentIndex {
-    fn stts(&self) -> &[u8] { &self.buf[.. self.stsz_start as usize] }
-    fn stsz(&self) -> &[u8] { &self.buf[self.stsz_start as usize .. self.stss_start as usize] }
-    fn stss(&self) -> &[u8] { &self.buf[self.stss_start as usize ..] }
+/// The lengths of the indexes associated with a `Segment`; for use within `Segment` only.
+struct SegmentLengths {
+    stts: usize,
+    stsz: usize,
+    stss: usize,
 }
 
 /// A wrapper around `recording::Segment` that keeps some additional `.mp4`-specific state.
 struct Segment {
     s: recording::Segment,
 
-    /// Holds the `stts`, `stsz`, and `stss` if they've been generated.
-    /// Access only through `with_index`.
-    index: RefCell<Option<SegmentIndex>>,
+    /// If generated, the `.mp4`-format sample indexes.
+    ///    1. stts: `slice[.. stsz_start]`
+    ///    2. stsz: `slice[stsz_start .. stss_start]`
+    ///    3. stss: `slice[stss_start ..]`
+    /// Access only through `write_index`.
+    index: LazyCell<Result<Box<[u8]>, ()>>,
 
     /// The 1-indexed frame number in the `File` of the first frame in this segment.
     first_frame_num: u32,
@@ -345,32 +338,46 @@ struct Segment {
 }
 
 impl Segment {
-    fn with_index<F, R>(&self, db: &db::Database, f: F) -> Result<R, Error>
-    where F: FnOnce(&SegmentIndex) -> Result<R, Error> {
-        let mut i = self.index.borrow_mut();
-        if let Some(ref i) = *i {
-            return f(i);
-        }
-        let index = self.build_index(db)?;
-        let r = f(&index);
-        *i = Some(index);
-        r
+    fn write_index<F>(&self, r: Range<u64>, db: &db::Database, out: &mut io::Write, f: F)
+                      -> Result<(), Error>
+    where F: FnOnce(&[u8], SegmentLengths) -> &[u8] {
+        let lens = SegmentLengths {
+            stts: mem::size_of::<u32>() * 2 * (self.s.frames as usize),
+            stsz: mem::size_of::<u32>() * self.s.frames as usize,
+            stss: mem::size_of::<u32>() * self.s.key_frames as usize,
+        };
+        let index = self.index.borrow_with(|| {
+            self.build_index(&lens, db)
+                .map_err(|e| {
+                    error!("Unable to build index for segment: {:?}", e);
+                    ()
+                })
+        });
+        let index = match *index {
+            Ok(ref b) => &b[..],
+            Err(()) => {
+                return Err(Error::new("Unable to build index; see previous error.".to_owned()))
+            },
+        };
+        out.write_all(&f(&index, lens)[r.start as usize .. r.end as usize])?;
+        Ok(())
     }
 
-    fn build_index(&self, db: &db::Database) -> Result<SegmentIndex, Error> {
+    fn stts(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[.. lens.stts] }
+    fn stsz(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[lens.stts .. lens.stts + lens.stsz] }
+    fn stss(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[lens.stts + lens.stsz ..] }
+
+    fn build_index(&self, lens: &SegmentLengths, db: &db::Database) -> Result<Box<[u8]>, Error> {
         let s = &self.s;
-        let stts_len = mem::size_of::<u32>() * 2 * (s.frames as usize);
-        let stsz_len = mem::size_of::<u32>() * s.frames as usize;
-        let stss_len = mem::size_of::<u32>() * s.key_frames as usize;
-        let len = stts_len + stsz_len + stss_len;
-        let mut buf = unsafe {
+        let len = lens.stts + lens.stsz + lens.stss;
+        let mut buf = {
             let mut v = Vec::with_capacity(len);
-            v.set_len(len);
+            unsafe { v.set_len(len) };
             v.into_boxed_slice()
         };
         {
-            let (stts, mut rest) = buf.split_at_mut(stts_len);
-            let (stsz, stss) = rest.split_at_mut(stsz_len);
+            let (stts, mut rest) = buf.split_at_mut(lens.stts);
+            let (stsz, stss) = rest.split_at_mut(lens.stsz);
             let mut frame = 0;
             let mut key_frame = 0;
             let mut last_start_and_dur = None;
@@ -396,11 +403,7 @@ impl Segment {
                                      cmp::min(s.desired_range_90k.end - last_start, dur) as u32);
             }
         }
-        Ok(SegmentIndex{
-            buf: buf,
-            stsz_start: stts_len as u32,
-            stss_start: (stts_len + stsz_len) as u32,
-        })
+        Ok(buf)
     }
 }
 
@@ -501,10 +504,10 @@ impl slices::Slice for Slice {
                 out.write_all(&f.video_sample_entries[p].data[r.start as usize .. r.end as usize])?;
                 Ok(())
             },
-            SliceType::Stts => f.write_stts(p, r, l, out),
-            SliceType::Stsz => f.write_stsz(p, r, l, out),
+            SliceType::Stts => f.segments[p].write_index(r, &f.db, out, Segment::stts),
+            SliceType::Stsz => f.segments[p].write_index(r, &f.db, out, Segment::stsz),
+            SliceType::Stss => f.segments[p].write_index(r, &f.db, out, Segment::stss),
             SliceType::Co64 => f.write_co64(r, l, out),
-            SliceType::Stss => f.write_stss(p, r, l, out),
             SliceType::VideoSampleData => f.write_video_sample_data(p, r, out),
             SliceType::SubtitleSampleData => f.write_subtitle_sample_data(p, r, l, out),
         }
@@ -580,7 +583,7 @@ impl FileBuilder {
         }
         self.segments.push(Segment{
             s: recording::Segment::new(db, &row, rel_range_90k)?,
-            index: RefCell::new(None),
+            index: LazyCell::new(),
             first_frame_num: self.next_frame_num,
             num_subtitle_samples: 0,
         });
@@ -1125,22 +1128,6 @@ pub struct File {
 }
 
 impl File {
-    fn write_stts(&self, i: usize, r: Range<u64>, _l: u64, out: &mut io::Write)
-                  -> Result<(), Error> {
-        self.segments[i].with_index(&self.db, |i| {
-            out.write_all(&i.stts()[r.start as usize .. r.end as usize])?;
-            Ok(())
-        })
-    }
-
-    fn write_stsz(&self, i: usize, r: Range<u64>, _l: u64, out: &mut io::Write)
-                  -> Result<(), Error> {
-        self.segments[i].with_index(&self.db, |i| {
-            out.write_all(&i.stsz()[r.start as usize .. r.end as usize])?;
-            Ok(())
-        })
-    }
-
     fn write_co64(&self, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<(), Error> {
         slices::clip_to_range(r, l, out, |w| {
             let mut pos = self.initial_sample_byte_pos;
@@ -1149,14 +1136,6 @@ impl File {
                 let r = s.s.sample_file_range();
                 pos += r.end - r.start;
             }
-            Ok(())
-        })
-    }
-
-    fn write_stss(&self, i: usize, r: Range<u64>, _l: u64, out: &mut io::Write)
-                  -> Result<(), Error> {
-        self.segments[i].with_index(&self.db, |i| {
-            out.write_all(&i.stss()[r.start as usize .. r.end as usize])?;
             Ok(())
         })
     }
