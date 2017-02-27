@@ -338,16 +338,21 @@ struct Segment {
 }
 
 impl Segment {
+    fn new(db: &db::LockedDatabase, row: &db::ListRecordingsRow, rel_range_90k: Range<i32>,
+           first_frame_num: u32) -> Result<Self, Error> {
+        Ok(Segment{
+            s: recording::Segment::new(db, row, rel_range_90k)?,
+            index: LazyCell::new(),
+            first_frame_num: first_frame_num,
+            num_subtitle_samples: 0,
+        })
+    }
+
     fn write_index<F>(&self, r: Range<u64>, db: &db::Database, out: &mut io::Write, f: F)
                       -> Result<(), Error>
     where F: FnOnce(&[u8], SegmentLengths) -> &[u8] {
-        let lens = SegmentLengths {
-            stts: mem::size_of::<u32>() * 2 * (self.s.frames as usize),
-            stsz: mem::size_of::<u32>() * self.s.frames as usize,
-            stss: mem::size_of::<u32>() * self.s.key_frames as usize,
-        };
         let index = self.index.borrow_with(|| {
-            self.build_index(&lens, db)
+            self.build_index(db)
                 .map_err(|e| {
                     error!("Unable to build index for segment: {:?}", e);
                     ()
@@ -359,16 +364,25 @@ impl Segment {
                 return Err(Error::new("Unable to build index; see previous error.".to_owned()))
             },
         };
-        out.write_all(&f(&index, lens)[r.start as usize .. r.end as usize])?;
+        out.write_all(&f(&index, self.lens())[r.start as usize .. r.end as usize])?;
         Ok(())
+    }
+
+    fn lens(&self) -> SegmentLengths {
+        SegmentLengths {
+            stts: mem::size_of::<u32>() * 2 * (self.s.frames as usize),
+            stsz: mem::size_of::<u32>() * self.s.frames as usize,
+            stss: mem::size_of::<u32>() * self.s.key_frames as usize,
+        }
     }
 
     fn stts(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[.. lens.stts] }
     fn stsz(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[lens.stts .. lens.stts + lens.stsz] }
     fn stss(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[lens.stts + lens.stsz ..] }
 
-    fn build_index(&self, lens: &SegmentLengths, db: &db::Database) -> Result<Box<[u8]>, Error> {
+    fn build_index(&self, db: &db::Database) -> Result<Box<[u8]>, Error> {
         let s = &self.s;
+        let lens = self.lens();
         let len = lens.stts + lens.stsz + lens.stss;
         let mut buf = {
             let mut v = Vec::with_capacity(len);
@@ -581,12 +595,7 @@ impl FileBuilder {
                     row.camera_id, row.id, prev.s.camera_id, prev.s.recording_id)));
             }
         }
-        self.segments.push(Segment{
-            s: recording::Segment::new(db, &row, rel_range_90k)?,
-            index: LazyCell::new(),
-            first_frame_num: self.next_frame_num,
-            num_subtitle_samples: 0,
-        });
+        self.segments.push(Segment::new(db, &row, rel_range_90k, self.next_frame_num)?);
         self.next_frame_num += row.video_samples as u32;
         if !self.video_sample_entries.iter().any(|e| e.id == row.video_sample_entry.id) {
             self.video_sample_entries.push(row.video_sample_entry);
@@ -1715,6 +1724,7 @@ mod bench {
     use hyper;
     use hyper::header;
     use http_entity;
+    use recording;
     use self::test::Bencher;
     use std::str;
     use super::tests::create_mp4_from_db;
@@ -1768,6 +1778,29 @@ mod bench {
 
     lazy_static! {
         static ref SERVER: BenchServer = { BenchServer::new() };
+    }
+
+    #[bench]
+    fn build_index(b: &mut Bencher) {
+        testutil::init();
+        let db = TestDb::new();
+        testutil::add_dummy_recordings_to_db(&db.db, 1);
+
+        let segment = {
+            let db = db.db.lock();
+            let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
+            let mut row = None;
+            db.list_recordings_by_time(testutil::TEST_CAMERA_ID, all_time, |r| {
+                row = Some(r);
+                Ok(())
+            }).unwrap();
+            let row = row.unwrap();
+            let rel_range_90k = 0 .. row.duration_90k;
+            super::Segment::new(&db, &row, rel_range_90k, 1).unwrap()
+        };
+        let v = segment.build_index(&db.db).unwrap();  // warm.
+        b.bytes = v.len() as u64;  // define the benchmark performance in terms of output bytes.
+        b.iter(|| segment.build_index(&db.db).unwrap());
     }
 
     /// Benchmarks serving the generated part of a `.mp4` file (up to the first byte from disk).
