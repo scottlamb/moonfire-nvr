@@ -442,8 +442,7 @@ impl Segment {
     /// Iterates through each frame in the segment.
     /// Must be called without the database lock held; retrieves video index from the cache.
     pub fn foreach<F>(&self, db: &db::Database, mut f: F) -> Result<(), Error>
-    where F: FnMut(&SampleIndexIterator) -> Result<(), Error>
-    {
+    where F: FnMut(&SampleIndexIterator) -> Result<(), Error> {
         trace!("foreach on recording {}/{}: {} frames, actual_time_90k: {:?}",
               self.camera_id, self.recording_id, self.frames, self.actual_time_90k());
         let playback = db.lock().get_recording_playback(self.camera_id, self.recording_id)?;
@@ -475,8 +474,12 @@ impl Segment {
                         self.camera_id, self.recording_id, self.key_frames)));
                 }
             }
-            f(&it)?;
-            have_frame = it.next(data)?;
+
+            // Note: this inner loop uses try! rather than ? for performance. Don't change these
+            // lines without reading https://github.com/rust-lang/rust/issues/37939 and running
+            // mp4::bench::build_index.
+            try!(f(&it));
+            have_frame = try!(it.next(data));
         }
         if key_frame < self.key_frames {
             return Err(Error::new(format!("recording {}/{}: expected {} key frames, found only {}",
