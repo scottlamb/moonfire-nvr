@@ -313,7 +313,7 @@ mod tests {
             frames.push(Frame{
                 start_90k: it.start_90k,
                 duration_90k: it.duration_90k,
-                is_key: it.is_key,
+                is_key: it.is_key(),
             });
         }
         frames

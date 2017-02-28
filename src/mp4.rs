@@ -400,7 +400,7 @@ impl Segment {
                 BigEndian::write_u32(&mut stts[8*frame .. 8*frame+4], 1);
                 BigEndian::write_u32(&mut stts[8*frame+4 .. 8*frame+8], it.duration_90k as u32);
                 BigEndian::write_u32(&mut stsz[4*frame .. 4*frame+4], it.bytes as u32);
-                if it.is_key {
+                if it.is_key() {
                     BigEndian::write_u32(&mut stss[4*key_frame .. 4*key_frame+4],
                                          self.first_frame_num + (frame as u32));
                     key_frame += 1;
@@ -589,7 +589,7 @@ impl FileBuilder {
     pub fn append(&mut self, db: &db::LockedDatabase, row: db::ListRecordingsRow,
                   rel_range_90k: Range<i32>) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
-            if prev.s.have_trailing_zero {
+            if prev.s.have_trailing_zero() {
                 return Err(Error::new(format!(
                     "unable to append recording {}/{} after recording {}/{} with trailing zero",
                     row.camera_id, row.id, prev.s.camera_id, prev.s.recording_id)));
@@ -1005,7 +1005,7 @@ impl FileBuilder {
 
                 // Write sample_description_index.
                 let i = self.video_sample_entries.iter().position(
-                    |e| e.id == s.s.video_sample_entry_id).unwrap();
+                    |e| e.id == s.s.video_sample_entry_id()).unwrap();
                 self.body.append_u32((i + 1) as u32);
             }
         })

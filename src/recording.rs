@@ -208,16 +208,95 @@ impl ops::SubAssign for Duration {
     fn sub_assign(&mut self, rhs: Duration) { self.0 -= rhs.0 }
 }
 
+/// An iterator through a sample index.
+/// Initially invalid; call `next()` before each read.
 #[derive(Clone, Copy, Debug)]
 pub struct SampleIndexIterator {
-    i: u32,
+    /// The index byte position of the next sample to read (low 31 bits) and if the current
+    /// same is a key frame (high bit).
+    i_and_is_key: u32,
+
+    /// The starting data byte position of this sample within the segment.
     pub pos: i32,
+
+    /// The starting time of this sample within the segment (in 90 kHz units).
     pub start_90k: i32,
+
+    /// The duration of this sample (in 90 kHz units).
     pub duration_90k: i32,
+
+    /// The byte length of this frame.
     pub bytes: i32,
-    bytes_key: i32,
-    bytes_nonkey: i32,
-    pub is_key: bool
+
+    /// The byte length of the last frame of the "other" type: if this one is key, the last
+    /// non-key; if this one is non-key, the last key.
+    bytes_other: i32,
+}
+
+impl SampleIndexIterator {
+    pub fn new() -> SampleIndexIterator {
+        SampleIndexIterator{i_and_is_key: 0,
+                            pos: 0,
+                            start_90k: 0,
+                            duration_90k: 0,
+                            bytes: 0,
+                            bytes_other: 0}
+    }
+
+    pub fn next(&mut self, data: &[u8]) -> Result<bool, Error> {
+        self.pos += self.bytes;
+        self.start_90k += self.duration_90k;
+        let i = (self.i_and_is_key & 0x7FFF_FFFF) as usize;
+        if i == data.len() {
+            return Ok(false)
+        }
+        let (raw1, i1) = match decode_varint32(data, i) {
+            Ok(tuple) => tuple,
+            Err(()) => return Err(Error::new(format!("bad varint 1 at offset {}", i))),
+        };
+        let (raw2, i2) = match decode_varint32(data, i1) {
+            Ok(tuple) => tuple,
+            Err(()) => return Err(Error::new(format!("bad varint 2 at offset {}", i1))),
+        };
+        let duration_90k_delta = unzigzag32(raw1 >> 1);
+        self.duration_90k += duration_90k_delta;
+        if self.duration_90k < 0 {
+            return Err(Error{
+                description: format!("negative duration {} after applying delta {}",
+                                     self.duration_90k, duration_90k_delta),
+                cause: None});
+        }
+        if self.duration_90k == 0 && data.len() > i2 {
+            return Err(Error{
+                description: format!("zero duration only allowed at end; have {} bytes left",
+                                     data.len() - i2),
+                cause: None});
+        }
+        let (prev_bytes_key, prev_bytes_nonkey) = match self.is_key() {
+            true => (self.bytes, self.bytes_other),
+            false => (self.bytes_other, self.bytes),
+        };
+        self.i_and_is_key = (i2 as u32) | (((raw1 & 1) as u32) << 31);
+        let bytes_delta = unzigzag32(raw2);
+        if self.is_key() {
+            self.bytes = prev_bytes_key + bytes_delta;
+            self.bytes_other = prev_bytes_nonkey;
+        } else {
+            self.bytes = prev_bytes_nonkey + bytes_delta;
+            self.bytes_other = prev_bytes_key;
+        }
+        if self.bytes <= 0 {
+            return Err(Error{
+                description: format!("non-positive bytes {} after applying delta {} to key={} \
+                                      frame at ts {}", self.bytes, bytes_delta, self.is_key(),
+                                      self.start_90k),
+                cause: None});
+        }
+        Ok(true)
+    }
+
+    pub fn uninitialized(&self) -> bool { self.i_and_is_key == 0 }
+    pub fn is_key(&self) -> bool { (self.i_and_is_key & 0x8000_0000) != 0 }
 }
 
 #[derive(Debug)]
@@ -234,67 +313,6 @@ pub struct SampleIndexEncoder {
     pub video_samples: i32,
     pub video_sync_samples: i32,
     pub video_index: Vec<u8>,
-}
-
-impl SampleIndexIterator {
-    pub fn new() -> SampleIndexIterator {
-        SampleIndexIterator{i: 0,
-                            pos: 0,
-                            start_90k: 0,
-                            duration_90k: 0,
-                            bytes: 0,
-                            bytes_key: 0,
-                            bytes_nonkey: 0,
-                            is_key: false}
-    }
-
-    pub fn next(&mut self, data: &[u8]) -> Result<bool, Error> {
-        self.pos += self.bytes;
-        self.start_90k += self.duration_90k;
-        if self.i as usize == data.len() {
-            return Ok(false)
-        }
-        let (raw1, i1) = match decode_varint32(data, self.i as usize) {
-            Ok(tuple) => tuple,
-            Err(()) => return Err(Error::new(format!("bad varint 1 at offset {}", self.i))),
-        };
-        let (raw2, i2) = match decode_varint32(data, i1) {
-            Ok(tuple) => tuple,
-            Err(()) => return Err(Error::new(format!("bad varint 2 at offset {}", i1))),
-        };
-        self.i = i2 as u32;
-        let duration_90k_delta = unzigzag32(raw1 >> 1);
-        self.duration_90k += duration_90k_delta;
-        if self.duration_90k < 0 {
-            return Err(Error{
-                description: format!("negative duration {} after applying delta {}",
-                                     self.duration_90k, duration_90k_delta),
-                cause: None});
-        }
-        if self.duration_90k == 0 && data.len() > self.i as usize {
-            return Err(Error{
-                description: format!("zero duration only allowed at end; have {} bytes left",
-                                     data.len() - self.i as usize),
-                cause: None});
-        }
-        self.is_key = (raw1 & 1) == 1;
-        let bytes_delta = unzigzag32(raw2);
-        self.bytes = if self.is_key {
-            self.bytes_key += bytes_delta;
-            self.bytes_key
-        } else {
-            self.bytes_nonkey += bytes_delta;
-            self.bytes_nonkey
-        };
-        if self.bytes <= 0 {
-            return Err(Error{
-                description: format!("non-positive bytes {} after applying delta {} to key={} frame at ts {}",
-                                     self.bytes, bytes_delta, self.is_key,
-                                     self.start_90k),
-                cause: None});
-        }
-        Ok(true)
-    }
 }
 
 impl SampleIndexEncoder {
@@ -344,10 +362,9 @@ pub struct Segment {
     pub file_end: i32,
     pub desired_range_90k: Range<i32>,
     actual_end_90k: i32,
-    pub frames: i32,
-    pub key_frames: i32,
-    pub video_sample_entry_id: i32,
-    pub have_trailing_zero: bool,
+    pub frames: u16,
+    pub key_frames: u16,
+    video_sample_entry_id_and_trailing_zero: i32,
 }
 
 impl Segment {
@@ -368,10 +385,11 @@ impl Segment {
             file_end: recording.sample_file_bytes,
             desired_range_90k: desired_range_90k,
             actual_end_90k: recording.duration_90k,
-            frames: recording.video_samples,
-            key_frames: recording.video_sync_samples,
-            video_sample_entry_id: recording.video_sample_entry.id,
-            have_trailing_zero: (recording.flags & db::RecordingFlags::TrailingZero as i32) != 0,
+            frames: recording.video_samples as u16,
+            key_frames: recording.video_sync_samples as u16,
+            video_sample_entry_id_and_trailing_zero:
+                recording.video_sample_entry.id |
+                ((((recording.flags & db::RecordingFlags::TrailingZero as i32) != 0) as i32) << 31),
         };
 
         if self_.desired_range_90k.start > self_.desired_range_90k.end ||
@@ -395,7 +413,7 @@ impl Segment {
             return Err(Error{description: String::from("no index"),
                              cause: None});
         }
-        if !it.is_key {
+        if !it.is_key() {
             return Err(Error{description: String::from("not key frame"),
                              cause: None});
         }
@@ -412,7 +430,7 @@ impl Segment {
         };
 
         loop {
-            if it.start_90k <= self_.desired_range_90k.start && it.is_key {
+            if it.start_90k <= self_.desired_range_90k.start && it.is_key() {
                 // new start candidate.
                 self_.begin = it;
                 self_.frames = 0;
@@ -422,16 +440,24 @@ impl Segment {
                 break;
             }
             self_.frames += 1;
-            self_.key_frames += it.is_key as i32;
+            self_.key_frames += it.is_key() as u16;
             if !it.next(data)? {
                 break;
             }
         }
         self_.file_end = it.pos;
         self_.actual_end_90k = it.start_90k;
-        self_.have_trailing_zero = it.duration_90k == 0;
+        self_.video_sample_entry_id_and_trailing_zero =
+            recording.video_sample_entry.id |
+            (((it.duration_90k == 0) as i32) << 31);
         Ok(self_)
     }
+
+    pub fn video_sample_entry_id(&self) -> i32 {
+        self.video_sample_entry_id_and_trailing_zero & 0x7FFFFFFF
+    }
+
+    pub fn have_trailing_zero(&self) -> bool { self.video_sample_entry_id_and_trailing_zero < 0 }
 
     /// Returns the byte range within the sample file of data associated with this segment.
     pub fn sample_file_range(&self) -> Range<u64> { self.begin.pos as u64 .. self.file_end as u64 }
@@ -448,12 +474,12 @@ impl Segment {
         let playback = db.lock().get_recording_playback(self.camera_id, self.recording_id)?;
         let data = &(&playback).video_index;
         let mut it = self.begin;
-        if it.i == 0 {
+        if it.uninitialized() {
             if !it.next(data)? {
                 return Err(Error::new(format!("recording {}/{}: no frames",
                                               self.camera_id, self.recording_id)));
             }
-            if !it.is_key {
+            if !it.is_key() {
                 return Err(Error::new(format!("recording {}/{}: doesn't start with key frame",
                                               self.camera_id, self.recording_id)));
             }
@@ -466,7 +492,7 @@ impl Segment {
                                               self.camera_id, self.recording_id, self.frames,
                                               i+1)));
             }
-            if it.is_key {
+            if it.is_key() {
                 key_frame += 1;
                 if key_frame > self.key_frames {
                     return Err(Error::new(format!(
@@ -577,7 +603,9 @@ mod tests {
         for sample in &samples {
             assert!(it.next(&e.video_index).unwrap());
             assert_eq!(sample,
-                       &Sample{duration_90k: it.duration_90k, bytes: it.bytes, is_key: it.is_key});
+                       &Sample{duration_90k: it.duration_90k,
+                               bytes: it.bytes,
+                               is_key: it.is_key()});
         }
         assert!(!it.next(&e.video_index).unwrap());
     }

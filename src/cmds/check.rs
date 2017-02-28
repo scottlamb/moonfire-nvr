@@ -79,7 +79,7 @@ fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
         bytes += it.bytes as u64;
         duration += it.duration_90k;
         video_samples += 1;
-        video_sync_samples += if it.is_key { 1 } else { 0 };
+        video_sync_samples += it.is_key() as i32;
     }
     Ok(RecordingSummary{
         bytes: bytes,
