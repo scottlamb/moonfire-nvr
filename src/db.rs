@@ -247,7 +247,7 @@ pub struct ListAggregatedRecordingsRow {
 #[derive(Debug)]
 pub struct RecordingPlayback {
     pub sample_file_uuid: Uuid,
-    pub video_index: Vec<u8>
+    pub video_index: Box<[u8]>,
 }
 
 /// Bitmask in the `flags` field in the `recordings` table; see `schema.sql`.
@@ -965,9 +965,9 @@ impl LockedDatabase {
         if let Some(row) = rows.next() {
             let row = row?;
             let uuid: FromSqlUuid = row.get_checked(0)?;
-            let r = Arc::new(RecordingPlayback{
+            let r = Arc::new(RecordingPlayback {
                 sample_file_uuid: uuid.0,
-                video_index: row.get_checked(1)?,
+                video_index: row.get_checked::<_, Vec<u8>>(1)?.into_boxed_slice(),
             });
             cache.insert(composite_id, r.clone());
             return Ok(r);
