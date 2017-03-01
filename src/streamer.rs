@@ -306,17 +306,18 @@ mod tests {
     }
 
     fn get_frames(db: &db::LockedDatabase, camera_id: i32, recording_id: i32) -> Vec<Frame> {
-        let rec = db.get_recording_playback(camera_id, recording_id).unwrap();
-        let mut it = recording::SampleIndexIterator::new();
-        let mut frames = Vec::new();
-        while it.next(&rec.video_index).unwrap() {
-            frames.push(Frame{
-                start_90k: it.start_90k,
-                duration_90k: it.duration_90k,
-                is_key: it.is_key(),
-            });
-        }
-        frames
+        db.with_recording_playback(camera_id, recording_id, |rec| {
+            let mut it = recording::SampleIndexIterator::new();
+            let mut frames = Vec::new();
+            while it.next(&rec.video_index).unwrap() {
+                frames.push(Frame{
+                    start_90k: it.start_90k,
+                    duration_90k: it.duration_90k,
+                    is_key: it.is_key(),
+                });
+            }
+            Ok(frames)
+        }).unwrap()
     }
 
     #[test]

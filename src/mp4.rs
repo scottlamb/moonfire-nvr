@@ -352,11 +352,10 @@ impl Segment {
                       -> Result<(), Error>
     where F: FnOnce(&[u8], SegmentLengths) -> &[u8] {
         let index = self.index.borrow_with(|| {
-            self.build_index(db)
-                .map_err(|e| {
-                    error!("Unable to build index for segment: {:?}", e);
-                    ()
-                })
+            db.lock()
+              .with_recording_playback(self.s.camera_id, self.s.recording_id,
+                                       |playback| self.build_index(playback))
+              .map_err(|e| { error!("Unable to build index for segment: {:?}", e); })
         });
         let index = match *index {
             Ok(ref b) => &b[..],
@@ -380,7 +379,7 @@ impl Segment {
     fn stsz(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[lens.stts .. lens.stts + lens.stsz] }
     fn stss(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[lens.stts + lens.stsz ..] }
 
-    fn build_index(&self, db: &db::Database) -> Result<Box<[u8]>, Error> {
+    fn build_index(&self, playback: &db::RecordingPlayback) -> Result<Box<[u8]>, Error> {
         let s = &self.s;
         let lens = self.lens();
         let len = lens.stts + lens.stsz + lens.stss;
@@ -395,7 +394,7 @@ impl Segment {
             let mut frame = 0;
             let mut key_frame = 0;
             let mut last_start_and_dur = None;
-            s.foreach(db, |it| {
+            s.foreach(playback, |it| {
                 last_start_and_dur = Some((it.start_90k, it.duration_90k));
                 BigEndian::write_u32(&mut stts[8*frame .. 8*frame+4], 1);
                 BigEndian::write_u32(&mut stts[8*frame+4 .. 8*frame+8], it.duration_90k as u32);
@@ -1152,8 +1151,11 @@ impl File {
     fn write_video_sample_data(&self, i: usize, r: Range<u64>, out: &mut io::Write)
                                -> Result<(), Error> {
         let s = &self.segments[i];
-        let rec = self.db.lock().get_recording_playback(s.s.camera_id, s.s.recording_id)?;
-        let f = self.dir.open_sample_file(rec.sample_file_uuid)?;
+        let uuid = {
+            self.db.lock().with_recording_playback(s.s.camera_id, s.s.recording_id,
+                                                   |p| Ok(p.sample_file_uuid))?
+        };
+        let f = self.dir.open_sample_file(uuid)?;
         mmapfile::MmapFileSlice::new(f, s.s.sample_file_range()).write_to(r, out)
     }
 
@@ -1786,8 +1788,8 @@ mod bench {
         let db = TestDb::new();
         testutil::add_dummy_recordings_to_db(&db.db, 1);
 
+        let db = db.db.lock();
         let segment = {
-            let db = db.db.lock();
             let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
             let mut row = None;
             db.list_recordings_by_time(testutil::TEST_CAMERA_ID, all_time, |r| {
@@ -1798,9 +1800,12 @@ mod bench {
             let rel_range_90k = 0 .. row.duration_90k;
             super::Segment::new(&db, &row, rel_range_90k, 1).unwrap()
         };
-        let v = segment.build_index(&db.db).unwrap();  // warm.
-        b.bytes = v.len() as u64;  // define the benchmark performance in terms of output bytes.
-        b.iter(|| segment.build_index(&db.db).unwrap());
+        db.with_recording_playback(segment.s.camera_id, segment.s.recording_id, |playback| {
+            let v = segment.build_index(playback).unwrap();  // warm.
+            b.bytes = v.len() as u64;  // define the benchmark performance in terms of output bytes.
+            b.iter(|| segment.build_index(playback).unwrap());
+            Ok(())
+        }).unwrap();
     }
 
     /// Benchmarks serving the generated part of a `.mp4` file (up to the first byte from disk).

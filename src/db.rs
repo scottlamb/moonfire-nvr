@@ -200,6 +200,21 @@ impl rusqlite::types::FromSql for FromSqlUuid {
     }
 }
 
+/// A box with space for the uuid (initially uninitialized) and the video index.
+/// The caller must fill the uuid bytes.
+struct PlaybackData(Box<[u8]>);
+
+impl rusqlite::types::FromSql for PlaybackData {
+    fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
+        let blob = value.as_blob()?;
+        let len = 16 + blob.len();
+        let mut v = Vec::with_capacity(len);
+        unsafe { v.set_len(len) };
+        v[16..].copy_from_slice(blob);
+        Ok(PlaybackData(v.into_boxed_slice()))
+    }
+}
+
 /// A concrete box derived from a ISO/IEC 14496-12 section 8.5.2 VisualSampleEntry box. Describes
 /// the codec, width, height, etc.
 #[derive(Debug)]
@@ -243,11 +258,20 @@ pub struct ListAggregatedRecordingsRow {
     pub run_start_id: i32,
 }
 
-/// Select fields from the `recordings_playback` table. Retrieve with `get_recording_playback`.
+/// Select fields from the `recordings_playback` table. Retrieve with `with_recording_playback`.
 #[derive(Debug)]
-pub struct RecordingPlayback {
+pub struct RecordingPlayback<'a> {
     pub sample_file_uuid: Uuid,
-    pub video_index: Box<[u8]>,
+    pub video_index: &'a [u8],
+}
+
+impl<'a> RecordingPlayback<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        RecordingPlayback {
+            sample_file_uuid: Uuid::from_bytes(&data[..16]).unwrap(),
+            video_index: &data[16..],
+        }
+    }
 }
 
 /// Bitmask in the `flags` field in the `recordings` table; see `schema.sql`.
@@ -497,7 +521,7 @@ struct State {
     cameras_by_uuid: BTreeMap<Uuid, i32>,
     video_sample_entries: BTreeMap<i32, Arc<VideoSampleEntry>>,
     list_recordings_by_time_sql: String,
-    playback_cache: RefCell<LruCache<i64, Arc<RecordingPlayback>, fnv::FnvBuildHasher>>,
+    playback_cache: RefCell<LruCache<i64, Box<[u8]>, fnv::FnvBuildHasher>>,
 }
 
 /// A high-level transaction. This manages the SQLite transaction and the matching modification to
@@ -949,15 +973,17 @@ impl LockedDatabase {
         Ok(())
     }
 
-    /// Gets a single `recording_playback` row.
+    /// Calls `f` with a single `recording_playback` row.
+    /// Note the lock is held for the duration of `f`.
     /// This uses a LRU cache to reduce the number of retrievals from the database.
-    pub fn get_recording_playback(&self, camera_id: i32, recording_id: i32)
-        -> Result<Arc<RecordingPlayback>, Error> {
+    pub fn with_recording_playback<F, R>(&self, camera_id: i32, recording_id: i32, f: F)
+                                      -> Result<R, Error>
+    where F: FnOnce(&RecordingPlayback) -> Result<R, Error> {
         let composite_id = composite_id(camera_id, recording_id);
         let mut cache = self.state.playback_cache.borrow_mut();
         if let Some(r) = cache.get_mut(&composite_id) {
             trace!("cache hit for recording {}/{}", camera_id, recording_id);
-            return Ok(r.clone());
+            return f(&RecordingPlayback::new(r));
         }
         trace!("cache miss for recording {}/{}", camera_id, recording_id);
         let mut stmt = self.conn.prepare_cached(GET_RECORDING_PLAYBACK_SQL)?;
@@ -965,12 +991,14 @@ impl LockedDatabase {
         if let Some(row) = rows.next() {
             let row = row?;
             let uuid: FromSqlUuid = row.get_checked(0)?;
-            let r = Arc::new(RecordingPlayback {
-                sample_file_uuid: uuid.0,
-                video_index: row.get_checked::<_, Vec<u8>>(1)?.into_boxed_slice(),
-            });
-            cache.insert(composite_id, r.clone());
-            return Ok(r);
+            let data = {
+                let mut data: PlaybackData = row.get_checked(1)?;
+                data.0[0..16].copy_from_slice(uuid.0.as_bytes());
+                data.0
+            };
+            let result = f(&RecordingPlayback::new(&data));
+            cache.insert(composite_id, data);
+            return result;
         }
         Err(Error::new(format!("no such recording {}/{}", camera_id, recording_id)))
     }
@@ -1467,7 +1495,7 @@ mod tests {
         assert_eq!(1, rows);
 
         // TODO: list_aggregated_recordings.
-        // TODO: get_recording_playback.
+        // TODO: with_recording_playback.
     }
 
     fn assert_unsorted_eq<T>(mut a: Vec<T>, mut b: Vec<T>)

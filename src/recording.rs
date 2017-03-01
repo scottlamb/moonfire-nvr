@@ -406,51 +406,52 @@ impl Segment {
         }
 
         // Slow path. Need to iterate through the index.
-        let playback = db.get_recording_playback(self_.camera_id, self_.recording_id)?;
-        let data = &(&playback).video_index;
-        let mut it = SampleIndexIterator::new();
-        if !it.next(data)? {
-            return Err(Error{description: String::from("no index"),
-                             cause: None});
-        }
-        if !it.is_key() {
-            return Err(Error{description: String::from("not key frame"),
-                             cause: None});
-        }
-
-        // Stop when hitting a frame with this start time.
-        // Going until the end of the recording is special-cased because there can be a trailing
-        // frame of zero duration. It's unclear exactly how this should be handled, but let's
-        // include it for consistency with the fast path. It'd be bizarre to have it included or
-        // not based on desired_range_90k.start.
-        let end_90k = if self_.desired_range_90k.end == self_.actual_end_90k {
-            i32::max_value()
-        } else {
-            self_.desired_range_90k.end
-        };
-
-        loop {
-            if it.start_90k <= self_.desired_range_90k.start && it.is_key() {
-                // new start candidate.
-                self_.begin = it;
-                self_.frames = 0;
-                self_.key_frames = 0;
-            }
-            if it.start_90k >= end_90k {
-                break;
-            }
-            self_.frames += 1;
-            self_.key_frames += it.is_key() as u16;
+        db.with_recording_playback(self_.camera_id, self_.recording_id, |playback| {
+            let data = &(&playback).video_index;
+            let mut it = SampleIndexIterator::new();
             if !it.next(data)? {
-                break;
+                return Err(Error{description: String::from("no index"),
+                                 cause: None});
             }
-        }
-        self_.file_end = it.pos;
-        self_.actual_end_90k = it.start_90k;
-        self_.video_sample_entry_id_and_trailing_zero =
-            recording.video_sample_entry.id |
-            (((it.duration_90k == 0) as i32) << 31);
-        Ok(self_)
+            if !it.is_key() {
+                return Err(Error{description: String::from("not key frame"),
+                                 cause: None});
+            }
+
+            // Stop when hitting a frame with this start time.
+            // Going until the end of the recording is special-cased because there can be a trailing
+            // frame of zero duration. It's unclear exactly how this should be handled, but let's
+            // include it for consistency with the fast path. It'd be bizarre to have it included or
+            // not based on desired_range_90k.start.
+            let end_90k = if self_.desired_range_90k.end == self_.actual_end_90k {
+                i32::max_value()
+            } else {
+                self_.desired_range_90k.end
+            };
+
+            loop {
+                if it.start_90k <= self_.desired_range_90k.start && it.is_key() {
+                    // new start candidate.
+                    self_.begin = it;
+                    self_.frames = 0;
+                    self_.key_frames = 0;
+                }
+                if it.start_90k >= end_90k {
+                    break;
+                }
+                self_.frames += 1;
+                self_.key_frames += it.is_key() as u16;
+                if !it.next(data)? {
+                    break;
+                }
+            }
+            self_.file_end = it.pos;
+            self_.actual_end_90k = it.start_90k;
+            self_.video_sample_entry_id_and_trailing_zero =
+                recording.video_sample_entry.id |
+                (((it.duration_90k == 0) as i32) << 31);
+            Ok(self_)
+        })
     }
 
     pub fn video_sample_entry_id(&self) -> i32 {
@@ -467,11 +468,10 @@ impl Segment {
 
     /// Iterates through each frame in the segment.
     /// Must be called without the database lock held; retrieves video index from the cache.
-    pub fn foreach<F>(&self, db: &db::Database, mut f: F) -> Result<(), Error>
+    pub fn foreach<F>(&self, playback: &db::RecordingPlayback, mut f: F) -> Result<(), Error>
     where F: FnMut(&SampleIndexIterator) -> Result<(), Error> {
         trace!("foreach on recording {}/{}: {} frames, actual_time_90k: {:?}",
               self.camera_id, self.recording_id, self.frames, self.actual_time_90k());
-        let playback = db.lock().get_recording_playback(self.camera_id, self.recording_id)?;
         let data = &(&playback).video_index;
         let mut it = self.begin;
         if it.uninitialized() {
@@ -634,6 +634,15 @@ mod tests {
         }
     }
 
+    fn get_frames<F, T>(db: &db::Database, segment: &Segment, f: F) -> Vec<T>
+    where F: Fn(&SampleIndexIterator) -> T {
+        let mut v = Vec::new();
+        db.lock().with_recording_playback(segment.camera_id, segment.recording_id, |playback| {
+            segment.foreach(playback, |it| { v.push(f(it)); Ok(()) })
+        }).unwrap();
+        v
+    }
+
     /// Tests that a `Segment` correctly can clip at the beginning and end.
     /// This is a simpler case; all sync samples means we can start on any frame.
     #[test]
@@ -649,9 +658,7 @@ mod tests {
         // Time range [2, 2 + 4 + 6 + 8) means the 2nd, 3rd, 4th samples should be
         // included.
         let segment = Segment::new(&db.db.lock(), &row, 2 .. 2+4+6+8).unwrap();
-        let mut v = Vec::new();
-        segment.foreach(&db.db, |it| { v.push(it.duration_90k); Ok(()) }).unwrap();
-        assert_eq!(&v, &[4, 6, 8]);
+        assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[4, 6, 8]);
     }
 
     /// Half sync frames means starting from the last sync frame <= desired point.
@@ -668,9 +675,7 @@ mod tests {
         // Time range [2 + 4 + 6, 2 + 4 + 6 + 8) means the 4th sample should be included.
         // The 3rd also gets pulled in because it is a sync frame and the 4th is not.
         let segment = Segment::new(&db.db.lock(), &row, 2+4+6 .. 2+4+6+8).unwrap();
-        let mut v = Vec::new();
-        segment.foreach(&db.db, |it| { v.push(it.duration_90k); Ok(()) }).unwrap();
-        assert_eq!(&v, &[6, 8]);
+        assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[6, 8]);
     }
 
     #[test]
@@ -682,9 +687,7 @@ mod tests {
         let db = TestDb::new();
         let row = db.create_recording_from_encoder(encoder);
         let segment = Segment::new(&db.db.lock(), &row, 1 .. 2).unwrap();
-        let mut v = Vec::new();
-        segment.foreach(&db.db, |it| { v.push(it.bytes); Ok(()) }).unwrap();
-        assert_eq!(&v, &[2, 3]);
+        assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[2, 3]);
     }
 
     /// Test a `Segment` which uses the whole recording.
@@ -700,9 +703,7 @@ mod tests {
         let db = TestDb::new();
         let row = db.create_recording_from_encoder(encoder);
         let segment = Segment::new(&db.db.lock(), &row, 0 .. 2+4+6+8+10).unwrap();
-        let mut v = Vec::new();
-        segment.foreach(&db.db, |it| { v.push(it.duration_90k); Ok(()) }).unwrap();
-        assert_eq!(&v, &[2, 4, 6, 8, 10]);
+        assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[2, 4, 6, 8, 10]);
     }
 
     #[test]
@@ -714,9 +715,7 @@ mod tests {
         let db = TestDb::new();
         let row = db.create_recording_from_encoder(encoder);
         let segment = Segment::new(&db.db.lock(), &row, 0 .. 2).unwrap();
-        let mut v = Vec::new();
-        segment.foreach(&db.db, |it| { v.push(it.bytes); Ok(()) }).unwrap();
-        assert_eq!(&v, &[1, 2, 3]);
+        assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1, 2, 3]);
     }
 
     // TODO: test segment error cases involving mismatch between row frames/key_frames and index.
