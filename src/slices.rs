@@ -30,15 +30,20 @@
 
 //! Tools for implementing a `http_entity::Entity` body composed from many "slices".
 
-use error::{Error, Result};
+use reffers::ARefs;
+use futures::stream::{self, BoxStream};
+use futures::Stream;
 use std::fmt;
-use std::io;
 use std::ops::Range;
+
+pub type Chunk = ARefs<'static, [u8]>;
+pub type Body = stream::BoxStream<Chunk, ::hyper::Error>;
 
 /// Writes a byte range to the given `io::Write` given a context argument; meant for use with
 /// `Slices`.
-pub trait Slice {
-    type Ctx;
+pub trait Slice : Sync + Sized + 'static {
+    type Ctx: Send + Clone;
+    type Chunk: Send;
 
     /// The byte position (relative to the start of the `Slices`) beyond the end of this slice.
     /// Note the starting position (and thus length) are inferred from the previous slice.
@@ -47,22 +52,10 @@ pub trait Slice {
     /// Writes `r` to `out`, as in `http_entity::Entity::write_to`.
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
-    fn write_to(&self, ctx: &Self::Ctx, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<()>;
-}
+    fn get_range(&self, ctx: &Self::Ctx, r: Range<u64>, len: u64)
+                 -> stream::BoxStream<Self::Chunk, ::hyper::Error>;
 
-/// Calls `f` with an `io::Write` which delegates to `inner` only for the section defined by `r`.
-/// This is useful for easily implementing the `ContextWriter` interface for pieces that generate
-/// data on-the-fly rather than simply copying a buffer.
-pub fn clip_to_range<F>(r: Range<u64>, l: u64, inner: &mut io::Write, mut f: F) -> Result<()>
-where F: FnMut(&mut Vec<u8>) -> Result<()> {
-    // Just create a buffer for the whole slice and copy out the relevant portion.
-    // One might expect it to be faster to avoid this memory allocation and extra copying, but
-    // benchmarks show when making many 4-byte writes it's better to be able to inline many
-    // Vec::write_all calls then make one call through traits to hyper's write logic.
-    let mut buf = Vec::with_capacity(l as usize);
-    f(&mut buf)?;
-    inner.write_all(&buf[r.start as usize .. r.end as usize])?;
-    Ok(())
+    fn get_slices(ctx: &Self::Ctx) -> &Slices<Self>;
 }
 
 /// Helper to serve byte ranges from a body which is broken down into many "slices".
@@ -114,56 +107,53 @@ impl<S> Slices<S> where S: Slice {
 
     /// Writes `range` to `out`.
     /// This interface mirrors `http_entity::Entity::write_to`, with the additional `ctx` argument.
-    pub fn write_to(&self, ctx: &S::Ctx, range: Range<u64>, out: &mut io::Write) -> Result<()> {
+    pub fn get_range(&self, ctx: &S::Ctx, range: Range<u64>)
+                     -> BoxStream<S::Chunk, ::hyper::Error> {
         if range.start > range.end || range.end > self.len {
-            return Err(Error{
-                description: format!("Bad range {:?} for slice of length {}", range, self.len),
-                cause: None});
+            error!("Bad range {:?} for slice of length {}", range, self.len);
+            return stream::once(Err(::hyper::Error::Incomplete)).boxed();
         }
 
         // Binary search for the first slice of the range to write, determining its index and
         // (from the preceding slice) the start of its range.
-        let (mut i, mut slice_start) = match self.slices.binary_search_by_key(&range.start,
-                                                                              |s| s.end()) {
-            Ok(i) if i == self.slices.len() - 1 => return Ok(()),  // at end.
+        let (i, slice_start) = match self.slices.binary_search_by_key(&range.start, |s| s.end()) {
             Ok(i) => (i+1, self.slices[i].end()),   // desired start == slice i's end; first is i+1!
             Err(i) if i == 0 => (0, 0),             // desired start < slice 0's end; first is 0.
             Err(i) => (i, self.slices[i-1].end()),  // desired start < slice i's end; first is i.
         };
 
-        // There is at least one slice to write.
         // Iterate through and write each slice until the end.
-        let mut start_pos = range.start - slice_start;
-        loop {
-            let s = &self.slices[i];
-            let end = s.end();
-            let l = end - slice_start;
-            if range.end <= end {  // last slice.
-                return s.write_to(ctx, start_pos .. range.end - slice_start, l, out);
-            }
-            s.write_to(ctx, start_pos .. end - slice_start, l, out)?;
 
-            // Setup next iteration.
-            start_pos = 0;
-            slice_start = end;
-            i += 1;
-        }
+        let start_pos = range.start - slice_start;
+        let bodies = stream::unfold(
+            (ctx.clone(), i, start_pos, slice_start), move |(c, i, start_pos, slice_start)| {
+            let (body, end);
+            {
+                let self_ = S::get_slices(&c);
+                if i == self_.slices.len() { return None }
+                let s = &self_.slices[i];
+                if range.end == slice_start + start_pos { return None }
+                end = ::std::cmp::min(range.end, s.end());
+                let l = end - slice_start;
+                body = s.get_range(&c, start_pos .. end - slice_start, l);
+            };
+            Some(Ok::<_, ::hyper::Error>((body, (c, i+1, 0, end))))
+        });
+        bodies.flatten().boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use error::{Error, Result};
-    use std::cell::RefCell;
-    use std::error::Error as E;
-    use std::io::Write;
+    use futures::{Future, Stream};
+    use futures::stream::{self, BoxStream};
     use std::ops::Range;
-    use std::vec::Vec;
-    use super::{Slice, Slices, clip_to_range};
+    use super::{Slice, Slices};
+    use testutil;
 
     #[derive(Debug, Eq, PartialEq)]
-    pub struct FakeWrite {
-        writer: &'static str,
+    pub struct FakeChunk {
+        slice: &'static str,
         range: Range<u64>,
     }
 
@@ -173,146 +163,84 @@ mod tests {
     }
 
     impl Slice for FakeSlice {
-        type Ctx = RefCell<Vec<FakeWrite>>;
+        type Ctx = &'static Slices<FakeSlice>;
+        type Chunk = FakeChunk;
 
         fn end(&self) -> u64 { self.end }
 
-        fn write_to(&self, ctx: &RefCell<Vec<FakeWrite>>, r: Range<u64>, _l: u64, _out: &mut Write)
-                    -> Result<()> {
-            ctx.borrow_mut().push(FakeWrite{writer: self.name, range: r});
-            Ok(())
+        fn get_range(&self, _ctx: &&'static Slices<FakeSlice>, r: Range<u64>, _l: u64)
+                     -> BoxStream<FakeChunk, ::hyper::Error> {
+            stream::once(Ok(FakeChunk{slice: self.name, range: r})).boxed()
         }
+
+        fn get_slices(ctx: &&'static Slices<FakeSlice>) -> &'static Slices<Self> { *ctx }
     }
 
-    pub fn new_slices() -> Slices<FakeSlice> {
-        let mut s = Slices::new();
-        s.append(FakeSlice{end: 5, name: "a"});
-        s.append(FakeSlice{end: 5+13, name: "b"});
-        s.append(FakeSlice{end: 5+13+7, name: "c"});
-        s.append(FakeSlice{end: 5+13+7+17, name: "d"});
-        s.append(FakeSlice{end: 5+13+7+17+19, name: "e"});
-        s
+    lazy_static! {
+        static ref SLICES: Slices<FakeSlice> = {
+            let mut s = Slices::new();
+            s.append(FakeSlice{end: 5, name: "a"});
+            s.append(FakeSlice{end: 5+13, name: "b"});
+            s.append(FakeSlice{end: 5+13+7, name: "c"});
+            s.append(FakeSlice{end: 5+13+7+17, name: "d"});
+            s.append(FakeSlice{end: 5+13+7+17+19, name: "e"});
+            s
+        };
     }
 
     #[test]
     pub fn size() {
-        assert_eq!(5 + 13 + 7 + 17 + 19, new_slices().len());
+        testutil::init();
+        assert_eq!(5 + 13 + 7 + 17 + 19, SLICES.len());
     }
 
     #[test]
     pub fn exact_slice() {
         // Test writing exactly slice b.
-        let s = new_slices();
-        let w = RefCell::new(Vec::new());
-        let mut dummy = Vec::new();
-        s.write_to(&w, 5 .. 18, &mut dummy).unwrap();
-        assert_eq!(&[FakeWrite{writer: "b", range: 0 .. 13}], &w.borrow()[..]);
+        testutil::init();
+        let out = SLICES.get_range(&&*SLICES, 5 .. 18).collect().wait().unwrap();
+        assert_eq!(&[FakeChunk{slice: "b", range: 0 .. 13}], &out[..]);
     }
 
     #[test]
     pub fn offset_first() {
         // Test writing part of slice a.
-        let s = new_slices();
-        let w = RefCell::new(Vec::new());
-        let mut dummy = Vec::new();
-        s.write_to(&w, 1 .. 3, &mut dummy).unwrap();
-        assert_eq!(&[FakeWrite{writer: "a", range: 1 .. 3}], &w.borrow()[..]);
+        testutil::init();
+        let out = SLICES.get_range(&&*SLICES, 1 .. 3).collect().wait().unwrap();
+        assert_eq!(&[FakeChunk{slice: "a", range: 1 .. 3}], &out[..]);
     }
 
     #[test]
     pub fn offset_mid() {
         // Test writing part of slice b, all of slice c, and part of slice d.
-        let s = new_slices();
-        let w = RefCell::new(Vec::new());
-        let mut dummy = Vec::new();
-        s.write_to(&w, 17 .. 26, &mut dummy).unwrap();
+        testutil::init();
+        let out = SLICES.get_range(&&*SLICES, 17 .. 26).collect().wait().unwrap();
         assert_eq!(&[
-                   FakeWrite{writer: "b", range: 12 .. 13},
-                   FakeWrite{writer: "c", range: 0 .. 7},
-                   FakeWrite{writer: "d", range: 0 .. 1},
-                   ], &w.borrow()[..]);
+                   FakeChunk{slice: "b", range: 12 .. 13},
+                   FakeChunk{slice: "c", range: 0 .. 7},
+                   FakeChunk{slice: "d", range: 0 .. 1},
+                   ], &out[..]);
     }
 
     #[test]
     pub fn everything() {
         // Test writing the whole Slices.
-        let s = new_slices();
-        let w = RefCell::new(Vec::new());
-        let mut dummy = Vec::new();
-        s.write_to(&w, 0 .. 61, &mut dummy).unwrap();
+        testutil::init();
+        let out = SLICES.get_range(&&*SLICES, 0 .. 61).collect().wait().unwrap();
         assert_eq!(&[
-                   FakeWrite{writer: "a", range: 0 .. 5},
-                   FakeWrite{writer: "b", range: 0 .. 13},
-                   FakeWrite{writer: "c", range: 0 .. 7},
-                   FakeWrite{writer: "d", range: 0 .. 17},
-                   FakeWrite{writer: "e", range: 0 .. 19},
-                   ], &w.borrow()[..]);
+                   FakeChunk{slice: "a", range: 0 .. 5},
+                   FakeChunk{slice: "b", range: 0 .. 13},
+                   FakeChunk{slice: "c", range: 0 .. 7},
+                   FakeChunk{slice: "d", range: 0 .. 17},
+                   FakeChunk{slice: "e", range: 0 .. 19},
+                   ], &out[..]);
     }
 
     #[test]
     pub fn at_end() {
-        let s = new_slices();
-        let w = RefCell::new(Vec::new());
-        let mut dummy = Vec::new();
-        s.write_to(&w, 61 .. 61, &mut dummy).unwrap();
-        let empty: &[FakeWrite] = &[];
-        assert_eq!(empty, &w.borrow()[..]);
-    }
-
-    #[test]
-    pub fn test_clip_to_range() {
-        let mut out = Vec::new();
-
-        // Simple case: one write with everything.
-        clip_to_range(0 .. 5, 5, &mut out, |w| {
-            w.write_all(b"01234").unwrap();
-            Ok(())
-        }).unwrap();
-        assert_eq!(b"01234", &out[..]);
-
-        // Same in a few writes.
-        out.clear();
-        clip_to_range(0 .. 5, 5, &mut out, |w| {
-            w.write_all(b"0").unwrap();
-            w.write_all(b"123").unwrap();
-            w.write_all(b"4").unwrap();
-            Ok(())
-        }).unwrap();
-        assert_eq!(b"01234", &out[..]);
-
-        // Limiting to a prefix.
-        out.clear();
-        clip_to_range(0 .. 2, 5, &mut out, |w| {
-            w.write_all(b"0").unwrap();    // all of this write
-            w.write_all(b"123").unwrap();  // some of this write
-            w.write_all(b"4").unwrap();    // none of this write
-            Ok(())
-        }).unwrap();
-        assert_eq!(b"01", &out[..]);
-
-        // Limiting to part in the middle.
-        out.clear();
-        clip_to_range(2 .. 4, 5, &mut out, |w| {
-            w.write_all(b"0").unwrap();     // none of this write
-            w.write_all(b"1234").unwrap();  // middle of this write
-            w.write_all(b"5678").unwrap();  // none of this write
-            Ok(())
-        }).unwrap();
-        assert_eq!(b"23", &out[..]);
-
-        // If the callback returns an error, it should be propagated (fast path or not).
-        out.clear();
-        assert_eq!(
-            clip_to_range(0 .. 4, 4, &mut out, |_| Err(Error::new("some error".to_owned())))
-                .unwrap_err().description(),
-            "some error");
-        out.clear();
-        assert_eq!(
-            clip_to_range(0 .. 1, 4, &mut out, |_| Err(Error::new("some error".to_owned())))
-                .unwrap_err().description(),
-            "some error");
-
-        // TODO: if inner.write does a partial write, the next try should start at the correct
-        // position.
+        testutil::init();
+        let out = SLICES.get_range(&&*SLICES, 61 .. 61).collect().wait().unwrap();
+        let empty: &[FakeChunk] = &[];
+        assert_eq!(empty, &out[..]);
     }
 }

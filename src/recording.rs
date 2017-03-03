@@ -375,7 +375,8 @@ impl Segment {
     /// desired start time. (The caller is responsible for creating an edit list to skip the
     /// undesired portion.) It will end at the first frame after the desired range (unless the
     /// desired range extends beyond the recording).
-    pub fn new(db: &db::LockedDatabase, recording: &db::ListRecordingsRow,
+    pub fn new(db: &db::LockedDatabase,
+               recording: &db::ListRecordingsRow,
                desired_range_90k: Range<i32>) -> Result<Segment, Error> {
         let mut self_ = Segment{
             camera_id: recording.camera_id,

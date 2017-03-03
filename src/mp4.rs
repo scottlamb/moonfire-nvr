@@ -83,14 +83,18 @@ use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db;
 use dir;
 use error::Error;
+use futures::{Future, Stream};
+use futures::stream;
 use http_entity;
 use hyper::header;
-use mmapfile;
+use memmap;
 use openssl::hash;
+use parking_lot::{Once, ONCE_INIT};
 use recording::{self, TIME_UNITS_PER_SEC};
-use slices::{self, Slices};
+use reffers::ARefs;
+use slices::{self, Body, Chunk, Slices};
 use smallvec::SmallVec;
-use lazycell::LazyCell;
+use std::cell::UnsafeCell;
 use std::cmp;
 use std::io;
 use std::ops::Range;
@@ -100,7 +104,7 @@ use strutil;
 use time::Timespec;
 
 /// This value should be incremented any time a change is made to this file that causes different
-/// bytes to be output for a particular set of `Builder` options. Incrementing this value will
+/// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
 /// cause the etag to change as well.
 const FORMAT_VERSION: [u8; 1] = [0x03];
 
@@ -329,42 +333,46 @@ struct Segment {
     ///    1. stts: `slice[.. stsz_start]`
     ///    2. stsz: `slice[stsz_start .. stss_start]`
     ///    3. stss: `slice[stss_start ..]`
-    /// Access only through `write_index`.
-    index: LazyCell<Result<Box<[u8]>, ()>>,
+    /// Access only through `get_index`.
+    index: UnsafeCell<Result<Box<[u8]>, ()>>,
 
     /// The 1-indexed frame number in the `File` of the first frame in this segment.
     first_frame_num: u32,
-    num_subtitle_samples: u32,
+    num_subtitle_samples: u16,
+
+    index_once: Once,
 }
+
+unsafe impl Sync for Segment {}
 
 impl Segment {
     fn new(db: &db::LockedDatabase, row: &db::ListRecordingsRow, rel_range_90k: Range<i32>,
            first_frame_num: u32) -> Result<Self, Error> {
         Ok(Segment{
             s: recording::Segment::new(db, row, rel_range_90k)?,
-            index: LazyCell::new(),
+            index: UnsafeCell::new(Err(())),
+            index_once: ONCE_INIT,
             first_frame_num: first_frame_num,
             num_subtitle_samples: 0,
         })
     }
 
-    fn write_index<F>(&self, r: Range<u64>, db: &db::Database, out: &mut io::Write, f: F)
-                      -> Result<(), Error>
+    fn get_index<'a, F>(&'a self, db: &db::Database, f: F) -> Result<&'a [u8], Error>
     where F: FnOnce(&[u8], SegmentLengths) -> &[u8] {
-        let index = self.index.borrow_with(|| {
-            db.lock()
-              .with_recording_playback(self.s.camera_id, self.s.recording_id,
-                                       |playback| self.build_index(playback))
-              .map_err(|e| { error!("Unable to build index for segment: {:?}", e); })
+        self.index_once.call_once(|| {
+            let index = unsafe { &mut *self.index.get() };
+            *index = db.lock()
+                       .with_recording_playback(self.s.camera_id, self.s.recording_id,
+                                                |playback| self.build_index(playback))
+                       .map_err(|e| { error!("Unable to build index for segment: {:?}", e); });
         });
-        let index = match *index {
-            Ok(ref b) => &b[..],
+        let index: &'a _ = unsafe { &*self.index.get() };
+        match *index {
+            Ok(ref b) => return Ok(f(&b[..], self.lens())),
             Err(()) => {
                 return Err(Error::new("Unable to build index; see previous error.".to_owned()))
             },
-        };
-        out.write_all(&f(&index, self.lens())[r.start as usize .. r.end as usize])?;
-        Ok(())
+        }
     }
 
     fn lens(&self) -> SegmentLengths {
@@ -466,8 +474,8 @@ enum SliceType {
     VideoSampleEntry = 2,    // param is index into m.video_sample_entries
     Stts = 3,                // param is index into m.segments
     Stsz = 4,                // param is index into m.segments
-    Co64 = 5,                // param is unused
-    Stss = 6,                // param is index into m.segments
+    Stss = 5,                // param is index into m.segments
+    Co64 = 6,                // param is unused
     VideoSampleData = 7,     // param is index into m.segments
     SubtitleSampleData = 8,  // param is index into m.segments
 
@@ -482,49 +490,69 @@ impl Slice {
 
         Ok(Slice(end | ((t as u64) << 40) | ((p as u64) << 44)))
     }
-}
 
-impl Slice {
     fn t(&self) -> SliceType {
         // This value is guaranteed to be a valid SliceType because it was copied from a SliceType
         // in Slice::new.
         unsafe { ::std::mem::transmute(((self.0 >> 40) & 0xF) as u8) }
     }
     fn p(&self) -> usize { (self.0 >> 44) as usize }
+
+    fn wrap_index<F>(&self, mp4: &File, r: Range<u64>, f: &F) -> Result<Chunk, Error>
+    where F: Fn(&[u8], SegmentLengths) -> &[u8] {
+        let mp4 = ARefs::new(mp4.0.clone());
+        let r = r.start as usize .. r.end as usize;
+        let p = self.p();
+        mp4.try_map(|mp4| Ok(&mp4.segments[p].get_index(&mp4.db, f)?[r]))
+    }
 }
 
 impl slices::Slice for Slice {
     type Ctx = File;
+    type Chunk = slices::Chunk;
 
     fn end(&self) -> u64 { return self.0 & 0xFF_FF_FF_FF_FF }
-    fn write_to(&self, f: &File, r: Range<u64>, l: u64, out: &mut io::Write)
-                -> Result<(), Error> {
-        let t = self.t();
+    fn get_range(&self, f: &File, range: Range<u64>, len: u64) -> Body {
+        trace!("getting mp4 slice {:?}'s range {:?} / {}", self, range, len);
         let p = self.p();
-        trace!("write {:?}, range {:?} out of len {}", self, r, l);
-        match t {
+        let res = match self.t() {
             SliceType::Static => {
                 let s = STATIC_BYTESTRINGS[p];
-                let part = &s[r.start as usize .. r.end as usize];
-                out.write_all(part)?;
-                Ok(())
+                let part = &s[range.start as usize .. range.end as usize];
+                Ok(part.into())
             },
             SliceType::Buf => {
-                out.write_all(&f.buf[p+r.start as usize .. p+r.end as usize])?;
-                Ok(())
+                let r = ARefs::new(f.0.clone());
+                Ok(r.map(|f| &f.buf[p+range.start as usize .. p+range.end as usize]))
             },
             SliceType::VideoSampleEntry => {
-                out.write_all(&f.video_sample_entries[p].data[r.start as usize .. r.end as usize])?;
-                Ok(())
+                let r = ARefs::new(f.0.clone());
+                Ok(r.map(|f| &f.video_sample_entries[p]
+                               .data[range.start as usize .. range.end as usize]))
             },
-            SliceType::Stts => f.segments[p].write_index(r, &f.db, out, Segment::stts),
-            SliceType::Stsz => f.segments[p].write_index(r, &f.db, out, Segment::stsz),
-            SliceType::Stss => f.segments[p].write_index(r, &f.db, out, Segment::stss),
-            SliceType::Co64 => f.write_co64(r, l, out),
-            SliceType::VideoSampleData => f.write_video_sample_data(p, r, out),
-            SliceType::SubtitleSampleData => f.write_subtitle_sample_data(p, r, l, out),
-        }
+            SliceType::Stts => self.wrap_index(f, range.clone(), &Segment::stts),
+            SliceType::Stsz => self.wrap_index(f, range.clone(), &Segment::stsz),
+            SliceType::Stss => self.wrap_index(f, range.clone(), &Segment::stss),
+            SliceType::Co64 => f.0.get_co64(range.clone(), len),
+            SliceType::VideoSampleData => f.0.get_video_sample_data(p, range.clone()),
+            SliceType::SubtitleSampleData => f.0.get_subtitle_sample_data(p, range.clone(), len),
+        };
+        stream::once(res
+            .map_err(|e| {
+                error!("Error producing {:?}: {:?}", self, e);
+                ::hyper::Error::Incomplete
+            })
+            .and_then(move |c| {
+                if c.len() != (range.end - range.start) as usize {
+                    error!("Error producing {:?}: range {:?} produced incorrect len {}.",
+                           self, range, c.len());
+                    return Err(::hyper::Error::Incomplete);
+                }
+                Ok(c)
+            })).boxed()
     }
+
+    fn get_slices(ctx: &File) -> &Slices<Self> { &ctx.0.slices }
 }
 
 impl ::std::fmt::Debug for Slice {
@@ -557,7 +585,7 @@ macro_rules! write_length {
 
 impl FileBuilder {
     pub fn new() -> Self {
-        FileBuilder{
+        FileBuilder {
             segments: Vec::new(),
             video_sample_entries: SmallVec::new(),
             next_frame_num: 1,
@@ -626,8 +654,8 @@ impl FileBuilder {
                 let end_sec = (s.s.start +
                                recording::Duration(d.end as i64 + TIME_UNITS_PER_SEC - 1))
                               .unix_seconds();
-                s.num_subtitle_samples = (end_sec - start_sec) as u32;
-                self.num_subtitle_samples += s.num_subtitle_samples;
+                s.num_subtitle_samples = (end_sec - start_sec) as u16;
+                self.num_subtitle_samples += s.num_subtitle_samples as u32;
             }
 
             // Update the etag to reflect this segment.
@@ -692,7 +720,7 @@ impl FileBuilder {
             debug!("Estimated {} buf bytes; actually were {}", EST_BUF_LEN, self.body.buf.len());
         }
         debug!("slices: {:?}", self.body.slices);
-        Ok(File{
+        Ok(File(Arc::new(FileInner{
             db: db,
             dir: dir,
             segments: self.segments,
@@ -702,7 +730,7 @@ impl FileBuilder {
             initial_sample_byte_pos: initial_sample_byte_pos,
             last_modified: header::HttpDate(time::at(Timespec::new(max_end.unix_seconds(), 0))),
             etag: header::EntityTag::strong(strutil::hex(&etag.finish()?)),
-        })
+        })))
     }
 
     /// Appends a `MovieBox` (ISO/IEC 14496-12 section 8.2.1).
@@ -1015,7 +1043,7 @@ impl FileBuilder {
         write_length!(self, {
             self.body.buf.extend_from_slice(
                 b"stsc\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01");
-            self.body.append_u32(self.num_subtitle_samples);
+            self.body.append_u32(self.num_subtitle_samples as u32);
             self.body.append_u32(1);
         })
     }
@@ -1042,7 +1070,7 @@ impl FileBuilder {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"stsz\x00\x00\x00\x00");
             self.body.append_u32((mem::size_of::<u16>() + SUBTITLE_LENGTH) as u32);
-            self.body.append_u32(self.num_subtitle_samples);
+            self.body.append_u32(self.num_subtitle_samples as u32);
         })
     }
 
@@ -1123,7 +1151,7 @@ impl BodyState {
     }
 }
 
-pub struct File {
+struct FileInner {
     db: Arc<db::Database>,
     dir: Arc<dir::SampleFileDir>,
     segments: Vec<Segment>,
@@ -1135,60 +1163,67 @@ pub struct File {
     etag: header::EntityTag,
 }
 
-impl File {
-    fn write_co64(&self, r: Range<u64>, l: u64, out: &mut io::Write) -> Result<(), Error> {
-        slices::clip_to_range(r, l, out, |w| {
-            let mut pos = self.initial_sample_byte_pos;
-            for s in &self.segments {
-                w.write_u64::<BigEndian>(pos)?;
-                let r = s.s.sample_file_range();
-                pos += r.end - r.start;
-            }
-            Ok(())
-        })
+impl FileInner {
+    fn get_co64(&self, r: Range<u64>, l: u64) -> Result<Chunk, Error> {
+        let mut v = Vec::with_capacity(l as usize);
+        let mut pos = self.initial_sample_byte_pos;
+        for s in &self.segments {
+            v.write_u64::<BigEndian>(pos)?;
+            let r = s.s.sample_file_range();
+            pos += r.end - r.start;
+        }
+        Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]))
     }
 
-    fn write_video_sample_data(&self, i: usize, r: Range<u64>, out: &mut io::Write)
-                               -> Result<(), Error> {
+    /// Gets a `Chunk` of video sample data from disk.
+    /// This works by `mmap()`ing in the data. There are a couple caveats:
+    ///
+    ///    * The thread which reads the resulting slice is likely to experience major page faults.
+    ///      Eventually this will likely be rewritten to `mmap()` the memory in another thread, and
+    ///      `mlock()` and send chunks of it to be read and `munlock()`ed to avoid this problem.
+    ///
+    ///    * If the backing file is truncated, the program will crash with `SIGBUS`. This shouldn't
+    ///      happen because nothing should be touching Moonfire NVR's files but itself.
+    fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> Result<Chunk, Error> {
         let s = &self.segments[i];
         let uuid = {
             self.db.lock().with_recording_playback(s.s.camera_id, s.s.recording_id,
                                                    |p| Ok(p.sample_file_uuid))?
         };
         let f = self.dir.open_sample_file(uuid)?;
-        mmapfile::MmapFileSlice::new(f, s.s.sample_file_range()).write_to(r, out)
+        let mmap = Box::new(memmap::Mmap::open_with_offset(
+            &f, memmap::Protection::Read, r.start as usize, (r.end - r.start) as usize)?);
+        Ok(ARefs::new(mmap).map(|m| unsafe { m.as_slice() }))
     }
 
-    fn write_subtitle_sample_data(&self, i: usize, r: Range<u64>, l: u64, out: &mut io::Write)
-                                  -> Result<(), Error> {
+    fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, l: u64) -> Result<Chunk, Error> {
         let s = &self.segments[i];
         let d = &s.s.desired_range_90k;
         let start_sec = (s.s.start + recording::Duration(d.start as i64)).unix_seconds();
         let end_sec = (s.s.start + recording::Duration(d.end as i64 + TIME_UNITS_PER_SEC - 1))
                       .unix_seconds();
-        slices::clip_to_range(r, l, out, |w| {
-            for ts in start_sec .. end_sec {
-                w.write_u16::<BigEndian>(SUBTITLE_LENGTH as u16)?;
-                let tm = time::at(time::Timespec{sec: ts, nsec: 0});
-                use std::io::Write;
-                write!(w, "{}", tm.strftime(SUBTITLE_TEMPLATE)?)?;
-            }
-            Ok(())
-        })?;
-        Ok(())
+        let mut v = Vec::with_capacity(l as usize);
+        for ts in start_sec .. end_sec {
+            v.write_u16::<BigEndian>(SUBTITLE_LENGTH as u16)?;
+            let tm = time::at(time::Timespec{sec: ts, nsec: 0});
+            use std::io::Write;
+            write!(v, "{}", tm.strftime(SUBTITLE_TEMPLATE)?)?;
+        }
+        Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]))
     }
 }
 
-impl http_entity::Entity<Error> for File {
+#[derive(Clone)]
+pub struct File(Arc<FileInner>);
+
+impl http_entity::Entity<Body> for File {
     fn add_headers(&self, hdrs: &mut header::Headers) {
         hdrs.set(header::ContentType("video/mp4".parse().unwrap()));
     }
-    fn last_modified(&self) -> Option<header::HttpDate> { Some(self.last_modified) }
-    fn etag(&self) -> Option<header::EntityTag> { Some(self.etag.clone()) }
-    fn len(&self) -> u64 { self.slices.len() }
-    fn write_to(&self, range: Range<u64>, out: &mut io::Write) -> Result<(), Error> {
-        self.slices.write_to(self, range, out)
-    }
+    fn last_modified(&self) -> Option<header::HttpDate> { Some(self.0.last_modified) }
+    fn etag(&self) -> Option<header::EntityTag> { Some(self.0.etag.clone()) }
+    fn len(&self) -> u64 { self.0.slices.len() }
+    fn get_range(&self, range: Range<u64>) -> Body { self.0.slices.get_range(self, range) }
 }
 
 /// Tests. There are two general strategies used to validate the resulting files:
@@ -1206,14 +1241,13 @@ mod tests {
     use byteorder::{BigEndian, ByteOrder};
     use db;
     use dir;
-    use error::Error;
+    use futures::Stream as FuturesStream;
     use ffmpeg;
     use hyper::header;
     use openssl::hash;
     use recording::{self, TIME_UNITS_PER_SEC};
     use http_entity::{self, Entity};
     use std::fs;
-    use std::io;
     use std::ops::Range;
     use std::path::Path;
     use std::sync::Arc;
@@ -1223,27 +1257,29 @@ mod tests {
     use stream::{self, Opener, Stream};
     use testutil::{self, TestDb, TEST_CAMERA_ID};
 
-    /// A wrapper around openssl's SHA-1 hashing that implements the `Write` trait.
-    struct Sha1(hash::Hasher);
-
-    impl Sha1 {
-        fn new() -> Sha1 { Sha1(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap()) }
-        fn finish(mut self) -> Vec<u8> { self.0.finish().unwrap() }
-    }
-
-    impl io::Write for Sha1 {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.0.update(buf).unwrap();
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    fn fill_slice(slice: &mut [u8], e: &http_entity::Entity<Body>, start: u64) {
+        let mut p = 0;
+        e.get_range(start .. start + slice.len() as u64)
+         .for_each(|chunk| {
+             slice[p .. p + chunk.len()].copy_from_slice(&chunk);
+             p += chunk.len();
+             Ok::<_, ::hyper::Error>(())
+         })
+        .wait()
+        .unwrap();
     }
 
     /// Returns the SHA-1 digest of the given `Entity`.
-    fn digest(e: &http_entity::Entity<Error>) -> Vec<u8> {
-        let mut sha1 = Sha1::new();
-        e.write_to(0 .. e.len(), &mut sha1).unwrap();
-        sha1.finish()
+    fn digest(e: &http_entity::Entity<Body>) -> Vec<u8> {
+        e.get_range(0 .. e.len())
+         .fold(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap(), |mut sha1, chunk| {
+             sha1.update(&chunk).unwrap();
+             Ok::<_, ::hyper::Error>(sha1)
+         })
+         .wait()
+         .unwrap()
+         .finish()
+         .unwrap()
     }
 
     /// Information used within `BoxCursor` to describe a box on the stack.
@@ -1256,13 +1292,13 @@ mod tests {
     /// A cursor over the boxes in a `.mp4` file. Supports moving forward and up/down the box
     /// stack, not backward. Panics on error.
     #[derive(Clone)]
-    struct BoxCursor<'a> {
-        mp4: &'a http_entity::Entity<Error>,
+    struct BoxCursor {
+        mp4: File,
         stack: Vec<Mp4Box>,
     }
 
-    impl<'a> BoxCursor<'a> {
-        pub fn new(mp4: &'a http_entity::Entity<Error>) -> BoxCursor<'a> {
+    impl BoxCursor {
+        pub fn new(mp4: File) -> BoxCursor {
             BoxCursor{
                 mp4: mp4,
                 stack: Vec::new(),
@@ -1274,11 +1310,11 @@ mod tests {
         fn internal_push(&mut self, pos: u64, max: u64) -> bool {
             if pos == max { return false; }
             let mut hdr = [0u8; 16];
-            self.mp4.write_to(pos .. pos+8, &mut &mut hdr[..]).unwrap();
+            fill_slice(&mut hdr[..8], &self.mp4, pos);
             let (len, hdr_len, boxtype_slice) = match BigEndian::read_u32(&hdr[..4]) {
                 0 => (self.mp4.len() - pos, 8, &hdr[4..8]),
                 1 => {
-                    self.mp4.write_to(pos+8 .. pos+12, &mut &mut hdr[..]).unwrap();
+                    fill_slice(&mut hdr[8..], &self.mp4, pos + 8);
                     (BigEndian::read_u64(&hdr[4..12]), 16, &hdr[12..])
                 },
                 l => (l as u64, 8, &hdr[4..8]),
@@ -1306,17 +1342,19 @@ mod tests {
 
         /// Gets the specified byte range within the current box, starting after the box type.
         /// Must not be at EOF.
-        pub fn get(&self, r: Range<u64>, mut buf: &mut [u8]) {
+        pub fn get(&self, start: u64, buf: &mut [u8]) {
             let interior = &self.stack.last().expect("at root").interior;
-            assert!(r.end < interior.end - interior.start);
-            self.mp4.write_to(r.start+interior.start .. r.end+interior.start, &mut buf).unwrap();
+            assert!(start + (buf.len() as u64) < interior.end - interior.start);
+            fill_slice(buf, &self.mp4, start+interior.start);
         }
 
         pub fn get_all(&self) -> Vec<u8> {
             let interior = self.stack.last().expect("at root").interior.clone();
             let len = (interior.end - interior.start) as usize;
+            trace!("get_all: start={}, len={}", interior.start, len);
             let mut out = Vec::with_capacity(len);
-            self.mp4.write_to(interior, &mut out).unwrap();
+            unsafe { out.set_len(len) };
+            fill_slice(&mut out[..], &self.mp4, interior.start);
             out
         }
 
@@ -1324,7 +1362,7 @@ mod tests {
         /// Must not be at EOF.
         pub fn get_u32(&self, p: u64) -> u32 {
             let mut buf = [0u8; 4];
-            self.get(p .. p+4, &mut buf);
+            self.get(p, &mut buf);
             BigEndian::read_u32(&buf[..])
         }
 
@@ -1360,14 +1398,14 @@ mod tests {
     }
 
     /// Information returned by `find_track`.
-    struct Track<'a> {
-        edts_cursor: Option<BoxCursor<'a>>,
-        stbl_cursor: BoxCursor<'a>,
+    struct Track {
+        edts_cursor: Option<BoxCursor>,
+        stbl_cursor: BoxCursor,
     }
 
     /// Finds the `moov/trak` that has a `tkhd` associated with the given `track_id`, which must
     /// exist.
-    fn find_track(mp4: &http_entity::Entity<Error>, track_id: u32) -> Track {
+    fn find_track(mp4: File, track_id: u32) -> Track {
         let mut cursor = BoxCursor::new(mp4);
         cursor.down();
         assert!(cursor.find(b"moov"));
@@ -1377,7 +1415,7 @@ mod tests {
             cursor.down();
             assert!(cursor.find(b"tkhd"));
             let mut version = [0u8; 1];
-            cursor.get(0 .. 1, &mut version);
+            cursor.get(0, &mut version);
 
             // Let id_pos be the offset after the FullBox section of the track_id.
             let id_pos = match version[0] {
@@ -1459,7 +1497,7 @@ mod tests {
             db.list_recordings_by_time(TEST_CAMERA_ID, all_time, |r| {
                 let d = r.duration_90k;
                 assert!(skip_90k + shorten_90k < d);
-                builder.append(&db, r, skip_90k .. d - shorten_90k).unwrap();
+                builder.append(&*db, r, skip_90k .. d - shorten_90k).unwrap();
                 Ok(())
             }).unwrap();
         }
@@ -1470,7 +1508,14 @@ mod tests {
         let mut filename = dir.to_path_buf();
         filename.push("clip.new.mp4");
         let mut out = fs::OpenOptions::new().write(true).create_new(true).open(&filename).unwrap();
-        mp4.write_to(0 .. mp4.len(), &mut out).unwrap();
+        use ::std::io::Write;
+        mp4.get_range(0 .. mp4.len())
+           .for_each(|chunk| {
+               out.write_all(&chunk)?;
+               Ok(())
+           })
+           .wait()
+           .unwrap();
         filename.to_str().unwrap().to_string()
     }
 
@@ -1536,7 +1581,7 @@ mod tests {
 
         // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
         let mp4 = make_mp4_from_encoder(&db, encoder, 2 .. 2+4+6+8);
-        let track = find_track(&mp4, 1);
+        let track = find_track(mp4, 1);
         assert!(track.edts_cursor.is_none());
         let mut cursor = track.stbl_cursor;
         cursor.down();
@@ -1590,7 +1635,7 @@ mod tests {
         // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
         let mp4 = make_mp4_from_encoder(&db, encoder, 2+4+6 .. 2+4+6+8);
-        let track = find_track(&mp4, 1);
+        let track = find_track(mp4, 1);
 
         // Examine edts. It should skip the 3rd frame.
         let mut cursor = track.edts_cursor.unwrap();
@@ -1721,26 +1766,23 @@ mod tests {
 
 #[cfg(all(test, feature="nightly"))]
 mod bench {
+    extern crate reqwest;
     extern crate test;
 
+    use futures::future;
+    use futures::stream::BoxStream;
     use hyper;
-    use hyper::header;
     use http_entity;
     use recording;
+    use reffers::ARefs;
     use self::test::Bencher;
     use std::str;
     use super::tests::create_mp4_from_db;
     use testutil::{self, TestDb};
 
     /// An HTTP server for benchmarking.
-    /// It's used as a singleton via `lazy_static!` for two reasons:
-    ///
-    ///    * to avoid running out of file descriptors. `#[bench]` functions apparently get called
-    ///      many times as the number of iterations is tuned, and hyper servers
-    ///      [can't be shut down](https://github.com/hyperium/hyper/issues/338), so
-    ///      otherwise the default Ubuntu 16.04.1 ulimit of 1024 files is quickly exhausted.
-    ///    * so that when getting a CPU profile of the benchmark, more of the profile focuses
-    ///      on the HTTP serving rather than the setup.
+    /// It's used as a singleton via `lazy_static!` so that when getting a CPU profile of the
+    /// benchmark, more of the profile focuses on the HTTP serving rather than the setup.
     ///
     /// Currently this only serves a single `.mp4` file but we could set up variations to benchmark
     /// different scenarios: with/without subtitles and edit lists, different lengths, serving
@@ -1752,29 +1794,37 @@ mod bench {
 
     impl BenchServer {
         fn new() -> BenchServer {
-            let mut listener = hyper::net::HttpListener::new("127.0.0.1:0").unwrap();
-            use hyper::net::NetworkListener;
-            let addr = listener.local_addr().unwrap();
-            let server = hyper::Server::new(listener);
-            let url = hyper::Url::parse(
-                format!("http://{}:{}/", addr.ip(), addr.port()).as_str()).unwrap();
             let db = TestDb::new();
             testutil::add_dummy_recordings_to_db(&db.db, 60);
             let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
-            let p = mp4.initial_sample_byte_pos;
-            use std::thread::spawn;
-            spawn(move || {
-                use hyper::server::{Request, Response, Fresh};
-                let (db, dir) = (db.db.clone(), db.dir.clone());
-                let _ = server.handle(move |req: Request, res: Response<Fresh>| {
-                    let mp4 = create_mp4_from_db(db.clone(), dir.clone(), 0, 0, false);
-                    http_entity::serve(&mp4, &req, res).unwrap();
-                });
+            let p = mp4.0.initial_sample_byte_pos;
+            let (tx, rx) = ::std::sync::mpsc::channel();
+            ::std::thread::spawn(move || {
+                let addr = "127.0.0.1:0".parse().unwrap();
+                let server = hyper::server::Http::new()
+                    .bind(&addr, move || Ok(MyService(mp4.clone())))
+                    .unwrap();
+                tx.send(server.local_addr().unwrap()).unwrap();
+                server.run().unwrap();
             });
+            let addr = rx.recv().unwrap();
             BenchServer{
-                url: url,
+                url: hyper::Url::parse(&format!("http://{}:{}/", addr.ip(), addr.port())).unwrap(),
                 generated_len: p,
             }
+        }
+    }
+
+    struct MyService(super::File);
+
+    impl hyper::server::Service for MyService {
+        type Request = hyper::server::Request;
+        type Response = hyper::server::Response<BoxStream<ARefs<'static, [u8]>, hyper::Error>>;
+        type Error = hyper::Error;
+        type Future = future::FutureResult<Self::Response, Self::Error>;
+
+        fn call(&self, req: hyper::server::Request) -> Self::Future {
+            future::ok(http_entity::serve(self.0.clone(), &req))
         }
     }
 
@@ -1816,11 +1866,12 @@ mod bench {
         let p = server.generated_len;
         let mut buf = Vec::with_capacity(p as usize);
         b.bytes = p;
-        let client = hyper::Client::new();
+        let client = reqwest::Client::new().unwrap();
         let mut run = || {
+            use self::reqwest::header::{Range, ByteRangeSpec};
             let mut resp =
                 client.get(server.url.clone())
-                      .header(header::Range::Bytes(vec![header::ByteRangeSpec::FromTo(0, p - 1)]))
+                      .header(Range::Bytes(vec![ByteRangeSpec::FromTo(0, p - 1)]))
                       .send()
                       .unwrap();
             buf.clear();

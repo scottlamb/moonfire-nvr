@@ -85,7 +85,7 @@ impl error::Error for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        write!(f, "Error: {}", self.description)
+        write!(f, "Error: {}\ncause: {:?}", self.description, self.cause)
     }
 }
 

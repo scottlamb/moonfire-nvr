@@ -55,6 +55,7 @@ use error::{Error, ResultExt};
 use fnv;
 use lru_cache::LruCache;
 use openssl::hash;
+use parking_lot::{Mutex,MutexGuard};
 use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
 use std::collections::BTreeMap;
@@ -64,7 +65,7 @@ use std::io::Write;
 use std::ops::Range;
 use std::str;
 use std::string::String;
-use std::sync::{Arc,Mutex,MutexGuard};
+use std::sync::Arc;
 use std::vec::Vec;
 use time;
 use uuid::Uuid;
@@ -1347,7 +1348,7 @@ impl Database {
             },
         }));
         {
-            let mut l = &mut *db.0.lock().unwrap();
+            let mut l = &mut *db.lock();
             l.init_video_sample_entries().annotate_err("init_video_sample_entries")?;
             l.init_cameras().annotate_err("init_cameras")?;
             for (&camera_id, ref mut camera) in &mut l.state.cameras_by_id {
@@ -1361,13 +1362,13 @@ impl Database {
 
     /// Locks the database; the returned reference is the only way to perform (read or write)
     /// operations.
-    pub fn lock(&self) -> MutexGuard<LockedDatabase> { self.0.lock().unwrap() }
+    pub fn lock(&self) -> MutexGuard<LockedDatabase> { self.0.lock() }
 
     /// For testing. Closes the database and return the connection. This allows verification that
     /// a newly opened database is in an acceptable state.
     #[cfg(test)]
     fn close(self) -> rusqlite::Connection {
-        self.0.into_inner().unwrap().conn
+        self.0.into_inner().conn
     }
 }
 

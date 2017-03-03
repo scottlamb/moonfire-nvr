@@ -28,17 +28,18 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use chan_signal;
 use clock;
 use db;
 use dir;
 use error::Error;
-use hyper::server::Server;
+use futures::{BoxFuture, Future, Stream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use stream;
 use streamer;
+use tokio_core::reactor;
+use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
 use web;
 
 const USAGE: &'static str = r#"
@@ -65,13 +66,18 @@ struct Args {
     flag_read_only: bool,
 }
 
+fn setup_shutdown_future(h: &reactor::Handle) -> BoxFuture<(), ()> {
+    let int = Signal::new(SIGINT, h).flatten_stream().into_future();
+    let term = Signal::new(SIGTERM, h).flatten_stream().into_future();
+    int.select(term)
+       .map(|_| ())
+       .map_err(|_| ())
+       .boxed()
+}
+
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
 
-    // Watch for termination signals.
-    // This must be started before any threads are spawned (such as the async logger thread) so
-    // that signals will be blocked in all threads.
-    let signal = chan_signal::notify(&[chan_signal::Signal::INT, chan_signal::Signal::TERM]);
     super::install_logger(true);
     let (_db_dir, conn) = super::open_conn(
         &args.flag_db_dir,
@@ -81,7 +87,7 @@ pub fn run() -> Result<(), Error> {
     info!("Database is loaded.");
 
     // Start a streamer for each camera.
-    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_streamers = Arc::new(AtomicBool::new(false));
     let mut streamers = Vec::new();
     let syncer = if !args.flag_read_only {
         let (syncer_channel, syncer_join) = dir::start_syncer(dir.clone()).unwrap();
@@ -92,7 +98,7 @@ pub fn run() -> Result<(), Error> {
             dir: &dir,
             clocks: &clock::REAL,
             opener: &*stream::FFMPEG,
-            shutdown: &shutdown,
+            shutdown: &shutdown_streamers,
         };
         for (i, (id, camera)) in l.cameras_by_id().iter().enumerate() {
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / cameras as i64;
@@ -108,24 +114,28 @@ pub fn run() -> Result<(), Error> {
     } else { None };
 
     // Start the web interface.
-    let server = Server::http(args.flag_http_addr.as_str()).unwrap();
-    let h = web::Handler::new(db.clone(), dir.clone());
-    let _guard = server.handle(h);
-    info!("Ready to serve HTTP requests");
+    let addr = args.flag_http_addr.parse().unwrap();
+    let server = ::hyper::server::Http::new()
+        .bind(&addr, move || Ok(web::Service::new(db.clone(), dir.clone())))
+        .unwrap();
 
-    // Wait for a signal and shut down.
-    chan_select! {
-        signal.recv() -> signal => info!("Received signal {:?}; shutting down streamers.", signal),
-    }
-    shutdown.store(true, Ordering::SeqCst);
+    let shutdown = setup_shutdown_future(&server.handle());
+
+    info!("Ready to serve HTTP requests");
+    server.run_until(shutdown).unwrap();
+
+    info!("Shutting down streamers.");
+    shutdown_streamers.store(true, Ordering::SeqCst);
     for streamer in streamers.drain(..) {
         streamer.join().unwrap();
     }
+
     if let Some((syncer_channel, syncer_join)) = syncer {
         info!("Shutting down syncer.");
         drop(syncer_channel);
         syncer_join.join().unwrap();
     }
+
     info!("Exiting.");
     ::std::process::exit(0);
 }
