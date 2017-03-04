@@ -652,13 +652,15 @@ mod bench {
         let url = reqwest::Url::parse(&format!("{}/cameras/{}/", server.base_url,
                                                *testutil::TEST_CAMERA_UUID)).unwrap();
         let mut buf = Vec::new();
-        b.iter(|| {
-            let client = reqwest::Client::new().unwrap();
+        let client = reqwest::Client::new().unwrap();
+        let mut f = || {
             let mut resp = client.get(url.clone()).send().unwrap();
             assert_eq!(*resp.status(), reqwest::StatusCode::Ok);
             buf.clear();
             use std::io::Read;
             resp.read_to_end(&mut buf).unwrap();
-        });
+        };
+        f();  // warm.
+        b.iter(f);
     }
 }

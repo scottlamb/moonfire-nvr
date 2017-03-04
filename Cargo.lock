@@ -267,7 +267,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "hyper"
 version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/scottlamb/hyper?branch=moonfire-on-0.10.x#601e52f7decfbe4b34f278058383f774fba7cb4f"
 dependencies = [
  "httparse 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "language-tags 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -282,6 +282,12 @@ dependencies = [
  "unicase 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "url 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "hyper"
+version = "0.10.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+replace = "hyper 0.10.5 (git+https://github.com/scottlamb/hyper?branch=moonfire-on-0.10.x)"
 
 [[package]]
 name = "hyper"
@@ -1230,6 +1236,7 @@ dependencies = [
 "checksum gdi32-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "0912515a8ff24ba900422ecda800b52f4016a56251922d397c576bf92c690518"
 "checksum http-entity 0.0.1 (git+https://github.com/scottlamb/http-entity?branch=hyper-0.11.x)" = "<none>"
 "checksum httparse 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "a6e7a63e511f9edffbab707141fbb8707d1a3098615fb2adbd5769cdfcc9b17d"
+"checksum hyper 0.10.5 (git+https://github.com/scottlamb/hyper?branch=moonfire-on-0.10.x)" = "<none>"
 "checksum hyper 0.10.5 (registry+https://github.com/rust-lang/crates.io-index)" = "43a15e3273b2133aaac0150478ab443fb89f15c3de41d8d93d8f3bb14bf560f6"
 "checksum hyper 0.11.0-a.0 (git+https://github.com/hyperium/hyper)" = "<none>"
 "checksum hyper 0.11.0-a.0 (git+https://github.com/scottlamb/hyper?branch=moonfire-on-0.11.x)" = "<none>"

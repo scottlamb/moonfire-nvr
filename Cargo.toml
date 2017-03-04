@@ -72,3 +72,4 @@ debug = true
 
 [replace]
 "https://github.com/hyperium/hyper#hyper:0.11.0-a.0" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }
+"hyper:0.10.5" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.10.x" }
