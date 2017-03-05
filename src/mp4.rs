@@ -830,9 +830,9 @@ impl FileBuilder {
             let actual = s.s.actual_time_90k();
             let skip = s.s.desired_range_90k.start - actual.start;
             let keep = s.s.desired_range_90k.end - s.s.desired_range_90k.start;
-            assert!(skip >= 0 && keep > 0, "desired={}..{} actual={}..{}",
-                    s.s.desired_range_90k.start, s.s.desired_range_90k.end,
-                    actual.start, actual.end);
+            assert!(skip >= 0 && keep > 0, "segment {}/{}: desired={}..{} actual={}..{}",
+                    s.s.camera_id, s.s.recording_id, s.s.desired_range_90k.start,
+                    s.s.desired_range_90k.end, actual.start, actual.end);
             cur_media_time += skip as u64;
             if unflushed.segment_duration + unflushed.media_time == cur_media_time {
                 unflushed.segment_duration += keep as u64;
