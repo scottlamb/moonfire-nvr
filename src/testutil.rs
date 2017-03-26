@@ -37,10 +37,6 @@ use rusqlite;
 use std::env;
 use std::sync;
 use std::thread;
-use slog::{self, DrainExt};
-use slog_envlogger;
-use slog_stdlog;
-use slog_term;
 use time;
 use uuid::Uuid;
 
@@ -61,9 +57,6 @@ pub const TEST_CAMERA_ID: i32 = 1;
 ///      results regardless of machine setup.)
 pub fn init() {
     INIT.call_once(|| {
-        let drain = slog_term::StreamerBuilder::new().async().full().build();
-        let drain = slog_envlogger::new(drain);
-        slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
         env::set_var("TZ", "America/Los_Angeles");
         time::tzset();
     });

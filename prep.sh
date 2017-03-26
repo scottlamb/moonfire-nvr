@@ -225,7 +225,9 @@ ExecStart=${SERVICE_BIN} run \\
     --sample-file-dir=${SAMPLES_PATH} \\
     --db-dir=${DB_DIR} \\
     --http-addr=0.0.0.0:${NVR_PORT}
-Environment=RUST_LOG=info
+Environment=TZ=:/etc/localtime
+Environment=MOONFIRE_FORMAT=google-systemd
+Environment=MOONFIRE_LOG=info
 Type=simple
 User=${NVR_USER}
 Nice=-20

@@ -77,8 +77,6 @@ fn setup_shutdown_future(h: &reactor::Handle) -> BoxFuture<(), ()> {
 
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
-
-    super::install_logger(true);
     let (_db_dir, conn) = super::open_conn(
         &args.flag_db_dir,
         if args.flag_read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
@@ -137,5 +135,5 @@ pub fn run() -> Result<(), Error> {
     }
 
     info!("Exiting.");
-    ::std::process::exit(0);
+    Ok(())
 }

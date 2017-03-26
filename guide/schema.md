@@ -84,7 +84,7 @@ Run the upgrade procedure using the new software binary (here referred to as
 `new-moonfire-nvr`; if you are installing from source, you may find it as
 `target/release/moonfire-nvr`).
 
-   $ sudo -u moonfire-nvr RUST_LOG=info new-moonfire-nvr --upgrade
+   $ sudo -u moonfire-nvr new-moonfire-nvr --upgrade
 
 Then run the system in read-only mode to verify correct operation:
 

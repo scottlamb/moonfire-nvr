@@ -53,7 +53,6 @@ struct Args {
 
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
-    super::install_logger(false);
     let (_db_dir, mut conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::Create)?;
 
     // Check if the database has already been initialized.

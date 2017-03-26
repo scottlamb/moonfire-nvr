@@ -33,10 +33,6 @@ use docopt;
 use error::Error;
 use libc;
 use rusqlite;
-use slog::{self, DrainExt};
-use slog_envlogger;
-use slog_stdlog;
-use slog_term;
 use std::path::Path;
 
 mod check;
@@ -67,16 +63,6 @@ impl Command {
             Command::Upgrade => upgrade::run(),
         }
     }
-}
-
-/// Initializes logging.
-/// `async` should be true only for serving; otherwise logging can block useful work.
-/// Sync logging should be preferred for other modes because async apparently is never flushed
-/// before the program exits, and partial output from these tools is very confusing.
-fn install_logger(async: bool) {
-    let drain = slog_term::StreamerBuilder::new().stderr();
-    let drain = slog_envlogger::new(if async { drain.async() } else { drain }.full().build());
-    slog_stdlog::set_logger(slog::Logger::root(drain.ignore_err(), None)).unwrap();
 }
 
 #[derive(PartialEq, Eq)]

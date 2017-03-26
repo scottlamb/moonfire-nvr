@@ -128,7 +128,6 @@ struct Args {
 
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
-    super::install_logger(false);
     let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
     let db = Arc::new(db::Database::new(conn)?);
     //let dir = Arc::new(dir::Fd::open(&args.flag_sample_file_dir)?);

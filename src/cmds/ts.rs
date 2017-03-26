@@ -43,7 +43,6 @@ struct Args {
 
 pub fn run() -> Result<(), Error> {
     let arg: Args = super::parse_args(&USAGE)?;
-    super::install_logger(false);
     for timestamp in &arg.arg_ts {
         let t = recording::Time::parse(timestamp)?;
         println!("{} == {}", t, t.0);

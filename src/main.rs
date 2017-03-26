@@ -47,6 +47,7 @@ extern crate reffers;
 extern crate rusqlite;
 extern crate memmap;
 #[macro_use] extern crate mime;
+extern crate mylog;
 extern crate openssl;
 extern crate parking_lot;
 extern crate regex;
@@ -54,10 +55,6 @@ extern crate rustc_serialize;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;
-extern crate slog;
-extern crate slog_envlogger;
-extern crate slog_stdlog;
-extern crate slog_term;
 extern crate smallvec;
 extern crate time;
 extern crate tokio_core;
@@ -96,9 +93,9 @@ Options:
 Commands:
     check                  Check database integrity
     init                   Initialize a database
-    run                    Run the daemon: record from cameras and handle HTTP requests
+    run                    Run the daemon: record from cameras and serve HTTP
     shell                  Start an interactive shell to modify the database
-    ts                     Translate between human-readable and numeric timestamps
+    ts                     Translate human-readable and numeric timestamps
     upgrade                Upgrade the database to the latest schema
 ";
 
@@ -118,6 +115,14 @@ fn version() -> String {
     }
 }
 
+fn parse_fmt<S: AsRef<str>>(fmt: S) -> Option<mylog::Format> {
+    match fmt.as_ref() {
+        "google" => Some(mylog::Format::Google),
+        "google-systemd" => Some(mylog::Format::GoogleSystemd),
+        _ => None,
+    }
+}
+
 fn main() {
     // Parse commandline arguments.
     // (Note this differs from cmds::parse_args in that it specifies options_first.)
@@ -127,9 +132,18 @@ fn main() {
                                                    .decode())
                                     .unwrap_or_else(|e| e.exit());
 
-    if let Err(e) = args.arg_command.unwrap().run() {
-        use std::io::Write;
-        writeln!(&mut ::std::io::stderr(), "{}", e).unwrap();
+    let mut h = mylog::Builder::new()
+        .set_format(::std::env::var("MOONFIRE_FORMAT")
+                    .ok()
+                    .and_then(parse_fmt)
+                    .unwrap_or(mylog::Format::Google))
+        .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or("info".to_owned()))
+        .build();
+    h.clone().install().unwrap();
+
+    if let Err(e) = { let _a = h.async(); args.arg_command.unwrap().run() } {
+        error!("{}", e);
         ::std::process::exit(1);
     }
+    info!("Success.");
 }

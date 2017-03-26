@@ -220,7 +220,9 @@ been done for you. If not, Create
         --sample-file-dir=/var/lib/moonfire-nvr/sample \
         --db-dir=/var/lib/moonfire-nvr/db \
         --http-addr=0.0.0.0:8080
-    Environment=RUST_LOG=info
+    Environment=TZ=:/etc/localtime
+    Environment=MOONFIRE_FORMAT=google-systemd
+    Environment=MOONFIRE_LOG=info
     Type=simple
     User=moonfire-nvr
     Nice=-20
@@ -249,10 +251,12 @@ and `systemctl` may be of particular interest.
 
 # Troubleshooting
 
-While Moonfire NVR is running, logs will be written to stdout. The `RUST_LOG`
-environmental variable controls the log level; `RUST_LOG=info` is recommended.
-If running through systemd, try `sudo journalctl --unit moonfire-nvr` to view
-the logs.
+While Moonfire NVR is running, logs will be written to stdout. The
+`MOONFIRE_LOG` environmental variable controls the log level;
+`MOONFIRE_LOG=info` is the default. `MOONFIRE_FORMAT` controls the
+logging style; options are `google` (default, like the Google glog package)
+or `google-systemd` (formatted for the systemd journal). If running through
+systemd, try `sudo journalctl --unit moonfire-nvr` to view the logs.
 
 If Moonfire NVR crashes with a `SIGSEGV`, the problem is likely an
 incompatible version of the C `ffmpeg` libraries; use the latest 2.x release

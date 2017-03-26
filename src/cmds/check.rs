@@ -98,7 +98,6 @@ struct File {
 
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
-    super::install_logger(false);
     let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadOnly)?;
     let mut files = Vec::new();
     for e in fs::read_dir(&args.flag_sample_file_dir)? {
