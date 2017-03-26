@@ -26,7 +26,7 @@ log = { version = "0.3", features = ["release_max_level_info"] }
 lru-cache = "0.1"
 memmap = "0.5"
 mime = "0.2"
-mylog = { path = "../mylog" }
+mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.9"
 parking_lot = { version = "0.3.8", features = [] }
 reffers = { git = "https://github.com/diwic/reffers-rs" }

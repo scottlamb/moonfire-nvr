@@ -17,7 +17,7 @@ dependencies = [
  "lru-cache 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "memmap 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "mime 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "mylog 0.1.0",
+ "mylog 0.1.0 (git+https://github.com/scottlamb/mylog)",
  "openssl 0.9.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "reffers 0.4.2 (git+https://github.com/diwic/reffers-rs)",
@@ -452,6 +452,7 @@ dependencies = [
 [[package]]
 name = "mylog"
 version = "0.1.0"
+source = "git+https://github.com/scottlamb/mylog#b461205d7ac33bd9e5d902cd29b05c7d7402b935"
 dependencies = [
  "chrono 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.21 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1138,6 +1139,7 @@ dependencies = [
 "checksum mio 0.6.4 (registry+https://github.com/rust-lang/crates.io-index)" = "eecdbdd49a849336e77b453f021c89972a2cfb5b51931a0026ae0ac4602de681"
 "checksum mio-uds 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "78437f00d9615c366932cbfe79790b5c2945706ba67cf78378ffacc0069ed9de"
 "checksum miow 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3a78d2605eb97302c10cf944b8d96b0a2a890c52957caf92fcd1f24f69049579"
+"checksum mylog 0.1.0 (git+https://github.com/scottlamb/mylog)" = "<none>"
 "checksum native-tls 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b805ee0e8fa268f67a4e5c7f4f80adb8af1fc4428ea0ce5b0ecab1430ef17ec0"
 "checksum ncurses 5.85.0 (registry+https://github.com/rust-lang/crates.io-index)" = "21f71f0e1ae96558612b1e9d188ec4f23149a11ee4fb4b96e130523bea52d605"
 "checksum net2 0.2.26 (registry+https://github.com/rust-lang/crates.io-index)" = "5edf9cb6be97212423aed9413dd4729d62b370b5e1c571750e882cebbbc1e3e2"
