@@ -358,10 +358,13 @@ pub struct Segment {
     pub camera_id: i32,
     pub recording_id: i32,
     pub start: Time,
-    begin: SampleIndexIterator,
+
+    /// An iterator positioned at the beginning of the segment, or `None`. Most segments are
+    /// positioned at the beginning of the recording, so this is an optional box to shrink a long
+    /// of segments. `None` is equivalent to `SampleIndexIterator::new()`.
+    begin: Option<Box<SampleIndexIterator>>,
     pub file_end: i32,
     pub desired_range_90k: Range<i32>,
-    actual_end_90k: i32,
     pub frames: u16,
     pub key_frames: u16,
     video_sample_entry_id_and_trailing_zero: i32,
@@ -374,7 +377,8 @@ impl Segment {
     /// the recording. The actual range will start at the first key frame at or before the
     /// desired start time. (The caller is responsible for creating an edit list to skip the
     /// undesired portion.) It will end at the first frame after the desired range (unless the
-    /// desired range extends beyond the recording).
+    /// desired range extends beyond the recording). (Likewise, the caller is responsible for
+    /// trimming the final frame's duration if desired.)
     pub fn new(db: &db::LockedDatabase,
                recording: &db::ListRecordingsRow,
                desired_range_90k: Range<i32>) -> Result<Segment, Error> {
@@ -382,10 +386,9 @@ impl Segment {
             camera_id: recording.camera_id,
             recording_id: recording.id,
             start: recording.start,
-            begin: SampleIndexIterator::new(),
+            begin: None,
             file_end: recording.sample_file_bytes,
             desired_range_90k: desired_range_90k,
-            actual_end_90k: recording.duration_90k,
             frames: recording.video_samples as u16,
             key_frames: recording.video_sync_samples as u16,
             video_sample_entry_id_and_trailing_zero:
@@ -394,20 +397,22 @@ impl Segment {
         };
 
         if self_.desired_range_90k.start > self_.desired_range_90k.end ||
-           self_.desired_range_90k.end > self_.actual_end_90k {
+           self_.desired_range_90k.end > recording.duration_90k {
             return Err(Error::new(format!(
                 "desired range [{}, {}) invalid for recording of length {}",
-                self_.desired_range_90k.start, self_.desired_range_90k.end, self_.actual_end_90k)));
+                self_.desired_range_90k.start, self_.desired_range_90k.end,
+                recording.duration_90k)));
         }
 
         if self_.desired_range_90k.start == 0 &&
-           self_.desired_range_90k.end == self_.actual_end_90k {
+           self_.desired_range_90k.end == recording.duration_90k {
             // Fast path. Existing entry is fine.
             return Ok(self_)
         }
 
         // Slow path. Need to iterate through the index.
         db.with_recording_playback(self_.camera_id, self_.recording_id, |playback| {
+            let mut begin = Box::new(SampleIndexIterator::new());
             let data = &(&playback).video_index;
             let mut it = SampleIndexIterator::new();
             if !it.next(data)? {
@@ -424,7 +429,7 @@ impl Segment {
             // frame of zero duration. It's unclear exactly how this should be handled, but let's
             // include it for consistency with the fast path. It'd be bizarre to have it included or
             // not based on desired_range_90k.start.
-            let end_90k = if self_.desired_range_90k.end == self_.actual_end_90k {
+            let end_90k = if self_.desired_range_90k.end == recording.duration_90k {
                 i32::max_value()
             } else {
                 self_.desired_range_90k.end
@@ -433,7 +438,7 @@ impl Segment {
             loop {
                 if it.start_90k <= self_.desired_range_90k.start && it.is_key() {
                     // new start candidate.
-                    self_.begin = it;
+                    *begin = it;
                     self_.frames = 0;
                     self_.key_frames = 0;
                 }
@@ -446,8 +451,8 @@ impl Segment {
                     break;
                 }
             }
+            self_.begin = Some(begin);
             self_.file_end = it.pos;
-            self_.actual_end_90k = it.start_90k;
             self_.video_sample_entry_id_and_trailing_zero =
                 recording.video_sample_entry.id |
                 (((it.duration_90k == 0) as i32) << 31);
@@ -462,19 +467,24 @@ impl Segment {
     pub fn have_trailing_zero(&self) -> bool { self.video_sample_entry_id_and_trailing_zero < 0 }
 
     /// Returns the byte range within the sample file of data associated with this segment.
-    pub fn sample_file_range(&self) -> Range<u64> { self.begin.pos as u64 .. self.file_end as u64 }
+    pub fn sample_file_range(&self) -> Range<u64> {
+        self.begin.as_ref().map(|b| b.pos as u64).unwrap_or(0) .. self.file_end as u64
+    }
 
-    /// Returns the actual time range as described in `new`.
-    pub fn actual_time_90k(&self) -> Range<i32> { self.begin.start_90k .. self.actual_end_90k }
+    /// Returns the actual start time as described in `new`.
+    pub fn actual_start_90k(&self) -> i32 { self.begin.as_ref().map(|b| b.start_90k).unwrap_or(0) }
 
     /// Iterates through each frame in the segment.
     /// Must be called without the database lock held; retrieves video index from the cache.
     pub fn foreach<F>(&self, playback: &db::RecordingPlayback, mut f: F) -> Result<(), Error>
     where F: FnMut(&SampleIndexIterator) -> Result<(), Error> {
-        trace!("foreach on recording {}/{}: {} frames, actual_time_90k: {:?}",
-              self.camera_id, self.recording_id, self.frames, self.actual_time_90k());
+        trace!("foreach on recording {}/{}: {} frames, actual_start_90k: {}",
+              self.camera_id, self.recording_id, self.frames, self.actual_start_90k());
         let data = &(&playback).video_index;
-        let mut it = self.begin;
+        let mut it = match self.begin {
+            Some(ref b) => **b,
+            None => SampleIndexIterator::new(),
+        };
         if it.uninitialized() {
             if !it.next(data)? {
                 return Err(Error::new(format!("recording {}/{}: no frames",

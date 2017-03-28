@@ -827,12 +827,12 @@ impl FileBuilder {
             // The actual range may start before the desired range because it can only start on a
             // key frame. This relationship should hold true:
             // actual start <= desired start < desired end
-            let actual = s.s.actual_time_90k();
-            let skip = s.s.desired_range_90k.start - actual.start;
+            let actual_start_90k = s.s.actual_start_90k();
+            let skip = s.s.desired_range_90k.start - actual_start_90k;
             let keep = s.s.desired_range_90k.end - s.s.desired_range_90k.start;
-            assert!(skip >= 0 && keep > 0, "segment {}/{}: desired={}..{} actual={}..{}",
+            assert!(skip >= 0 && keep > 0, "segment {}/{}: desired={}..{} actual_start={}",
                     s.s.camera_id, s.s.recording_id, s.s.desired_range_90k.start,
-                    s.s.desired_range_90k.end, actual.start, actual.end);
+                    s.s.desired_range_90k.end, actual_start_90k);
             cur_media_time += skip as u64;
             if unflushed.segment_duration + unflushed.media_time == cur_media_time {
                 unflushed.segment_duration += keep as u64;
