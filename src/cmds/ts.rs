@@ -36,7 +36,7 @@ Usage: moonfire-nvr ts <ts>...
        moonfire-nvr ts --help
 "#;
 
-#[derive(Debug, RustcDecodable)]
+#[derive(Debug, Deserialize)]
 struct Args {
     arg_ts: Vec<String>,
 }

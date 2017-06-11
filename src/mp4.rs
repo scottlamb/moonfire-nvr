@@ -101,7 +101,6 @@ use std::ops::Range;
 use std::mem;
 use std::sync::Arc;
 use strutil;
-use time::Timespec;
 
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
@@ -720,6 +719,8 @@ impl FileBuilder {
             debug!("Estimated {} buf bytes; actually were {}", EST_BUF_LEN, self.body.buf.len());
         }
         debug!("slices: {:?}", self.body.slices);
+        let mtime = ::std::time::UNIX_EPOCH +
+                    ::std::time::Duration::from_secs(max_end.unix_seconds() as u64);
         Ok(File(Arc::new(FileInner{
             db: db,
             dir: dir,
@@ -728,8 +729,8 @@ impl FileBuilder {
             buf: self.body.buf,
             video_sample_entries: self.video_sample_entries,
             initial_sample_byte_pos: initial_sample_byte_pos,
-            last_modified: header::HttpDate(time::at(Timespec::new(max_end.unix_seconds(), 0))),
-            etag: header::EntityTag::strong(strutil::hex(&etag.finish()?)),
+            last_modified: mtime.into(),
+            etag: header::EntityTag::strong(strutil::hex(&etag.finish2()?)),
         })))
     }
 
@@ -1270,7 +1271,7 @@ mod tests {
     }
 
     /// Returns the SHA-1 digest of the given `Entity`.
-    fn digest(e: &http_entity::Entity<Body>) -> Vec<u8> {
+    fn digest(e: &http_entity::Entity<Body>) -> hash::DigestBytes {
         e.get_range(0 .. e.len())
          .fold(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap(), |mut sha1, chunk| {
              sha1.update(&chunk).unwrap();
@@ -1278,7 +1279,7 @@ mod tests {
          })
          .wait()
          .unwrap()
-         .finish()
+         .finish2()
          .unwrap()
     }
 

@@ -68,7 +68,7 @@ const UPGRADERS: [fn(&rusqlite::Transaction) -> Result<(), Error>; 1] = [
     v0_to_v1::run,
 ];
 
-#[derive(Debug, RustcDecodable)]
+#[derive(Debug, Deserialize)]
 struct Args {
     flag_db_dir: String,
     flag_sample_file_dir: String,

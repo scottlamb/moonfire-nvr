@@ -46,7 +46,7 @@ Options:
                            [default: /var/lib/moonfire-nvr/db]
 "#;
 
-#[derive(Debug, RustcDecodable)]
+#[derive(Debug, Deserialize)]
 struct Args {
     flag_db_dir: String,
 }

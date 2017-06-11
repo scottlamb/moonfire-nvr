@@ -211,9 +211,8 @@ fn edit_camera_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv
     let dialog = if let Some(id) = *item {
         let l = db.lock();
         let camera = l.cameras_by_id().get(&id).expect("missing camera");
-        dialog.find_id::<views::TextView>("uuid")
-              .expect("missing TextView")
-              .set_content(camera.uuid.to_string());
+        dialog.find_id("uuid", |v: &mut views::TextView| v.set_content(camera.uuid.to_string()))
+              .expect("missing TextView");
         let bytes = camera.sample_file_bytes;
         let name = camera.short_name.clone();
         for &(view_id, content) in &[("short_name", &camera.short_name),
@@ -222,13 +221,12 @@ fn edit_camera_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv
                                      ("password", &camera.password),
                                      ("main_rtsp_path", &camera.main_rtsp_path),
                                      ("sub_rtsp_path", &camera.sub_rtsp_path)] {
-            dialog.find_id::<views::EditView>(view_id)
-                  .expect("missing EditView")
-                  .set_content(content.to_string());
+            dialog.find_id(view_id, |v: &mut views::EditView| v.set_content(content.to_string()))
+                  .expect("missing EditView");
         }
-        dialog.find_id::<views::TextArea>("description")
-              .expect("missing TextArea")
-              .set_content(camera.description.to_string());
+        dialog.find_id("description",
+                       |v: &mut views::TextArea| v.set_content(camera.description.to_string()))
+              .expect("missing TextArea");
         dialog.title("Edit camera")
               .button("Edit", {
                   let db = db.clone();

@@ -42,7 +42,7 @@ mod run;
 mod ts;
 mod upgrade;
 
-#[derive(Debug, RustcDecodable)]
+#[derive(Debug, Deserialize)]
 pub enum Command {
     Check,
     Config,
@@ -95,8 +95,8 @@ fn open_conn(db_dir: &str, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connect
     Ok((dir, conn))
 }
 
-fn parse_args<T>(usage: &str) -> Result<T, Error> where T: ::rustc_serialize::Decodable {
+fn parse_args<'a, T>(usage: &str) -> Result<T, Error> where T: ::serde::Deserialize<'a> {
     Ok(docopt::Docopt::new(usage)
-                      .and_then(|d| d.decode())
+                      .and_then(|d| d.deserialize())
                       .unwrap_or_else(|e| e.exit()))
 }

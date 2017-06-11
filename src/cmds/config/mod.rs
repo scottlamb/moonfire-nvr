@@ -120,7 +120,7 @@ fn decode_size(encoded: &str) -> Result<i64, ()> {
     Ok(decoded)
 }
 
-#[derive(Debug, RustcDecodable)]
+#[derive(Debug, Deserialize)]
 struct Args {
     flag_db_dir: String,
     flag_sample_file_dir: String,

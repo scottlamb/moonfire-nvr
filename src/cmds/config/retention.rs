@@ -229,7 +229,7 @@ pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &m
                         move |siv, _| press_change(&model, siv)
                     })
                     .fixed_width(25))
-                .child(views::TextView::new("").with_id(&format!("{}_ok", id)).fixed_width(1)));
+                .child(views::TextView::new("").with_id(format!("{}_ok", id)).fixed_width(1)));
     }
     let over = model.borrow().total_retain > model.borrow().fs_capacity;
     list.add_child(

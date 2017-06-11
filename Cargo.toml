@@ -15,7 +15,7 @@ bundled = ["rusqlite/bundled"]
 
 [dependencies]
 byteorder = "1.0"
-docopt = "0.7"
+docopt = "0.8"
 futures = "0.1"
 fnv = "1.0"
 http-entity = { git = "https://github.com/scottlamb/http-entity", branch = "hyper-0.11.x" }
@@ -25,30 +25,29 @@ libc = "0.2"
 log = { version = "0.3", features = ["release_max_level_info"] }
 lru-cache = "0.1"
 memmap = "0.5"
-mime = "0.2"
+mime = "0.3"
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.9"
-parking_lot = { version = "0.3.8", features = [] }
+parking_lot = { version = "0.4", features = [] }
 reffers = { git = "https://github.com/diwic/reffers-rs" }
 regex = "0.2"
-rusqlite = "0.10.1"
-rustc-serialize = "0.3"
-serde = "0.9"
-serde_derive = "0.9"
-serde_json = "0.9"
-smallvec = "0.3"
+rusqlite = "0.12"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+smallvec = "0.4"
 time = "0.1"
 tokio-core = "0.1"
 tokio-signal = "0.1"
 url = "1.4"
-uuid = { version = "0.4", features = ["serde", "v4"] }
+uuid = { version = "0.5", features = ["serde", "v4"] }
 
 [dev-dependencies]
-reqwest = "0.3"
+reqwest = "0.6"
 tempdir = "0.3"
 
 [dependencies.cursive]
-version = "0.4"
+version = "0.5"
 #default-features = false
 #features = ["termion"]
 
@@ -71,4 +70,4 @@ debug = true
 
 [replace]
 "https://github.com/hyperium/hyper#hyper:0.11.0-a.0" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }
-"hyper:0.10.5" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.10.x" }
+"hyper:0.10.12" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.10.x" }

@@ -63,9 +63,6 @@ const BINARY_PREFIXES: &'static [&'static str] = &[" ", " Ki", " Mi", " Gi", " T
 const DECIMAL_PREFIXES: &'static [&'static str] =&[" ", " k", " M", " G", " T", " P", " E"];
 
 lazy_static! {
-    static ref JSON: mime::Mime = mime!(Application/Json);
-    static ref HTML: mime::Mime = mime!(Text/Html);
-
     /// Regex used to parse the `s` query parameter to `view.mp4`.
     /// As described in `design/api.md`, this is of the form
     /// `START_ID[-END_ID][.[REL_START_TIME]-[REL_END_TIME]]`.
@@ -112,8 +109,8 @@ fn decode_path(path: &str) -> Path {
 
 fn is_json(req: &Request) -> bool {
     if let Some(accept) = req.headers().get::<header::Accept>() {
-        return accept.len() == 1 && accept[0].item == *JSON &&
-               accept[0].quality == header::Quality(1000);
+        return accept.len() == 1 && accept[0].item == mime::APPLICATION_JSON &&
+               accept[0].quality == header::q(1000);
     }
     false
 }
@@ -229,7 +226,7 @@ impl Service {
     fn not_found(&self) -> Result<Response<slices::Body>, Error> {
         Ok(Response::new()
             .with_status(status::StatusCode::NotFound)
-            .with_header(header::ContentType(mime!(Text/Plain)))
+            .with_header(header::ContentType(mime::TEXT_PLAIN))
             .with_body(stream::once(Ok(ARefs::new(&b"not found"[..]))).boxed()))
     }
 
@@ -244,7 +241,8 @@ impl Service {
             }
         };
         Ok(Response::new()
-           .with_header(header::ContentType(if json { JSON.clone() } else { HTML.clone() }))
+           .with_header(header::ContentType(if json { mime::APPLICATION_JSON }
+                                            else { mime::TEXT_HTML }))
            .with_header(header::ContentLength(buf.len() as u64))
            .with_body(stream::once(Ok(ARefs::new(buf))).boxed()))
     }
@@ -297,7 +295,8 @@ impl Service {
             }
         };
         Ok(Response::new()
-           .with_header(header::ContentType(if json { JSON.clone() } else { HTML.clone() }))
+           .with_header(header::ContentType(if json { mime::APPLICATION_JSON }
+                                            else { mime::TEXT_HTML }))
            .with_header(header::ContentLength(buf.len() as u64))
            .with_body(stream::once(Ok(ARefs::new(buf))).boxed()))
     }
@@ -425,7 +424,7 @@ impl Service {
         }
         let buf = serde_json::to_vec(&out)?;
         Ok(Response::new()
-           .with_header(header::ContentType(JSON.clone()))
+           .with_header(header::ContentType(mime::APPLICATION_JSON))
            .with_header(header::ContentLength(buf.len() as u64))
            .with_body(stream::once(Ok(ARefs::new(buf))).boxed()))
     }

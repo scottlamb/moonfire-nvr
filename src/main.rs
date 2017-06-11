@@ -46,12 +46,11 @@ extern crate lru_cache;
 extern crate reffers;
 extern crate rusqlite;
 extern crate memmap;
-#[macro_use] extern crate mime;
+extern crate mime;
 extern crate mylog;
 extern crate openssl;
 extern crate parking_lot;
 extern crate regex;
-extern crate rustc_serialize;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;
@@ -100,7 +99,7 @@ Commands:
 ";
 
 /// Commandline arguments corresponding to `USAGE`; automatically filled by the `docopt` crate.
-#[derive(Debug, RustcDecodable)]
+#[derive(Debug, Deserialize)]
 struct Args {
     arg_command: Option<cmds::Command>,
 }
@@ -129,7 +128,7 @@ fn main() {
     let args: Args = docopt::Docopt::new(USAGE)
                                     .and_then(|d| d.options_first(true)
                                                    .version(Some(version()))
-                                                   .decode())
+                                                   .deserialize())
                                     .unwrap_or_else(|e| e.exit());
 
     let mut h = mylog::Builder::new()

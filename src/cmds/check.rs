@@ -54,7 +54,7 @@ Options:
                            [default: /var/lib/moonfire-nvr/sample]
 "#;
 
-#[derive(Debug, RustcDecodable)]
+#[derive(Debug, Deserialize)]
 struct Args {
     flag_db_dir: String,
     flag_sample_file_dir: String,

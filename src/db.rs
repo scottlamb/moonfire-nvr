@@ -1135,7 +1135,7 @@ impl LockedDatabase {
     /// Inserts the specified video sample entry if absent.
     /// On success, returns the id of a new or existing row.
     pub fn insert_video_sample_entry(&mut self, w: u16, h: u16, data: &[u8]) -> Result<i32, Error> {
-        let sha1 = hash::hash(hash::MessageDigest::sha1(), data)?;
+        let sha1 = hash::hash2(hash::MessageDigest::sha1(), data)?;
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&sha1);
 
@@ -1155,7 +1155,7 @@ impl LockedDatabase {
 
         let mut stmt = self.conn.prepare_cached(INSERT_VIDEO_SAMPLE_ENTRY_SQL)?;
         stmt.execute_named(&[
-            (":sha1", &sha1),
+            (":sha1", &&sha1_bytes[..]),
             (":width", &(w as i64)),
             (":height", &(h as i64)),
             (":data", &data),
