@@ -1780,6 +1780,7 @@ mod bench {
     use std::str;
     use super::tests::create_mp4_from_db;
     use testutil::{self, TestDb};
+    use url::Url;
 
     /// An HTTP server for benchmarking.
     /// It's used as a singleton via `lazy_static!` so that when getting a CPU profile of the
@@ -1789,7 +1790,7 @@ mod bench {
     /// different scenarios: with/without subtitles and edit lists, different lengths, serving
     /// different fractions of the file, etc.
     struct BenchServer {
-        url: hyper::Url,
+        url: Url,
         generated_len: u64,
     }
 
@@ -1810,7 +1811,7 @@ mod bench {
             });
             let addr = rx.recv().unwrap();
             BenchServer{
-                url: hyper::Url::parse(&format!("http://{}:{}/", addr.ip(), addr.port())).unwrap(),
+                url: Url::parse(&format!("http://{}:{}/", addr.ip(), addr.port())).unwrap(),
                 generated_len: p,
             }
         }
