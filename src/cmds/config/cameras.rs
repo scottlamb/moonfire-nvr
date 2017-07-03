@@ -42,17 +42,23 @@ use super::{decode_size, encode_size};
 
 /// Builds a `CameraChange` from an active `edit_camera_dialog`.
 fn get_change(siv: &mut Cursive) -> db::CameraChange {
+    // Note: these find_id calls are separate statements, which seems to be important:
+    // https://github.com/gyscos/Cursive/issues/144
+    let sn = siv.find_id::<views::EditView>("short_name").unwrap().get_content().as_str().into();
+    let d = siv.find_id::<views::TextArea>("description").unwrap().get_content().into();
+    let h = siv.find_id::<views::EditView>("host").unwrap().get_content().as_str().into();
+    let u = siv.find_id::<views::EditView>("username").unwrap().get_content().as_str().into();
+    let p = siv.find_id::<views::EditView>("password").unwrap().get_content().as_str().into();
+    let m = siv.find_id::<views::EditView>("main_rtsp_path").unwrap().get_content().as_str().into();
+    let s = siv.find_id::<views::EditView>("sub_rtsp_path").unwrap().get_content().as_str().into();
     db::CameraChange{
-        short_name: siv.find_id::<views::EditView>("short_name")
-                       .unwrap().get_content().as_str().into(),
-        description: siv.find_id::<views::TextArea>("description").unwrap().get_content().into(),
-        host: siv.find_id::<views::EditView>("host").unwrap().get_content().as_str().into(),
-        username: siv.find_id::<views::EditView>("username").unwrap().get_content().as_str().into(),
-        password: siv.find_id::<views::EditView>("password").unwrap().get_content().as_str().into(),
-        main_rtsp_path: siv.find_id::<views::EditView>("main_rtsp_path")
-                           .unwrap().get_content().as_str().into(),
-        sub_rtsp_path: siv.find_id::<views::EditView>("sub_rtsp_path")
-                          .unwrap().get_content().as_str().into(),
+        short_name: sn,
+        description: d,
+        host: h,
+        username: u,
+        password: p,
+        main_rtsp_path: m,
+        sub_rtsp_path: s,
     }
 }
 
