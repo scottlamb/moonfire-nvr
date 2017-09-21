@@ -83,7 +83,7 @@ use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db;
 use dir;
 use error::Error;
-use futures::{Future, Stream};
+use futures::Stream;
 use futures::stream;
 use http_entity;
 use hyper::header;
@@ -1242,8 +1242,8 @@ mod tests {
     use byteorder::{BigEndian, ByteOrder};
     use db;
     use dir;
+    use futures::Future;
     use futures::Stream as FuturesStream;
-    use ffmpeg;
     use hyper::header;
     use openssl::hash;
     use recording::{self, TIME_UNITS_PER_SEC};
@@ -1475,14 +1475,14 @@ mod tests {
         loop {
             let pkt = match input.get_next() {
                 Ok(p) => p,
-                Err(ffmpeg::Error::Eof) => { break; },
+                Err(e) if e.is_eof() => { break; },
                 Err(e) => { panic!("unexpected input error: {}", e); },
             };
             let pts = pkt.pts().unwrap();
-            frame_time += recording::Duration(pkt.duration());
+            frame_time += recording::Duration(pkt.duration() as i64);
             output.write(pkt.data().expect("packet without data"), frame_time, pts,
                          pkt.is_key()).unwrap();
-            end_pts = Some(pts + pkt.duration());
+            end_pts = Some(pts + pkt.duration() as i64);
         }
         output.close(end_pts).unwrap();
         db.syncer_channel.flush();
@@ -1528,12 +1528,12 @@ mod tests {
         loop {
             let orig_pkt = match orig.get_next() {
                 Ok(p) => Some(p),
-                Err(ffmpeg::Error::Eof) => None,
+                Err(e) if e.is_eof() => None,
                 Err(e) => { panic!("unexpected input error: {}", e); },
             };
             let new_pkt = match new.get_next() {
                 Ok(p) => Some(p),
-                Err(ffmpeg::Error::Eof) => { break; },
+                Err(e) if e.is_eof() => { break; },
                 Err(e) => { panic!("unexpected input error: {}", e); },
             };
             let (orig_pkt, new_pkt) = match (orig_pkt, new_pkt) {
@@ -1545,7 +1545,7 @@ mod tests {
             assert_eq!(orig_pkt.dts(), new_pkt.dts() + pts_offset);
             assert_eq!(orig_pkt.data(), new_pkt.data());
             assert_eq!(orig_pkt.is_key(), new_pkt.is_key());
-            final_durations = Some((orig_pkt.duration(), new_pkt.duration()));
+            final_durations = Some((orig_pkt.duration() as i64, new_pkt.duration() as i64));
         }
 
         if let Some((orig_dur, new_dur)) = final_durations {

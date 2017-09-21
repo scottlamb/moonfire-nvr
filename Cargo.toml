@@ -26,6 +26,7 @@ log = { version = "0.3", features = ["release_max_level_info"] }
 lru-cache = "0.1"
 memmap = "0.5"
 mime = "0.3"
+moonfire-ffmpeg = { path = "ffmpeg" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.9"
 parking_lot = { version = "0.4", features = [] }
@@ -50,17 +51,6 @@ tempdir = "0.3"
 version = "0.5"
 #default-features = false
 #features = ["termion"]
-
-[dependencies.ffmpeg]
-git = "https://github.com/scottlamb/rust-ffmpeg"
-branch = "2.x"
-default-features = false
-features = ["codec", "format"]
-
-[dependencies.ffmpeg-sys]
-version = "2.8"
-default-features = false
-features = ["avcodec"]
 
 [profile.release]
 debug = true

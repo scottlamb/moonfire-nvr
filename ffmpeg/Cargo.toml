@@ -1,0 +1,17 @@
+[package]
+name = "moonfire-ffmpeg"
+version = "0.0.1"
+authors = ["Scott Lamb <slamb@slamb.org>"]
+readme = "../README.md"
+#links = "ffmpeg"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+libc = "0.2"
+log = { version = "0.3", features = ["release_max_level_info"] }
+
+[build-dependencies]
+gcc = "0.3"
+pkg-config = "0.3"

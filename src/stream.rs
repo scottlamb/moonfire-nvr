@@ -29,14 +29,10 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use error::Error;
-use ffmpeg::{self, format, media};
-use ffmpeg_sys::{self, AVLockOp};
 use h264;
-use libc::{self, c_int, c_void};
-use std::mem;
-use std::ptr;
+use moonfire_ffmpeg;
+use std::ffi::{CStr, CString};
 use std::result::Result;
-use std::slice;
 use std::sync;
 
 static START: sync::Once = sync::ONCE_INIT;
@@ -52,41 +48,13 @@ pub enum Source<'a> {
     Rtsp(&'a str),  // url, for production use.
 }
 
-// TODO: I think this should be provided by ffmpeg-sys. Otherwise, ffmpeg-sys is thread-hostile,
-// which I believe is not allowed at all in Rust. (Also, this method's signature should include
-// unsafe.)
-extern "C" fn lock_callback(untyped_ptr: *mut *mut c_void, op: AVLockOp) -> c_int {
-    unsafe {
-        let ptr = mem::transmute::<*mut *mut c_void, *mut *mut libc::pthread_mutex_t>(untyped_ptr);
-        match op {
-            AVLockOp::AV_LOCK_CREATE => {
-                let m = Box::<libc::pthread_mutex_t>::new(mem::uninitialized());
-                *ptr = Box::into_raw(m);
-                libc::pthread_mutex_init(*ptr, ptr::null());
-            },
-            AVLockOp::AV_LOCK_DESTROY => {
-                libc::pthread_mutex_destroy(*ptr);
-                Box::from_raw(*ptr);  // delete.
-                *ptr = ptr::null_mut();
-            },
-            AVLockOp::AV_LOCK_OBTAIN => {
-                libc::pthread_mutex_lock(*ptr);
-            },
-            AVLockOp::AV_LOCK_RELEASE => {
-                libc::pthread_mutex_unlock(*ptr);
-            },
-        };
-    };
-    0
-}
-
 pub trait Opener<S : Stream> : Sync {
     fn open(&self, src: Source) -> Result<S, Error>;
 }
 
 pub trait Stream {
     fn get_extra_data(&self) -> Result<h264::ExtraData, Error>;
-    fn get_next(&mut self) -> Result<ffmpeg::Packet, ffmpeg::Error>;
+    fn get_next<'p>(&'p mut self) -> Result<moonfire_ffmpeg::Packet<'p>, moonfire_ffmpeg::Error>;
 }
 
 pub struct Ffmpeg {}
@@ -94,41 +62,58 @@ pub struct Ffmpeg {}
 impl Ffmpeg {
     fn new() -> Ffmpeg {
         START.call_once(|| {
-            unsafe { ffmpeg_sys::av_lockmgr_register(lock_callback); };
-            ffmpeg::init().unwrap();
-            ffmpeg::format::network::init();
+            moonfire_ffmpeg::Ffmpeg::new();
+            //ffmpeg::init().unwrap();
+            //ffmpeg::format::network::init();
         });
         Ffmpeg{}
     }
 }
 
+macro_rules! c_str {
+    ($s:expr) => { {
+        unsafe { CStr::from_ptr(concat!($s, "\0").as_ptr() as *const i8) }
+    } }
+}
+
 impl Opener<FfmpegStream> for Ffmpeg {
     fn open(&self, src: Source) -> Result<FfmpegStream, Error> {
-        let (input, discard_first) = match src {
+        use moonfire_ffmpeg::InputFormatContext;
+        let (mut input, discard_first) = match src {
             #[cfg(test)]
             Source::File(filename) =>
-                (format::input_with(&format!("file:{}", filename), ffmpeg::Dictionary::new())?,
+                (InputFormatContext::open(&CString::new(format!("file:{}", filename)).unwrap(),
+                 &mut moonfire_ffmpeg::Dictionary::new())?,
                  false),
             Source::Rtsp(url) => {
-                let open_options = dict![
-                    "rtsp_transport" => "tcp",
-                    // https://trac.ffmpeg.org/ticket/5018 workaround attempt.
-                    "probesize" => "262144",
-                    "user-agent" => "moonfire-nvr",
-                    // 10-second socket timeout, in microseconds.
-                    "stimeout" => "10000000"
-                ];
-                (format::input_with(&url, open_options)?, true)
+                let mut open_options = moonfire_ffmpeg::Dictionary::new();
+                open_options.set(c_str!("rtsp_transport"), c_str!("tcp")).unwrap();
+                // https://trac.ffmpeg.org/ticket/5018 workaround attempt.
+                open_options.set(c_str!("probesize"), c_str!("262144")).unwrap();
+                open_options.set(c_str!("user-agent"), c_str!("moonfire-nvr")).unwrap();
+                // 10-second socket timeout, in microseconds.
+                open_options.set(c_str!("stimeout"), c_str!("10000000")).unwrap();
+                let i = InputFormatContext::open(&CString::new(url).unwrap(), &mut open_options)?;
+                if !open_options.empty() {
+                    warn!("While opening URL {}, some options were not understood: {}",
+                          url, open_options);
+                }
+                (i, true)
             },
         };
 
+        input.find_stream_info()?;
+
         // Find the video stream.
         let mut video_i = None;
-        for (i, stream) in input.streams().enumerate() {
-            if stream.codec().medium() == media::Type::Video {
-                debug!("Video stream index is {}", i);
-                video_i = Some(i);
-                break;
+        {
+            let s = input.streams();
+            for i in 0 .. s.len() {
+                if s.get(i).codec().codec_type().is_video() {
+                    debug!("Video stream index is {}", i);
+                    video_i = Some(i);
+                    break;
+                }
             }
         }
         let video_i = match video_i {
@@ -137,8 +122,8 @@ impl Opener<FfmpegStream> for Ffmpeg {
         };
 
         let mut stream = FfmpegStream{
-            input: input,
-            video_i: video_i,
+            input,
+            video_i,
         };
 
         if discard_first {
@@ -151,30 +136,31 @@ impl Opener<FfmpegStream> for Ffmpeg {
 }
 
 pub struct FfmpegStream {
-    input: format::context::Input,
+    input: moonfire_ffmpeg::InputFormatContext,
     video_i: usize,
 }
 
 impl Stream for FfmpegStream {
     fn get_extra_data(&self) -> Result<h264::ExtraData, Error> {
-        let video = self.input.stream(self.video_i).expect("can't get video stream known to exist");
+        let video = self.input.streams().get(self.video_i);
+        let tb = video.time_base();
+        if tb.num != 1 || tb.den != 90000 {
+            return Err(Error::new(format!("video stream has timebase {}/{}; expected 1/90000",
+                                          tb.num, tb.den)));
+        }
         let codec = video.codec();
-        let (extradata, width, height) = unsafe {
-            let ptr = codec.as_ptr();
-            (slice::from_raw_parts((*ptr).extradata, (*ptr).extradata_size as usize),
-             (*ptr).width as u16,
-             (*ptr).height as u16)
-        };
-        // TODO: verify video stream is h264.
-        h264::ExtraData::parse(extradata, width, height)
+        let codec_id = codec.codec_id();
+        if !codec_id.is_h264() {
+            return Err(Error::new(format!("stream's video codec {:?} is not h264", codec_id)));
+        }
+        h264::ExtraData::parse(codec.extradata(), codec.width() as u16, codec.height() as u16)
     }
 
-    fn get_next(&mut self) -> Result<ffmpeg::Packet, ffmpeg::Error> {
-        let mut pkt = ffmpeg::Packet::empty();
+    fn get_next<'i>(&'i mut self) -> Result<moonfire_ffmpeg::Packet<'i>, moonfire_ffmpeg::Error> {
         loop {
-            pkt.read(&mut self.input)?;
-            if pkt.stream() == self.video_i {
-                return Ok(pkt);
+            let p = self.input.read_frame()?;
+            if p.stream_index() == self.video_i {
+                return Ok(p);
             }
         }
     }

@@ -63,8 +63,6 @@ edge version from the command line via git:
 There are no binary packages of Moonfire NVR available yet, so it must be built
 from source.
 
-
-
 Moonfire NVR is written in the [Rust Programming
 Language](https://www.rust-lang.org/en-US/). In the long term, I expect this
 will result in a more secure, full-featured, easy-to-install software. In the
@@ -74,18 +72,14 @@ project.
 
 You will need the following C libraries installed:
 
-* [ffmpeg](http://ffmpeg.org/) version 2.x, including `libavutil`,
+* [ffmpeg](http://ffmpeg.org/) version 2.x or 3.x, including `libavutil`,
   `libavcodec` (to inspect H.264 frames), and `libavformat` (to connect to RTSP
   servers and write `.mp4` files).
 
-  Note ffmpeg 3.x isn't supported yet by the Rust `ffmpeg` crate; see
-  [rust-ffmpeg/issues/64](https://github.com/meh/rust-ffmpeg/issues/64).
-
-  Additionally, ffmpeg library versions older than 55.1.101, along with
-  55.1.101, along with all versions of the competing project
-  [libav](http://libav.org), don't not support socket timeouts for RTSP. For
-  reliable reconnections on error, it's strongly recommended to use ffmpeg
-  library versions >= 55.1.101.
+  Note ffmpeg library versions older than 55.1.101, along with all versions of
+  the competing project [libav](http://libav.org), don't not support socket
+  timeouts for RTSP. For reliable reconnections on error, it's strongly
+  recommended to use ffmpeg library versions >= 55.1.101.
 
 * [SQLite3](https://www.sqlite.org/).
 
@@ -102,7 +96,9 @@ all non-Rust dependencies:
                    libavutil-dev \
                    libncurses5-dev \
                    libncursesw5-dev \
-                   libsqlite3-dev
+                   libsqlite3-dev \
+                   libssl-dev \
+                   pkgconf
 
 Next, you need Rust 1.15+ and Cargo. The easiest way to install them is by following
 the instructions at [rustup.rs](https://www.rustup.rs/).
@@ -181,7 +177,7 @@ database. If the daemon is running, you will need to stop it temporarily:
 
 You can configure the system through a text-based user interface:
 
-    $ sudo -u moonfire-nvr moonfire-nvr config
+    $ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
 
 In the user interface, add your cameras under the "Edit cameras" dialog.
 There's a "Test" button to verify your settings directly from the dialog.
@@ -251,18 +247,12 @@ and `systemctl` may be of particular interest.
 
 # Troubleshooting
 
-While Moonfire NVR is running, logs will be written to stdout. The
+While Moonfire NVR is running, logs will be written to stderr. The
 `MOONFIRE_LOG` environmental variable controls the log level;
 `MOONFIRE_LOG=info` is the default. `MOONFIRE_FORMAT` controls the
 logging style; options are `google` (default, like the Google glog package)
 or `google-systemd` (formatted for the systemd journal). If running through
 systemd, try `sudo journalctl --unit moonfire-nvr` to view the logs.
-
-If Moonfire NVR crashes with a `SIGSEGV`, the problem is likely an
-incompatible version of the C `ffmpeg` libraries; use the latest 2.x release
-instead. This is one of the Rust growing pains mentioned above. While most
-code written in Rust is "safe", the foreign function interface is not only
-unsafe but currently error-prone.
 
 # <a name="help"></a> Getting help and getting involved
 

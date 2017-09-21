@@ -33,8 +33,6 @@
 extern crate byteorder;
 extern crate core;
 extern crate docopt;
-#[macro_use] extern crate ffmpeg;
-extern crate ffmpeg_sys;
 extern crate futures;
 extern crate fnv;
 extern crate http_entity;
@@ -47,6 +45,7 @@ extern crate reffers;
 extern crate rusqlite;
 extern crate memmap;
 extern crate mime;
+extern crate moonfire_ffmpeg;
 extern crate mylog;
 extern crate openssl;
 extern crate parking_lot;

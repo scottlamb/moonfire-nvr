@@ -182,8 +182,6 @@ impl SampleFileDir {
         write!(&mut buf[..36], "{}", uuid.hyphenated()).expect("can't format uuid to pathname buf");
 
         // libc::c_char seems to be i8 on some platforms (Linux/arm) and u8 on others (Linux/amd64).
-        // Transmute, suppressing the warning that happens on platforms in which it's already u8.
-        #[allow(useless_transmute)]
         unsafe { mem::transmute::<[u8; 37], [libc::c_char; 37]>(buf) }
     }
 

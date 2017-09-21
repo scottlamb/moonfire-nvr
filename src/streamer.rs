@@ -113,7 +113,6 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
 
         let mut stream = self.opener.open(stream::Source::Rtsp(&self.url))?;
         let realtime_offset = self.clocks.realtime() - self.clocks.monotonic();
-        // TODO: verify time base.
         // TODO: verify width/height.
         let extra_data = stream.get_extra_data()?;
         let video_sample_entry_id =
@@ -190,9 +189,8 @@ mod tests {
     use clock::{self, Clocks};
     use db;
     use error::Error;
-    use ffmpeg;
-    use ffmpeg::packet::Mut;
     use h264;
+    use moonfire_ffmpeg;
     use recording;
     use std::cmp;
     use std::sync::{Arc, Mutex};
@@ -228,9 +226,9 @@ mod tests {
     }
 
     impl<'a> Stream for ProxyingStream<'a> {
-        fn get_next(&mut self) -> Result<ffmpeg::Packet, ffmpeg::Error> {
+        fn get_next(&mut self) -> Result<moonfire_ffmpeg::Packet, moonfire_ffmpeg::Error> {
             if self.pkts_left == 0 {
-                return Err(ffmpeg::Error::Eof);
+                return Err(moonfire_ffmpeg::Error::eof());
             }
             self.pkts_left -= 1;
 
@@ -240,7 +238,7 @@ mod tests {
             // Avoid accumulating conversion error by tracking the total amount to sleep and how
             // much we've already slept, rather than considering each frame in isolation.
             {
-                let goal = pkt.pts().unwrap() + pkt.duration();
+                let goal = pkt.pts().unwrap() + pkt.duration() as i64;
                 let goal = time::Duration::nanoseconds(
                     goal * 1_000_000_000 / recording::TIME_UNITS_PER_SEC);
                 let duration = goal - self.slept;
@@ -254,15 +252,12 @@ mod tests {
                 self.ts_offset_pkts_left -= 1;
                 let old_pts = pkt.pts().unwrap();
                 let old_dts = pkt.dts();
-                unsafe {
-                    let pkt = pkt.as_mut_ptr();
-                    (*pkt).pts = old_pts + self.ts_offset;
-                    (*pkt).dts = old_dts + self.ts_offset;
+                pkt.set_pts(Some(old_pts + self.ts_offset));
+                pkt.set_dts(old_dts + self.ts_offset);
 
-                    // In a real rtsp stream, the duration of a packet is not known until the
-                    // next packet. ffmpeg's duration is an unreliable estimate.
-                    (*pkt).duration = recording::TIME_UNITS_PER_SEC as i32;
-                }
+                // In a real rtsp stream, the duration of a packet is not known until the
+                // next packet. ffmpeg's duration is an unreliable estimate.
+                pkt.set_duration(recording::TIME_UNITS_PER_SEC as i32);
             }
 
             Ok(pkt)

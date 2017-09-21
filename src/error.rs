@@ -34,8 +34,8 @@ extern crate uuid;
 
 use core::ops::Deref;
 use core::num;
-use ffmpeg;
 use openssl::error::ErrorStack;
+use moonfire_ffmpeg;
 use serde_json;
 use std::boxed::Box;
 use std::convert::From;
@@ -127,9 +127,9 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-impl From<ffmpeg::Error> for Error {
-    fn from(err: ffmpeg::Error) -> Self {
-        Error{description: format!("{} ({})", err.description(), err), cause: Some(Box::new(err))}
+impl From<moonfire_ffmpeg::Error> for Error {
+    fn from(err: moonfire_ffmpeg::Error) -> Self {
+        Error{description: format!("ffmpeg: {}", err), cause: Some(Box::new(err))}
     }
 }
 
