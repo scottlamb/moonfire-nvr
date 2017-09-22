@@ -50,7 +50,7 @@ tempdir = "0.3"
 [dependencies.cursive]
 version = "0.5"
 #default-features = false
-#features = ["termion"]
+#features = ["termion-backend"]
 
 [profile.release]
 debug = true
@@ -59,4 +59,14 @@ debug = true
 debug = true
 
 [replace]
+
+# This hyper fork has a patch to disable Nagle's algorithm.
 "hyper:0.11.2" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }
+
+# The libc crate just added OS X support for clock_gettime, which Moonfire NVR
+# needs. There hasn't been a release, so go straight to git for the moment.
+# Do it for all platforms because [target.foo.replace] is apparently
+# unsupported.
+#[target.'cfg(target_os = "macos")'.replace]
+#[target.x86_64-apple-darwin.replace]
+"libc:0.2.31" = { git = "https://github.com/rust-lang/libc" }
