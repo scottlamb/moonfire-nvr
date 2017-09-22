@@ -32,7 +32,7 @@ use clock;
 use db;
 use dir;
 use error::Error;
-use futures::{BoxFuture, Future, Stream};
+use futures::{Future, Stream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -66,13 +66,12 @@ struct Args {
     flag_read_only: bool,
 }
 
-fn setup_shutdown_future(h: &reactor::Handle) -> BoxFuture<(), ()> {
+fn setup_shutdown_future(h: &reactor::Handle) -> Box<Future<Item = (), Error = ()>> {
     let int = Signal::new(SIGINT, h).flatten_stream().into_future();
     let term = Signal::new(SIGTERM, h).flatten_stream().into_future();
-    int.select(term)
-       .map(|_| ())
-       .map_err(|_| ())
-       .boxed()
+    Box::new(int.select(term)
+                .map(|_| ())
+                .map_err(|_| ()))
 }
 
 pub fn run() -> Result<(), Error> {

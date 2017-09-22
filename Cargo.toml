@@ -18,8 +18,8 @@ byteorder = "1.0"
 docopt = "0.8"
 futures = "0.1"
 fnv = "1.0"
-http-entity = { git = "https://github.com/scottlamb/http-entity", branch = "hyper-0.11.x" }
-hyper = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }
+http-entity = { git = "https://github.com/scottlamb/http-entity" }
+hyper = "0.11.2"
 lazy_static = "0.2"
 libc = "0.2"
 log = { version = "0.3", features = ["release_max_level_info"] }
@@ -44,7 +44,7 @@ url = "1.4"
 uuid = { version = "0.5", features = ["serde", "v4"] }
 
 [dev-dependencies]
-reqwest = "0.6"
+reqwest = "0.7"
 tempdir = "0.3"
 
 [dependencies.cursive]
@@ -59,5 +59,4 @@ debug = true
 debug = true
 
 [replace]
-"https://github.com/hyperium/hyper#hyper:0.11.0-a.0" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }
-"hyper:0.10.12" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.10.x" }
+"hyper:0.11.2" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }

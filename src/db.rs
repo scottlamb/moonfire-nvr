@@ -613,7 +613,7 @@ impl<'a> Transaction<'a> {
                 (":uuid", &uuid),
                 (":state", &(ReservationState::Deleting as i64))
             ])?;
-            let mut m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, row.camera_id);
+            let m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, row.camera_id);
             m.duration -= row.time.end - row.time.start;
             m.sample_file_bytes -= row.sample_file_bytes as i64;
             adjust_days(row.time.clone(), -1, &mut m.days);
@@ -665,7 +665,7 @@ impl<'a> Transaction<'a> {
             }
         }
         self.must_rollback = true;
-        let mut m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, r.camera_id);
+        let m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, r.camera_id);
         {
             let recording_id = m.new_next_recording_id.unwrap_or(cam.next_recording_id);
             let composite_id = composite_id(r.camera_id, recording_id);
@@ -720,7 +720,7 @@ impl<'a> Transaction<'a> {
         if changes != 1 {
             return Err(Error::new(format!("no such camera {}", camera_id)));
         }
-        let mut m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, camera_id);
+        let m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, camera_id);
         m.new_retain_bytes = Some(new_limit);
         Ok(())
     }
@@ -731,7 +731,7 @@ impl<'a> Transaction<'a> {
         self.precommit()?;
         self.tx.commit()?;
         for (&camera_id, m) in &self.mods_by_camera {
-            let mut camera = self.state.cameras_by_id.get_mut(&camera_id)
+            let camera = self.state.cameras_by_id.get_mut(&camera_id)
                                  .expect("modified camera must exist");
             camera.duration += m.duration;
             camera.sample_file_bytes += m.sample_file_bytes;
@@ -1348,7 +1348,7 @@ impl Database {
             },
         }));
         {
-            let mut l = &mut *db.lock();
+            let l = &mut *db.lock();
             l.init_video_sample_entries().annotate_err("init_video_sample_entries")?;
             l.init_cameras().annotate_err("init_cameras")?;
             for (&camera_id, ref mut camera) in &mut l.state.cameras_by_id {

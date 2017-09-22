@@ -76,7 +76,11 @@ static int lock_callback(void **mutex, enum AVLockOp op) {
         case AV_LOCK_RELEASE:
             if (pthread_mutex_unlock(*mutex) != 0)
                 return -1;
+            break;
+        default:
+            return -1;
     }
+    return 0;
 }
 
 void moonfire_ffmpeg_init(void) {
@@ -91,7 +95,7 @@ struct moonfire_ffmpeg_streams {
 };
 
 struct moonfire_ffmpeg_data {
-    const char *data;
+    uint8_t *data;
     size_t len;
 };
 

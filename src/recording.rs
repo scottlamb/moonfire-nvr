@@ -28,8 +28,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate uuid;
-
 use coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
 use core::str::FromStr;
 use db;

@@ -35,11 +35,10 @@ use core::str::FromStr;
 use db;
 use dir::SampleFileDir;
 use error::Error;
-use futures::Stream;
 use futures::{future, stream};
 use json;
 use http_entity;
-use hyper::{header, status};
+use hyper::header;
 use hyper::server::{self, Request, Response};
 use mime;
 use mp4;
@@ -224,10 +223,11 @@ impl Service {
     }
 
     fn not_found(&self) -> Result<Response<slices::Body>, Error> {
+        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(&b"not found"[..]))));
         Ok(Response::new()
-            .with_status(status::StatusCode::NotFound)
+            .with_status(hyper::StatusCode::NotFound)
             .with_header(header::ContentType(mime::TEXT_PLAIN))
-            .with_body(stream::once(Ok(ARefs::new(&b"not found"[..]))).boxed()))
+            .with_body(body))
     }
 
     fn list_cameras(&self, req: &Request) -> Result<Response<slices::Body>, Error> {
@@ -240,11 +240,13 @@ impl Service {
                 self.list_cameras_html(db)?
             }
         };
+        let len = buf.len();
+        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
         Ok(Response::new()
            .with_header(header::ContentType(if json { mime::APPLICATION_JSON }
                                             else { mime::TEXT_HTML }))
-           .with_header(header::ContentLength(buf.len() as u64))
-           .with_body(stream::once(Ok(ARefs::new(buf))).boxed()))
+           .with_header(header::ContentLength(len as u64))
+           .with_body(body))
     }
 
     fn list_cameras_html(&self, db: MutexGuard<db::LockedDatabase>) -> Result<Vec<u8>, Error> {
@@ -294,11 +296,13 @@ impl Service {
                 self.camera_html(db, query, uuid)?
             }
         };
+        let len = buf.len();
+        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
         Ok(Response::new()
            .with_header(header::ContentType(if json { mime::APPLICATION_JSON }
                                             else { mime::TEXT_HTML }))
-           .with_header(header::ContentLength(buf.len() as u64))
-           .with_body(stream::once(Ok(ARefs::new(buf))).boxed()))
+           .with_header(header::ContentLength(len as u64))
+           .with_body(body))
     }
 
     fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, query: Option<&str>,
@@ -398,10 +402,11 @@ impl Service {
                          -> Result<Response<slices::Body>, Error> {
         let r = Service::get_optional_range(query)?;
         if !is_json(req) {
+            let body: slices::Body = Box::new(stream::once(
+                Ok(ARefs::new(&b"only available for JSON requests"[..]))));
             return Ok(Response::new()
-                      .with_status(status::StatusCode::NotAcceptable)
-                      .with_body(stream::once(
-                              Ok(ARefs::new(&b"only available for JSON requests"[..]))).boxed()));
+                      .with_status(hyper::StatusCode::NotAcceptable)
+                      .with_body(body));
         }
         let mut out = json::ListRecordings{recordings: Vec::new()};
         {
@@ -423,10 +428,12 @@ impl Service {
             })?;
         }
         let buf = serde_json::to_vec(&out)?;
+        let len = buf.len();
+        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
         Ok(Response::new()
            .with_header(header::ContentType(mime::APPLICATION_JSON))
-           .with_header(header::ContentLength(buf.len() as u64))
-           .with_body(stream::once(Ok(ARefs::new(buf))).boxed()))
+           .with_header(header::ContentLength(len as u64))
+           .with_body(body))
     }
 
     fn camera_view_mp4(&self, uuid: Uuid, query: Option<&str>, req: &Request)
@@ -614,7 +621,6 @@ mod bench {
 
     use hyper;
     use self::test::Bencher;
-    use std::str;
     use testutil::{self, TestDb};
 
     struct Server {
@@ -653,8 +659,8 @@ mod bench {
         let mut buf = Vec::new();
         let client = reqwest::Client::new().unwrap();
         let mut f = || {
-            let mut resp = client.get(url.clone()).send().unwrap();
-            assert_eq!(*resp.status(), reqwest::StatusCode::Ok);
+            let mut resp = client.get(url.clone()).unwrap().send().unwrap();
+            assert_eq!(resp.status(), reqwest::StatusCode::Ok);
             buf.clear();
             use std::io::Read;
             resp.read_to_end(&mut buf).unwrap();

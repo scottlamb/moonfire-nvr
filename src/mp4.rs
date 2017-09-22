@@ -76,14 +76,12 @@
 //! * mdat (media data container)
 //! ```
 
-extern crate byteorder;
 extern crate time;
 
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db;
 use dir;
 use error::Error;
-use futures::Stream;
 use futures::stream;
 use http_entity;
 use hyper::header;
@@ -396,7 +394,7 @@ impl Segment {
             v.into_boxed_slice()
         };
         {
-            let (stts, mut rest) = buf.split_at_mut(lens.stts);
+            let (stts, rest) = buf.split_at_mut(lens.stts);
             let (stsz, stss) = rest.split_at_mut(lens.stsz);
             let mut frame = 0;
             let mut key_frame = 0;
@@ -536,7 +534,7 @@ impl slices::Slice for Slice {
             SliceType::VideoSampleData => f.0.get_video_sample_data(p, range.clone()),
             SliceType::SubtitleSampleData => f.0.get_subtitle_sample_data(p, range.clone(), len),
         };
-        stream::once(res
+        Box::new(stream::once(res
             .map_err(|e| {
                 error!("Error producing {:?}: {:?}", self, e);
                 ::hyper::Error::Incomplete
@@ -548,7 +546,7 @@ impl slices::Slice for Slice {
                     return Err(::hyper::Error::Incomplete);
                 }
                 Ok(c)
-            })).boxed()
+            })))
     }
 
     fn get_slices(ctx: &File) -> &Slices<Self> { &ctx.0.slices }
@@ -1217,7 +1215,10 @@ impl FileInner {
 #[derive(Clone)]
 pub struct File(Arc<FileInner>);
 
-impl http_entity::Entity<Body> for File {
+impl http_entity::Entity for File {
+    type Chunk = slices::Chunk;
+    type Body = slices::Body;
+
     fn add_headers(&self, hdrs: &mut header::Headers) {
         hdrs.set(header::ContentType("video/mp4".parse().unwrap()));
     }
@@ -1258,12 +1259,13 @@ mod tests {
     use stream::{self, Opener, Stream};
     use testutil::{self, TestDb, TEST_CAMERA_ID};
 
-    fn fill_slice(slice: &mut [u8], e: &http_entity::Entity<Body>, start: u64) {
+    fn fill_slice<E: http_entity::Entity>(slice: &mut [u8], e: &E, start: u64) {
         let mut p = 0;
         e.get_range(start .. start + slice.len() as u64)
          .for_each(|chunk| {
-             slice[p .. p + chunk.len()].copy_from_slice(&chunk);
-             p += chunk.len();
+             let c: &[u8] = chunk.as_ref();
+             slice[p .. p + c.len()].copy_from_slice(c);
+             p += c.len();
              Ok::<_, ::hyper::Error>(())
          })
         .wait()
@@ -1271,10 +1273,11 @@ mod tests {
     }
 
     /// Returns the SHA-1 digest of the given `Entity`.
-    fn digest(e: &http_entity::Entity<Body>) -> hash::DigestBytes {
+    fn digest<E: http_entity::Entity>(e: &E) -> hash::DigestBytes {
         e.get_range(0 .. e.len())
          .fold(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap(), |mut sha1, chunk| {
-             sha1.update(&chunk).unwrap();
+             let c: &[u8] = chunk.as_ref();
+             sha1.update(c).unwrap();
              Ok::<_, ::hyper::Error>(sha1)
          })
          .wait()
@@ -1770,14 +1773,13 @@ mod bench {
     extern crate reqwest;
     extern crate test;
 
+    use futures::Stream;
     use futures::future;
-    use futures::stream::BoxStream;
     use hyper;
     use http_entity;
     use recording;
     use reffers::ARefs;
     use self::test::Bencher;
-    use std::str;
     use super::tests::create_mp4_from_db;
     use testutil::{self, TestDb};
     use url::Url;
@@ -1821,7 +1823,8 @@ mod bench {
 
     impl hyper::server::Service for MyService {
         type Request = hyper::server::Request;
-        type Response = hyper::server::Response<BoxStream<ARefs<'static, [u8]>, hyper::Error>>;
+        type Response = hyper::server::Response<
+            Box<Stream<Item = ARefs<'static, [u8]>, Error = hyper::Error> + Send>>;
         type Error = hyper::Error;
         type Future = future::FutureResult<Self::Response, Self::Error>;
 
@@ -1873,6 +1876,7 @@ mod bench {
             use self::reqwest::header::{Range, ByteRangeSpec};
             let mut resp =
                 client.get(server.url.clone())
+                      .unwrap()
                       .header(Range::Bytes(vec![ByteRangeSpec::FromTo(0, p - 1)]))
                       .send()
                       .unwrap();
