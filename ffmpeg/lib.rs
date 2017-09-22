@@ -76,7 +76,7 @@ extern "C" {
 //#[link(name = "avutil")]
 extern "C" {
     fn avutil_version() -> libc::c_int;
-    fn av_strerror(e: libc::c_int, b: *mut u8, s: libc::size_t) -> libc::c_int;
+    fn av_strerror(e: libc::c_int, b: *mut libc::c_char, s: libc::size_t) -> libc::c_int;
     fn av_dict_count(d: *const AVDictionary) -> libc::c_int;
     fn av_dict_get(d: *const AVDictionary, key: *const libc::c_char, prev: *mut AVDictionaryEntry,
                    flags: libc::c_int) -> *mut AVDictionaryEntry;
@@ -356,9 +356,13 @@ impl std::error::Error for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         const ARRAYLEN: usize = 64;
-        let mut buf = [0u8; ARRAYLEN];
-        unsafe { av_strerror(self.0, buf.as_mut_ptr(), ARRAYLEN) };
-        f.write_str(std::str::from_utf8(&buf).map_err(|_| fmt::Error)?)
+        let mut buf = [0; ARRAYLEN];
+        let s = unsafe {
+            // Note av_strerror uses strlcpy, so it guarantees a trailing NUL byte.
+            av_strerror(self.0, buf.as_mut_ptr(), ARRAYLEN);
+            CStr::from_ptr(buf.as_ptr())
+        };
+        f.write_str(&s.to_string_lossy())
     }
 }
 
@@ -429,5 +433,21 @@ impl Ffmpeg {
                   Version(avutil_version()));
         });
         Ffmpeg{}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+    use super::Error;
+
+    #[test]
+    fn test_error() {
+        let eof_formatted = format!("{}", Error::eof());
+        assert!(eof_formatted.contains("End of file"), "eof is: {}", eof_formatted);
+
+        // Errors should be round trippable to a CString. (This will fail if they contain NUL
+        // bytes.)
+        CString::new(eof_formatted).unwrap();
     }
 }
