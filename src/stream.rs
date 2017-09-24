@@ -31,6 +31,7 @@
 use error::Error;
 use h264;
 use moonfire_ffmpeg;
+use std::os::raw::c_char;
 use std::ffi::{CStr, CString};
 use std::result::Result;
 use std::sync;
@@ -72,7 +73,7 @@ impl Ffmpeg {
 
 macro_rules! c_str {
     ($s:expr) => { {
-        unsafe { CStr::from_ptr(concat!($s, "\0").as_ptr() as *const i8) }
+        unsafe { CStr::from_ptr(concat!($s, "\0").as_ptr() as *const c_char) }
     } }
 }
 
