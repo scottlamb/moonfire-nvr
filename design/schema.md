@@ -548,7 +548,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 [wdpurple]: http://www.wdc.com/en/products/products.aspx?id=1210
 [wd20eurs]: http://www.wdc.com/wdproducts/library/SpecSheet/ENG/2879-701250.pdf
 [seeker]: http://www.linuxinsight.com/how_fast_is_your_disk.html
-[rfc-3551]: https://www.ietf.org/rfc/rfc3551.txt
+[rfc-3551]: https://tools.ietf.org/html/rfc3551
 [hikvision-sr]: http://www.cctvforum.com/viewtopic.php?f=19&t=44534
 [iso-14496-12]: http://www.iso.org/iso/home/store/catalogue_ics/catalogue_detail_ics.htm?csnumber=68960
 [sqlite3]: https://www.sqlite.org/

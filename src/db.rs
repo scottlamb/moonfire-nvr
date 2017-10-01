@@ -59,6 +59,7 @@ use parking_lot::{Mutex,MutexGuard};
 use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
 use std::collections::BTreeMap;
+use std::collections::btree_map;
 use std::cell::RefCell;
 use std::cmp;
 use std::io::Write;
@@ -822,6 +823,11 @@ impl<'a> Transaction<'a> {
 impl LockedDatabase {
     /// Returns an immutable view of the cameras by id.
     pub fn cameras_by_id(&self) -> &BTreeMap<i32, Camera> { &self.state.cameras_by_id }
+
+    /// Returns an immutable view of the video sample entries.
+    pub fn video_sample_entries(&self) -> btree_map::Values<i32, Arc<VideoSampleEntry>> {
+        self.state.video_sample_entries.values()
+    }
 
     /// Starts a transaction for a write operation.
     /// Note transactions are not needed for read operations; this process holds a lock on the

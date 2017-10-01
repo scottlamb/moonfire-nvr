@@ -194,7 +194,10 @@ Expected query parameters:
     end times are in 90k units and relative to the start of the first specified
     id. These can be used to clip the returned segments. Note they can be used
     to skip over some ids entirely; this is allowed so that the caller doesn't
-    need to know the start time of each interior id.
+    need to know the start time of each interior id. If there is no key frame
+    at the desired relative start time, frames back to the last key frame will
+    be included in the returned data, and an edit list will instruct the
+    viewer to skip to the desired start time.
 *   `ts` (optional): should be set to `true` to request a subtitle track be
     added with human-readable recording timestamps.
 
@@ -217,3 +220,44 @@ Example request URI to retrieve recording id 1, skipping its first 26
 ```
     /camera/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1.26
 ```
+
+TODO: error behavior on missing segment. It should be a 404, likely with an
+`application/json` body describing what portion if any (still) exists.
+
+### `/camera/<uuid>/view.m4s`
+
+A GET returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
+media segment][media-segment].
+
+Expected query parameters:
+
+*   `s` (one or more): as with the `.mp4` URL, except that media segments
+    can't contain edit lists so none will be generated. TODO: maybe add a
+    `Leading-Time:` header to indicate how many leading 90,000ths of a second
+    are present, so that the caller can trim it in some other way.
+
+It's recommended that each `.m4s` retrieval be for at most one Moonfire NVR
+recording segment for several reasons:
+
+*   The Media Source Extension API appears structured for adding a complete
+    segment at a time. Large media segments thus impose significant latency on
+    seeking.
+*   There is currently a hard limit of 4 GiB of data because the `.m4s` uses a
+    single `moof` followed by a single `mdat`; the former references the
+    latter with 32-bit offsets.
+*   There's currently no way to generate an initialization segment for more
+    than one video sample entry, so a `.m4s` that uses more than one video
+    sample entry can't be used.
+
+### `/init/<sha1>.mp4`
+
+A GET returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
+initialization segment][init-segment].
+
+TODO: return a MIME type with a `Codecs` parameter as in [RFC 6381](rfc-6381). Web
+browsers expect this parameter when initializing a `SourceBuffer`; currently
+the user agent must divine this information.
+
+[media-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-media-segments
+[init-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-init-segments
+[rfc-6381]: https://tools.ietf.org/html/rfc6381

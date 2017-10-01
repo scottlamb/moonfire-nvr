@@ -127,17 +127,18 @@ impl<S> Slices<S> where S: Slice {
         let start_pos = range.start - slice_start;
         let bodies = stream::unfold(
             (ctx.clone(), i, start_pos, slice_start), move |(c, i, start_pos, slice_start)| {
-            let (body, end);
+            let (body, min_end);
             {
                 let self_ = S::get_slices(&c);
                 if i == self_.slices.len() { return None }
                 let s = &self_.slices[i];
                 if range.end == slice_start + start_pos { return None }
-                end = ::std::cmp::min(range.end, s.end());
-                let l = end - slice_start;
-                body = s.get_range(&c, start_pos .. end - slice_start, l);
+                let s_end = s.end();
+                min_end = ::std::cmp::min(range.end, s_end);
+                let l = s_end - slice_start;
+                body = s.get_range(&c, start_pos .. min_end - slice_start, l);
             };
-            Some(Ok::<_, ::hyper::Error>((body, (c, i+1, 0, end))))
+            Some(Ok::<_, ::hyper::Error>((body, (c, i+1, 0, min_end))))
         });
         Box::new(bodies.flatten())
     }

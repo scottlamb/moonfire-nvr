@@ -69,16 +69,27 @@ lazy_static! {
 }
 
 enum Path {
-    CamerasList,              // "/" or "/cameras/"
-    Camera(Uuid),             // "/cameras/<uuid>/"
-    CameraRecordings(Uuid),   // "/cameras/<uuid>/recordings"
-    CameraViewMp4(Uuid),      // "/cameras/<uuid>/view.mp4"
+    CamerasList,                 // "/" or "/cameras/"
+    InitSegment([u8; 20]),       // "/init/<sha1>.mp4"
+    Camera(Uuid),                // "/cameras/<uuid>/"
+    CameraRecordings(Uuid),      // "/cameras/<uuid>/recordings"
+    CameraViewMp4(Uuid),         // "/cameras/<uuid>/view.mp4"
+    CameraViewMp4Segment(Uuid),  // "/cameras/<uuid>/view.m4s"
     NotFound,
 }
 
 fn decode_path(path: &str) -> Path {
     if path == "/" {
         return Path::CamerasList;
+    }
+    if path.starts_with("/init/") {
+        if path.len() != 50 || !path.ends_with(".mp4") {
+            return Path::NotFound;
+        }
+        if let Ok(sha1) = strutil::dehex(&path.as_bytes()[6..46]) {
+            return Path::InitSegment(sha1);
+        }
+        return Path::NotFound;
     }
     if !path.starts_with("/cameras/") {
         return Path::NotFound;
@@ -102,6 +113,7 @@ fn decode_path(path: &str) -> Path {
         "/" => Path::Camera(uuid),
         "/recordings" => Path::CameraRecordings(uuid),
         "/view.mp4" => Path::CameraViewMp4(uuid),
+        "/view.m4s" => Path::CameraViewMp4Segment(uuid),
         _ => Path::NotFound,
     }
 }
@@ -436,7 +448,20 @@ impl Service {
            .with_body(body))
     }
 
-    fn camera_view_mp4(&self, uuid: Uuid, query: Option<&str>, req: &Request)
+    fn init_segment(&self, sha1: [u8; 20], req: &Request) -> Result<Response<slices::Body>, Error> {
+        let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
+        let db = self.db.lock();
+        for ent in db.video_sample_entries() {
+            if ent.sha1 == sha1 {
+                builder.append_video_sample_entry(ent.clone());
+                let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
+                return Ok(http_entity::serve(mp4, req));
+            }
+        }
+        self.not_found()
+    }
+
+    fn camera_view_mp4(&self, uuid: Uuid, type_: mp4::Type, query: Option<&str>, req: &Request)
                        -> Result<Response<slices::Body>, Error> {
         let camera_id = {
             let db = self.db.lock();
@@ -444,7 +469,7 @@ impl Service {
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
             camera.id
         };
-        let mut builder = mp4::FileBuilder::new();
+        let mut builder = mp4::FileBuilder::new(type_);
         if let Some(q) = query {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value) = (key.borrow(), value.borrow());
@@ -556,10 +581,16 @@ impl server::Service for Service {
     fn call(&self, req: Request) -> Self::Future {
         debug!("request on: {}", req.uri());
         let res = match decode_path(req.uri().path()) {
+            Path::InitSegment(sha1) => self.init_segment(sha1, &req),
             Path::CamerasList => self.list_cameras(&req),
             Path::Camera(uuid) => self.camera(uuid, req.uri().query(), &req),
             Path::CameraRecordings(uuid) => self.camera_recordings(uuid, req.uri().query(), &req),
-            Path::CameraViewMp4(uuid) => self.camera_view_mp4(uuid, req.uri().query(), &req),
+            Path::CameraViewMp4(uuid) => {
+                self.camera_view_mp4(uuid, mp4::Type::Normal, req.uri().query(), &req)
+            },
+            Path::CameraViewMp4Segment(uuid) => {
+                self.camera_view_mp4(uuid, mp4::Type::MediaSegment, req.uri().query(), &req)
+            },
             Path::NotFound => self.not_found(),
         };
         future::result(res.map_err(|e| {

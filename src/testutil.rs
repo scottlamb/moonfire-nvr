@@ -32,6 +32,7 @@ extern crate tempdir;
 
 use db;
 use dir;
+use mylog;
 use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
 use std::env;
@@ -57,6 +58,10 @@ pub const TEST_CAMERA_ID: i32 = 1;
 ///      results regardless of machine setup.)
 pub fn init() {
     INIT.call_once(|| {
+        let h = mylog::Builder::new()
+            .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or("info".to_owned()))
+            .build();
+        h.install().unwrap();
         env::set_var("TZ", "America/Los_Angeles");
         time::tzset();
     });
