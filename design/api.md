@@ -182,7 +182,9 @@ Example response:
 
 ### `/camera/<uuid>/view.mp4`
 
-A GET returns a `.mp4` file, with an etag and support for range requests.
+A GET returns a `.mp4` file, with an etag and support for range requests. The
+MIME type will be `video/mp4`, with a `codecs` parameter as specified in [RFC
+6381][rfc-6381].
 
 Expected query parameters:
 
@@ -227,7 +229,8 @@ TODO: error behavior on missing segment. It should be a 404, likely with an
 ### `/camera/<uuid>/view.m4s`
 
 A GET returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
-media segment][media-segment].
+media segment][media-segment]. The MIME type will be `video/mp4`, with a
+`codecs` parameter as specified in [RFC 6381][rfc-6381].
 
 Expected query parameters:
 
@@ -252,11 +255,8 @@ recording segment for several reasons:
 ### `/init/<sha1>.mp4`
 
 A GET returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
-initialization segment][init-segment].
-
-TODO: return a MIME type with a `Codecs` parameter as in [RFC 6381](rfc-6381). Web
-browsers expect this parameter when initializing a `SourceBuffer`; currently
-the user agent must divine this information.
+initialization segment][init-segment]. The MIME type will be `video/mp4`, with
+a `codecs` parameter as specified in [RFC 6381][rfc-6381].
 
 [media-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-media-segments
 [init-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-init-segments

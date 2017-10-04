@@ -118,8 +118,8 @@ impl TestDb {
     pub fn create_recording_from_encoder(&self, encoder: recording::SampleIndexEncoder)
                                          -> db::ListRecordingsRow {
         let mut db = self.db.lock();
-        let video_sample_entry_id =
-            db.insert_video_sample_entry(1920, 1080, &[0u8; 100]).unwrap();
+        let video_sample_entry_id = db.insert_video_sample_entry(
+            1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
         {
             let mut tx = db.tx().unwrap();
             tx.bypass_reservation_for_testing = true;
@@ -155,7 +155,8 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
     let mut data = Vec::new();
     data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
     let mut db = db.lock();
-    let video_sample_entry_id = db.insert_video_sample_entry(1920, 1080, &[0u8; 100]).unwrap();
+    let video_sample_entry_id = db.insert_video_sample_entry(
+        1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
     const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
     const DURATION: recording::Duration = recording::Duration(5399985);
     let mut recording = db::RecordingToInsert{

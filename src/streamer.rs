@@ -117,7 +117,8 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
         let extra_data = stream.get_extra_data()?;
         let video_sample_entry_id =
             self.db.lock().insert_video_sample_entry(extra_data.width, extra_data.height,
-                                                     &extra_data.sample_entry)?;
+                                                     extra_data.sample_entry,
+                                                     extra_data.rfc6381_codec)?;
         debug!("{}: video_sample_entry_id={}", self.short_name, video_sample_entry_id);
         let mut seen_key_frame = false;
         let mut state: Option<WriterState> = None;

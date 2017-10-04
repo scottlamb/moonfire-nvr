@@ -95,6 +95,7 @@ fn parse_annex_b_extra_data(data: &[u8]) -> Result<(&[u8], &[u8])> {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExtraData {
     pub sample_entry: Vec<u8>,
+    pub rfc6381_codec: String,
     pub width: u16,
     pub height: u16,
 
@@ -134,7 +135,7 @@ impl ExtraData {
 
         // This is a concatenation of the following boxes/classes.
 
-        // SampleEntry, ISO/IEC 14496-10 section 8.5.2.
+        // SampleEntry, ISO/IEC 14496-12 section 8.5.2.
         let avc1_len_pos = sample_entry.len();
         sample_entry.write_u32::<BigEndian>(avc1_len as u32)?;  // length
         // type + reserved + data_reference_index = 1
@@ -215,13 +216,26 @@ impl ExtraData {
                                            length {}", avc1_len, sample_entry.len() - avc1_len_pos,
                                            avc_decoder_config_len)));
         }
-        Ok(ExtraData{
-            sample_entry: sample_entry,
-            width: width,
-            height: height,
-            need_transform: need_transform,
+        let rfc6381_codec = rfc6381_codec_from_sample_entry(&sample_entry)?;
+        Ok(ExtraData {
+            sample_entry,
+            rfc6381_codec,
+            width,
+            height,
+            need_transform,
         })
     }
+}
+
+pub fn rfc6381_codec_from_sample_entry(sample_entry: &[u8]) -> Result<String> {
+    if sample_entry.len() < 99 || &sample_entry[4..8] != b"avc1" ||
+       &sample_entry[90..94] != b"avcC" {
+        return Err(Error::new("not a valid AVCSampleEntry".to_owned()));
+    }
+    let profile_idc = sample_entry[103];
+    let constraint_flags_byte = sample_entry[104];
+    let level_idc = sample_entry[105];
+    Ok(format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags_byte, level_idc))
 }
 
 /// Transforms sample data from Annex B format to AVC format. Should be called on samples iff
@@ -245,6 +259,8 @@ pub fn transform_sample_data(annexb_sample: &[u8], avc_sample: &mut Vec<u8>) -> 
 
 #[cfg(test)]
 mod tests {
+    use testutil;
+
     const ANNEX_B_TEST_INPUT: [u8; 35] = [
         0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x00, 0x1f,
         0x9a, 0x66, 0x02, 0x80, 0x2d, 0xff, 0x35, 0x01,
@@ -283,6 +299,7 @@ mod tests {
 
     #[test]
     fn test_decode() {
+        testutil::init();
         let data = &ANNEX_B_TEST_INPUT;
         let mut pieces = Vec::new();
         super::decode_h264_annex_b(data, |p| {
@@ -294,23 +311,28 @@ mod tests {
 
     #[test]
     fn test_sample_entry_from_avc_decoder_config() {
+        testutil::init();
         let e = super::ExtraData::parse(&AVC_DECODER_CONFIG_TEST_INPUT, 1280, 720).unwrap();
         assert_eq!(&e.sample_entry[..], &TEST_OUTPUT[..]);
         assert_eq!(e.width, 1280);
         assert_eq!(e.height, 720);
         assert_eq!(e.need_transform, false);
+        assert_eq!(e.rfc6381_codec, "avc1.4d001f");
     }
 
     #[test]
     fn test_sample_entry_from_annex_b() {
+        testutil::init();
         let e = super::ExtraData::parse(&ANNEX_B_TEST_INPUT, 1280, 720).unwrap();
         assert_eq!(e.width, 1280);
         assert_eq!(e.height, 720);
         assert_eq!(e.need_transform, true);
+        assert_eq!(e.rfc6381_codec, "avc1.4d001f");
     }
 
     #[test]
     fn test_transform_sample_data() {
+        testutil::init();
         const INPUT: [u8; 64] = [
             0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x00, 0x1f,
             0x9a, 0x66, 0x02, 0x80, 0x2d, 0xff, 0x35, 0x01,

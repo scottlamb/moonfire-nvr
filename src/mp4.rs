@@ -1472,8 +1472,19 @@ impl http_entity::Entity for File {
     type Body = slices::Body;
 
     fn add_headers(&self, hdrs: &mut header::Headers) {
-        // TODO: add RFC 6381 "Codecs" parameter.
-        hdrs.set(header::ContentType("video/mp4".parse().unwrap()));
+        let mut mime = String::with_capacity(64);
+        mime.push_str("video/mp4; codecs=\"");
+        let mut first = true;
+        for e in &self.0.video_sample_entries {
+            if first {
+                first = false
+            } else {
+                mime.push_str(", ");
+            }
+            mime.push_str(&e.rfc6381_codec);
+        }
+        mime.push('"');
+        hdrs.set(header::ContentType(mime.parse().unwrap()));
     }
     fn last_modified(&self) -> Option<header::HttpDate> { Some(self.0.last_modified) }
     fn etag(&self) -> Option<header::EntityTag> { Some(self.0.etag.clone()) }
@@ -1725,7 +1736,8 @@ mod tests {
         const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
         let extra_data = input.get_extra_data().unwrap();
         let video_sample_entry_id = db.db.lock().insert_video_sample_entry(
-            extra_data.width, extra_data.height, &extra_data.sample_entry).unwrap();
+            extra_data.width, extra_data.height, extra_data.sample_entry,
+            extra_data.rfc6381_codec).unwrap();
         let mut output = db.dir.create_writer(&db.syncer_channel, None,
                                               TEST_CAMERA_ID, video_sample_entry_id).unwrap();
 

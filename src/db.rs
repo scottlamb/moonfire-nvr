@@ -53,6 +53,7 @@
 
 use error::{Error, ResultExt};
 use fnv;
+use h264;
 use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
@@ -221,11 +222,12 @@ impl rusqlite::types::FromSql for PlaybackData {
 /// the codec, width, height, etc.
 #[derive(Debug)]
 pub struct VideoSampleEntry {
+    pub data: Vec<u8>,
+    pub rfc6381_codec: String,
     pub id: i32,
     pub width: u16,
     pub height: u16,
     pub sha1: [u8; 20],
-    pub data: Vec<u8>,
 }
 
 /// A row used in `list_recordings_by_time` and `list_recordings_by_id`.
@@ -1077,12 +1079,18 @@ impl LockedDatabase {
                     id, sha1_vec.len())));
             }
             sha1.copy_from_slice(&sha1_vec);
-            self.state.video_sample_entries.insert(id, Arc::new(VideoSampleEntry{
+            let data: Vec<u8> = row.get_checked(4)?;
+
+            // TODO: store this in the database rather than have codec-specific dispatch logic here.
+            let rfc6381_codec = h264::rfc6381_codec_from_sample_entry(&data)?;
+
+            self.state.video_sample_entries.insert(id, Arc::new(VideoSampleEntry {
                 id: id as i32,
                 width: row.get_checked::<_, i32>(2)? as u16,
                 height: row.get_checked::<_, i32>(3)? as u16,
-                sha1: sha1,
-                data: row.get_checked(4)?,
+                sha1,
+                data,
+                rfc6381_codec,
             }));
         }
         info!("Loaded {} video sample entries",
@@ -1140,8 +1148,9 @@ impl LockedDatabase {
 
     /// Inserts the specified video sample entry if absent.
     /// On success, returns the id of a new or existing row.
-    pub fn insert_video_sample_entry(&mut self, w: u16, h: u16, data: &[u8]) -> Result<i32, Error> {
-        let sha1 = hash::hash2(hash::MessageDigest::sha1(), data)?;
+    pub fn insert_video_sample_entry(&mut self, w: u16, h: u16, data: Vec<u8>,
+                                     rfc6381_codec: String) -> Result<i32, Error> {
+        let sha1 = hash::hash2(hash::MessageDigest::sha1(), &data)?;
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&sha1);
 
@@ -1168,12 +1177,13 @@ impl LockedDatabase {
         ])?;
 
         let id = self.conn.last_insert_rowid() as i32;
-        self.state.video_sample_entries.insert(id, Arc::new(VideoSampleEntry{
+        self.state.video_sample_entries.insert(id, Arc::new(VideoSampleEntry {
             id: id,
             width: w,
             height: h,
             sha1: sha1_bytes,
-            data: data.to_vec(),
+            data: data,
+            rfc6381_codec,
         }));
 
         Ok(id)
@@ -1485,6 +1495,7 @@ mod tests {
                 assert_eq!(r.video_samples, row.video_samples);
                 assert_eq!(r.video_sync_samples, row.video_sync_samples);
                 assert_eq!(r.sample_file_bytes, row.sample_file_bytes);
+                assert_eq!(row.video_sample_entry.rfc6381_codec, "avc1.4d0029");
                 Ok(())
             }).unwrap();
         }
@@ -1628,7 +1639,9 @@ mod tests {
         assert_unsorted_eq(db.lock().list_reserved_sample_files().unwrap(),
                            vec![uuid_to_use, uuid_to_keep]);
 
-        let vse_id = db.lock().insert_video_sample_entry(768, 512, &[0u8; 100]).unwrap();
+        let vse_id = db.lock().insert_video_sample_entry(
+            1920, 1080, include_bytes!("testdata/avc1").to_vec(),
+            "avc1.4d0029".to_owned()).unwrap();
         assert!(vse_id > 0, "vse_id = {}", vse_id);
 
         // Inserting a recording should succeed and remove its uuid from the reserved table.
