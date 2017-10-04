@@ -103,7 +103,7 @@ use strutil;
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
 /// cause the etag to change as well.
-const FORMAT_VERSION: [u8; 1] = [0x03];
+const FORMAT_VERSION: [u8; 1] = [0x04];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
 const NORMAL_FTYP_BOX: &'static [u8] = &[
@@ -1107,8 +1107,8 @@ impl FileBuilder {
                     self.body.append_u64(e.segment_duration);
                     self.body.append_u64(e.media_time);
 
-                    // media_rate_integer + media_rate_fraction: both fixed at 1
-                    self.body.buf.extend_from_slice(b"\x00\x01\x00\x01");
+                    // media_rate_integer + media_rate_fraction: fixed at 1.0
+                    self.body.buf.extend_from_slice(b"\x00\x01\x00\x00");
                 }
             })?;
         })
@@ -1795,6 +1795,7 @@ mod tests {
            })
            .wait()
            .unwrap();
+        info!("wrote {:?}", filename);
         filename.to_str().unwrap().to_string()
     }
 
@@ -1925,7 +1926,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x01,                          // length
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,  // segment_duration
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06,  // media_time
-            0x00, 0x01, 0x00, 0x01,                          // media_rate_{integer,fraction}
+            0x00, 0x01, 0x00, 0x00,                          // media_rate_{integer,fraction}
         ]);
 
         // Examine stbl.
@@ -2017,7 +2018,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "908ae8ac303f66f2f4a1f8f52dba8f6ea9fdb442";
+        const EXPECTED_ETAG: &'static str = "f7638ef2b277fa42bc88ed79246dc720c0dfd363";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -2037,7 +2038,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "e21c6a6dfede1081db3701cc595ec267c43c2bff";
+        const EXPECTED_ETAG: &'static str = "df7446f3efc6939f751f42c55af47242f0080c81";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -2077,7 +2078,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "555de64b39615e1a1cbe5bdd565ff197f5f126c5";
+        const EXPECTED_ETAG: &'static str = "b68e9c423cdac9bf8d400ed9fe538493dce843ba";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
