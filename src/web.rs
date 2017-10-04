@@ -427,7 +427,9 @@ impl Service {
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
             db.list_aggregated_recordings(camera.id, r, recording::Duration(i64::max_value()),
                                           |row| {
-                out.recordings.push(json::Recording{
+                out.recordings.push(json::Recording {
+                    start_id: row.ids.start,
+                    end_id: if row.ids.end == row.ids.start + 1 { None } else { Some(row.ids.end) },
                     start_time_90k: row.time.start.0,
                     end_time_90k: row.time.end.0,
                     sample_file_bytes: row.sample_file_bytes,

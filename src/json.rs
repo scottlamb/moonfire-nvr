@@ -125,7 +125,11 @@ pub struct Recording {
     pub end_time_90k: i64,
     pub sample_file_bytes: i64,
     pub video_samples: i64,
+    pub video_sample_entry_sha1: String,
+    pub start_id: i32,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_id: Option<i32>,
     pub video_sample_entry_width: u16,
     pub video_sample_entry_height: u16,
-    pub video_sample_entry_sha1: String,
 }
