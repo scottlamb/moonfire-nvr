@@ -1418,10 +1418,12 @@ impl FileInner {
     fn get_co64(&self, r: Range<u64>, l: u64) -> Result<Chunk, Error> {
         let mut v = Vec::with_capacity(l as usize);
         let mut pos = self.initial_sample_byte_pos;
+        debug!("co64, initial pos={}", pos);
         for s in &self.segments {
             v.write_u64::<BigEndian>(pos)?;
             let r = s.s.sample_file_range();
             pos += r.end - r.start;
+            debug!("co64, pos={} after adding r={:?}", pos, r);
         }
         Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]))
     }
@@ -1442,8 +1444,9 @@ impl FileInner {
                                                    |p| Ok(p.sample_file_uuid))?
         };
         let f = self.dir.open_sample_file(uuid)?;
+        let start = s.s.sample_file_range().start + r.start;
         let mmap = Box::new(memmap::Mmap::open_with_offset(
-            &f, memmap::Protection::Read, r.start as usize, (r.end - r.start) as usize)?);
+            &f, memmap::Protection::Read, start as usize, (r.end - r.start) as usize)?);
         Ok(ARefs::new(mmap).map(|m| unsafe { m.as_slice() }))
     }
 
