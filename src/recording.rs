@@ -352,6 +352,7 @@ impl SampleIndexEncoder {
 
 /// A segment represents a view of some or all of a single recording, starting from a key frame.
 /// Used by the `Mp4FileBuilder` class to splice together recordings into a single virtual .mp4.
+#[derive(Debug)]
 pub struct Segment {
     pub camera_id: i32,
     pub recording_id: i32,

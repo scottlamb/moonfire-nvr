@@ -94,6 +94,7 @@ use slices::{self, Body, Chunk, Slices};
 use smallvec::SmallVec;
 use std::cell::UnsafeCell;
 use std::cmp;
+use std::fmt;
 use std::io;
 use std::ops::Range;
 use std::mem;
@@ -103,7 +104,7 @@ use strutil;
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
 /// cause the etag to change as well.
-const FORMAT_VERSION: [u8; 1] = [0x04];
+const FORMAT_VERSION: [u8; 1] = [0x05];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
 const NORMAL_FTYP_BOX: &'static [u8] = &[
@@ -350,6 +351,17 @@ struct Segment {
     index_once: Once,
 }
 
+// Manually implement Debug because `index` and `index_once` are not Debug.
+impl fmt::Debug for Segment {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("mp4::Segment")
+           .field("s", &self.s)
+           .field("first_frame_num", &self.first_frame_num)
+           .field("num_subtitle_samples", &self.num_subtitle_samples)
+           .finish()
+    }
+}
+
 unsafe impl Sync for Segment {}
 
 impl Segment {
@@ -359,7 +371,7 @@ impl Segment {
             s: recording::Segment::new(db, row, rel_range_90k)?,
             index: UnsafeCell::new(Err(())),
             index_once: ONCE_INIT,
-            first_frame_num: first_frame_num,
+            first_frame_num,
             num_subtitle_samples: 0,
         })
     }
@@ -753,8 +765,10 @@ impl FileBuilder {
                     row.camera_id, row.id, prev.s.camera_id, prev.s.recording_id)));
             }
         }
-        self.segments.push(Segment::new(db, &row, rel_range_90k, self.next_frame_num)?);
-        self.next_frame_num += row.video_samples as u32;
+        let s = Segment::new(db, &row, rel_range_90k, self.next_frame_num)?;
+
+        self.next_frame_num += s.s.frames as u32;
+        self.segments.push(s);
         if !self.video_sample_entries.iter().any(|e| e.id == row.video_sample_entry.id) {
             self.video_sample_entries.push(row.video_sample_entry);
         }
@@ -856,6 +870,7 @@ impl FileBuilder {
         } else {
             debug!("Estimated {} buf bytes; actually were {}", EST_BUF_LEN, self.body.buf.len());
         }
+        debug!("segments: {:#?}", self.segments);
         debug!("slices: {:?}", self.body.slices);
         let mtime = ::std::time::UNIX_EPOCH +
                     ::std::time::Duration::from_secs(max_end as u64);
@@ -1082,7 +1097,7 @@ impl FileBuilder {
                 if unflushed.segment_duration > 0 {
                     flushed.push(unflushed);
                 }
-                unflushed = Entry{
+                unflushed = Entry {
                     segment_duration: keep as u64,
                     media_time: cur_media_time,
                 };
@@ -1840,11 +1855,20 @@ mod tests {
 
     /// Makes a `.mp4` file which is only good for exercising the `Slice` logic for producing
     /// sample tables that match the supplied encoder.
-    fn make_mp4_from_encoder(type_: Type, db: &TestDb, encoder: recording::SampleIndexEncoder,
-                             desired_range_90k: Range<i32>) -> File {
-        let row = db.create_recording_from_encoder(encoder);
+    fn make_mp4_from_encoders(type_: Type, db: &TestDb,
+                              mut encoders: Vec<recording::SampleIndexEncoder>,
+                              desired_range_90k: Range<i32>) -> File {
         let mut builder = FileBuilder::new(type_);
-        builder.append(&db.db.lock(), row, desired_range_90k).unwrap();
+        let mut duration_so_far = 0;
+        for e in encoders.drain(..) {
+            let row = db.create_recording_from_encoder(e);
+            let d_start = if desired_range_90k.start < duration_so_far { 0 }
+                          else { desired_range_90k.start - duration_so_far };
+            let d_end = if desired_range_90k.end > duration_so_far + row.duration_90k
+                        { row.duration_90k } else { desired_range_90k.end - duration_so_far };
+            duration_so_far += row.duration_90k;
+            builder.append(&db.db.lock(), row, d_start .. d_end).unwrap();
+        }
         builder.build(db.db.clone(), db.dir.clone()).unwrap()
     }
 
@@ -1861,7 +1885,7 @@ mod tests {
         }
 
         // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
-        let mp4 = make_mp4_from_encoder(Type::Normal, &db, encoder, 2 .. 2+4+6+8);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![encoder], 2 .. 2+4+6+8);
         let track = find_track(mp4, 1);
         assert!(track.edts_cursor.is_none());
         let mut cursor = track.stbl_cursor;
@@ -1915,7 +1939,7 @@ mod tests {
 
         // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
-        let mp4 = make_mp4_from_encoder(Type::Normal, &db, encoder, 2+4+6 .. 2+4+6+8);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![encoder], 2+4+6 .. 2+4+6+8);
         let track = find_track(mp4, 1);
 
         // Examine edts. It should skip the 3rd frame.
@@ -1965,6 +1989,41 @@ mod tests {
     }
 
     #[test]
+    fn test_multi_segment() {
+        testutil::init();
+        let db = TestDb::new();
+        let mut encoders = Vec::new();
+        let mut encoder = recording::SampleIndexEncoder::new();
+        encoder.add_sample(1, 1, true);
+        encoder.add_sample(2, 2, false);
+        encoder.add_sample(3, 3, true);
+        encoders.push(encoder);
+        let mut encoder = recording::SampleIndexEncoder::new();
+        encoder.add_sample(4, 4, true);
+        encoder.add_sample(5, 5, false);
+        encoders.push(encoder);
+
+        // This should include samples 3 and 4 only, both sync frames.
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1+2 .. 1+2+3+4);
+        let mut cursor = BoxCursor::new(mp4);
+        cursor.down();
+        assert!(cursor.find(b"moov"));
+        cursor.down();
+        assert!(cursor.find(b"trak"));
+        cursor.down();
+        assert!(cursor.find(b"mdia"));
+        cursor.down();
+        assert!(cursor.find(b"minf"));
+        cursor.down();
+        assert!(cursor.find(b"stbl"));
+        cursor.down();
+        assert!(cursor.find(b"stss"));
+        assert_eq!(cursor.get_u32(4), 2);  // entry_count
+        assert_eq!(cursor.get_u32(8), 1);
+        assert_eq!(cursor.get_u32(12), 2);
+    }
+
+    #[test]
     fn test_media_segment() {
         testutil::init();
         let db = TestDb::new();
@@ -1977,7 +2036,8 @@ mod tests {
 
         // Time range [2+4+6, 2+4+6+8+1) means the 4th sample and part of the 5th are included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
-        let mp4 = make_mp4_from_encoder(Type::MediaSegment, &db, encoder, 2+4+6 .. 2+4+6+8+1);
+        let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![encoder],
+                                         2+4+6 .. 2+4+6+8+1);
         let mut cursor = BoxCursor::new(mp4);
         cursor.down();
 
@@ -2019,7 +2079,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "f7638ef2b277fa42bc88ed79246dc720c0dfd363";
+        const EXPECTED_ETAG: &'static str = "c56ef7eb3b4a713ceafebc3dc7958bd9e62a2fae";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -2039,7 +2099,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "df7446f3efc6939f751f42c55af47242f0080c81";
+        const EXPECTED_ETAG: &'static str = "3bdc2c8ce521df50155d0ca4d7497ada448fa7c3";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -2059,7 +2119,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("685e026af44204bc9cc52115c5e17058e9fb7c70", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "1d5c5980f6ba08a4dd52dfd785667d42cdb16992";
+        const EXPECTED_ETAG: &'static str = "3986d3bd9b866c3455fb7359fb134aa2d9107af7";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
@@ -2079,7 +2139,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "b68e9c423cdac9bf8d400ed9fe538493dce843ba";
+        const EXPECTED_ETAG: &'static str = "9e789398c9a71ca834fec8fbc55b389f99d12dda";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.syncer_join.join().unwrap();
