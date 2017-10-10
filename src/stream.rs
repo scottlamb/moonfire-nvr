@@ -82,10 +82,20 @@ impl Opener<FfmpegStream> for Ffmpeg {
         use moonfire_ffmpeg::InputFormatContext;
         let (mut input, discard_first) = match src {
             #[cfg(test)]
-            Source::File(filename) =>
-                (InputFormatContext::open(&CString::new(format!("file:{}", filename)).unwrap(),
-                 &mut moonfire_ffmpeg::Dictionary::new())?,
-                 false),
+            Source::File(filename) => {
+                let mut open_options = moonfire_ffmpeg::Dictionary::new();
+
+                // Work around https://github.com/scottlamb/moonfire-nvr/issues/10
+                open_options.set(c_str!("advanced_editlist"), c_str!("false")).unwrap();
+                let url = format!("file:{}", filename);
+                let i = InputFormatContext::open(&CString::new(url.clone()).unwrap(),
+                                                 &mut open_options)?;
+                if !open_options.empty() {
+                    warn!("While opening URL {}, some options were not understood: {}",
+                          url, open_options);
+                }
+                (i, false)
+            }
             Source::Rtsp(url) => {
                 let mut open_options = moonfire_ffmpeg::Dictionary::new();
                 open_options.set(c_str!("rtsp_transport"), c_str!("tcp")).unwrap();
