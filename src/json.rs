@@ -43,6 +43,7 @@ pub struct ListCameras<'a> {
 /// JSON serialization wrapper for a single camera when processing `/cameras/` and
 /// `/cameras/<uuid>/`. See `design/api.md` for details.
 #[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
 pub struct Camera<'a> {
     pub uuid: Uuid,
     pub short_name: &'a str,
@@ -53,6 +54,7 @@ pub struct Camera<'a> {
     pub total_duration_90k: i64,
     pub total_sample_file_bytes: i64,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Camera::serialize_days")]
     pub days: Option<&'a BTreeMap<db::CameraDayKey, db::CameraDayValue>>,
 }
@@ -94,6 +96,7 @@ impl<'a> Camera<'a> {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
 struct CameraDayValue {
     pub start_time_90k: i64,
     pub end_time_90k: i64,
@@ -120,6 +123,7 @@ pub struct ListRecordings {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
 pub struct Recording {
     pub start_time_90k: i64,
     pub end_time_90k: i64,

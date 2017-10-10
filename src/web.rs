@@ -326,8 +326,8 @@ impl Service {
                 for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                     let (key, value) = (key.borrow(), value.borrow());
                     match key {
-                        "start_time" => time.start = recording::Time::parse(value)?,
-                        "end_time" => time.end = recording::Time::parse(value)?,
+                        "startTime" => time.start = recording::Time::parse(value)?,
+                        "endTime" => time.end = recording::Time::parse(value)?,
                         "trim" if value == "true" => trim = true,
                         _ => {},
                     }
@@ -556,7 +556,7 @@ impl Service {
         Ok(http_entity::serve(mp4, req))
     }
 
-    /// Parses optional `start_time_90k` and `end_time_90k` query parameters, defaulting to the
+    /// Parses optional `startTime90k` and `endTime90k` query parameters, defaulting to the
     /// full range of possible values.
     fn get_optional_range(query: Option<&str>) -> Result<Range<recording::Time>, Error> {
         let mut start = i64::min_value();
@@ -565,8 +565,8 @@ impl Service {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value) = (key.borrow(), value.borrow());
                 match key {
-                    "start_time_90k" => start = i64::from_str(value)?,
-                    "end_time_90k" => end = i64::from_str(value)?,
+                    "startTime90k" => start = i64::from_str(value)?,
+                    "endTime90k" => end = i64::from_str(value)?,
                     _ => {},
                 }
             };
