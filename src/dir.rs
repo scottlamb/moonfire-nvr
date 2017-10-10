@@ -503,6 +503,7 @@ struct InnerWriter<'a> {
 }
 
 /// Adjusts durations given by the camera to correct its clock frequency error.
+#[derive(Copy, Clone, Debug)]
 struct ClockAdjuster {
     /// Every `every_minus_1 + 1` units, add `-ndir`.
     /// Note i32::max_value() disables adjustment.
@@ -521,16 +522,16 @@ impl ClockAdjuster {
         // desired duration of a single recording). Cap the rate at 500 ppm (which corrects
         // 2,700/90,000ths of a second over a minute) to prevent noticeably speeding up or slowing
         // down playback.
-        let (every, ndir) = match local_time_delta {
-            None | Some(0) => (i32::max_value(), 0),
-            Some(d) if d <= -2700 => (2000,  1),
-            Some(d) if d >=  2700 => (2000, -1),
-            Some(d) if d < -60 => ((60 * 90000) / -(d as i32),  1),
-            Some(d)            => ((60 * 90000) /  (d as i32), -1),
+        let (every_minus_1, ndir) = match local_time_delta {
+            Some(d) if d <= -2700 => (1999,  1),
+            Some(d) if d >=  2700 => (1999, -1),
+            Some(d) if d < -60 => ((60 * 90000) / -(d as i32) - 1,  1),
+            Some(d) if d > 60  => ((60 * 90000) /  (d as i32) - 1, -1),
+            _ => (i32::max_value(), 0),
         };
         ClockAdjuster{
-            every_minus_1: every - 1,
-            ndir: ndir,
+            every_minus_1,
+            ndir,
             cur: 0,
         }
     }
@@ -705,17 +706,15 @@ mod tests {
         testutil::init();
 
         // no-ops.
-        let mut a = ClockAdjuster::new(None);
-        for _ in 0..1800 {
-            assert_eq!(3000, a.adjust(3000));
-        }
-        a = ClockAdjuster::new(Some(0));
-        for _ in 0..1800 {
-            assert_eq!(3000, a.adjust(3000));
+        for v in &[None, Some(0), Some(-10), Some(10)] {
+            let mut a = ClockAdjuster::new(*v);
+            for _ in 0..1800 {
+                assert_eq!(3000, a.adjust(3000), "v={:?}", *v);
+            }
         }
 
         // typical, 100 ppm adjustment.
-        a = ClockAdjuster::new(Some(-540));
+        let mut a = ClockAdjuster::new(Some(-540));
         let mut total = 0;
         for _ in 0..1800 {
             let new = a.adjust(3000);
@@ -723,6 +722,17 @@ mod tests {
             total += new;
         }
         let expected = 1800*3000 - 540;
+        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
+                total, expected);
+
+        a = ClockAdjuster::new(Some(540));
+        let mut total = 0;
+        for _ in 0..1800 {
+            let new = a.adjust(3000);
+            assert!(new == 3000 || new == 3001);
+            total += new;
+        }
+        let expected = 1800*3000 + 540;
         assert!(total == expected || total == expected + 1, "total={} vs expected={}",
                 total, expected);
 
@@ -735,6 +745,17 @@ mod tests {
             total += new;
         }
         let expected = 1800*3000 - 2700;
+        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
+                total, expected);
+
+        a = ClockAdjuster::new(Some(1_000_000));
+        total = 0;
+        for _ in 0..1800 {
+            let new = a.adjust(3000);
+            assert!(new == 3001 || new == 3002, "new={}", new);
+            total += new;
+        }
+        let expected = 1800*3000 + 2700;
         assert!(total == expected || total == expected + 1, "total={} vs expected={}",
                 total, expected);
     }
