@@ -529,10 +529,11 @@ impl Segment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testutil::TestDb;
+    use testutil::{self, TestDb};
 
     #[test]
     fn test_parse_time() {
+        testutil::init();
         let tests = &[
             ("2006-01-02T15:04:05-07:00",       102261550050000),
             ("2006-01-02T15:04:05:00001-07:00", 102261550050001),
@@ -550,11 +551,13 @@ mod tests {
 
     #[test]
     fn test_format_time() {
+        testutil::init();
         assert_eq!("2006-01-02T15:04:05:00000-08:00", format!("{}", Time(102261874050000)));
     }
 
     #[test]
     fn test_display_duration() {
+        testutil::init();
         let tests = &[
             // (output, seconds)
             ("0 seconds", 0),
@@ -577,6 +580,7 @@ mod tests {
     /// Tests encoding the example from design/schema.md.
     #[test]
     fn test_encode_example() {
+        testutil::init();
         let mut e = SampleIndexEncoder::new();
         e.add_sample(10, 1000, true);
         e.add_sample(9, 10, false);
@@ -592,6 +596,7 @@ mod tests {
     /// Tests a round trip from `SampleIndexEncoder` to `SampleIndexIterator`.
     #[test]
     fn test_round_trip() {
+        testutil::init();
         #[derive(Debug, PartialEq, Eq)]
         struct Sample {
             duration_90k: i32,
@@ -624,6 +629,7 @@ mod tests {
     /// TODO: test and fix overflow cases.
     #[test]
     fn test_iterator_errors() {
+        testutil::init();
         struct Test {
             encoded: &'static [u8],
             err: &'static str,
@@ -657,6 +663,7 @@ mod tests {
     /// This is a simpler case; all sync samples means we can start on any frame.
     #[test]
     fn test_segment_clipping_with_all_sync() {
+        testutil::init();
         let mut encoder = SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
@@ -674,6 +681,7 @@ mod tests {
     /// Half sync frames means starting from the last sync frame <= desired point.
     #[test]
     fn test_segment_clipping_with_half_sync() {
+        testutil::init();
         let mut encoder = SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
@@ -690,6 +698,7 @@ mod tests {
 
     #[test]
     fn test_segment_clipping_with_trailing_zero() {
+        testutil::init();
         let mut encoder = SampleIndexEncoder::new();
         encoder.add_sample(1, 1, true);
         encoder.add_sample(1, 2, true);
@@ -704,6 +713,7 @@ mod tests {
     /// This takes a fast path which skips scanning the index in `new()`.
     #[test]
     fn test_segment_fast_path() {
+        testutil::init();
         let mut encoder = SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
@@ -718,6 +728,7 @@ mod tests {
 
     #[test]
     fn test_segment_fast_path_with_trailing_zero() {
+        testutil::init();
         let mut encoder = SampleIndexEncoder::new();
         encoder.add_sample(1, 1, true);
         encoder.add_sample(1, 2, true);

@@ -323,8 +323,9 @@ impl CameraDayKey {
 
     pub fn bounds(&self) -> Range<recording::Time> {
         let mut my_tm = time::strptime(self.as_ref(), "%Y-%m-%d").expect("days must be parseable");
-        let start = recording::Time(my_tm.to_timespec().sec * recording::TIME_UNITS_PER_SEC);
+        my_tm.tm_utcoff = 1;  // to the time crate, values != 0 mean local time.
         my_tm.tm_isdst = -1;
+        let start = recording::Time(my_tm.to_timespec().sec * recording::TIME_UNITS_PER_SEC);
         my_tm.tm_hour = 0;
         my_tm.tm_min = 0;
         my_tm.tm_sec = 0;
@@ -1575,6 +1576,17 @@ mod tests {
         // Remove two days.
         adjust_days(test_time .. test_time + three_min, -1, &mut m);
         assert_eq!(0, m.len());
+    }
+
+    #[test]
+    fn test_day_bounds() {
+        testutil::init();
+        assert_eq!(CameraDayKey(*b"2017-10-10").bounds(),  // normal day (24 hrs)
+                   recording::Time(135685692000000) .. recording::Time(135693468000000));
+        assert_eq!(CameraDayKey(*b"2017-03-12").bounds(),  // spring forward (23 hrs)
+                   recording::Time(134037504000000) .. recording::Time(134044956000000));
+        assert_eq!(CameraDayKey(*b"2017-11-05").bounds(),  // fall back (25 hrs)
+                   recording::Time(135887868000000) .. recording::Time(135895968000000));
     }
 
     #[test]
