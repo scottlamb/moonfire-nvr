@@ -319,8 +319,9 @@ impl Service {
 
     fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, query: Option<&str>,
                    uuid: Uuid) -> Result<Vec<u8>, Error> {
-        let (r, trim) = {
+        let (r, split, trim) = {
             let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
+            let mut split = recording::Duration(60 * 60 * recording::TIME_UNITS_PER_SEC);
             let mut trim = false;
             if let Some(q) = query {
                 for (key, value) in form_urlencoded::parse(q.as_bytes()) {
@@ -328,12 +329,13 @@ impl Service {
                     match key {
                         "startTime" => time.start = recording::Time::parse(value)?,
                         "endTime" => time.end = recording::Time::parse(value)?,
+                        "split" => split = recording::Duration(i64::from_str(value)?),
                         "trim" if value == "true" => trim = true,
                         _ => {},
                     }
                 };
             }
-            (time, trim)
+            (time, split, trim)
         };
         let camera = db.get_camera(uuid)
                        .ok_or_else(|| Error::new("no such camera".to_owned()))?;
@@ -358,13 +360,8 @@ impl Service {
             </tr>\n",
             HtmlEscaped(&camera.short_name), HtmlEscaped(&camera.description))?;
 
-        // Rather than listing each 60-second recording, generate a HTML row for aggregated .mp4
-        // files of up to FORCE_SPLIT_DURATION each, provided there is no gap or change in video
-        // parameters between recordings.
-        static FORCE_SPLIT_DURATION: recording::Duration =
-            recording::Duration(60 * 60 * recording::TIME_UNITS_PER_SEC);
         let mut rows = Vec::new();
-        db.list_aggregated_recordings(camera.id, r.clone(), FORCE_SPLIT_DURATION, |row| {
+        db.list_aggregated_recordings(camera.id, r.clone(), split, |row| {
             rows.push(row.clone());
             Ok(())
         })?;
@@ -412,7 +409,22 @@ impl Service {
 
     fn camera_recordings(&self, uuid: Uuid, query: Option<&str>, req: &Request)
                          -> Result<Response<slices::Body>, Error> {
-        let r = Service::get_optional_range(query)?;
+        let (r, split) = {
+            let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
+            let mut split = recording::Duration(i64::max_value());
+            if let Some(q) = query {
+                for (key, value) in form_urlencoded::parse(q.as_bytes()) {
+                    let (key, value) = (key.borrow(), value.borrow());
+                    match key {
+                        "startTime90k" => time.start = recording::Time::parse(value)?,
+                        "endTime90k" => time.end = recording::Time::parse(value)?,
+                        "split90k" => split = recording::Duration(i64::from_str(value)?),
+                        _ => {},
+                    }
+                };
+            }
+            (time, split)
+        };
         if !is_json(req) {
             let body: slices::Body = Box::new(stream::once(
                 Ok(ARefs::new(&b"only available for JSON requests"[..]))));
@@ -425,8 +437,7 @@ impl Service {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            db.list_aggregated_recordings(camera.id, r, recording::Duration(i64::max_value()),
-                                          |row| {
+            db.list_aggregated_recordings(camera.id, r, split, |row| {
                 let end = row.ids.end - 1;  // in api, ids are inclusive.
                 out.recordings.push(json::Recording {
                     start_id: row.ids.start,
@@ -554,24 +565,6 @@ impl Service {
         }
         let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
         Ok(http_entity::serve(mp4, req))
-    }
-
-    /// Parses optional `startTime90k` and `endTime90k` query parameters, defaulting to the
-    /// full range of possible values.
-    fn get_optional_range(query: Option<&str>) -> Result<Range<recording::Time>, Error> {
-        let mut start = i64::min_value();
-        let mut end = i64::max_value();
-        if let Some(q) = query {
-            for (key, value) in form_urlencoded::parse(q.as_bytes()) {
-                let (key, value) = (key.borrow(), value.borrow());
-                match key {
-                    "startTime90k" => start = i64::from_str(value)?,
-                    "endTime90k" => end = i64::from_str(value)?,
-                    _ => {},
-                }
-            };
-        }
-        Ok(recording::Time(start) .. recording::Time(end))
     }
 }
 

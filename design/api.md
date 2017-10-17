@@ -118,6 +118,8 @@ Valid request parameters:
 *   `startTime90k` and and `endTime90k` limit the data returned to only
     recordings which overlap with the given half-open interval. Either or both
     may be absent; they default to the beginning and end of time, respectively.
+*   `split90k` causes long runs of recordings to be split at the next
+    convenient boundary after the given duration.
 *   TODO(slamb): `continue` to support paging. (If data is too large, the
     server should return a `continue` key which is expected to be returned on
     following requests.)
