@@ -30,6 +30,7 @@
 
 //! Tools for implementing a `http_entity::Entity` body composed from many "slices".
 
+use error::Error;
 use reffers::ARefs;
 use futures::stream;
 use futures::Stream;
@@ -92,12 +93,16 @@ impl<S> Slices<S> where S: Slice {
         self.slices.reserve(additional)
     }
 
-    /// Appends the given slice.
-    pub fn append(&mut self, slice: S) {
-        assert!(slice.end() > self.len, "end {} <= len {} while adding slice {:?} to slices:\n{:?}",
-                slice.end(), self.len, slice, self);
+    /// Appends the given slice, which must have end > the Slice's current len.
+    pub fn append(&mut self, slice: S) -> Result<(), Error> {
+        if slice.end() <= self.len {
+            return Err(Error::new(
+                    format!("end {} <= len {} while adding slice {:?} to slices:\n{:?}",
+                            slice.end(), self.len, slice, self)));
+        }
         self.len = slice.end();
         self.slices.push(slice);
+        Ok(())
     }
 
     /// Returns the total byte length of all slices.
@@ -182,11 +187,11 @@ mod tests {
     lazy_static! {
         static ref SLICES: Slices<FakeSlice> = {
             let mut s = Slices::new();
-            s.append(FakeSlice{end: 5, name: "a"});
-            s.append(FakeSlice{end: 5+13, name: "b"});
-            s.append(FakeSlice{end: 5+13+7, name: "c"});
-            s.append(FakeSlice{end: 5+13+7+17, name: "d"});
-            s.append(FakeSlice{end: 5+13+7+17+19, name: "e"});
+            s.append(FakeSlice{end: 5, name: "a"}).unwrap();
+            s.append(FakeSlice{end: 5+13, name: "b"}).unwrap();
+            s.append(FakeSlice{end: 5+13+7, name: "c"}).unwrap();
+            s.append(FakeSlice{end: 5+13+7+17, name: "d"}).unwrap();
+            s.append(FakeSlice{end: 5+13+7+17+19, name: "e"}).unwrap();
             s
         };
     }

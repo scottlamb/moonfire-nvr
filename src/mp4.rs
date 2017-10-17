@@ -1405,8 +1405,7 @@ impl BodyState {
 
     fn append_slice(&mut self, len: u64, t: SliceType, p: usize) -> Result<(), Error> {
         let l = self.slices.len();
-        self.slices.append(Slice::new(l + len, t, p)?);
-        Ok(())
+        self.slices.append(Slice::new(l + len, t, p)?)
     }
 
     /// Appends a static bytestring, flushing the buffer if necessary.

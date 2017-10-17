@@ -406,10 +406,13 @@ impl Segment {
         if self_.desired_range_90k.start == 0 &&
            self_.desired_range_90k.end == recording.duration_90k {
             // Fast path. Existing entry is fine.
+            trace!("recording::Segment::new fast path, recording={:#?}", recording);
             return Ok(self_)
         }
 
         // Slow path. Need to iterate through the index.
+        trace!("recording::Segment::new slow path, desired_range_90k={:?}, recording={:#?}",
+               self_.desired_range_90k, recording);
         db.with_recording_playback(self_.camera_id, self_.recording_id, |playback| {
             let mut begin = Box::new(SampleIndexIterator::new());
             let data = &(&playback).video_index;
@@ -441,7 +444,7 @@ impl Segment {
                     self_.frames = 0;
                     self_.key_frames = 0;
                 }
-                if it.start_90k >= end_90k {
+                if it.start_90k >= end_90k && self_.frames > 0 {
                     break;
                 }
                 self_.frames += 1;
@@ -707,6 +710,18 @@ mod tests {
         let row = db.create_recording_from_encoder(encoder);
         let segment = Segment::new(&db.db.lock(), &row, 1 .. 2).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[2, 3]);
+    }
+
+    /// Even if the desired duration is 0, there should still be a frame.
+    #[test]
+    fn test_segment_zero_desired_duration() {
+        testutil::init();
+        let mut encoder = SampleIndexEncoder::new();
+        encoder.add_sample(1, 1, true);
+        let db = TestDb::new();
+        let row = db.create_recording_from_encoder(encoder);
+        let segment = Segment::new(&db.db.lock(), &row, 0 .. 0).unwrap();
+        assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1]);
     }
 
     /// Test a `Segment` which uses the whole recording.
