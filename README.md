@@ -59,9 +59,10 @@ make this possible:
 # <a name="help"></a> Getting help and getting involved
 
 Please email the
-[moonfire-nvr-users]([https://groups.google.com/d/forum/moonfire-nvr-users)
-mailing list with questions, bug reports, feature requests, or just to say
-you love/hate the software and why.
+[moonfire-nvr-users](https://groups.google.com/d/forum/moonfire-nvr-users)
+mailing list with questions, or just to say you love/hate the software and
+why. You can also file bugs and feature requests on the
+[github issue tracker](https://github.com/scottlamb/moonfire-nvr/issues).
 
 I'd welcome help with testing, development (in Rust, JavaScript, and HTML),
 user interface/graphic design, and documentation. Please email the mailing
