@@ -120,11 +120,12 @@ impl TestDb {
         let mut db = self.db.lock();
         let video_sample_entry_id = db.insert_video_sample_entry(
             1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
+        let row_id;
         {
             let mut tx = db.tx().unwrap();
             tx.bypass_reservation_for_testing = true;
             const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-            tx.insert_recording(&db::RecordingToInsert{
+            row_id = tx.insert_recording(&db::RecordingToInsert{
                 camera_id: TEST_CAMERA_ID,
                 sample_file_bytes: encoder.sample_file_bytes,
                 time: START_TIME ..
@@ -142,8 +143,7 @@ impl TestDb {
             tx.commit().unwrap();
         }
         let mut row = None;
-        let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
-        db.list_recordings_by_time(TEST_CAMERA_ID, all_time,
+        db.list_recordings_by_id(TEST_CAMERA_ID, row_id .. row_id + 1,
                                    |r| { row = Some(r); Ok(()) }).unwrap();
         row.unwrap()
     }

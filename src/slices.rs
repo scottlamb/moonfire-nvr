@@ -41,7 +41,7 @@ pub type Body = Box<Stream<Item = Chunk, Error = ::hyper::Error> + Send>;
 
 /// Writes a byte range to the given `io::Write` given a context argument; meant for use with
 /// `Slices`.
-pub trait Slice : Sync + Sized + 'static {
+pub trait Slice : fmt::Debug + Sized + Sync + 'static {
     type Ctx: Send + Clone;
     type Chunk: Send;
 
@@ -70,7 +70,7 @@ pub struct Slices<S> where S: Slice {
     slices: Vec<S>,
 }
 
-impl<S> fmt::Debug for Slices<S> where S: fmt::Debug + Slice {
+impl<S> fmt::Debug for Slices<S> where S: Slice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} slices with overall length {}:", self.slices.len(), self.len)?;
         let mut start = 0;
@@ -94,7 +94,8 @@ impl<S> Slices<S> where S: Slice {
 
     /// Appends the given slice.
     pub fn append(&mut self, slice: S) {
-        assert!(slice.end() > self.len);
+        assert!(slice.end() > self.len, "end {} <= len {} while adding slice {:?} to slices:\n{:?}",
+                slice.end(), self.len, slice, self);
         self.len = slice.end();
         self.slices.push(slice);
     }
@@ -158,6 +159,7 @@ mod tests {
         range: Range<u64>,
     }
 
+    #[derive(Debug)]
     pub struct FakeSlice {
         end: u64,
         name: &'static str,

@@ -1083,13 +1083,13 @@ impl FileBuilder {
         for s in &self.segments {
             // The actual range may start before the desired range because it can only start on a
             // key frame. This relationship should hold true:
-            // actual start <= desired start < desired end
+            // actual start <= desired start <= desired end
             let actual_start_90k = s.s.actual_start_90k();
             let skip = s.s.desired_range_90k.start - actual_start_90k;
             let keep = s.s.desired_range_90k.end - s.s.desired_range_90k.start;
-            assert!(skip >= 0 && keep > 0, "segment {}/{}: desired={}..{} actual_start={}",
-                    s.s.camera_id, s.s.recording_id, s.s.desired_range_90k.start,
-                    s.s.desired_range_90k.end, actual_start_90k);
+            if skip < 0 || keep < 0 {
+                return Err(Error::new(format!("skip={} keep={} on segment {:#?}", skip, keep, s)));
+            }
             cur_media_time += skip as u64;
             if unflushed.segment_duration + unflushed.media_time == cur_media_time {
                 unflushed.segment_duration += keep as u64;
@@ -1660,6 +1660,12 @@ mod tests {
             BigEndian::read_u32(&buf[..])
         }
 
+        pub fn get_u64(&self, p: u64) -> u64 {
+            let mut buf = [0u8; 8];
+            self.get(p, &mut buf);
+            BigEndian::read_u64(&buf[..])
+        }
+
         /// Navigates to the next box after the current one, or up if the current one is last.
         pub fn next(&mut self) -> bool {
             let old = self.stack.pop().expect("positioned at root; there is no next");
@@ -2021,6 +2027,30 @@ mod tests {
         assert_eq!(cursor.get_u32(4), 2);  // entry_count
         assert_eq!(cursor.get_u32(8), 1);
         assert_eq!(cursor.get_u32(12), 2);
+    }
+
+    #[test]
+    fn test_zero_duration_recording() {
+        testutil::init();
+        let db = TestDb::new();
+        let mut encoders = Vec::new();
+        let mut encoder = recording::SampleIndexEncoder::new();
+        encoder.add_sample(2, 1, true);
+        encoder.add_sample(3, 2, false);
+        encoders.push(encoder);
+        let mut encoder = recording::SampleIndexEncoder::new();
+        encoder.add_sample(0, 3, true);
+        encoders.push(encoder);
+
+        // Multi-segment recording with an edit list, encoding with a zero-duration recording.
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1 .. 2+3);
+        let track = find_track(mp4, 1);
+        let mut cursor = track.edts_cursor.unwrap();
+        cursor.down();
+        cursor.find(b"elst");
+        assert_eq!(cursor.get_u32(4), 1);   // entry_count
+        assert_eq!(cursor.get_u64(8), 4);   // segment_duration
+        assert_eq!(cursor.get_u64(16), 1);  // media_time
     }
 
     #[test]

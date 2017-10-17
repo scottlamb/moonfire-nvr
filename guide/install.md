@@ -171,6 +171,7 @@ been done for you. If not, Create
     Environment=TZ=:/etc/localtime
     Environment=MOONFIRE_FORMAT=google-systemd
     Environment=MOONFIRE_LOG=info
+    Environment=RUST_BACKTRACE=1
     Type=simple
     User=moonfire-nvr
     Nice=-20

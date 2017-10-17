@@ -228,6 +228,7 @@ ExecStart=${SERVICE_BIN} run \\
 Environment=TZ=:/etc/localtime
 Environment=MOONFIRE_FORMAT=google-systemd
 Environment=MOONFIRE_LOG=info
+Environment=RUST_BACKTRACE=1
 Type=simple
 User=${NVR_USER}
 Nice=-20

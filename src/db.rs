@@ -646,7 +646,7 @@ impl<'a> Transaction<'a> {
     /// Inserts the specified recording.
     /// The sample file uuid must have been previously reserved. (Although this can be bypassed
     /// for testing; see the `bypass_reservation_for_testing` field.)
-    pub fn insert_recording(&mut self, r: &RecordingToInsert) -> Result<(), Error> {
+    pub fn insert_recording(&mut self, r: &RecordingToInsert) -> Result<i32, Error> {
         self.check_must_rollback()?;
 
         // Sanity checking.
@@ -670,8 +670,9 @@ impl<'a> Transaction<'a> {
         }
         self.must_rollback = true;
         let m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, r.camera_id);
+        let recording_id;
         {
-            let recording_id = m.new_next_recording_id.unwrap_or(cam.next_recording_id);
+            recording_id = m.new_next_recording_id.unwrap_or(cam.next_recording_id);
             let composite_id = composite_id(r.camera_id, recording_id);
             let mut stmt = self.tx.prepare_cached(INSERT_RECORDING_SQL)?;
             stmt.execute_named(&[
@@ -706,7 +707,7 @@ impl<'a> Transaction<'a> {
         m.duration += r.time.end - r.time.start;
         m.sample_file_bytes += r.sample_file_bytes as i64;
         adjust_days(r.time.clone(), 1, &mut m.days);
-        Ok(())
+        Ok(recording_id)
     }
 
     /// Updates the `retain_bytes` for the given camera to the specified limit.
