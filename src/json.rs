@@ -34,10 +34,13 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
-pub struct ListCameras<'a> {
+#[serde(rename_all="camelCase")]
+pub struct TopLevel<'a> {
+    pub time_zone_name: &'a str,
+
     // Use a custom serializer which presents the map's values as a sequence and includes the
     // "days" attribute or not, according to the bool in the tuple.
-    #[serde(serialize_with = "ListCameras::serialize_cameras")]
+    #[serde(serialize_with = "TopLevel::serialize_cameras")]
     pub cameras: (&'a BTreeMap<i32, db::Camera>, bool),
 }
 
@@ -104,9 +107,8 @@ struct CameraDayValue {
     pub total_duration_90k: i64,
 }
 
-impl<'a> ListCameras<'a> {
-    /// Serializes cameras as a list (rather than a map), wrapping each camera in the
-    /// `ListCamerasCamera` type to tweak the data returned.
+impl<'a> TopLevel<'a> {
+    /// Serializes cameras as a list (rather than a map), optionally including the `days` field.
     fn serialize_cameras<S>(cameras: &(&BTreeMap<i32, db::Camera>, bool),
                             serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {

@@ -172,6 +172,7 @@ struct ServiceInner {
     dir: Arc<SampleFileDir>,
     ui_files: HashMap<String, UiFile>,
     pool: futures_cpupool::CpuPool,
+    time_zone_name: String,
 }
 
 impl ServiceInner {
@@ -197,7 +198,10 @@ impl ServiceInner {
 
         let buf = {
             let db = self.db.lock();
-            serde_json::to_vec(&json::ListCameras{cameras: (db.cameras_by_id(), days)})?
+            serde_json::to_vec(&json::TopLevel {
+                time_zone_name: &self.time_zone_name,
+                cameras: (db.cameras_by_id(), days),
+            })?
         };
         let len = buf.len();
         let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
@@ -390,7 +394,7 @@ impl ServiceInner {
 pub struct Service(Arc<ServiceInner>);
 
 impl Service {
-    pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>, ui_dir: Option<&str>)
+    pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>, ui_dir: Option<&str>, zone: String)
                -> Result<Self, Error> {
         let mut ui_files = HashMap::new();
         if let Some(d) = ui_dir {
@@ -402,6 +406,7 @@ impl Service {
             dir,
             ui_files,
             pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
+            time_zone_name: zone,
         })))
     }
 

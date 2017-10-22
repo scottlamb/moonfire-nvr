@@ -42,6 +42,11 @@ use tokio_core::reactor;
 use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
 use web;
 
+// These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
+// They seem to be correct for Linux and OS X at least.
+const LOCALTIME_PATH: &'static str = "/etc/localtime";
+const ZONEINFO_PATH: &'static str = "/usr/share/zoneinfo/";
+
 const USAGE: &'static str = r#"
 Usage: moonfire-nvr run [options]
 
@@ -77,6 +82,16 @@ fn setup_shutdown_future(h: &reactor::Handle) -> Box<Future<Item = (), Error = (
                 .map_err(|_| ()))
 }
 
+fn resolve_zone() -> String {
+    let p = ::std::fs::read_link(LOCALTIME_PATH).expect("unable to read localtime symlink");
+    let p = p.to_str().expect("localtime symlink destination must be valid UTF-8");
+    if !p.starts_with(ZONEINFO_PATH) {
+        panic!("Expected {} to point to a path within {}; actually points to {}",
+               LOCALTIME_PATH, ZONEINFO_PATH, p);
+    }
+    p[ZONEINFO_PATH.len()..].into()
+}
+
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
     let (_db_dir, conn) = super::open_conn(
@@ -86,7 +101,7 @@ pub fn run() -> Result<(), Error> {
     let dir = dir::SampleFileDir::new(&args.flag_sample_file_dir, db.clone()).unwrap();
     info!("Database is loaded.");
 
-    let s = web::Service::new(db.clone(), dir.clone(), Some(&args.flag_ui_dir))?;
+    let s = web::Service::new(db.clone(), dir.clone(), Some(&args.flag_ui_dir), resolve_zone())?;
 
     // Start a streamer for each camera.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));
