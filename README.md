@@ -15,7 +15,8 @@ with support for trimming them to arbitrary time ranges. No scrub bar yet.
 There's also no support for motion detection, no authentication, and no config
 UI.
 
-[![screenshot](screenshot-smaller.png | 704x474)](screenshot.png)
+<a href="screenshot.png"><img src="screenshot-smaller.png" width=704
+height=474 alt="[screenshot]"></a>
 
 This is version 0.1, the initial release. Until version 1.0, there will be no
 compatibility guarantees: configuration and storage formats may change from
