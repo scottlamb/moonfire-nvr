@@ -223,7 +223,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "http-entity"
 version = "0.0.1"
-source = "git+https://github.com/scottlamb/http-entity#9f870224c3c91c072446f2179816afc095aa8943"
+source = "git+https://github.com/scottlamb/http-entity#c09444ed4ce20bb22e44c0bd1dcc193f6243bd07"
 dependencies = [
  "futures 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -235,13 +235,12 @@ dependencies = [
 [[package]]
 name = "http-file"
 version = "0.0.1"
-source = "git+https://github.com/scottlamb/http-entity#9f870224c3c91c072446f2179816afc095aa8943"
+source = "git+https://github.com/scottlamb/http-entity#c09444ed4ce20bb22e44c0bd1dcc193f6243bd07"
 dependencies = [
  "futures 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-cpupool 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "http-entity 0.0.1 (git+https://github.com/scottlamb/http-entity)",
  "hyper 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.31 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "mime 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.38 (registry+https://github.com/rust-lang/crates.io-index)",
