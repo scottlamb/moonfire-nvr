@@ -7,7 +7,9 @@ dependencies = [
  "docopt 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "fnv 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
- "http-entity 0.0.1 (git+https://github.com/scottlamb/http-entity)",
+ "futures-cpupool 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "http-entity 0.0.1",
+ "http-file 0.0.1",
  "hyper 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.31 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -221,12 +223,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "http-entity"
 version = "0.0.1"
-source = "git+https://github.com/scottlamb/http-entity#d8a51ae8602a1b80dc757fd4a404fc878f599ca7"
 dependencies = [
  "futures 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "mime 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "time 0.1.38 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "http-file"
+version = "0.0.1"
+dependencies = [
+ "futures 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures-cpupool 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "http-entity 0.0.1",
+ "hyper 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.31 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mime 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.38 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -1147,7 +1162,6 @@ dependencies = [
 "checksum futures 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)" = "05a23db7bd162d4e8265968602930c476f688f0c180b44bdaf55e0cb2c687558"
 "checksum futures-cpupool 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "77d49e7de8b91b20d6fda43eea906637eff18b96702eb6b2872df8bfab1ad2b5"
 "checksum gcc 0.3.54 (registry+https://github.com/rust-lang/crates.io-index)" = "5e33ec290da0d127825013597dbdfc28bee4964690c7ce1166cbc2a7bd08b1bb"
-"checksum http-entity 0.0.1 (git+https://github.com/scottlamb/http-entity)" = "<none>"
 "checksum httparse 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "af2f2dd97457e8fb1ae7c5a420db346af389926e36f43768b96f101546b04a07"
 "checksum hyper 0.11.2 (git+https://github.com/scottlamb/hyper?branch=moonfire-on-0.11.x)" = "<none>"
 "checksum hyper 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)" = "641abc3e3fcf0de41165595f801376e01106bca1fd876dda937730e477ca004c"

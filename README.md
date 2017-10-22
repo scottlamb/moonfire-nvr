@@ -10,10 +10,12 @@ analyze, or re-encode video frames, so it requires little CPU. It handles six
 2](https://www.raspberrypi.org/products/raspberry-pi-2-model-b/), using
 less than 10% of the machine's total CPU.
 
-So far, the web interface is basic: just a table with links to one-hour
-segments of video. Although the backend supports generating `.mp4` files for
-arbitrary time ranges, you have to construct URLs by hand. There's also no
-support for motion detection, no authentication, and no config UI.
+So far, the web interface is basic: a filterable list of video segments,
+with support for trimming them to arbitrary time ranges. No scrub bar yet.
+There's also no support for motion detection, no authentication, and no config
+UI.
+
+[![screenshot](screenshot-smaller.png | 704x474)](screenshot.png)
 
 This is version 0.1, the initial release. Until version 1.0, there will be no
 compatibility guarantees: configuration and storage formats may change from

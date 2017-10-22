@@ -35,9 +35,10 @@ use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
 pub struct ListCameras<'a> {
-    // Use a custom serializer which presents the map's values as a sequence.
+    // Use a custom serializer which presents the map's values as a sequence and includes the
+    // "days" attribute or not, according to the bool in the tuple.
     #[serde(serialize_with = "ListCameras::serialize_cameras")]
-    pub cameras: &'a BTreeMap<i32, db::Camera>,
+    pub cameras: (&'a BTreeMap<i32, db::Camera>, bool),
 }
 
 /// JSON serialization wrapper for a single camera when processing `/cameras/` and
@@ -106,12 +107,12 @@ struct CameraDayValue {
 impl<'a> ListCameras<'a> {
     /// Serializes cameras as a list (rather than a map), wrapping each camera in the
     /// `ListCamerasCamera` type to tweak the data returned.
-    fn serialize_cameras<S>(cameras: &BTreeMap<i32, db::Camera>,
+    fn serialize_cameras<S>(cameras: &(&BTreeMap<i32, db::Camera>, bool),
                             serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
-        let mut seq = serializer.serialize_seq(Some(cameras.len()))?;
-        for c in cameras.values() {
-            seq.serialize_element(&Camera::new(c, false))?;
+        let mut seq = serializer.serialize_seq(Some(cameras.0.len()))?;
+        for c in cameras.0.values() {
+            seq.serialize_element(&Camera::new(c, cameras.1))?;
         }
         seq.end()
     }

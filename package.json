@@ -1,0 +1,29 @@
+{
+  "author": "Scott Lamb <slamb@slamb.org>",
+  "bugs": {
+    "url": "https://github.com/scottlamb/moonfire-nvr/issues"
+  },
+  "scripts": {
+    "build": "ln ui-src/index.html ui-dist && webpack"
+  },
+  "dependencies": {
+    "jquery": "^3.2.1",
+    "jquery-ui": "^1.12.1",
+    "moment-timezone": "^0.5.13"
+  },
+  "homepage": "https://github.com/scottlamb/moonfire-nvr",
+  "license": "GPL-3.0",
+  "name": "moonfire-nvr",
+  "repository": "scottlamb/moonfire-nvr",
+  "version": "0.1.0",
+  "devDependencies": {
+    "babel-core": "^6.26.0",
+    "babel-loader": "^7.1.2",
+    "babel-minify-webpack-plugin": "^0.2.0",
+    "babel-preset-env": "^1.6.1",
+    "css-loader": "^0.28.7",
+    "file-loader": "^1.1.5",
+    "style-loader": "^0.19.0",
+    "webpack": "^3.8.1"
+  }
+}

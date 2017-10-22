@@ -2,5 +2,7 @@ cameras.sql
 .project
 .settings
 *.swp
-target
+node_modules
 prep.config
+target
+ui-dist

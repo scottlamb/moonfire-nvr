@@ -36,30 +36,28 @@ use db;
 use dir::SampleFileDir;
 use error::Error;
 use futures::{future, stream};
+use futures_cpupool;
 use json;
 use http_entity;
+use http_file;
 use hyper::header;
 use hyper::server::{self, Request, Response};
 use mime;
 use mp4;
-use parking_lot::MutexGuard;
 use recording;
 use reffers::ARefs;
 use regex::Regex;
 use serde_json;
 use slices;
+use std::collections::HashMap;
 use std::cmp;
-use std::fmt;
-use std::io::Write;
+use std::fs;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::Arc;
 use strutil;
-use time;
 use url::form_urlencoded;
 use uuid::Uuid;
-
-const BINARY_PREFIXES: &'static [&'static str] = &[" ", " Ki", " Mi", " Gi", " Ti", " Pi", " Ei"];
-const DECIMAL_PREFIXES: &'static [&'static str] =&[" ", " k", " M", " G", " T", " P", " E"];
 
 lazy_static! {
     /// Regex used to parse the `s` query parameter to `view.mp4`.
@@ -69,18 +67,23 @@ lazy_static! {
 }
 
 enum Path {
-    CamerasList,                 // "/" or "/cameras/"
-    InitSegment([u8; 20]),       // "/init/<sha1>.mp4"
-    Camera(Uuid),                // "/cameras/<uuid>/"
-    CameraRecordings(Uuid),      // "/cameras/<uuid>/recordings"
-    CameraViewMp4(Uuid),         // "/cameras/<uuid>/view.mp4"
-    CameraViewMp4Segment(Uuid),  // "/cameras/<uuid>/view.m4s"
+    TopLevel,                       // "/api/"
+    InitSegment([u8; 20]),          // "/api/init/<sha1>.mp4"
+    Camera(Uuid),                   // "/api/cameras/<uuid>/"
+    CameraRecordings(Uuid),         // "/api/cameras/<uuid>/recordings"
+    CameraViewMp4(Uuid),            // "/api/cameras/<uuid>/view.mp4"
+    CameraViewMp4Segment(Uuid),     // "/api/cameras/<uuid>/view.m4s"
+    Static,                         // "<other path>"
     NotFound,
 }
 
 fn decode_path(path: &str) -> Path {
+    if !path.starts_with("/api/") {
+        return Path::Static;
+    }
+    let path = &path["/api".len()..];
     if path == "/" {
-        return Path::CamerasList;
+        return Path::TopLevel;
     }
     if path.starts_with("/init/") {
         if path.len() != 50 || !path.ends_with(".mp4") {
@@ -95,9 +98,6 @@ fn decode_path(path: &str) -> Path {
         return Path::NotFound;
     }
     let path = &path["/cameras/".len()..];
-    if path == "" {
-        return Path::CamerasList;
-    }
     let slash = match path.find('/') {
         None => { return Path::NotFound; },
         Some(s) => s,
@@ -115,72 +115,6 @@ fn decode_path(path: &str) -> Path {
         "/view.mp4" => Path::CameraViewMp4(uuid),
         "/view.m4s" => Path::CameraViewMp4Segment(uuid),
         _ => Path::NotFound,
-    }
-}
-
-fn is_json(req: &Request) -> bool {
-    if let Some(accept) = req.headers().get::<header::Accept>() {
-        return accept.len() == 1 && accept[0].item == mime::APPLICATION_JSON &&
-               accept[0].quality == header::q(1000);
-    }
-    false
-}
-
-pub struct HtmlEscaped<'a>(&'a str);
-
-impl<'a> fmt::Display for HtmlEscaped<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut last_end = 0;
-        for (start, part) in self.0.match_indices(|c| c == '<' || c == '&') {
-            f.write_str(&self.0[last_end..start])?;
-            f.write_str(if part == "<" { "&lt;" } else { "&amp;" })?;
-            last_end = start + 1;
-        }
-        f.write_str(&self.0[last_end..])
-    }
-}
-
-pub struct Humanized(i64);
-
-impl Humanized {
-    fn do_fmt(&self, base: f32, prefixes: &[&str], f: &mut fmt::Formatter) -> fmt::Result {
-        let mut n = self.0 as f32;
-        let mut i = 0;
-        loop {
-            if n < base || i >= prefixes.len() - 1 {
-                break;
-            }
-            n /= base;
-            i += 1;
-        }
-        write!(f, "{:.1}{}", n, prefixes[i])
-    }
-}
-
-impl fmt::Display for Humanized {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.do_fmt(1000., DECIMAL_PREFIXES, f)
-    }
-}
-
-impl fmt::Binary for Humanized {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.do_fmt(1024., BINARY_PREFIXES, f)
-    }
-}
-
-pub struct HumanizedTimestamp(Option<recording::Time>);
-
-impl fmt::Display for HumanizedTimestamp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.0 {
-            None => f.write_str("n/a"),
-            Some(t) => {
-                let tm = time::at(time::Timespec{sec: t.unix_seconds(), nsec: 0});
-                write!(f, "{}",
-                       tm.strftime("%a, %d %b %Y %H:%M:%S %Z").or_else(|_| Err(fmt::Error))?)
-            }
-        }
     }
 }
 
@@ -224,16 +158,23 @@ impl Segments {
     }
 }
 
-pub struct Service {
-    db: Arc<db::Database>,
-    dir: Arc<SampleFileDir>,
+/// A user interface file (.html, .js, etc).
+/// The list of files is loaded into the server at startup; this makes path canonicalization easy.
+/// The files themselves are opened on every request so they can be changed during development.
+#[derive(Debug)]
+struct UiFile {
+    mime: mime::Mime,
+    path: PathBuf,
 }
 
-impl Service {
-    pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>) -> Self {
-        Service{db: db, dir: dir}
-    }
+struct ServiceInner {
+    db: Arc<db::Database>,
+    dir: Arc<SampleFileDir>,
+    ui_files: HashMap<String, UiFile>,
+    pool: futures_cpupool::CpuPool,
+}
 
+impl ServiceInner {
     fn not_found(&self) -> Result<Response<slices::Body>, Error> {
         let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(&b"not found"[..]))));
         Ok(Response::new()
@@ -242,172 +183,46 @@ impl Service {
             .with_body(body))
     }
 
-    fn list_cameras(&self, req: &Request) -> Result<Response<slices::Body>, Error> {
-        let json = is_json(req);
-        let buf = {
-            let db = self.db.lock();
-            if json {
-                serde_json::to_vec(&json::ListCameras{cameras: db.cameras_by_id()})?
-            } else {
-                self.list_cameras_html(db)?
-            }
-        };
-        let len = buf.len();
-        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
-        Ok(Response::new()
-           .with_header(header::ContentType(if json { mime::APPLICATION_JSON }
-                                            else { mime::TEXT_HTML }))
-           .with_header(header::ContentLength(len as u64))
-           .with_body(body))
-    }
-
-    fn list_cameras_html(&self, db: MutexGuard<db::LockedDatabase>) -> Result<Vec<u8>, Error> {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(b"\
-            <!DOCTYPE html>\n\
-            <html>\n\
-            <head>\n\
-            <title>Camera list</title>\n\
-            <meta http-equiv=\"Content-Language\" content=\"en\">\n\
-            <style type=\"text/css\">\n\
-            .header { background-color: #ddd; }\n\
-            td { padding-right: 3em; }\n\
-            </style>\n\
-            </head>\n\
-            <body>\n\
-            <table>\n");
-        for row in db.cameras_by_id().values() {
-            write!(&mut buf, "\
-                <tr class=header><td colspan=2><a href=\"/cameras/{}/\">{}</a></td></tr>\n\
-                <tr><td>description</td><td>{}</td></tr>\n\
-                <tr><td>space</td><td>{:b}B / {:b}B ({:.1}%)</td></tr>\n\
-                <tr><td>uuid</td><td>{}</td></tr>\n\
-                <tr><td>oldest recording</td><td>{}</td></tr>\n\
-                <tr><td>newest recording</td><td>{}</td></tr>\n\
-                <tr><td>total duration</td><td>{}</td></tr>\n",
-                row.uuid, HtmlEscaped(&row.short_name), HtmlEscaped(&row.description),
-                Humanized(row.sample_file_bytes), Humanized(row.retain_bytes),
-                100. * row.sample_file_bytes as f32 / row.retain_bytes as f32,
-                row.uuid, HumanizedTimestamp(row.range.as_ref().map(|r| r.start)),
-                HumanizedTimestamp(row.range.as_ref().map(|r| r.end)),
-                row.duration)?;
-        }
-        Ok(buf)
-    }
-
-    fn camera(&self, uuid: Uuid, query: Option<&str>, req: &Request)
-              -> Result<Response<slices::Body>, Error> {
-        let json = is_json(req);
-        let buf = {
-            let db = self.db.lock();
-            if json {
-                let camera = db.get_camera(uuid)
-                               .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-                serde_json::to_vec(&json::Camera::new(camera, true))?
-            } else {
-                self.camera_html(db, query, uuid)?
-            }
-        };
-        let len = buf.len();
-        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
-        Ok(Response::new()
-           .with_header(header::ContentType(if json { mime::APPLICATION_JSON }
-                                            else { mime::TEXT_HTML }))
-           .with_header(header::ContentLength(len as u64))
-           .with_body(body))
-    }
-
-    fn camera_html(&self, db: MutexGuard<db::LockedDatabase>, query: Option<&str>,
-                   uuid: Uuid) -> Result<Vec<u8>, Error> {
-        let (r, split, trim) = {
-            let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
-            let mut split = recording::Duration(60 * 60 * recording::TIME_UNITS_PER_SEC);
-            let mut trim = false;
-            if let Some(q) = query {
-                for (key, value) in form_urlencoded::parse(q.as_bytes()) {
-                    let (key, value) = (key.borrow(), value.borrow());
-                    match key {
-                        "startTime" => time.start = recording::Time::parse(value)?,
-                        "endTime" => time.end = recording::Time::parse(value)?,
-                        "split" => split = recording::Duration(i64::from_str(value)?),
-                        "trim" if value == "true" => trim = true,
-                        _ => {},
-                    }
+    fn top_level(&self, query: Option<&str>) -> Result<Response<slices::Body>, Error> {
+        let mut days = false;
+        if let Some(q) = query {
+            for (key, value) in form_urlencoded::parse(q.as_bytes()) {
+                let (key, value) : (_, &str) = (key.borrow(), value.borrow());
+                match key {
+                    "days" => days = value == "true",
+                    _ => {},
                 };
             }
-            (time, split, trim)
+        }
+
+        let buf = {
+            let db = self.db.lock();
+            serde_json::to_vec(&json::ListCameras{cameras: (db.cameras_by_id(), days)})?
         };
-        let camera = db.get_camera(uuid)
-                       .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-        let mut buf = Vec::new();
-        write!(&mut buf, "\
-            <!DOCTYPE html>\n\
-            <html>\n\
-            <head>\n\
-            <title>{0} recordings</title>\n\
-            <meta http-equiv=\"Content-Language\" content=\"en\">\n\
-            <style type=\"text/css\">\n\
-            tr:not(:first-child):hover {{ background-color: #ddd; }}\n\
-            th, td {{ padding: 0.5ex 1.5em; text-align: right; }}\n\
-            </style>\n\
-            </head>\n\
-            <body>\n\
-            <h1>{0}</h1>\n\
-            <p>{1}</p>\n\
-            <table>\n\
-            <tr><th>start</th><th>end</th><th>resolution</th>\
-            <th>fps</th><th>size</th><th>bitrate</th>\
-            </tr>\n",
-            HtmlEscaped(&camera.short_name), HtmlEscaped(&camera.description))?;
-
-        let mut rows = Vec::new();
-        db.list_aggregated_recordings(camera.id, r.clone(), split, |row| {
-            rows.push(row.clone());
-            Ok(())
-        })?;
-
-        // Display newest recording first.
-        rows.sort_by(|r1, r2| r2.ids.start.cmp(&r1.ids.start));
-
-        for row in &rows {
-            let seconds = (row.time.end.0 - row.time.start.0) / recording::TIME_UNITS_PER_SEC;
-            let url = {
-                let mut url = String::with_capacity(64);
-                use std::fmt::Write;
-                write!(&mut url, "view.mp4?s={}", row.ids.start)?;
-                if row.ids.end != row.ids.start + 1 {
-                    write!(&mut url, "-{}", row.ids.end - 1)?;
-                }
-                if trim {
-                    let rel_start = if row.time.start < r.start { Some(r.start - row.time.start) }
-                                    else { None };
-                    let rel_end = if row.time.end > r.end { Some(r.end - row.time.start) }
-                                  else { None };
-                    if rel_start.is_some() || rel_end.is_some() {
-                        url.push('.');
-                        if let Some(s) = rel_start { write!(&mut url, "{}", s.0)?; }
-                        url.push('-');
-                        if let Some(e) = rel_end { write!(&mut url, "{}", e.0)?; }
-                    }
-                }
-                url
-            };
-            let start = if trim && row.time.start < r.start { r.start } else { row.time.start };
-            let end = if trim && row.time.end > r.end { r.end } else { row.time.end };
-            write!(&mut buf, "\
-                <tr><td><a href=\"{}\">{}</a></td>\
-                <td>{}</td><td>{}x{}</td><td>{:.0}</td><td>{:b}B</td><td>{}bps</td></tr>\n",
-                url, HumanizedTimestamp(Some(start)), HumanizedTimestamp(Some(end)),
-                row.video_sample_entry.width, row.video_sample_entry.height,
-                if seconds == 0 { 0. } else { row.video_samples as f32 / seconds as f32 },
-                Humanized(row.sample_file_bytes),
-                Humanized(if seconds == 0 { 0 } else { row.sample_file_bytes * 8 / seconds }))?;
-        };
-        buf.extend_from_slice(b"</table>\n</html>\n");
-        Ok(buf)
+        let len = buf.len();
+        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
+        Ok(Response::new()
+           .with_header(header::ContentType(mime::APPLICATION_JSON))
+           .with_header(header::ContentLength(len as u64))
+           .with_body(body))
     }
 
-    fn camera_recordings(&self, uuid: Uuid, query: Option<&str>, req: &Request)
+    fn camera(&self, uuid: Uuid) -> Result<Response<slices::Body>, Error> {
+        let buf = {
+            let db = self.db.lock();
+            let camera = db.get_camera(uuid)
+                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
+            serde_json::to_vec(&json::Camera::new(camera, true))?
+        };
+        let len = buf.len();
+        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
+        Ok(Response::new()
+           .with_header(header::ContentType(mime::APPLICATION_JSON))
+           .with_header(header::ContentLength(len as u64))
+           .with_body(body))
+    }
+
+    fn camera_recordings(&self, uuid: Uuid, query: Option<&str>)
                          -> Result<Response<slices::Body>, Error> {
         let (r, split) = {
             let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
@@ -425,13 +240,6 @@ impl Service {
             }
             (time, split)
         };
-        if !is_json(req) {
-            let body: slices::Body = Box::new(stream::once(
-                Ok(ARefs::new(&b"only available for JSON requests"[..]))));
-            return Ok(Response::new()
-                      .with_status(hyper::StatusCode::NotAcceptable)
-                      .with_body(body));
-        }
         let mut out = json::ListRecordings{recordings: Vec::new()};
         {
             let db = self.db.lock();
@@ -566,6 +374,75 @@ impl Service {
         let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
         Ok(http_entity::serve(mp4, req))
     }
+
+    fn static_file(&self, req: &Request) -> Result<Response<slices::Body>, Error> {
+        let s = match self.ui_files.get(req.uri().path()) {
+            None => { return self.not_found() },
+            Some(s) => s,
+        };
+        let f = fs::File::open(&s.path)?;
+        let e = http_file::ChunkedReadFile::new(f, Some(self.pool.clone()), s.mime.clone())?;
+        Ok(http_entity::serve(e, &req))
+    }
+}
+
+#[derive(Clone)]
+pub struct Service(Arc<ServiceInner>);
+
+impl Service {
+    pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>, ui_dir: Option<&str>)
+               -> Result<Self, Error> {
+        let mut ui_files = HashMap::new();
+        if let Some(d) = ui_dir {
+            Service::fill_ui_files(d, &mut ui_files);
+        }
+        debug!("UI files: {:#?}", ui_files);
+        Ok(Service(Arc::new(ServiceInner {
+            db,
+            dir,
+            ui_files,
+            pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
+        })))
+    }
+
+    fn fill_ui_files(dir: &str, files: &mut HashMap<String, UiFile>) {
+        let r = match fs::read_dir(dir) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("Unable to search --ui-dir={}; will serve no static files. Error was: {}",
+                      dir, e);
+                return;
+            }
+        };
+        for e in r {
+            let e = match e {
+                Ok(e) => e,
+                Err(e) => {
+                    warn!("Error searching UI directory; may be missing files. Error was: {}", e);
+                    continue;
+                },
+            };
+            let (p, mime) = match e.file_name().to_str() {
+                Some(n) if n == "index.html" => ("/".to_owned(), mime::TEXT_HTML),
+                Some(n) if n.ends_with(".js") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
+                Some(n) if n.ends_with(".html") => (format!("/{}", n), mime::TEXT_HTML),
+                Some(n) if n.ends_with(".png") => (format!("/{}", n), mime::IMAGE_PNG),
+                Some(n) => {
+                    warn!("UI directory file {:?} has unknown extension; skipping", n);
+                    continue;
+                },
+                None => {
+                    warn!("UI directory file {:?} is not a valid UTF-8 string; skipping",
+                          e.file_name());
+                    continue;
+                },
+            };
+            files.insert(p, UiFile {
+                mime,
+                path: e.path(),
+            });
+        }
+    }
 }
 
 impl server::Service for Service {
@@ -577,17 +454,18 @@ impl server::Service for Service {
     fn call(&self, req: Request) -> Self::Future {
         debug!("request on: {}", req.uri());
         let res = match decode_path(req.uri().path()) {
-            Path::InitSegment(sha1) => self.init_segment(sha1, &req),
-            Path::CamerasList => self.list_cameras(&req),
-            Path::Camera(uuid) => self.camera(uuid, req.uri().query(), &req),
-            Path::CameraRecordings(uuid) => self.camera_recordings(uuid, req.uri().query(), &req),
+            Path::InitSegment(sha1) => self.0.init_segment(sha1, &req),
+            Path::TopLevel => self.0.top_level(req.uri().query()),
+            Path::Camera(uuid) => self.0.camera(uuid),
+            Path::CameraRecordings(uuid) => self.0.camera_recordings(uuid, req.uri().query()),
             Path::CameraViewMp4(uuid) => {
-                self.camera_view_mp4(uuid, mp4::Type::Normal, req.uri().query(), &req)
+                self.0.camera_view_mp4(uuid, mp4::Type::Normal, req.uri().query(), &req)
             },
             Path::CameraViewMp4Segment(uuid) => {
-                self.camera_view_mp4(uuid, mp4::Type::MediaSegment, req.uri().query(), &req)
+                self.0.camera_view_mp4(uuid, mp4::Type::MediaSegment, req.uri().query(), &req)
             },
-            Path::NotFound => self.not_found(),
+            Path::NotFound => self.0.not_found(),
+            Path::Static => self.0.static_file(&req),
         };
         future::result(res.map_err(|e| {
             error!("error: {}", e);
@@ -598,26 +476,8 @@ impl server::Service for Service {
 
 #[cfg(test)]
 mod tests {
-    use super::{HtmlEscaped, Humanized, Segments};
+    use super::Segments;
     use testutil;
-
-    #[test]
-    fn test_humanize() {
-        testutil::init();
-        assert_eq!("1.0 B",    format!("{:b}B", Humanized(1)));
-        assert_eq!("1.0 EiB",  format!("{:b}B", Humanized(1i64 << 60)));
-        assert_eq!("1.5 EiB",  format!("{:b}B", Humanized((1i64 << 60) + (1i64 << 59))));
-        assert_eq!("8.0 EiB", format!("{:b}B", Humanized(i64::max_value())));
-        assert_eq!("1.0 Mbps", format!("{}bps", Humanized(1_000_000)));
-    }
-
-    #[test]
-    fn test_html_escaped() {
-        testutil::init();
-        assert_eq!("", format!("{}", HtmlEscaped("")));
-        assert_eq!("no special chars", format!("{}", HtmlEscaped("no special chars")));
-        assert_eq!("a &lt;tag> &amp; text", format!("{}", HtmlEscaped("a <tag> & text")));
-    }
 
     #[test]
     fn test_segments() {
@@ -662,8 +522,9 @@ mod bench {
             ::std::thread::spawn(move || {
                 let addr = "127.0.0.1:0".parse().unwrap();
                 let (db, dir) = (db.db.clone(), db.dir.clone());
+                let service = super::Service::new(db.clone(), dir.clone(), None);
                 let server = hyper::server::Http::new()
-                    .bind(&addr, move || Ok(super::Service::new(db.clone(), dir.clone())))
+                    .bind(&addr, move || Ok(service.clone()))
                     .unwrap();
                 tx.send(server.local_addr().unwrap()).unwrap();
                 server.run().unwrap();
@@ -678,10 +539,10 @@ mod bench {
     }
 
     #[bench]
-    fn serve_camera_html(b: &mut Bencher) {
+    fn serve_camera_recordings(b: &mut Bencher) {
         testutil::init();
         let server = &*SERVER;
-        let url = reqwest::Url::parse(&format!("{}/cameras/{}/", server.base_url,
+        let url = reqwest::Url::parse(&format!("{}/cameras/{}/recordings", server.base_url,
                                                *testutil::TEST_CAMERA_UUID)).unwrap();
         let mut buf = Vec::new();
         let client = reqwest::Client::new().unwrap();

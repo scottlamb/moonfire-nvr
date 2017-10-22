@@ -22,31 +22,57 @@ HTML rather than JSON.
 
 TODO(slamb): authentication.
 
-### `/cameras/`
+### `/api/`
 
-A `GET` request on this URL returns basic information about all cameras. The
-`application/json` response will have a top-level `cameras` with a list of
-attributes about each camera:
+A `GET` request on this URL returns basic information about the server,
+including all cameras. Valid request parameters:
 
-*   `uuid`: in text format
-*   `shortName`: a short name (typically one or two words)
-*   `description`: a longer description (typically a phrase or paragraph)
-*   `retainBytes`: the configured total number of bytes of completed
-    recordings to retain.
-*   `minStartTime90k`: the start time of the earliest recording for this
-    camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
-*   `maxEndTime90k`: the end time of the latest recording for this
-    camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
-*   `totalDuration90k`: the total duration recorded, in 90 kHz units.
-    This is no greater than `maxEndTime90k - maxStartTime90k`; it
-    will be lesser if there are gaps in the recorded data.
-*   `totalSampleFileBytes`: the total number of bytes of sample data (the
-    `mdat` portion of a `.mp4` file).
+*   `days`: a boolean indicating if the days parameter described below
+    should be included.
+
+Example request URI:
+
+```
+/api/?days=true
+```
+
+The `application/json` response will have a dict as follows:
+
+*   `timeZoneName`: the name of the IANA time zone the server is using
+    to divide recordings into days as described further below.
+*   `cameras`: a list of cameras. Each is a dict as follows:
+    *   `uuid`: in text format
+    *   `shortName`: a short name (typically one or two words)
+    *   `description`: a longer description (typically a phrase or paragraph)
+    *   `retainBytes`: the configured total number of bytes of completed
+        recordings to retain.
+    *   `minStartTime90k`: the start time of the earliest recording for this
+        camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
+    *   `maxEndTime90k`: the end time of the latest recording for this camera,
+        in 90kHz units since 1970-01-01 00:00:00 UTC.
+    *   `totalDuration90k`: the total duration recorded, in 90 kHz units.
+        This is no greater than `maxEndTime90k - maxStartTime90k`; it will be
+        lesser if there are gaps in the recorded data.
+    *   `totalSampleFileBytes`: the total number of bytes of sample data (the
+        `mdat` portion of a `.mp4` file).
+    *   `days`: object representing calendar days (in the server's time zone)
+        with non-zero total duration of recordings for that day. The keys are
+        of the form `YYYY-mm-dd`; the values are objects with the following
+        attributes:
+        *   `totalDuration90k` is the total duration recorded during that day.
+            If a recording spans a day boundary, some portion of it is accounted to
+            each day.
+        *   `startTime90k` is the start of that calendar day in the server's time
+            zone.
+        *   `endTime90k` is the end of that calendar day in the server's time zone.
+            It is usually 24 hours after the start time. It might be 23 hours or 25
+            hours during spring forward or fall back, respectively.
 
 Example response:
 
 ```json
 {
+  "timeZoneName": "America/Los_Angeles",
   "cameras": [
     {
       "uuid": "fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe",
@@ -57,31 +83,27 @@ Example response:
       "maxEndTime90k": 130985466591817,
       "totalDuration90k": 96736169725,
       "totalSampleFileBytes": 446774393937,
+      "days": {
+        "2016-05-01": {
+          "endTime90k": 131595516000000,
+          "startTime90k": 131587740000000,
+          "totalDuration90k": 52617609
+        },
+        "2016-05-02": {
+          "endTime90k": 131603292000000,
+          "startTime90k": 131595516000000,
+          "totalDuration90k": 20946022
+        }
+      },
     },
     ...
   ],
 }
 ```
 
-### `/cameras/<uuid>/`
+### `/api/cameras/<uuid>/`
 
 A GET returns information for the camera with the given URL. The information
-returned is a superset of that returned by the camera list. It also includes a
-list of calendar days (in the server's time zone) with data in the server's
-time zone. The `days` entry is a object mapping `YYYY-mm-dd` to a day object
-with the following attributes:
-
-*   `totalDuration90k` is the total duration recorded during that day.
-    If a recording spans a day boundary, some portion of it is accounted to
-    each day.
-*   `startTime90k` is the start of that calendar day in the server's time
-    zone.
-*   `endTime90k` is the end of that calendar day in the server's time zone.
-    It is usually 24 hours after the start time. It might be 23 hours or 25
-    hours during spring forward or fall back, respectively.
-
-A calendar day will be present in the `days` object iff there is a non-zero
-total duration of recordings for that day.
 
 Example response:
 
@@ -99,17 +121,17 @@ Example response:
       "totalDuration90k": 20946022
     }
   },
-  "description":"",
+  "description": "",
   "maxEndTime90k": 131598273666690,
   "minStartTime90k": 131590386129355,
   "retainBytes": 104857600,
   "shortName": "driveway",
   "totalDuration90k": 73563631,
-  "totalSampleFileBytes": 98901406,
+  "totalSampleFileBytes": 98901406
 }
 ```
 
-### `/camera/<uuid>/recordings`
+### `/api/cameras/<uuid>/recordings`
 
 A GET returns information about recordings, in descending order.
 
@@ -153,7 +175,7 @@ Each recording object has the following properties:
 Example request URI (with added whitespace between parameters):
 
 ```
-/camera/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/recordings
+/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/recordings
     ?startTime90k=130888729442361
     &endTime90k=130985466591817
 ```
@@ -182,7 +204,7 @@ Example response:
 }
 ```
 
-### `/camera/<uuid>/view.mp4`
+### `/api/cameras/<uuid>/view.mp4`
 
 A GET returns a `.mp4` file, with an etag and support for range requests. The
 MIME type will be `video/mp4`, with a `codecs` parameter as specified in [RFC
@@ -208,27 +230,27 @@ Expected query parameters:
 Example request URI to retrieve all of recording id 1 from the given camera:
 
 ```
-    /camera/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1
 ```
 
 Example request URI to retrieve all of recording ids 1–5 from the given camera,
 with timestamp subtitles:
 
 ```
-    /camera/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1-5&ts=true
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1-5&ts=true
 ```
 
 Example request URI to retrieve recording id 1, skipping its first 26
 90,000ths of a second:
 
 ```
-    /camera/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1.26
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1.26
 ```
 
 TODO: error behavior on missing segment. It should be a 404, likely with an
 `application/json` body describing what portion if any (still) exists.
 
-### `/camera/<uuid>/view.m4s`
+### `/api/cameras/<uuid>/view.m4s`
 
 A GET returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
 media segment][media-segment]. The MIME type will be `video/mp4`, with a
@@ -254,7 +276,7 @@ recording segment for several reasons:
     than one video sample entry, so a `.m4s` that uses more than one video
     sample entry can't be used.
 
-### `/init/<sha1>.mp4`
+### `/api/init/<sha1>.mp4`
 
 A GET returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
 initialization segment][init-segment]. The MIME type will be `video/mp4`, with

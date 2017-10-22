@@ -76,6 +76,10 @@ fi
 #
 #SERVICE_BIN=
 
+# Resource files location
+# Default: "/usr/local/lib/moonfire-nvr"
+#LIB_DIR=/usr/local/lib/moonfire-nvr
+
 # Service name
 # Default: "moonfire-nvr"
 #
@@ -111,6 +115,7 @@ SAMPLES_DIR="${SAMPLES_DIR:-$NVR_HOME/$SAMPLES_DIR_NAME}"
 SERVICE_NAME="${SERVICE_NAME:-moonfire-nvr}"
 SERVICE_DESC="${SERVICE_DESC:-Moonfire NVR}"
 SERVICE_BIN="${SERVICE_BIN:-/usr/local/bin/moonfire-nvr}"
+LIB_DIR="${UI_DIR:-/usr/local/lib/moonfire-nvr}"
 
 # Process command line options
 #
@@ -150,7 +155,7 @@ if [ ! -x "${SERVICE_BIN}" ]; then
 	echo "Binary not installed, building..."; echo
 	if ! cargo --version; then
 		echo "cargo not installed/working."
-		echo "Install a nightly Rust (see http://rustup.us) first."
+		echo "Install Rust (see http://rustup.us) first."
 		echo
 		exit 1
 	fi
@@ -161,7 +166,7 @@ if [ ! -x "${SERVICE_BIN}" ]; then
 		exit 1
 	fi
 	if ! cargo build --release; then
-		echo "Build failed."
+		echo "Server build failed."
 		echo "RUST_TEST_THREADS=1 cargo build --release --verbose"
 		echo
 		exit 1
@@ -173,6 +178,23 @@ if [ ! -x "${SERVICE_BIN}" ]; then
 		echo "Build failed to install..."; echo
 		exit 1
 	fi
+fi
+if [ ! -d "${LIB_DIR}/ui" ]; then
+	echo "UI directory doesn't exist, building..."; echo
+	if ! yarn --version; then
+		echo "yarn not installed/working."
+		echo "Install from https://yarnpkg.com/ first."
+		echo
+		exit 1
+	fi
+	if ! yarn build; then
+		echo "UI build failed."
+		echo "yarn build"
+		echo
+		exit 1
+	fi
+	sudo mkdir "${LIB_DIR}"
+	sudo cp -R ui-dist "${LIB_DIR}/ui"
 fi
 
 # Create user and groups
@@ -224,6 +246,7 @@ After=network-online.target
 ExecStart=${SERVICE_BIN} run \\
     --sample-file-dir=${SAMPLES_PATH} \\
     --db-dir=${DB_DIR} \\
+    --ui-dir=${LIB_DIR}/ui \\
     --http-addr=0.0.0.0:${NVR_PORT}
 Environment=TZ=:/etc/localtime
 Environment=MOONFIRE_FORMAT=google-systemd

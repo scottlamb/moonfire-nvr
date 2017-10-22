@@ -17,10 +17,7 @@ from source.
 
 Moonfire NVR is written in the [Rust Programming
 Language](https://www.rust-lang.org/en-US/). In the long term, I expect this
-will result in a more secure, full-featured, easy-to-install software. In the
-short term, there will be growing pains. Rust is a new programming language.
-Moonfire NVR's primary author is new to Rust. And Moonfire NVR is a young
-project.
+will result in a more secure, full-featured, easy-to-install software.
 
 You will need the following C libraries installed:
 
@@ -55,6 +52,8 @@ all non-Rust dependencies:
 Next, you need Rust 1.17+ and Cargo. The easiest way to install them is by following
 the instructions at [rustup.rs](https://www.rustup.rs/).
 
+Finally, building the UI requires [yarn](https://yarnpkg.com/en/).
+
 You can continue to follow the build/install instructions below for a manual
 build and install, or alternatively you can run the prep script called `prep.sh`.
 
@@ -85,9 +84,12 @@ For instructions, you can skip to "[Camera configuration and hard disk mounting]
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
+    $ yarn build
     $ cargo test
     $ cargo build --release
     $ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
+    $ sudo mkdir /usr/local/lib/moonfire-nvr
+    $ sudo cp -R ui-dist /usr/local/lib/moonfire-nvr/ui
 
 ## Further configuration
 
