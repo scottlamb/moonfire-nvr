@@ -19,10 +19,8 @@ docopt = "0.8"
 futures = "0.1"
 futures-cpupool = "0.1"
 fnv = "1.0"
-http-entity = { path = "../http-entity" }
-http-file = { path = "../http-entity/http-file" }
-#http-entity = { git = "https://github.com/scottlamb/http-entity" }
-#http-file = { git = "https://github.com/scottlamb/http-entity" }
+http-entity = { git = "https://github.com/scottlamb/http-entity" }
+http-file = { git = "https://github.com/scottlamb/http-entity" }
 hyper = "0.11.2"
 lazy_static = "0.2"
 libc = "0.2"
