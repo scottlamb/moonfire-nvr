@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate gcc;
+extern crate cc;
 extern crate pkg_config;
 
 fn main() {
@@ -37,16 +37,14 @@ fn main() {
         pkg_config::Config::new().atleast_version("56.0").probe("libavcodec").unwrap(),
         pkg_config::Config::new().atleast_version("56.0").probe("libavformat").unwrap(),
     ];
-    let mut wrapper = gcc::Config::new();
+    let mut wrapper = cc::Build::new();
 
-    // Pass compilation flags on to gcc. It'd be nice if pkg-config made this easier; see
-    // <https://github.com/alexcrichton/pkg-config-rs/issues/43>.
     for lib in &libraries {
+        // Pass include paths on to gcc. It'd be nice if pkg-config allowed fetching CFLAGS and
+        // passing that on; see <https://github.com/alexcrichton/pkg-config-rs/issues/43>. But
+        // the include paths are likely all that's included/significant for compilation.
         for p in &lib.include_paths {
             wrapper.include(p);
-        }
-        for l in &lib.libs {
-            println!("lib: {}", l);
         }
     }
 
