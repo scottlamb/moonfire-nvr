@@ -33,7 +33,7 @@ extern crate libc;
 
 use std::cell::{Ref, RefCell};
 use std::ffi::CStr;
-use std::fmt;
+use std::fmt::{self, Write};
 use std::marker::PhantomData;
 use std::ptr;
 use std::sync;
@@ -366,11 +366,44 @@ impl fmt::Display for Error {
     }
 }
 
+#[derive(Copy, Clone)]
 struct Version(libc::c_int);
+
+impl Version {
+    fn major(self) -> libc::c_int { (self.0 >> 16) & 0xFF }
+    fn minor(self) -> libc::c_int { (self.0 >> 8) & 0xFF }
+}
 
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}.{}.{}", (self.0 >> 16) & 0xFF, (self.0 >> 8) & 0xFF, self.0 & 0xFF)
+    }
+}
+
+struct Library {
+    name: &'static str,
+    compiled: Version,
+    running: Version,
+}
+
+impl Library {
+    fn new(name: &'static str, compiled: libc::c_int, running: libc::c_int) -> Self {
+        Library {
+            name,
+            compiled: Version(compiled),
+            running: Version(running),
+        }
+    }
+
+    fn is_compatible(&self) -> bool {
+        self.running.major() == self.compiled.major() &&
+            self.running.minor() >= self.compiled.minor()
+    }
+}
+
+impl fmt::Display for Library {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: running={} compiled={}", self.name, self.running, self.compiled)
     }
 }
 
@@ -416,21 +449,38 @@ impl Drop for Dictionary {
 impl Ffmpeg {
     pub fn new() -> Ffmpeg {
         START.call_once(|| unsafe {
+            let libs = &[
+                Library::new("avutil", moonfire_ffmpeg_compiled_libavutil_version,
+                             avutil_version()),
+                Library::new("avcodec", moonfire_ffmpeg_compiled_libavcodec_version,
+                             avcodec_version()),
+                Library::new("avformat", moonfire_ffmpeg_compiled_libavformat_version,
+                             avformat_version()),
+            ];
+            let mut msg = String::new();
+            let mut compatible = true;
+            for l in libs {
+                write!(&mut msg, "\n{}", l).unwrap();
+                if !l.is_compatible() {
+                    compatible = false;
+                    msg.push_str(" <- not ABI-compatible!");
+                }
+            }
+            if !compatible {
+                panic!("Incompatible ffmpeg versions:{}", msg);
+            }
+            for l in libs {
+                if !l.is_compatible() {
+                    panic!("Library {}'s running version {} isn't ABI-compatible with \
+                           compiled version {}!", l.name, l.running, l.compiled);
+                }
+            }
             moonfire_ffmpeg_init();
             av_register_all();
             if avformat_network_init() < 0 {
                 panic!("avformat_network_init failed");
             }
-            info!("Initialized ffmpeg. Versions:\n\
-                  avcodec compiled={} running={}\n\
-                  avformat compiled={} running={}\n\
-                  avutil compiled={} running={}",
-                  Version(moonfire_ffmpeg_compiled_libavcodec_version),
-                  Version(avcodec_version()),
-                  Version(moonfire_ffmpeg_compiled_libavformat_version),
-                  Version(avformat_version()),
-                  Version(moonfire_ffmpeg_compiled_libavutil_version),
-                  Version(avutil_version()));
+            info!("Initialized ffmpeg. Versions:{}", msg);
         });
         Ffmpeg{}
     }
@@ -440,6 +490,32 @@ impl Ffmpeg {
 mod tests {
     use std::ffi::CString;
     use super::Error;
+
+    /// Just tests that this doesn't crash with an ABI compatibility error.
+    #[test]
+    fn test_init() { super::Ffmpeg::new(); }
+
+    #[test]
+    fn test_is_compatible() {
+        // compiled major/minor/patch, running major/minor/patch, expected compatible
+        use ::libc::c_int;
+        struct Test(c_int, c_int, c_int, c_int, c_int, c_int, bool);
+
+        let tests = &[
+            Test(55, 1, 2, 55, 1, 2, true),   // same version, compatible
+            Test(55, 1, 2, 55, 2, 1, true),   // newer minor version, compatible
+            Test(55, 1, 3, 55, 1, 2, true),   // older patch version, compatible (but weird)
+            Test(55, 2, 2, 55, 1, 2, false),  // older minor version, incompatible
+            Test(55, 1, 2, 56, 1, 2, false),  // newer major version, incompatible
+            Test(56, 1, 2, 55, 1, 2, false),  // older major version, incompatible
+        ];
+
+        for t in tests {
+            let l = super::Library::new(
+                "avutil", (t.0 << 16) | (t.1 << 8) | t.2, (t.3 << 16) | (t.4 << 8) | t.5);
+            assert!(l.is_compatible() == t.6, "{} expected={}", l, t.6);
+        }
+    }
 
     #[test]
     fn test_error() {
