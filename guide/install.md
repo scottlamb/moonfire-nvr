@@ -84,6 +84,7 @@ For instructions, you can skip to "[Camera configuration and hard disk mounting]
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
+    $ yarn
     $ yarn build
     $ cargo test
     $ cargo build --release

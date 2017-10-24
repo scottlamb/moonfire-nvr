@@ -187,10 +187,12 @@ if [ ! -d "${LIB_DIR}/ui" ]; then
 		echo
 		exit 1
 	fi
+	if ! yarn; then
+		echo "UI package installation failed."
+		exit 1
+	fi
 	if ! yarn build; then
 		echo "UI build failed."
-		echo "yarn build"
-		echo
 		exit 1
 	fi
 	sudo mkdir "${LIB_DIR}"
