@@ -1457,9 +1457,14 @@ impl FileInner {
         };
         let f = self.dir.open_sample_file(uuid)?;
         let start = s.s.sample_file_range().start + r.start;
-        let mmap = Box::new(memmap::Mmap::open_with_offset(
-            &f, memmap::Protection::Read, start as usize, (r.end - r.start) as usize)?);
-        Ok(ARefs::new(mmap).map(|m| unsafe { m.as_slice() }))
+        let mmap = Box::new(unsafe {
+            memmap::MmapOptions::new()
+                .offset(start as usize)
+                .len((r.end - r.start) as usize)
+                .map(&f)?
+            });
+        use core::ops::Deref;
+        Ok(ARefs::new(mmap).map(|m| m.deref()))
     }
 
     fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, l: u64) -> Result<Chunk, Error> {
@@ -2278,12 +2283,11 @@ mod bench {
         let p = server.generated_len;
         let mut buf = Vec::with_capacity(p as usize);
         b.bytes = p;
-        let client = reqwest::Client::new().unwrap();
+        let client = reqwest::Client::new();
         let mut run = || {
             use self::reqwest::header::{Range, ByteRangeSpec};
             let mut resp =
                 client.get(server.url.clone())
-                      .unwrap()
                       .header(Range::Bytes(vec![ByteRangeSpec::FromTo(0, p - 1)]))
                       .send()
                       .unwrap();

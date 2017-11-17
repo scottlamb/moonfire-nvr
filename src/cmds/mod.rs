@@ -85,13 +85,15 @@ fn open_conn(db_dir: &str, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connect
     let conn = rusqlite::Connection::open_with_flags(
         Path::new(&db_dir).join("db"),
         match mode {
-            OpenMode::ReadOnly => rusqlite::SQLITE_OPEN_READ_ONLY,
-            OpenMode::ReadWrite => rusqlite::SQLITE_OPEN_READ_WRITE,
-            OpenMode::Create => rusqlite::SQLITE_OPEN_READ_WRITE | rusqlite::SQLITE_OPEN_CREATE,
+            OpenMode::ReadOnly => rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            OpenMode::ReadWrite => rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+            OpenMode::Create => {
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+            },
         } |
         // rusqlite::Connection is not Sync, so there's no reason to tell SQLite3 to use the
         // serialized threading mode.
-        rusqlite::SQLITE_OPEN_NO_MUTEX)?;
+        rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
     Ok((dir, conn))
 }
 

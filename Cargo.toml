@@ -26,19 +26,19 @@ lazy_static = "0.2"
 libc = "0.2"
 log = { version = "0.3", features = ["release_max_level_info"] }
 lru-cache = "0.1"
-memmap = "0.5"
+memmap = "0.6"
 mime = "0.3"
 moonfire-ffmpeg = { path = "ffmpeg" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.9"
-parking_lot = { version = "0.4", features = [] }
+parking_lot = { version = "0.5", features = [] }
 reffers = { git = "https://github.com/diwic/reffers-rs" }
 regex = "0.2"
-rusqlite = "0.12"
+rusqlite = "0.13"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-smallvec = "0.4"
+smallvec = "0.5"
 time = "0.1"
 tokio-core = "0.1"
 tokio-signal = "0.1"
@@ -46,11 +46,11 @@ url = "1.4"
 uuid = { version = "0.5", features = ["serde", "v4"] }
 
 [dev-dependencies]
-reqwest = "0.7"
+reqwest = "0.8"
 tempdir = "0.3"
 
 [dependencies.cursive]
-version = "0.5"
+version = "0.7"
 #default-features = false
 #features = ["termion-backend"]
 
@@ -63,12 +63,4 @@ debug = true
 [replace]
 
 # This hyper fork has a patch to disable Nagle's algorithm.
-"hyper:0.11.2" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }
-
-# The libc crate just added OS X support for clock_gettime, which Moonfire NVR
-# needs. There hasn't been a release, so go straight to git for the moment.
-# Do it for all platforms because [target.foo.replace] is apparently
-# unsupported.
-#[target.'cfg(target_os = "macos")'.replace]
-#[target.x86_64-apple-darwin.replace]
-"libc:0.2.31" = { git = "https://github.com/rust-lang/libc" }
+"hyper:0.11.7" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }

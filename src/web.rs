@@ -527,7 +527,7 @@ mod bench {
             ::std::thread::spawn(move || {
                 let addr = "127.0.0.1:0".parse().unwrap();
                 let (db, dir) = (db.db.clone(), db.dir.clone());
-                let service = super::Service::new(db.clone(), dir.clone(), None);
+                let service = super::Service::new(db.clone(), dir.clone(), None, "".to_owned()).unwrap();
                 let server = hyper::server::Http::new()
                     .bind(&addr, move || Ok(service.clone()))
                     .unwrap();
@@ -547,12 +547,12 @@ mod bench {
     fn serve_camera_recordings(b: &mut Bencher) {
         testutil::init();
         let server = &*SERVER;
-        let url = reqwest::Url::parse(&format!("{}/cameras/{}/recordings", server.base_url,
+        let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/recordings", server.base_url,
                                                *testutil::TEST_CAMERA_UUID)).unwrap();
         let mut buf = Vec::new();
-        let client = reqwest::Client::new().unwrap();
+        let client = reqwest::Client::new();
         let mut f = || {
-            let mut resp = client.get(url.clone()).unwrap().send().unwrap();
+            let mut resp = client.get(url.clone()).send().unwrap();
             assert_eq!(resp.status(), reqwest::StatusCode::Ok);
             buf.clear();
             use std::io::Read;
