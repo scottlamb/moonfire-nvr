@@ -469,12 +469,6 @@ impl Ffmpeg {
             if !compatible {
                 panic!("Incompatible ffmpeg versions:{}", msg);
             }
-            for l in libs {
-                if !l.is_compatible() {
-                    panic!("Library {}'s running version {} isn't ABI-compatible with \
-                           compiled version {}!", l.name, l.running, l.compiled);
-                }
-            }
             moonfire_ffmpeg_init();
             av_register_all();
             if avformat_network_init() < 0 {
