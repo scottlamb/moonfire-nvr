@@ -34,7 +34,6 @@ extern crate libc;
 use std::cell::{Ref, RefCell};
 use std::ffi::CStr;
 use std::fmt::{self, Write};
-use std::marker::PhantomData;
 use std::ptr;
 use std::sync;
 
@@ -168,14 +167,14 @@ impl InputFormatContext {
     pub fn read_frame<'i>(&'i self) -> Result<Packet<'i>, Error> {
         let pkt = self.pkt.borrow();
         Error::wrap(unsafe { av_read_frame(self.ctx, *pkt) })?;
-        Ok(Packet { _ctx: PhantomData, pkt: pkt })
+        Ok(Packet(pkt))
     }
 
     pub fn streams<'i>(&'i self) -> Streams<'i> {
-        Streams {
-            _owner: PhantomData,
-            streams: unsafe { moonfire_ffmpeg_fctx_streams(self.ctx) },
-        }
+        Streams(unsafe {
+            let s = moonfire_ffmpeg_fctx_streams(self.ctx);
+            std::slice::from_raw_parts(s.streams, s.len as usize)
+        })
     }
 }
 
@@ -204,15 +203,12 @@ struct StreamsLen {
     len: libc::size_t,
 }
 
-pub struct Packet<'i> {
-    _ctx: PhantomData<&'i InputFormatContext>,
-    pkt: Ref<'i, *mut AVPacket>,
-}
+pub struct Packet<'i>(Ref<'i, *mut AVPacket>);
 
 impl<'i> Packet<'i> {
-    pub fn is_key(&self) -> bool { unsafe { moonfire_ffmpeg_packet_is_key(*self.pkt) } }
+    pub fn is_key(&self) -> bool { unsafe { moonfire_ffmpeg_packet_is_key(*self.0) } }
     pub fn pts(&self) -> Option<i64> {
-        match unsafe { moonfire_ffmpeg_packet_pts(*self.pkt) } {
+        match unsafe { moonfire_ffmpeg_packet_pts(*self.0) } {
             v if v == unsafe { moonfire_ffmpeg_av_nopts_value } => None,
             v => Some(v),
         }
@@ -222,22 +218,22 @@ impl<'i> Packet<'i> {
             None => unsafe { moonfire_ffmpeg_av_nopts_value },
             Some(v) => v,
         };
-        unsafe { moonfire_ffmpeg_packet_set_pts(*self.pkt, real_pts); }
+        unsafe { moonfire_ffmpeg_packet_set_pts(*self.0, real_pts); }
     }
-    pub fn dts(&self) -> i64 { unsafe { moonfire_ffmpeg_packet_dts(*self.pkt) } }
+    pub fn dts(&self) -> i64 { unsafe { moonfire_ffmpeg_packet_dts(*self.0) } }
     pub fn set_dts(&mut self, dts: i64) {
-        unsafe { moonfire_ffmpeg_packet_set_dts(*self.pkt, dts); }
+        unsafe { moonfire_ffmpeg_packet_set_dts(*self.0, dts); }
     }
-    pub fn duration(&self) -> i32 { unsafe { moonfire_ffmpeg_packet_duration(*self.pkt) } }
+    pub fn duration(&self) -> i32 { unsafe { moonfire_ffmpeg_packet_duration(*self.0) } }
     pub fn set_duration(&mut self, dur: i32) {
-        unsafe { moonfire_ffmpeg_packet_set_duration(*self.pkt, dur) }
+        unsafe { moonfire_ffmpeg_packet_set_duration(*self.0, dur) }
     }
     pub fn stream_index(&self) -> usize {
-        unsafe { moonfire_ffmpeg_packet_stream_index(*self.pkt) as usize }
+        unsafe { moonfire_ffmpeg_packet_stream_index(*self.0) as usize }
     }
     pub fn data(&self) -> Option<&[u8]> {
         unsafe {
-            let d = moonfire_ffmpeg_packet_data(*self.pkt);
+            let d = moonfire_ffmpeg_packet_data(*self.0);
             if d.data.is_null() {
                 None
             } else {
@@ -245,72 +241,51 @@ impl<'i> Packet<'i> {
             }
         }
     }
-
-    //pub fn deref(self) -> &'i InputFormatContext { self.ctx }
 }
 
 impl<'i> Drop for Packet<'i> {
     fn drop(&mut self) {
         unsafe {
-            av_packet_unref(*self.pkt);
+            av_packet_unref(*self.0);
         }
     }
 }
 
-pub struct Streams<'owner> {
-    _owner: PhantomData<&'owner ()>,
-    streams: StreamsLen,
-}
+pub struct Streams<'owner>(&'owner [*const AVStream]);
 
 impl<'owner> Streams<'owner> {
-    pub fn get(&self, i: usize) -> Stream<'owner> {
-        assert!(i < self.streams.len);
-        Stream {
-            _owner: PhantomData,
-            stream: unsafe { *self.streams.streams.offset(i as isize) }
-        }
-    }
-
-    pub fn len(&self) -> usize { self.streams.len }
+    pub fn get(&self, i: usize) -> Stream<'owner> { Stream(unsafe { self.0[i].as_ref() }.unwrap()) }
+    pub fn len(&self) -> usize { self.0.len() }
 }
 
-pub struct Stream<'o> {
-    _owner: PhantomData<&'o ()>,
-    stream: *const AVStream,
-}
+pub struct Stream<'o>(&'o AVStream);
 
 impl<'o> Stream<'o> {
     pub fn codec<'s>(&'s self) -> CodecContext<'s> {
-        CodecContext {
-            _owner: PhantomData,
-            ctx: unsafe { moonfire_ffmpeg_stream_codec(self.stream) },
-        }
+        CodecContext(unsafe { moonfire_ffmpeg_stream_codec(self.0).as_ref() }.unwrap())
     }
 
     pub fn time_base(&self) -> AVRational {
-        unsafe { moonfire_ffmpeg_stream_time_base(self.stream) }
+        unsafe { moonfire_ffmpeg_stream_time_base(self.0) }
     }
 }
 
-pub struct CodecContext<'s> {
-    _owner: PhantomData<&'s ()>,
-    ctx: *const AVCodecContext,
-}
+pub struct CodecContext<'s>(&'s AVCodecContext);
 
 impl<'s> CodecContext<'s> {
     pub fn extradata(&self) -> &[u8] {
         unsafe {
-            let d = moonfire_ffmpeg_cctx_extradata(self.ctx);
+            let d = moonfire_ffmpeg_cctx_extradata(self.0);
             ::std::slice::from_raw_parts(d.data, d.len)
         }
     }
-    pub fn width(&self) -> libc::c_int { unsafe { moonfire_ffmpeg_cctx_width(self.ctx) } }
-    pub fn height(&self) -> libc::c_int { unsafe { moonfire_ffmpeg_cctx_height(self.ctx) } }
+    pub fn width(&self) -> libc::c_int { unsafe { moonfire_ffmpeg_cctx_width(self.0) } }
+    pub fn height(&self) -> libc::c_int { unsafe { moonfire_ffmpeg_cctx_height(self.0) } }
     pub fn codec_id(&self) -> CodecId {
-        CodecId(unsafe { moonfire_ffmpeg_cctx_codec_id(self.ctx) })
+        CodecId(unsafe { moonfire_ffmpeg_cctx_codec_id(self.0) })
     }
     pub fn codec_type(&self) -> MediaType {
-        MediaType(unsafe { moonfire_ffmpeg_cctx_codec_type(self.ctx) })
+        MediaType(unsafe { moonfire_ffmpeg_cctx_codec_type(self.0) })
     }
 }
 
