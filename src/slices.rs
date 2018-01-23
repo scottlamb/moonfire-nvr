@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Tools for implementing a `http_entity::Entity` body composed from many "slices".
+//! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
 use error::Error;
 use reffers::ARefs;
@@ -50,7 +50,7 @@ pub trait Slice : fmt::Debug + Sized + Sync + 'static {
     /// Note the starting position (and thus length) are inferred from the previous slice.
     fn end(&self) -> u64;
 
-    /// Writes `r` to `out`, as in `http_entity::Entity::write_to`.
+    /// Writes `r` to `out`, as in `http_serve::Entity::write_to`.
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
     fn get_range(&self, ctx: &Self::Ctx, r: Range<u64>, len: u64)
@@ -112,7 +112,7 @@ impl<S> Slices<S> where S: Slice {
     pub fn num(&self) -> usize { self.slices.len() }
 
     /// Writes `range` to `out`.
-    /// This interface mirrors `http_entity::Entity::write_to`, with the additional `ctx` argument.
+    /// This interface mirrors `http_serve::Entity::write_to`, with the additional `ctx` argument.
     pub fn get_range(&self, ctx: &S::Ctx, range: Range<u64>)
                      -> Box<Stream<Item = S::Chunk, Error = ::hyper::Error> + Send> {
         if range.start > range.end || range.end > self.len {

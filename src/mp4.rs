@@ -83,7 +83,7 @@ use db;
 use dir;
 use error::Error;
 use futures::stream;
-use http_entity;
+use http_serve;
 use hyper::header;
 use memmap;
 use openssl::hash;
@@ -1487,7 +1487,7 @@ impl FileInner {
 #[derive(Clone)]
 pub struct File(Arc<FileInner>);
 
-impl http_entity::Entity for File {
+impl http_serve::Entity for File {
     type Chunk = slices::Chunk;
     type Body = slices::Body;
 
@@ -1532,7 +1532,7 @@ mod tests {
     use hyper::header;
     use openssl::hash;
     use recording::{self, TIME_UNITS_PER_SEC};
-    use http_entity::{self, Entity};
+    use http_serve::{self, Entity};
     use std::fs;
     use std::ops::Range;
     use std::path::Path;
@@ -1543,7 +1543,7 @@ mod tests {
     use stream::{self, Opener, Stream};
     use testutil::{self, TestDb, TEST_CAMERA_ID};
 
-    fn fill_slice<E: http_entity::Entity>(slice: &mut [u8], e: &E, start: u64) {
+    fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64) {
         let mut p = 0;
         e.get_range(start .. start + slice.len() as u64)
          .for_each(|chunk| {
@@ -1557,7 +1557,7 @@ mod tests {
     }
 
     /// Returns the SHA-1 digest of the given `Entity`.
-    fn digest<E: http_entity::Entity>(e: &E) -> hash::DigestBytes {
+    fn digest<E: http_serve::Entity>(e: &E) -> hash::DigestBytes {
         e.get_range(0 .. e.len())
          .fold(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap(), |mut sha1, chunk| {
              let c: &[u8] = chunk.as_ref();
@@ -2188,7 +2188,7 @@ mod bench {
     use futures::Stream;
     use futures::future;
     use hyper;
-    use http_entity;
+    use http_serve;
     use recording;
     use reffers::ARefs;
     use self::test::Bencher;
@@ -2241,7 +2241,7 @@ mod bench {
         type Future = future::FutureResult<Self::Response, Self::Error>;
 
         fn call(&self, req: hyper::server::Request) -> Self::Future {
-            future::ok(http_entity::serve(self.0.clone(), &req))
+            future::ok(http_serve::serve(self.0.clone(), &req))
         }
     }
 

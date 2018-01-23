@@ -38,8 +38,7 @@ use error::Error;
 use futures::{future, stream};
 use futures_cpupool;
 use json;
-use http_entity;
-use http_file;
+use http_serve;
 use hyper::header;
 use hyper::server::{self, Request, Response};
 use mime;
@@ -281,7 +280,7 @@ impl ServiceInner {
             if ent.sha1 == sha1 {
                 builder.append_video_sample_entry(ent.clone());
                 let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
-                return Ok(http_entity::serve(mp4, req));
+                return Ok(http_serve::serve(mp4, req));
             }
         }
         self.not_found()
@@ -376,7 +375,7 @@ impl ServiceInner {
             };
         }
         let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
-        Ok(http_entity::serve(mp4, req))
+        Ok(http_serve::serve(mp4, req))
     }
 
     fn static_file(&self, req: &Request) -> Result<Response<slices::Body>, Error> {
@@ -385,8 +384,8 @@ impl ServiceInner {
             Some(s) => s,
         };
         let f = fs::File::open(&s.path)?;
-        let e = http_file::ChunkedReadFile::new(f, Some(self.pool.clone()), s.mime.clone())?;
-        Ok(http_entity::serve(e, &req))
+        let e = http_serve::ChunkedReadFile::new(f, Some(self.pool.clone()), s.mime.clone())?;
+        Ok(http_serve::serve(e, &req))
     }
 }
 
