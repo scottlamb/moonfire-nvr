@@ -183,9 +183,9 @@ impl ServiceInner {
             .with_body(body))
     }
 
-    fn top_level(&self, query: Option<&str>) -> Result<Response<slices::Body>, Error> {
+    fn top_level(&self, req: &Request) -> Result<Response<slices::Body>, Error> {
         let mut days = false;
-        if let Some(q) = query {
+        if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value) : (_, &str) = (key.borrow(), value.borrow());
                 match key {
@@ -195,42 +195,34 @@ impl ServiceInner {
             }
         }
 
-        let buf = {
+        let mut resp = Response::new().with_header(header::ContentType(mime::APPLICATION_JSON));
+        if let Some(mut w) = http_serve::streaming_body(&req, &mut resp).build() {
             let db = self.db.lock();
-            serde_json::to_vec(&json::TopLevel {
-                time_zone_name: &self.time_zone_name,
-                cameras: (db.cameras_by_id(), days),
-            })?
-        };
-        let len = buf.len();
-        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
-        Ok(Response::new()
-           .with_header(header::ContentType(mime::APPLICATION_JSON))
-           .with_header(header::ContentLength(len as u64))
-           .with_body(body))
+            serde_json::to_writer(&mut w, &json::TopLevel {
+                    time_zone_name: &self.time_zone_name,
+                    cameras: (db.cameras_by_id(), days),
+            })?;
+        }
+        Ok(resp)
     }
 
-    fn camera(&self, uuid: Uuid) -> Result<Response<slices::Body>, Error> {
-        let buf = {
+    fn camera(&self, req: &Request, uuid: Uuid) -> Result<Response<slices::Body>, Error> {
+        let mut resp = Response::new().with_header(header::ContentType(mime::APPLICATION_JSON));
+        if let Some(mut w) = http_serve::streaming_body(&req, &mut resp).build() {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            serde_json::to_vec(&json::Camera::new(camera, true))?
+            serde_json::to_writer(&mut w, &json::Camera::new(camera, true))?
         };
-        let len = buf.len();
-        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
-        Ok(Response::new()
-           .with_header(header::ContentType(mime::APPLICATION_JSON))
-           .with_header(header::ContentLength(len as u64))
-           .with_body(body))
+        Ok(resp)
     }
 
-    fn camera_recordings(&self, uuid: Uuid, query: Option<&str>)
+    fn camera_recordings(&self, req: &Request, uuid: Uuid)
                          -> Result<Response<slices::Body>, Error> {
         let (r, split) = {
             let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
             let mut split = recording::Duration(i64::max_value());
-            if let Some(q) = query {
+            if let Some(q) = req.uri().query() {
                 for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                     let (key, value) = (key.borrow(), value.borrow());
                     match key {
@@ -264,13 +256,11 @@ impl ServiceInner {
                 Ok(())
             })?;
         }
-        let buf = serde_json::to_vec(&out)?;
-        let len = buf.len();
-        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(buf))));
-        Ok(Response::new()
-           .with_header(header::ContentType(mime::APPLICATION_JSON))
-           .with_header(header::ContentLength(len as u64))
-           .with_body(body))
+        let mut resp = Response::new().with_header(header::ContentType(mime::APPLICATION_JSON));
+        if let Some(mut w) = http_serve::streaming_body(&req, &mut resp).build() {
+            serde_json::to_writer(&mut w, &out)?
+        };
+        Ok(resp)
     }
 
     fn init_segment(&self, sha1: [u8; 20], req: &Request) -> Result<Response<slices::Body>, Error> {
@@ -459,9 +449,9 @@ impl server::Service for Service {
         debug!("request on: {}", req.uri());
         let res = match decode_path(req.uri().path()) {
             Path::InitSegment(sha1) => self.0.init_segment(sha1, &req),
-            Path::TopLevel => self.0.top_level(req.uri().query()),
-            Path::Camera(uuid) => self.0.camera(uuid),
-            Path::CameraRecordings(uuid) => self.0.camera_recordings(uuid, req.uri().query()),
+            Path::TopLevel => self.0.top_level(&req),
+            Path::Camera(uuid) => self.0.camera(&req, uuid),
+            Path::CameraRecordings(uuid) => self.0.camera_recordings(&req, uuid),
             Path::CameraViewMp4(uuid) => {
                 self.0.camera_view_mp4(uuid, mp4::Type::Normal, req.uri().query(), &req)
             },
