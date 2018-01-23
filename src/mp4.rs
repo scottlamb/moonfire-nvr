@@ -381,7 +381,7 @@ impl Segment {
         self.index_once.call_once(|| {
             let index = unsafe { &mut *self.index.get() };
             *index = db.lock()
-                       .with_recording_playback(self.s.camera_id, self.s.recording_id,
+                       .with_recording_playback(self.s.stream_id, self.s.recording_id,
                                                 |playback| self.build_index(playback))
                        .map_err(|e| { error!("Unable to build index for segment: {:?}", e); });
         });
@@ -629,7 +629,7 @@ impl Slice {
         }
         let truns =
             mp4.0.db.lock()
-               .with_recording_playback(s.s.camera_id, s.s.recording_id,
+               .with_recording_playback(s.s.stream_id, s.s.recording_id,
                                         |playback| s.truns(playback, pos, len))
                .map_err(|e| { Error::new(format!("Unable to build index for segment: {:?}", e)) })?;
         let truns = ARefs::new(truns);
@@ -762,7 +762,7 @@ impl FileBuilder {
             if prev.s.have_trailing_zero() {
                 return Err(Error::new(format!(
                     "unable to append recording {}/{} after recording {}/{} with trailing zero",
-                    row.camera_id, row.id, prev.s.camera_id, prev.s.recording_id)));
+                    row.stream_id, row.id, prev.s.stream_id, prev.s.recording_id)));
             }
         }
         let s = Segment::new(db, &row, rel_range_90k, self.next_frame_num)?;
@@ -811,7 +811,7 @@ impl FileBuilder {
             // Update the etag to reflect this segment.
             let mut data = [0_u8; 24];
             let mut cursor = io::Cursor::new(&mut data[..]);
-            cursor.write_i32::<BigEndian>(s.s.camera_id)?;
+            cursor.write_i32::<BigEndian>(s.s.stream_id)?;
             cursor.write_i32::<BigEndian>(s.s.recording_id)?;
             cursor.write_i64::<BigEndian>(s.s.start.0)?;
             cursor.write_i32::<BigEndian>(d.start)?;
@@ -1452,7 +1452,7 @@ impl FileInner {
     fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> Result<Chunk, Error> {
         let s = &self.segments[i];
         let uuid = {
-            self.db.lock().with_recording_playback(s.s.camera_id, s.s.recording_id,
+            self.db.lock().with_recording_playback(s.s.stream_id, s.s.recording_id,
                                                    |p| Ok(p.sample_file_uuid))?
         };
         let f = self.dir.open_sample_file(uuid)?;
@@ -1541,7 +1541,7 @@ mod tests {
     use strutil;
     use super::*;
     use stream::{self, Opener, Stream};
-    use testutil::{self, TestDb, TEST_CAMERA_ID};
+    use testutil::{self, TestDb, TEST_STREAM_ID};
 
     fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64) {
         let mut p = 0;
@@ -1765,7 +1765,7 @@ mod tests {
             extra_data.width, extra_data.height, extra_data.sample_entry,
             extra_data.rfc6381_codec).unwrap();
         let mut output = db.dir.create_writer(&db.syncer_channel, None,
-                                              TEST_CAMERA_ID, video_sample_entry_id).unwrap();
+                                              TEST_STREAM_ID, video_sample_entry_id).unwrap();
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
         // It's needed because dir::Writer calculates a packet's duration from its pts and the
@@ -1799,7 +1799,7 @@ mod tests {
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
         {
             let db = db.lock();
-            db.list_recordings_by_time(TEST_CAMERA_ID, all_time, |r| {
+            db.list_recordings_by_time(TEST_STREAM_ID, all_time, |r| {
                 let d = r.duration_90k;
                 assert!(skip_90k + shorten_90k < d);
                 builder.append(&*db, r, skip_90k .. d - shorten_90k).unwrap();
@@ -2259,7 +2259,7 @@ mod bench {
         let segment = {
             let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
             let mut row = None;
-            db.list_recordings_by_time(testutil::TEST_CAMERA_ID, all_time, |r| {
+            db.list_recordings_by_time(testutil::TEST_STREAM_ID, all_time, |r| {
                 row = Some(r);
                 Ok(())
             }).unwrap();
@@ -2267,7 +2267,7 @@ mod bench {
             let rel_range_90k = 0 .. row.duration_90k;
             super::Segment::new(&db, &row, rel_range_90k, 1).unwrap()
         };
-        db.with_recording_playback(segment.s.camera_id, segment.s.recording_id, |playback| {
+        db.with_recording_playback(segment.s.stream_id, segment.s.recording_id, |playback| {
             let v = segment.build_index(playback).unwrap();  // warm.
             b.bytes = v.len() as u64;  // define the benchmark performance in terms of output bytes.
             b.iter(|| segment.build_index(playback).unwrap());

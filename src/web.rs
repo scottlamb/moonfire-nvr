@@ -66,13 +66,13 @@ lazy_static! {
 }
 
 enum Path {
-    TopLevel,                       // "/api/"
-    InitSegment([u8; 20]),          // "/api/init/<sha1>.mp4"
-    Camera(Uuid),                   // "/api/cameras/<uuid>/"
-    CameraRecordings(Uuid),         // "/api/cameras/<uuid>/recordings"
-    CameraViewMp4(Uuid),            // "/api/cameras/<uuid>/view.mp4"
-    CameraViewMp4Segment(Uuid),     // "/api/cameras/<uuid>/view.m4s"
-    Static,                         // "<other path>"
+    TopLevel,                                    // "/api/"
+    InitSegment([u8; 20]),                       // "/api/init/<sha1>.mp4"
+    Camera(Uuid),                                // "/api/cameras/<uuid>/"
+    StreamRecordings(Uuid, db::StreamType),      // "/api/cameras/<uuid>/<type>/recordings"
+    StreamViewMp4(Uuid, db::StreamType),         // "/api/cameras/<uuid>/<type>/view.mp4"
+    StreamViewMp4Segment(Uuid, db::StreamType),  // "/api/cameras/<uuid>/<type>/view.m4s"
+    Static,                                      // "<other path>"
     NotFound,
 }
 
@@ -101,18 +101,33 @@ fn decode_path(path: &str) -> Path {
         None => { return Path::NotFound; },
         Some(s) => s,
     };
-    let (uuid, path) = path.split_at(slash);
+    let uuid = &path[0 .. slash];
+    let path = &path[slash+1 .. ];
 
     // TODO(slamb): require uuid to be in canonical format.
     let uuid = match Uuid::parse_str(uuid) {
         Ok(u) => u,
         Err(_) => { return Path::NotFound },
     };
+
+    if path.is_empty() {
+        return Path::Camera(uuid);
+    }
+
+    let slash = match path.find('/') {
+        None => { return Path::NotFound; },
+        Some(s) => s,
+    };
+    let (type_, path) = path.split_at(slash);
+
+    let type_ = match db::StreamType::parse(type_) {
+        None => { return Path::NotFound; },
+        Some(t) => t,
+    };
     match path {
-        "/" => Path::Camera(uuid),
-        "/recordings" => Path::CameraRecordings(uuid),
-        "/view.mp4" => Path::CameraViewMp4(uuid),
-        "/view.m4s" => Path::CameraViewMp4Segment(uuid),
+        "/recordings" => Path::StreamRecordings(uuid, type_),
+        "/view.mp4" => Path::StreamViewMp4(uuid, type_),
+        "/view.m4s" => Path::StreamViewMp4Segment(uuid, type_),
         _ => Path::NotFound,
     }
 }
@@ -200,7 +215,7 @@ impl ServiceInner {
             let db = self.db.lock();
             serde_json::to_writer(&mut w, &json::TopLevel {
                     time_zone_name: &self.time_zone_name,
-                    cameras: (db.cameras_by_id(), days),
+                    cameras: (&db, days),
             })?;
         }
         Ok(resp)
@@ -212,12 +227,12 @@ impl ServiceInner {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            serde_json::to_writer(&mut w, &json::Camera::new(camera, true))?
+            serde_json::to_writer(&mut w, &json::Camera::wrap(camera, &db, true)?)?
         };
         Ok(resp)
     }
 
-    fn camera_recordings(&self, req: &Request, uuid: Uuid)
+    fn stream_recordings(&self, req: &Request, uuid: Uuid, type_: db::StreamType)
                          -> Result<Response<slices::Body>, Error> {
         let (r, split) = {
             let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
@@ -240,7 +255,9 @@ impl ServiceInner {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            db.list_aggregated_recordings(camera.id, r, split, |row| {
+            let stream_id = camera.streams[type_.index()]
+                                  .ok_or_else(|| Error::new("no such stream".to_owned()))?;
+            db.list_aggregated_recordings(stream_id, r, split, |row| {
                 let end = row.ids.end - 1;  // in api, ids are inclusive.
                 out.recordings.push(json::Recording {
                     start_id: row.ids.start,
@@ -276,23 +293,23 @@ impl ServiceInner {
         self.not_found()
     }
 
-    fn camera_view_mp4(&self, uuid: Uuid, type_: mp4::Type, query: Option<&str>, req: &Request)
-                       -> Result<Response<slices::Body>, Error> {
-        let camera_id = {
+    fn stream_view_mp4(&self, req: &Request, uuid: Uuid, stream_type_: db::StreamType,
+                       mp4_type_: mp4::Type) -> Result<Response<slices::Body>, Error> {
+        let stream_id = {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            camera.id
+            camera.streams[stream_type_.index()].ok_or_else(|| Error::new("no such stream".to_owned()))?
         };
-        let mut builder = mp4::FileBuilder::new(type_);
-        if let Some(q) = query {
+        let mut builder = mp4::FileBuilder::new(mp4_type_);
+        if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value) = (key.borrow(), value.borrow());
                 match key {
                     "s" => {
                         let s = Segments::parse(value).map_err(
                             |_| Error::new(format!("invalid s parameter: {}", value)))?;
-                        debug!("camera_view_mp4: appending s={:?}", s);
+                        debug!("stream_view_mp4: appending s={:?}", s);
                         let mut est_segments = (s.ids.end - s.ids.start) as usize;
                         if let Some(end) = s.end_time {
                             // There should be roughly ceil((end - start) /
@@ -309,15 +326,15 @@ impl ServiceInner {
                         let db = self.db.lock();
                         let mut prev = None;
                         let mut cur_off = 0;
-                        db.list_recordings_by_id(camera_id, s.ids.clone(), |r| {
+                        db.list_recordings_by_id(stream_id, s.ids.clone(), |r| {
                             // Check for missing recordings.
                             match prev {
                                 None if r.id == s.ids.start => {},
                                 None => return Err(Error::new(format!("no such recording {}/{}",
-                                                                      camera_id, s.ids.start))),
+                                                                      stream_id, s.ids.start))),
                                 Some(id) if r.id != id + 1 => {
                                     return Err(Error::new(format!("no such recording {}/{}",
-                                                                  camera_id, id + 1)));
+                                                                  stream_id, id + 1)));
                                 },
                                 _ => {},
                             };
@@ -330,11 +347,11 @@ impl ServiceInner {
                                 let start = cmp::max(0, s.start_time - cur_off);
                                 let end = cmp::min(d, end_time - cur_off);
                                 let times = start as i32 .. end as i32;
-                                debug!("...appending recording {}/{} with times {:?} (out of dur {})",
-                                       r.camera_id, r.id, times, d);
+                                debug!("...appending recording {}/{} with times {:?} \
+                                       (out of dur {})", r.stream_id, r.id, times, d);
                                 builder.append(&db, r, start as i32 .. end as i32)?;
                             } else {
-                                debug!("...skipping recording {}/{} dur {}", r.camera_id, r.id, d);
+                                debug!("...skipping recording {}/{} dur {}", r.stream_id, r.id, d);
                             }
                             cur_off += d;
                             Ok(())
@@ -344,11 +361,11 @@ impl ServiceInner {
                         match prev {
                             Some(id) if s.ids.end != id + 1 => {
                                 return Err(Error::new(format!("no such recording {}/{}",
-                                                              camera_id, s.ids.end - 1)));
+                                                              stream_id, s.ids.end - 1)));
                             },
                             None => {
                                 return Err(Error::new(format!("no such recording {}/{}",
-                                                              camera_id, s.ids.start)));
+                                                              stream_id, s.ids.start)));
                             },
                             _ => {},
                         };
@@ -451,12 +468,12 @@ impl server::Service for Service {
             Path::InitSegment(sha1) => self.0.init_segment(sha1, &req),
             Path::TopLevel => self.0.top_level(&req),
             Path::Camera(uuid) => self.0.camera(&req, uuid),
-            Path::CameraRecordings(uuid) => self.0.camera_recordings(&req, uuid),
-            Path::CameraViewMp4(uuid) => {
-                self.0.camera_view_mp4(uuid, mp4::Type::Normal, req.uri().query(), &req)
+            Path::StreamRecordings(uuid, type_) => self.0.stream_recordings(&req, uuid, type_),
+            Path::StreamViewMp4(uuid, type_) => {
+                self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::Normal)
             },
-            Path::CameraViewMp4Segment(uuid) => {
-                self.0.camera_view_mp4(uuid, mp4::Type::MediaSegment, req.uri().query(), &req)
+            Path::StreamViewMp4Segment(uuid, type_) => {
+                self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::MediaSegment)
             },
             Path::NotFound => self.0.not_found(),
             Path::Static => self.0.static_file(&req),
@@ -539,10 +556,10 @@ mod bench {
     }
 
     #[bench]
-    fn serve_camera_recordings(b: &mut Bencher) {
+    fn serve_stream_recordings(b: &mut Bencher) {
         testutil::init();
         let server = &*SERVER;
-        let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/recordings", server.base_url,
+        let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/main/recordings", server.base_url,
                                                server.test_camera_uuid)).unwrap();
         let mut buf = Vec::new();
         let client = reqwest::Client::new();

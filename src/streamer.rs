@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use clock::{Clocks, TimerGuard};
-use db::{Camera, Database};
+use db::{Camera, Database, Stream};
 use dir;
 use error::Error;
 use h264;
@@ -62,7 +62,7 @@ pub struct Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     syncer_channel: dir::SyncerChannel,
     clocks: &'a C,
     opener: &'a stream::Opener<S>,
-    camera_id: i32,
+    stream_id: i32,
     short_name: String,
     url: String,
     redacted_url: String,
@@ -77,9 +77,9 @@ struct WriterState<'a> {
 
 impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     pub fn new<'b>(env: &Environment<'a, 'b, C, S>, syncer_channel: dir::SyncerChannel,
-                   camera_id: i32, c: &Camera, rotate_offset_sec: i64,
+                   stream_id: i32, c: &Camera, s: &Stream, rotate_offset_sec: i64,
                    rotate_interval_sec: i64) -> Self {
-        Streamer{
+        Streamer {
             shutdown: env.shutdown.clone(),
             rotate_offset_sec: rotate_offset_sec,
             rotate_interval_sec: rotate_interval_sec,
@@ -88,10 +88,10 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             syncer_channel: syncer_channel,
             clocks: env.clocks,
             opener: env.opener,
-            camera_id: camera_id,
-            short_name: c.short_name.to_owned(),
-            url: format!("rtsp://{}:{}@{}{}", c.username, c.password, c.host, c.main_rtsp_path),
-            redacted_url: format!("rtsp://{}:redacted@{}{}", c.username, c.host, c.main_rtsp_path),
+            stream_id: stream_id,
+            short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
+            url: format!("rtsp://{}:{}@{}{}", c.username, c.password, c.host, s.rtsp_path),
+            redacted_url: format!("rtsp://{}:redacted@{}{}", c.username, c.host, s.rtsp_path),
         }
     }
 
@@ -167,7 +167,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
                     let r = r + if prev.is_none() { self.rotate_interval_sec } else { 0 };
 
                     let _t = TimerGuard::new(self.clocks, || "creating writer");
-                    let w = self.dir.create_writer(&self.syncer_channel, prev, self.camera_id,
+                    let w = self.dir.create_writer(&self.syncer_channel, prev, self.stream_id,
                                                    video_sample_entry_id)?;
                     WriterState{
                         writer: w,
@@ -358,8 +358,9 @@ mod tests {
         {
             let l = db.db.lock();
             let camera = l.cameras_by_id().get(&testutil::TEST_CAMERA_ID).unwrap();
-            stream = super::Streamer::new(&env, db.syncer_channel.clone(), testutil::TEST_CAMERA_ID,
-                                          camera, 0, 3);
+            let s = l.streams_by_id().get(&testutil::TEST_STREAM_ID).unwrap();
+            stream = super::Streamer::new(&env, db.syncer_channel.clone(), testutil::TEST_STREAM_ID,
+                                          camera, s, 0, 3);
         }
         stream.run();
         assert!(opener.streams.lock().unwrap().is_empty());
@@ -370,7 +371,7 @@ mod tests {
         // 3-second boundaries (such as 2016-04-26 00:00:03), rotation happens somewhat later:
         // * the first rotation is always skipped
         // * the second rotation is deferred until a key frame.
-        assert_eq!(get_frames(&db, testutil::TEST_CAMERA_ID, 1), &[
+        assert_eq!(get_frames(&db, testutil::TEST_STREAM_ID, 1), &[
             Frame{start_90k:      0, duration_90k: 90379, is_key:  true},
             Frame{start_90k:  90379, duration_90k: 89884, is_key: false},
             Frame{start_90k: 180263, duration_90k: 89749, is_key: false},
@@ -380,12 +381,12 @@ mod tests {
             Frame{start_90k: 540015, duration_90k: 90021, is_key: false},  // pts_time 6.0001...
             Frame{start_90k: 630036, duration_90k: 89958, is_key: false},
         ]);
-        assert_eq!(get_frames(&db, testutil::TEST_CAMERA_ID, 2), &[
+        assert_eq!(get_frames(&db, testutil::TEST_STREAM_ID, 2), &[
             Frame{start_90k:      0, duration_90k: 90011, is_key:  true},
             Frame{start_90k:  90011, duration_90k:     0, is_key: false},
         ]);
         let mut recordings = Vec::new();
-        db.list_recordings_by_id(testutil::TEST_CAMERA_ID, 1..3, |r| {
+        db.list_recordings_by_id(testutil::TEST_STREAM_ID, 1..3, |r| {
             recordings.push(r);
             Ok(())
         }).unwrap();

@@ -51,14 +51,13 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
     let p = siv.find_id::<views::EditView>("password").unwrap().get_content().as_str().into();
     let m = siv.find_id::<views::EditView>("main_rtsp_path").unwrap().get_content().as_str().into();
     let s = siv.find_id::<views::EditView>("sub_rtsp_path").unwrap().get_content().as_str().into();
-    db::CameraChange{
+    db::CameraChange {
         short_name: sn,
         description: d,
         host: h,
         username: u,
         password: p,
-        main_rtsp_path: m,
-        sub_rtsp_path: s,
+        rtsp_paths: [m, s],
     }
 }
 
@@ -145,8 +144,20 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::Sa
     let typed = siv.find_id::<views::EditView>("confirm").unwrap().get_content();
     if decode_size(typed.as_str()).ok() == Some(to_delete) {
         siv.pop_layer();  // deletion confirmation dialog
-        if let Err(e) = dir::lower_retention(dir.clone(),
-                                             &[dir::NewLimit{camera_id: id, limit: 0}]) {
+
+        let mut zero_limits = Vec::new();
+        {
+            let l = db.lock();
+            for (&stream_id, stream) in l.streams_by_id() {
+                if stream.camera_id == id {
+                    zero_limits.push(dir::NewLimit {
+                        stream_id,
+                        limit: 0,
+                    });
+                }
+            }
+        }
+        if let Err(e) = dir::lower_retention(dir.clone(), &zero_limits) {
             siv.add_layer(views::Dialog::text(format!("Unable to delete recordings: {}", e))
                           .title("Error")
                           .dismiss_button("Abort"));
@@ -162,7 +173,6 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::Sa
 
 fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>,
                    id: i32) {
-    info!("actually_delete call");
     siv.pop_layer();  // get rid of the add/edit camera dialog.
     let result = {
         let mut l = db.lock();
@@ -198,14 +208,14 @@ fn edit_camera_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv
                .child(views::DummyView)
                .child(views::Button::new("Test", |siv| {
                    let c = get_change(siv);
-                   press_test(siv, &c, "main", &c.main_rtsp_path)
+                   press_test(siv, &c, "main", &c.rtsp_paths[0])
                })))
         .child("sub_rtsp_path", views::LinearLayout::horizontal()
                .child(views::EditView::new().with_id("sub_rtsp_path").full_width())
                .child(views::DummyView)
                .child(views::Button::new("Test", |siv| {
                    let c = get_change(siv);
-                   press_test(siv, &c, "sub", &c.sub_rtsp_path)
+                   press_test(siv, &c, "sub", &c.rtsp_paths[1])
                })))
         .min_height(8);
     let layout = views::LinearLayout::vertical()
@@ -214,20 +224,39 @@ fn edit_camera_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv
         .child(views::TextArea::new().with_id("description").min_height(3))
         .full_width();
     let mut dialog = views::Dialog::around(layout);
-    let dialog = if let Some(id) = *item {
+    let dialog = if let Some(camera_id) = *item {
         let l = db.lock();
-        let camera = l.cameras_by_id().get(&id).expect("missing camera");
+        let camera = l.cameras_by_id().get(&camera_id).expect("missing camera");
         dialog.find_id("uuid", |v: &mut views::TextView| v.set_content(camera.uuid.to_string()))
               .expect("missing TextView");
-        let bytes = camera.sample_file_bytes;
+        let mut main_rtsp_path = "";
+        let mut sub_rtsp_path = "";
+        let mut bytes = 0;
+        for (_, s) in l.streams_by_id() {
+            if s.camera_id != camera_id { continue; }
+            bytes += s.sample_file_bytes;
+            match s.type_ {
+                db::StreamType::MAIN => main_rtsp_path = &s.rtsp_path,
+                db::StreamType::SUB => sub_rtsp_path = &s.rtsp_path,
+            };
+        }
         let name = camera.short_name.clone();
-        for &(view_id, content) in &[("short_name", &camera.short_name),
-                                     ("host", &camera.host),
-                                     ("username", &camera.username),
-                                     ("password", &camera.password),
-                                     ("main_rtsp_path", &camera.main_rtsp_path),
-                                     ("sub_rtsp_path", &camera.sub_rtsp_path)] {
+        for &(view_id, content) in &[("short_name", &*camera.short_name),
+                                     ("host", &*camera.host),
+                                     ("username", &*camera.username),
+                                     ("password", &*camera.password),
+                                     ("main_rtsp_path", main_rtsp_path),
+                                     ("sub_rtsp_path", sub_rtsp_path)] {
             dialog.find_id(view_id, |v: &mut views::EditView| v.set_content(content.to_string()))
+                  .expect("missing EditView");
+        }
+        for s in l.streams_by_id().values() {
+            if s.camera_id != camera_id { continue };
+            let id = match s.type_ {
+                db::StreamType::MAIN => "main_rtsp_path",
+                db::StreamType::SUB  => "sub_rtsp_path",
+            };
+            dialog.find_id(id, |v: &mut views::EditView| v.set_content(s.rtsp_path.to_string()))
                   .expect("missing EditView");
         }
         dialog.find_id("description",
@@ -237,12 +266,12 @@ fn edit_camera_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv
               .button("Edit", {
                   let db = db.clone();
                   let dir = dir.clone();
-                  move |s| press_edit(s, &db, &dir, Some(id))
+                  move |s| press_edit(s, &db, &dir, Some(camera_id))
               })
               .button("Delete", {
                   let db = db.clone();
                   let dir = dir.clone();
-                  move |s| press_delete(s, &db, &dir, id, name.clone(), bytes)
+                  move |s| press_delete(s, &db, &dir, camera_id, name.clone(), bytes)
               })
     } else {
         dialog.title("Add camera")

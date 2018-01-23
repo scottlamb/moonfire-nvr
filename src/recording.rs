@@ -354,7 +354,7 @@ impl SampleIndexEncoder {
 /// Used by the `Mp4FileBuilder` class to splice together recordings into a single virtual .mp4.
 #[derive(Debug)]
 pub struct Segment {
-    pub camera_id: i32,
+    pub stream_id: i32,
     pub recording_id: i32,
     pub start: Time,
 
@@ -381,8 +381,8 @@ impl Segment {
     pub fn new(db: &db::LockedDatabase,
                recording: &db::ListRecordingsRow,
                desired_range_90k: Range<i32>) -> Result<Segment, Error> {
-        let mut self_ = Segment{
-            camera_id: recording.camera_id,
+        let mut self_ = Segment {
+            stream_id: recording.stream_id,
             recording_id: recording.id,
             start: recording.start,
             begin: None,
@@ -413,7 +413,7 @@ impl Segment {
         // Slow path. Need to iterate through the index.
         trace!("recording::Segment::new slow path, desired_range_90k={:?}, recording={:#?}",
                self_.desired_range_90k, recording);
-        db.with_recording_playback(self_.camera_id, self_.recording_id, |playback| {
+        db.with_recording_playback(self_.stream_id, self_.recording_id, |playback| {
             let mut begin = Box::new(SampleIndexIterator::new());
             let data = &(&playback).video_index;
             let mut it = SampleIndexIterator::new();
@@ -481,7 +481,7 @@ impl Segment {
     pub fn foreach<F>(&self, playback: &db::RecordingPlayback, mut f: F) -> Result<(), Error>
     where F: FnMut(&SampleIndexIterator) -> Result<(), Error> {
         trace!("foreach on recording {}/{}: {} frames, actual_start_90k: {}",
-              self.camera_id, self.recording_id, self.frames, self.actual_start_90k());
+              self.stream_id, self.recording_id, self.frames, self.actual_start_90k());
         let data = &(&playback).video_index;
         let mut it = match self.begin {
             Some(ref b) => **b,
@@ -490,11 +490,11 @@ impl Segment {
         if it.uninitialized() {
             if !it.next(data)? {
                 return Err(Error::new(format!("recording {}/{}: no frames",
-                                              self.camera_id, self.recording_id)));
+                                              self.stream_id, self.recording_id)));
             }
             if !it.is_key() {
                 return Err(Error::new(format!("recording {}/{}: doesn't start with key frame",
-                                              self.camera_id, self.recording_id)));
+                                              self.stream_id, self.recording_id)));
             }
         }
         let mut have_frame = true;
@@ -502,7 +502,7 @@ impl Segment {
         for i in 0 .. self.frames {
             if !have_frame {
                 return Err(Error::new(format!("recording {}/{}: expected {} frames, found only {}",
-                                              self.camera_id, self.recording_id, self.frames,
+                                              self.stream_id, self.recording_id, self.frames,
                                               i+1)));
             }
             if it.is_key() {
@@ -510,7 +510,7 @@ impl Segment {
                 if key_frame > self.key_frames {
                     return Err(Error::new(format!(
                         "recording {}/{}: more than expected {} key frames",
-                        self.camera_id, self.recording_id, self.key_frames)));
+                        self.stream_id, self.recording_id, self.key_frames)));
                 }
             }
 
@@ -522,7 +522,7 @@ impl Segment {
         }
         if key_frame < self.key_frames {
             return Err(Error::new(format!("recording {}/{}: expected {} key frames, found only {}",
-                                          self.camera_id, self.recording_id, self.key_frames,
+                                          self.stream_id, self.recording_id, self.key_frames,
                                           key_frame)));
         }
         Ok(())
@@ -656,7 +656,7 @@ mod tests {
     fn get_frames<F, T>(db: &db::Database, segment: &Segment, f: F) -> Vec<T>
     where F: Fn(&SampleIndexIterator) -> T {
         let mut v = Vec::new();
-        db.lock().with_recording_playback(segment.camera_id, segment.recording_id, |playback| {
+        db.lock().with_recording_playback(segment.stream_id, segment.recording_id, |playback| {
             segment.foreach(playback, |it| { v.push(f(it)); Ok(()) })
         }).unwrap();
         v

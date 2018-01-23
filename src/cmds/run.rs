@@ -98,18 +98,21 @@ pub fn run() -> Result<(), Error> {
         &args.flag_db_dir,
         if args.flag_read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
     let db = Arc::new(db::Database::new(conn).unwrap());
+
+    // TODO: multiple sample file dirs.
     let dir = dir::SampleFileDir::new(&args.flag_sample_file_dir, db.clone()).unwrap();
     info!("Database is loaded.");
 
     let s = web::Service::new(db.clone(), dir.clone(), Some(&args.flag_ui_dir), resolve_zone())?;
 
-    // Start a streamer for each camera.
+    // Start a streamer for each stream.
+    // TODO: enabled only.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));
     let mut streamers = Vec::new();
     let syncer = if !args.flag_read_only {
         let (syncer_channel, syncer_join) = dir::start_syncer(dir.clone()).unwrap();
         let l = db.lock();
-        let cameras = l.cameras_by_id().len();
+        let streams = l.streams_by_id().len();
         let env = streamer::Environment{
             db: &db,
             dir: &dir,
@@ -117,12 +120,13 @@ pub fn run() -> Result<(), Error> {
             opener: &*stream::FFMPEG,
             shutdown: &shutdown_streamers,
         };
-        for (i, (id, camera)) in l.cameras_by_id().iter().enumerate() {
-            let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / cameras as i64;
+        for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
+            let camera = l.cameras_by_id().get(&stream.camera_id).unwrap();
+            let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let mut streamer = streamer::Streamer::new(&env, syncer_channel.clone(), *id, camera,
-                                                       rotate_offset_sec,
+                                                       stream, rotate_offset_sec,
                                                        streamer::ROTATE_INTERVAL_SEC);
-            let name = format!("stream-{}", streamer.short_name());
+            let name = format!("s-{}", streamer.short_name());
             streamers.push(thread::Builder::new().name(name).spawn(move|| {
                 streamer.run();
             }).expect("can't create thread"));

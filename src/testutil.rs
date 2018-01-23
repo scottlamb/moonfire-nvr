@@ -45,6 +45,7 @@ static INIT: sync::Once = sync::ONCE_INIT;
 
 /// id of the camera created by `TestDb::new` below.
 pub const TEST_CAMERA_ID: i32 = 1;
+pub const TEST_STREAM_ID: i32 = 1;
 
 /// Performs global initialization for tests.
 ///    * set up logging. (Note the output can be confusing unless `RUST_TEST_THREADS=1` is set in
@@ -89,12 +90,14 @@ impl TestDb {
                 host: "test-camera".to_owned(),
                 username: "foo".to_owned(),
                 password: "bar".to_owned(),
-                main_rtsp_path: "/main".to_owned(),
-                sub_rtsp_path: "/sub".to_owned(),
+                rtsp_paths: [
+                    "/main".to_owned(),
+                    "/sub".to_owned(),
+                ],
             }).unwrap());
             test_camera_uuid = l.cameras_by_id().get(&TEST_CAMERA_ID).unwrap().uuid;
             let mut tx = l.tx().unwrap();
-            tx.update_retention(TEST_CAMERA_ID, 1048576).unwrap();
+            tx.update_retention(TEST_STREAM_ID, 1048576).unwrap();
             tx.commit().unwrap();
         }
         let path = tmpdir.path().to_str().unwrap().to_owned();
@@ -121,7 +124,7 @@ impl TestDb {
             tx.bypass_reservation_for_testing = true;
             const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
             row_id = tx.insert_recording(&db::RecordingToInsert{
-                camera_id: TEST_CAMERA_ID,
+                stream_id: TEST_STREAM_ID,
                 sample_file_bytes: encoder.sample_file_bytes,
                 time: START_TIME ..
                       START_TIME + recording::Duration(encoder.total_duration_90k as i64),
@@ -138,7 +141,7 @@ impl TestDb {
             tx.commit().unwrap();
         }
         let mut row = None;
-        db.list_recordings_by_id(TEST_CAMERA_ID, row_id .. row_id + 1,
+        db.list_recordings_by_id(TEST_STREAM_ID, row_id .. row_id + 1,
                                    |r| { row = Some(r); Ok(()) }).unwrap();
         row.unwrap()
     }
@@ -155,7 +158,7 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
     const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
     const DURATION: recording::Duration = recording::Duration(5399985);
     let mut recording = db::RecordingToInsert{
-        camera_id: TEST_CAMERA_ID,
+        stream_id: TEST_STREAM_ID,
         sample_file_bytes: 30104460,
         flags: 0,
         time: START_TIME .. (START_TIME + DURATION),

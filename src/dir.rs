@@ -254,7 +254,7 @@ pub fn start_syncer(dir: Arc<SampleFileDir>)
 }
 
 pub struct NewLimit {
-    pub camera_id: i32,
+    pub stream_id: i32,
     pub limit: i64,
 }
 
@@ -272,30 +272,30 @@ pub fn lower_retention(dir: Arc<SampleFileDir>, limits: &[NewLimit]) -> Result<(
         let mut to_delete = Vec::new();
         for l in limits {
             let before = to_delete.len();
-            let camera = db.cameras_by_id().get(&l.camera_id)
-                           .ok_or_else(|| Error::new(format!("no such camera {}", l.camera_id)))?;
-            if l.limit >= camera.sample_file_bytes { continue }
-            get_rows_to_delete(db, l.camera_id, camera, camera.retain_bytes - l.limit,
+            let stream = db.streams_by_id().get(&l.stream_id)
+                           .ok_or_else(|| Error::new(format!("no such stream {}", l.stream_id)))?;
+            if l.limit >= stream.sample_file_bytes { continue }
+            get_rows_to_delete(db, l.stream_id, stream, stream.retain_bytes - l.limit,
                                &mut to_delete)?;
-            info!("camera {}, {}->{}, deleting {} rows", camera.short_name,
-                  camera.sample_file_bytes, l.limit, to_delete.len() - before);
+            info!("stream {}, {}->{}, deleting {} rows", stream.id,
+                  stream.sample_file_bytes, l.limit, to_delete.len() - before);
         }
         Ok(to_delete)
     })
 }
 
-/// Gets rows to delete to bring a camera's disk usage within bounds.
-fn get_rows_to_delete(db: &db::LockedDatabase, camera_id: i32,
-                      camera: &db::Camera, extra_bytes_needed: i64,
+/// Gets rows to delete to bring a stream's disk usage within bounds.
+fn get_rows_to_delete(db: &db::LockedDatabase, stream_id: i32,
+                      stream: &db::Stream, extra_bytes_needed: i64,
                       to_delete: &mut Vec<db::ListOldestSampleFilesRow>) -> Result<(), Error> {
-    let bytes_needed = camera.sample_file_bytes + extra_bytes_needed - camera.retain_bytes;
+    let bytes_needed = stream.sample_file_bytes + extra_bytes_needed - stream.retain_bytes;
     let mut bytes_to_delete = 0;
     if bytes_needed <= 0 {
-        debug!("{}: have remaining quota of {}", camera.short_name, -bytes_needed);
+        debug!("{}: have remaining quota of {}", stream.id, -bytes_needed);
         return Ok(());
     }
     let mut n = 0;
-    db.list_oldest_sample_files(camera_id, |row| {
+    db.list_oldest_sample_files(stream_id, |row| {
         bytes_to_delete += row.sample_file_bytes as i64;
         to_delete.push(row);
         n += 1;
@@ -303,10 +303,10 @@ fn get_rows_to_delete(db: &db::LockedDatabase, camera_id: i32,
     })?;
     if bytes_needed > bytes_to_delete {
         return Err(Error::new(format!("{}: couldn't find enough files to delete: {} left.",
-                                      camera.short_name, bytes_needed)));
+                                      stream.id, bytes_needed)));
     }
     info!("{}: deleting {} bytes in {} recordings ({} bytes needed)",
-          camera.short_name, bytes_to_delete, n, bytes_needed);
+          stream.id, bytes_to_delete, n, bytes_needed);
     Ok(())
 }
 
@@ -343,12 +343,12 @@ impl Syncer {
         }
     }
 
-    /// Rotates files for all cameras and deletes stale reserved uuids from previous runs.
+    /// Rotates files for all streams and deletes stale reserved uuids from previous runs.
     fn initial_rotation(&mut self) -> Result<(), Error> {
         self.do_rotation(|db| {
             let mut to_delete = Vec::new();
-            for (camera_id, camera) in db.cameras_by_id() {
-                get_rows_to_delete(&db, *camera_id, camera, 0, &mut to_delete)?;
+            for (stream_id, stream) in db.streams_by_id() {
+                get_rows_to_delete(&db, *stream_id, stream, 0, &mut to_delete)?;
             }
             Ok(to_delete)
         })
@@ -389,7 +389,7 @@ impl Syncer {
     fn save(&mut self, recording: db::RecordingToInsert, f: fs::File) {
         if let Err(e) = self.save_helper(&recording, f) {
             error!("camera {}: will discard recording {} due to error while saving: {}",
-                   recording.camera_id, recording.sample_file_uuid, e);
+                   recording.stream_id, recording.sample_file_uuid, e);
             self.to_unlink.push(recording.sample_file_uuid);
             return;
         }
@@ -416,10 +416,10 @@ impl Syncer {
         let mut db = self.dir.db.lock();
         let mut new_next_uuid = l.next_uuid;
         {
-            let camera =
-                db.cameras_by_id().get(&recording.camera_id)
-                  .ok_or_else(|| Error::new(format!("no such camera {}", recording.camera_id)))?;
-            get_rows_to_delete(&db, recording.camera_id, camera,
+            let stream =
+                db.streams_by_id().get(&recording.stream_id)
+                  .ok_or_else(|| Error::new(format!("no such stream {}", recording.stream_id)))?;
+            get_rows_to_delete(&db, recording.stream_id, stream,
                                recording.sample_file_bytes as i64, &mut to_delete)?;
         }
         let mut tx = db.tx()?;
@@ -490,7 +490,7 @@ struct InnerWriter<'a> {
 
     adjuster: ClockAdjuster,
 
-    camera_id: i32,
+    stream_id: i32,
     video_sample_entry_id: i32,
     run_offset: i32,
 
@@ -567,20 +567,20 @@ pub struct PreviousWriter {
 
 impl<'a> Writer<'a> {
     /// Opens the writer; for use by `SampleFileDir` (which should supply `f`).
-    fn open(f: fs::File, uuid: Uuid, prev: Option<PreviousWriter>, camera_id: i32,
+    fn open(f: fs::File, uuid: Uuid, prev: Option<PreviousWriter>, stream_id: i32,
             video_sample_entry_id: i32, syncer_channel: &'a SyncerChannel) -> Result<Self, Error> {
         Ok(Writer(Some(InnerWriter{
-            syncer_channel: syncer_channel,
-            f: f,
+            syncer_channel,
+            f,
             index: recording::SampleIndexEncoder::new(),
-            uuid: uuid,
+            uuid,
             corrupt: false,
             hasher: hash::Hasher::new(hash::MessageDigest::sha1())?,
             prev_end: prev.map(|p| p.end_time),
             local_start: recording::Time(i64::max_value()),
             adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
-            camera_id: camera_id,
-            video_sample_entry_id: video_sample_entry_id,
+            stream_id,
+            video_sample_entry_id,
             run_offset: prev.map(|p| p.run_offset + 1).unwrap_or(0),
             unflushed_sample: None,
         })))
@@ -663,7 +663,7 @@ impl<'a> InnerWriter<'a> {
                     else { 0 };
         let local_start_delta = self.local_start - start;
         let recording = db::RecordingToInsert{
-            camera_id: self.camera_id,
+            stream_id: self.stream_id,
             sample_file_bytes: self.index.sample_file_bytes,
             time: start .. end,
             local_time_delta: local_start_delta,

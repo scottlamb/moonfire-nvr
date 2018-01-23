@@ -21,6 +21,8 @@ import moment from 'moment-timezone';
 
 const apiUrl = '/api/';
 
+const allStreamTypes = ['main', 'sub'];
+
 // IANA timezone name.
 let zone = null;
 
@@ -35,7 +37,8 @@ let selectedRange = {
     singleDateStr: null, // if startDateStr===endDateStr, that value, otherwise null
 };
 
-// Cameras is a dictionary as retrieved from apiUrl + some extra props:
+// Cameras is a dictionary as retrieved from apiUrl + some extra props within
+// the streams dicts:
 // * "enabled" is a boolean indicating if the camera should be displayed and
 //   if it should be used to constrain the datepickers.
 // * "recordingsUrl" is null or the currently fetched/fetching .../recordings url.
@@ -62,8 +65,8 @@ function formatTime(ts90k) {
   return m.format('YYYY-MM-DDTHH:mm:ss:' + String(100000 + frac).substr(1) + 'Z');
 }
 
-function onSelectVideo(camera, range, recording) {
-  let url = apiUrl + 'cameras/' + camera.uuid + '/view.mp4?s=' + recording.startId;
+function onSelectVideo(camera, streamType, range, recording) {
+  let url = apiUrl + 'cameras/' + camera.uuid + '/' + streamType + '/view.mp4?s=' + recording.startId;
   if (recording.endId !== undefined) {
     url += '-' + recording.endId;
   }
@@ -100,30 +103,31 @@ function onSelectVideo(camera, range, recording) {
     formattedEnd = formattedEnd.substr(timePos);
   }
   dialog.dialog({
-      title: camera.shortName + ", " + formattedStart + " to " + formattedEnd,
+      title: camera.shortName + " " + streamType + ", " + formattedStart + " to " + formattedEnd,
       width: recording.videoSampleEntryWidth / 4,
       close: function() { dialog.remove(); },
   });
   video.attr("src", url);
 }
 
-function formatRecordings(camera) {
-  let tbody = $("#tab-" + camera.uuid);
+function formatRecordings(camera, streamType) {
+  let tbody = $("#tab-" + camera.uuid + "-" + streamType);
   $(".loading", tbody).hide();
   $(".r", tbody).remove();
   const frameRateFmt = new Intl.NumberFormat([], {maximumFractionDigits: 0});
   const sizeFmt = new Intl.NumberFormat([], {maximumFractionDigits: 1});
   const trim = $("#trim").prop("checked");
-  for (let recording of camera.recordingsData.recordings) {
+  const stream = camera.streams[streamType];
+  for (const recording of stream.recordingsData.recordings) {
     const duration = (recording.endTime90k - recording.startTime90k) / 90000;
     let row = $('<tr class="r"/>');
-    const startTime90k = trim && recording.startTime90k < camera.recordingsRange.startTime90k
-        ? camera.recordingsRange.startTime90k : recording.startTime90k;
-    const endTime90k = trim && recording.endTime90k > camera.recordingsRange.endTime90k
-        ? camera.recordingsRange.endTime90k : recording.endTime90k;
+    const startTime90k = trim && recording.startTime90k < stream.recordingsRange.startTime90k
+        ? stream.recordingsRange.startTime90k : recording.startTime90k;
+    const endTime90k = trim && recording.endTime90k > stream.recordingsRange.endTime90k
+        ? stream.recordingsRange.endTime90k : recording.endTime90k;
     let formattedStart = formatTime(startTime90k);
     let formattedEnd = formatTime(endTime90k);
-    const singleDateStr = camera.recordingsRange.singleDateStr;
+    const singleDateStr = stream.recordingsRange.singleDateStr;
     if (singleDateStr !== null && formattedStart.startsWith(singleDateStr)) {
       formattedStart = formattedStart.substr(11);
     }
@@ -137,7 +141,7 @@ function formatRecordings(camera) {
         $("<td/>").text(frameRateFmt.format(recording.videoSamples / duration)),
         $("<td/>").text(sizeFmt.format(recording.sampleFileBytes  / 1048576) + " MB"),
         $("<td/>").text(sizeFmt.format(recording.sampleFileBytes / duration * .000008) + " Mbps"));
-    row.on("click", function() { onSelectVideo(camera, camera.recordingsRange, recording); });
+    row.on("click", function() { onSelectVideo(camera, streamType, stream.recordingsRange, recording); });
     tbody.append(row);
   }
 };
@@ -156,33 +160,37 @@ function fetch() {
               formatTime(selectedRange.endTime90k));
   let split = $("#split").val();
   for (let camera of cameras) {
-    let url = apiUrl + 'cameras/' + camera.uuid + '/recordings?startTime90k=' +
-              selectedRange.startTime90k + '&endTime90k=' + selectedRange.endTime90k;
-    if (split !== '') {
-      url += '&split90k=' + split;
+    for (const streamType in camera.streams) {
+      let stream = camera.streams[streamType];
+      let url = apiUrl + 'cameras/' + camera.uuid + '/' + streamType + '/recordings?startTime90k=' +
+                selectedRange.startTime90k + '&endTime90k=' + selectedRange.endTime90k;
+      if (split !== '') {
+        url += '&split90k=' + split;
+      }
+      if (url === stream.recordingsUrl) {
+        continue;  // nothing to do.
+      }
+      console.log('url: ', url);
+      if (stream.recordingsReq !== null) {
+        stream.recordingsReq.abort();
+      }
+      let tbody = $("#tab-" + camera.uuid + "-" + streamType);
+      $(".r", tbody).remove();
+      $(".loading", tbody).show();
+      let r = req(url);
+      stream.recordingsUrl = url;
+      stream.recordingsRange = selectedRange;
+      stream.recordingsReq = r;
+      r.always(function() { stream.recordingsReq = null; });
+      r.then(function(data, status, req) {
+        // Sort recordings in descending order.
+        data.recordings.sort(function(a, b) { return b.startId - a.startId; });
+        stream.recordingsData = data;
+        formatRecordings(camera, streamType);
+      }).catch(function(data, status, err) {
+        console.log(url, ' load failed: ', status, ': ', err);
+      });
     }
-    if (url === camera.recordingsUrl) {
-      continue;  // nothing to do.
-    }
-    if (camera.recordingsReq !== null) {
-      camera.recordingsReq.abort();
-    }
-    let tbody = $("#tab-" + camera.uuid);
-    $(".r", tbody).remove();
-    $(".loading", tbody).show();
-    let r = req(url);
-    camera.recordingsUrl = url;
-    camera.recordingsRange = selectedRange;
-    camera.recordingsReq = r;
-    r.always(function() { camera.recordingsReq = null; });
-    r.then(function(data, status, req) {
-      // Sort recordings in descending order.
-      data.recordings.sort(function(a, b) { return b.startId - a.startId; });
-      camera.recordingsData = data;
-      formatRecordings(camera);
-    }).catch(function(data, status, err) {
-      console.log(url, ' load failed: ', status, ': ', err);
-    });
   }
 }
 
@@ -190,11 +198,14 @@ function fetch() {
 function setupCalendar() {
   let merged = {};
   for (const camera of cameras) {
-    if (!camera.enabled) {
-      continue;
-    }
-    for (const dateStr in camera.days) {
-      merged[dateStr] = true;
+    for (const streamType in camera.streams) {
+      const stream = camera.streams[streamType];
+      if (!stream.enabled) {
+        continue;
+      }
+      for (const dateStr in stream.days) {
+        merged[dateStr] = true;
+      }
     }
   }
   let minDateStr = '9999-99-99';
@@ -258,14 +269,16 @@ function setupCalendar() {
   }
 };
 
-function onCameraChange(event, camera) {
-  camera.enabled = event.target.checked;
-  if (camera.enabled) {
-    $("#tab-" + camera.uuid).show();
+function onStreamChange(event, camera, streamType) {
+  let stream = camera.streams[streamType];
+  stream.enabled = event.target.checked;
+  let id = "#tab-" + camera.uuid + "-" + streamType;
+  if (stream.enabled) {
+    $(id).show();
   } else {
-    $("#tab-" + camera.uuid).hide();
+    $(id).hide();
   }
-  console.log('Camera ', camera.shortName, camera.enabled ? 'enabled' : 'disabled');
+  console.log(camera.shortName + "/" + streamType, stream.enabled ? 'enabled' : 'disabled');
   setupCalendar();
 }
 
@@ -324,30 +337,53 @@ function onTimeChange(e, isEnd) {
 }
 
 function onReceivedCameras(data) {
-  let fieldset = $("#cameras");
+  let camtable = $("#cameras");
   if (data.cameras.length === 0) {
     return;
   }
+
+  // Add a header row.
+  let hdr = $('<tr/>').append($('<th/>'));
+  for (const streamType of allStreamTypes) {
+    hdr.append($('<th/>').text(streamType));
+  }
+  camtable.append(hdr);
+
   var reqs = [];
   let videos = $("#videos");
   for (let camera of data.cameras) {
-    const id = "cam-" + camera.uuid;
-    let checkBox = $('<input type="checkbox" checked>').attr("name", id).attr("id", id);
-    checkBox.change(function(event) { onCameraChange(event, camera); });
-    fieldset.append(checkBox,
-                    $("<label/>").attr("for", id).text(camera.shortName),
-                    $("<br/>"));
-    let tab = $("<tbody>").attr("id", "tab-" + camera.uuid);
-    tab.append(
-        $('<tr class="name">').append($('<th colspan=6/>').text(camera.shortName)),
-        $('<tr class="hdr"><th>start</th><th>end</th><th>resolution</th><th>fps</th><th>size</th><th>bitrate</th></tr>'),
-        $('<tr class="loading"><td colspan=6>loading...</td></tr>'));
-    videos.append(tab);
-    camera.enabled = true;
-    camera.recordingsUrl = null;
-    camera.recordingsRange = null;
-    camera.recordingsData = null;
-    camera.recordingsReq = null;
+    let row = $('<tr/>').append($('<td>').text(camera.shortName));
+    let anyCheckedForCam = false;
+    for (const streamType of allStreamTypes) {
+      let stream = camera.streams[streamType];
+      if (stream === undefined) {
+        row.append('<td/>');
+        continue;
+      }
+      const id = "cam-" + camera.uuid + "-" + streamType;
+      let checkBox = $('<input type="checkbox">').attr("name", id).attr("id", id);
+      checkBox.change(function(event) { onStreamChange(event, camera, streamType); });
+      row.append($("<td/>").append(checkBox));
+      let tab = $("<tbody>").attr("id", "tab-" + camera.uuid + "-" + streamType);
+      tab.append(
+          $('<tr class="name">').append($('<th colspan=6/>').text(camera.shortName + " " + streamType)),
+          $('<tr class="hdr"><th>start</th><th>end</th><th>resolution</th><th>fps</th><th>size</th><th>bitrate</th></tr>'),
+          $('<tr class="loading"><td colspan=6>loading...</td></tr>'));
+      videos.append(tab);
+      stream.recordingsUrl = null;
+      stream.recordingsRange = null;
+      stream.recordingsData = null;
+      stream.recordingsReq = null;
+      stream.enabled = false;
+      if (!anyCheckedForCam) {
+        checkBox.attr("checked", "checked");
+        anyCheckedForCam = true;
+        stream.enabled = true;
+      } else {
+        tab.hide();
+      }
+    }
+    camtable.append(row);
   }
   $("#end-date-same").change(function(e) { setupCalendar(); });
   $("#end-date-other").change(function(e) { setupCalendar(); });
@@ -365,8 +401,11 @@ function onReceivedCameras(data) {
     // reformat the tables.
     let newTrim = e.target.checked;
     for (camera of cameras) {
-      if (camera.recordingsData !== null) {
-        formatRecordings(camera);
+      for (streamType in camera.streams) {
+        const stream = camera.streams[streamType];
+        if (stream.recordingsData !== null) {
+          formatRecordings(camera, streamType);
+        }
       }
     }
   });

@@ -144,7 +144,8 @@ pub fn run() -> Result<(), Error> {
                 move |siv, item| item(&db, &dir, siv)
             })
             .item("Edit cameras".to_string(), cameras::add_dialog)
-            .item("Edit retention".to_string(), retention::add_dialog))
+            .item("Edit retention".to_string(), retention::add_dialog)
+            )
         .button("Quit", |siv| siv.quit())
         .title("Main menu"));
 

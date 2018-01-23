@@ -65,6 +65,7 @@ use std::cell::RefCell;
 use std::cmp;
 use std::io::Write;
 use std::ops::Range;
+use std::mem;
 use std::str;
 use std::string::String;
 use std::sync::Arc;
@@ -73,7 +74,7 @@ use time;
 use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
-pub const EXPECTED_VERSION: i32 = 1;
+pub const EXPECTED_VERSION: i32 = 2;
 
 const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
     select
@@ -110,10 +111,10 @@ const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &'static str = r#"
 "#;
 
 const INSERT_RECORDING_SQL: &'static str = r#"
-    insert into recording (composite_id, camera_id, run_offset, flags, sample_file_bytes,
+    insert into recording (composite_id, stream_id, run_offset, flags, sample_file_bytes,
                            start_time_90k, duration_90k, local_time_delta_90k, video_samples,
                            video_sync_samples, video_sample_entry_id)
-                   values (:composite_id, :camera_id, :run_offset, :flags, :sample_file_bytes,
+                   values (:composite_id, :stream_id, :run_offset, :flags, :sample_file_bytes,
                            :start_time_90k, :duration_90k, :local_time_delta_90k,
                            :video_samples, :video_sync_samples, :video_sample_entry_id)
 "#;
@@ -125,7 +126,7 @@ const INSERT_RECORDING_PLAYBACK_SQL: &'static str = r#"
 "#;
 
 const UPDATE_NEXT_RECORDING_ID_SQL: &'static str =
-    "update camera set next_recording_id = :next_recording_id where id = :camera_id";
+    "update stream set next_recording_id = :next_recording_id where id = :stream_id";
 
 const LIST_OLDEST_SAMPLE_FILES_SQL: &'static str = r#"
     select
@@ -152,24 +153,24 @@ const DELETE_RECORDING_PLAYBACK_SQL: &'static str = r#"
     delete from recording_playback where composite_id = :composite_id
 "#;
 
-const CAMERA_MIN_START_SQL: &'static str = r#"
+const STREAM_MIN_START_SQL: &'static str = r#"
     select
       start_time_90k
     from
       recording
     where
-      camera_id = :camera_id
+      stream_id = :stream_id
     order by start_time_90k limit 1
 "#;
 
-const CAMERA_MAX_START_SQL: &'static str = r#"
+const STREAM_MAX_START_SQL: &'static str = r#"
     select
       start_time_90k,
       duration_90k
     from
       recording
     where
-      camera_id = :camera_id
+      stream_id = :stream_id
     order by start_time_90k desc;
 "#;
 
@@ -236,7 +237,7 @@ pub struct ListRecordingsRow {
     pub start: recording::Time,
     pub video_sample_entry: Arc<VideoSampleEntry>,
 
-    pub camera_id: i32,
+    pub stream_id: i32,
     pub id: i32,
 
     /// This is a recording::Duration, but a single recording's duration fits into an i32.
@@ -257,7 +258,7 @@ pub struct ListAggregatedRecordingsRow {
     pub video_sync_samples: i64,
     pub sample_file_bytes: i64,
     pub video_sample_entry: Arc<VideoSampleEntry>,
-    pub camera_id: i32,
+    pub stream_id: i32,
     pub flags: i32,
     pub run_start_id: i32,
 }
@@ -286,7 +287,7 @@ pub enum RecordingFlags {
 /// A recording to pass to `insert_recording`.
 #[derive(Debug)]
 pub struct RecordingToInsert {
-    pub camera_id: i32,
+    pub stream_id: i32,
     pub run_offset: i32,
     pub flags: i32,
     pub sample_file_bytes: i32,
@@ -304,7 +305,7 @@ pub struct RecordingToInsert {
 #[derive(Debug)]
 pub struct ListOldestSampleFilesRow {
     pub uuid: Uuid,
-    pub camera_id: i32,
+    pub stream_id: i32,
     pub recording_id: i32,
     pub time: Range<recording::Time>,
     pub sample_file_bytes: i32,
@@ -312,11 +313,11 @@ pub struct ListOldestSampleFilesRow {
 
 /// A calendar day in `YYYY-mm-dd` format.
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct CameraDayKey([u8; 10]);
+pub struct StreamDayKey([u8; 10]);
 
-impl CameraDayKey {
+impl StreamDayKey {
     fn new(tm: time::Tm) -> Result<Self, Error> {
-        let mut s = CameraDayKey([0u8; 10]);
+        let mut s = StreamDayKey([0u8; 10]);
         write!(&mut s.0[..], "{}", tm.strftime("%Y-%m-%d")?)?;
         Ok(s)
     }
@@ -335,13 +336,13 @@ impl CameraDayKey {
     }
 }
 
-impl AsRef<str> for CameraDayKey {
+impl AsRef<str> for StreamDayKey {
     fn as_ref(&self) -> &str { str::from_utf8(&self.0[..]).expect("days are always UTF-8") }
 }
 
 /// In-memory state about a particular camera on a particular day.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct CameraDayValue {
+pub struct StreamDayValue {
     /// The number of recordings that overlap with this day. Note that `adjust_day` automatically
     /// prunes days with 0 recordings.
     pub recordings: i64,
@@ -362,11 +363,53 @@ pub struct Camera {
     pub host: String,
     pub username: String,
     pub password: String,
-    pub main_rtsp_path: String,
-    pub sub_rtsp_path: String,
+    pub streams: [Option<i32>; 2],
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum StreamType { MAIN, SUB }
+
+impl StreamType {
+    pub fn from_index(i: usize) -> Option<Self> {
+        match i {
+            0 => Some(StreamType::MAIN),
+            1 => Some(StreamType::SUB),
+            _ => None,
+        }
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            StreamType::MAIN => 0,
+            StreamType::SUB => 1,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StreamType::MAIN => "main",
+            StreamType::SUB => "sub",
+        }
+    }
+
+    pub fn parse(type_: &str) -> Option<Self> {
+        match type_ {
+            "main" => Some(StreamType::MAIN),
+            "sub" => Some(StreamType::SUB),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Stream {
+    pub id: i32,
+    pub camera_id: i32,
+    pub type_: StreamType,
+    pub rtsp_path: String,
     pub retain_bytes: i64,
 
-    /// The time range of recorded data associated with this camera (minimum start time and maximum
+    /// The time range of recorded data associated with this stream (minimum start time and maximum
     /// end time). `None` iff there are no recordings for this camera.
     pub range: Option<Range<recording::Time>>,
     pub sample_file_bytes: i64,
@@ -376,8 +419,7 @@ pub struct Camera {
     pub duration: recording::Duration,
 
     /// Mapping of calendar day (in the server's time zone) to a summary of recordings on that day.
-    pub days: BTreeMap<CameraDayKey, CameraDayValue>,
-
+    pub days: BTreeMap<StreamDayKey, StreamDayValue>,
     next_recording_id: i32,
 }
 
@@ -389,14 +431,13 @@ pub struct CameraChange {
     pub host: String,
     pub username: String,
     pub password: String,
-    pub main_rtsp_path: String,
-    pub sub_rtsp_path: String,
+    pub rtsp_paths: [String; 2],
 }
 
 /// Adds non-zero `delta` to the day represented by `day` in the map `m`.
 /// Inserts a map entry if absent; removes the entry if it has 0 entries on exit.
-fn adjust_day(day: CameraDayKey, delta: CameraDayValue,
-              m: &mut BTreeMap<CameraDayKey, CameraDayValue>) {
+fn adjust_day(day: StreamDayKey, delta: StreamDayValue,
+              m: &mut BTreeMap<StreamDayKey, StreamDayValue>) {
     use ::std::collections::btree_map::Entry;
     match m.entry(day) {
         Entry::Vacant(e) => { e.insert(delta); },
@@ -421,10 +462,10 @@ fn adjust_day(day: CameraDayKey, delta: CameraDayValue,
 /// This function swallows/logs date formatting errors because they shouldn't happen and there's
 /// not much that can be done about them. (The database operation has already gone through.)
 fn adjust_days(r: Range<recording::Time>, sign: i64,
-               m: &mut BTreeMap<CameraDayKey, CameraDayValue>) {
+               m: &mut BTreeMap<StreamDayKey, StreamDayValue>) {
     // Find first day key.
     let mut my_tm = time::at(time::Timespec{sec: r.start.unix_seconds(), nsec: 0});
-    let day = match CameraDayKey::new(my_tm) {
+    let day = match StreamDayKey::new(my_tm) {
         Ok(d) => d,
         Err(ref e) => {
             error!("Unable to fill first day key from {:?}: {}; will ignore.", my_tm, e);
@@ -443,7 +484,7 @@ fn adjust_days(r: Range<recording::Time>, sign: i64,
     let boundary_90k = boundary.sec * TIME_UNITS_PER_SEC;
 
     // Adjust the first day.
-    let first_day_delta = CameraDayValue{
+    let first_day_delta = StreamDayValue{
         recordings: sign,
         duration: recording::Duration(sign * (cmp::min(r.end.0, boundary_90k) - r.start.0)),
     };
@@ -456,21 +497,21 @@ fn adjust_days(r: Range<recording::Time>, sign: i64,
     // Fill day with the second day. This requires a normalized representation so recalculate.
     // (The C mktime(3) already normalized for us once, but .to_timespec() discarded that result.)
     let my_tm = time::at(boundary);
-    let day = match CameraDayKey::new(my_tm) {
+    let day = match StreamDayKey::new(my_tm) {
         Ok(d) => d,
         Err(ref e) => {
             error!("Unable to fill second day key from {:?}: {}; will ignore.", my_tm, e);
             return;
         }
     };
-    let second_day_delta = CameraDayValue{
+    let second_day_delta = StreamDayValue{
         recordings: sign,
         duration: recording::Duration(sign * (r.end.0 - boundary_90k)),
     };
     adjust_day(day, second_day_delta, m);
 }
 
-impl Camera {
+impl Stream {
     /// Adds a single recording with the given properties to the in-memory state.
     fn add_recording(&mut self, r: Range<recording::Time>, sample_file_bytes: i32) {
         self.range = Some(match self.range {
@@ -484,9 +525,10 @@ impl Camera {
 }
 
 /// Initializes the recordings associated with the given camera.
-fn init_recordings(conn: &mut rusqlite::Connection, camera_id: i32, camera: &mut Camera)
+fn init_recordings(conn: &mut rusqlite::Connection, stream_id: i32, camera: &Camera,
+                   stream: &mut Stream)
     -> Result<(), Error> {
-    info!("Loading recordings for camera {}", camera.short_name);
+    info!("Loading recordings for camera {} stream {:?}", camera.short_name, stream.type_);
     let mut stmt = conn.prepare(r#"
         select
           recording.start_time_90k,
@@ -495,19 +537,19 @@ fn init_recordings(conn: &mut rusqlite::Connection, camera_id: i32, camera: &mut
         from
           recording
         where
-          camera_id = :camera_id
+          stream_id = :stream_id
     "#)?;
-    let mut rows = stmt.query_named(&[(":camera_id", &camera_id)])?;
+    let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
     let mut i = 0;
     while let Some(row) = rows.next() {
         let row = row?;
         let start = recording::Time(row.get_checked(0)?);
         let duration = recording::Duration(row.get_checked(1)?);
         let bytes = row.get_checked(2)?;
-        camera.add_recording(start .. start + duration, bytes);
+        stream.add_recording(start .. start + duration, bytes);
         i += 1;
     }
-    info!("Loaded {} recordings for camera {}", i, camera.short_name);
+    info!("Loaded {} recordings for camera {} stream {:?}", i, camera.short_name, stream.type_);
     Ok(())
 }
 
@@ -523,6 +565,7 @@ pub struct LockedDatabase {
 #[derive(Debug)]
 struct State {
     cameras_by_id: BTreeMap<i32, Camera>,
+    streams_by_id: BTreeMap<i32, Stream>,
     cameras_by_uuid: BTreeMap<Uuid, i32>,
     video_sample_entries: BTreeMap<i32, Arc<VideoSampleEntry>>,
     list_recordings_by_time_sql: String,
@@ -533,7 +576,7 @@ struct State {
 /// be applied to the in-memory state on successful commit.
 pub struct Transaction<'a> {
     state: &'a mut State,
-    mods_by_camera: fnv::FnvHashMap<i32, CameraModification>,
+    mods_by_stream: fnv::FnvHashMap<i32, StreamModification>,
     tx: rusqlite::Transaction<'a>,
 
     /// True if due to an earlier error the transaction must be rolled back rather than committed.
@@ -548,8 +591,8 @@ pub struct Transaction<'a> {
     pub bypass_reservation_for_testing: bool,
 }
 
-/// A modification to be done to a `Camera` after a `Transaction` is committed.
-struct CameraModification {
+/// A modification to be done to a `Stream` after a `Transaction` is committed.
+struct StreamModification {
     /// Add this to `camera.duration`. Thus, positive values indicate a net addition;
     /// negative values indicate a net subtraction.
     duration: recording::Duration,
@@ -557,10 +600,10 @@ struct CameraModification {
     /// Add this to `camera.sample_file_bytes`.
     sample_file_bytes: i64,
 
-    /// Add this to `camera.days`.
-    days: BTreeMap<CameraDayKey, CameraDayValue>,
+    /// Add this to `stream.days`.
+    days: BTreeMap<StreamDayKey, StreamDayValue>,
 
-    /// Reset the Camera range to this value. This should be populated immediately prior to the
+    /// Reset the Stream range to this value. This should be populated immediately prior to the
     /// commit.
     range: Option<Range<recording::Time>>,
 
@@ -571,8 +614,8 @@ struct CameraModification {
     new_retain_bytes: Option<i64>,
 }
 
-fn composite_id(camera_id: i32, recording_id: i32) -> i64 {
-    (camera_id as i64) << 32 | recording_id as i64
+fn composite_id(stream_id: i32, recording_id: i32) -> i64 {
+    (stream_id as i64) << 32 | recording_id as i64
 }
 
 impl<'a> Transaction<'a> {
@@ -601,23 +644,23 @@ impl<'a> Transaction<'a> {
         self.check_must_rollback()?;
         self.must_rollback = true;
         for row in rows {
-            let composite_id = &composite_id(row.camera_id, row.recording_id);
+            let composite_id = &composite_id(row.stream_id, row.recording_id);
             let changes = del1.execute_named(&[(":composite_id", composite_id)])?;
             if changes != 1 {
                 return Err(Error::new(format!("no such recording {}/{} (uuid {})",
-                                              row.camera_id, row.recording_id, row.uuid)));
+                                              row.stream_id, row.recording_id, row.uuid)));
             }
             let changes = del2.execute_named(&[(":composite_id", composite_id)])?;
             if changes != 1 {
                 return Err(Error::new(format!("no such recording_playback {}/{} (uuid {})",
-                                              row.camera_id, row.recording_id, row.uuid)));
+                                              row.stream_id, row.recording_id, row.uuid)));
             }
             let uuid = &row.uuid.as_bytes()[..];
             insert.execute_named(&[
                 (":uuid", &uuid),
                 (":state", &(ReservationState::Deleting as i64))
             ])?;
-            let m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, row.camera_id);
+            let m = Transaction::get_mods_by_stream(&mut self.mods_by_stream, row.stream_id);
             m.duration -= row.time.end - row.time.start;
             m.sample_file_bytes -= row.sample_file_bytes as i64;
             adjust_days(row.time.clone(), -1, &mut m.days);
@@ -656,9 +699,10 @@ impl<'a> Transaction<'a> {
         }
 
         // Unreserve the sample file uuid and insert the recording row.
-        let cam = match self.state.cameras_by_id.get_mut(&r.camera_id) {
-            None => return Err(Error::new(format!("no such camera id {}", r.camera_id))),
-            Some(c) => c,
+        // TODO: var used?
+        let stream = match self.state.streams_by_id.get_mut(&r.stream_id) {
+            None => return Err(Error::new(format!("no such stream id {}", r.stream_id))),
+            Some(s) => s,
         };
         let uuid = &r.sample_file_uuid.as_bytes()[..];
         {
@@ -669,15 +713,15 @@ impl<'a> Transaction<'a> {
             }
         }
         self.must_rollback = true;
-        let m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, r.camera_id);
+        let m = Transaction::get_mods_by_stream(&mut self.mods_by_stream, r.stream_id);
         let recording_id;
         {
-            recording_id = m.new_next_recording_id.unwrap_or(cam.next_recording_id);
-            let composite_id = composite_id(r.camera_id, recording_id);
+            recording_id = m.new_next_recording_id.unwrap_or(stream.next_recording_id);
+            let composite_id = composite_id(r.stream_id, recording_id);
             let mut stmt = self.tx.prepare_cached(INSERT_RECORDING_SQL)?;
             stmt.execute_named(&[
                 (":composite_id", &composite_id),
-                (":camera_id", &(r.camera_id as i64)),
+                (":stream_id", &(r.stream_id as i64)),
                 (":run_offset", &r.run_offset),
                 (":flags", &r.flags),
                 (":sample_file_bytes", &r.sample_file_bytes),
@@ -699,7 +743,7 @@ impl<'a> Transaction<'a> {
             ])?;
             let mut stmt = self.tx.prepare_cached(UPDATE_NEXT_RECORDING_ID_SQL)?;
             stmt.execute_named(&[
-                (":camera_id", &(r.camera_id as i64)),
+                (":stream_id", &(r.stream_id as i64)),
                 (":next_recording_id", &m.new_next_recording_id),
             ])?;
         }
@@ -710,22 +754,22 @@ impl<'a> Transaction<'a> {
         Ok(recording_id)
     }
 
-    /// Updates the `retain_bytes` for the given camera to the specified limit.
+    /// Updates the `retain_bytes` for the given stream to the specified limit.
     /// Note this just resets the limit in the database; it's the caller's responsibility to ensure
     /// current usage is under the new limit if desired.
-    pub fn update_retention(&mut self, camera_id: i32, new_limit: i64) -> Result<(), Error> {
+    pub fn update_retention(&mut self, stream_id: i32, new_limit: i64) -> Result<(), Error> {
         if new_limit < 0 {
-            return Err(Error::new(format!("can't set limit for camera {} to {}; must be >= 0",
-                                          camera_id, new_limit)));
+            return Err(Error::new(format!("can't set limit for stream {} to {}; must be >= 0",
+                                          stream_id, new_limit)));
         }
         self.check_must_rollback()?;
         let mut stmt =
-            self.tx.prepare_cached("update camera set retain_bytes = :retain where id = :id")?;
-        let changes = stmt.execute_named(&[(":retain", &new_limit), (":id", &camera_id)])?;
+            self.tx.prepare_cached("update stream set retain_bytes = :retain where id = :id")?;
+        let changes = stmt.execute_named(&[(":retain", &new_limit), (":id", &stream_id)])?;
         if changes != 1 {
-            return Err(Error::new(format!("no such camera {}", camera_id)));
+            return Err(Error::new(format!("no such stream {}", stream_id)));
         }
-        let m = Transaction::get_mods_by_camera(&mut self.mods_by_camera, camera_id);
+        let m = Transaction::get_mods_by_stream(&mut self.mods_by_stream, stream_id);
         m.new_retain_bytes = Some(new_limit);
         Ok(())
     }
@@ -735,20 +779,20 @@ impl<'a> Transaction<'a> {
         self.check_must_rollback()?;
         self.precommit()?;
         self.tx.commit()?;
-        for (&camera_id, m) in &self.mods_by_camera {
-            let camera = self.state.cameras_by_id.get_mut(&camera_id)
-                                 .expect("modified camera must exist");
-            camera.duration += m.duration;
-            camera.sample_file_bytes += m.sample_file_bytes;
+        for (&stream_id, m) in &self.mods_by_stream {
+            let stream = self.state.streams_by_id.get_mut(&stream_id)
+                                                 .expect("modified stream must exist");
+            stream.duration += m.duration;
+            stream.sample_file_bytes += m.sample_file_bytes;
             for (k, v) in &m.days {
-                adjust_day(*k, *v, &mut camera.days);
+                adjust_day(*k, *v, &mut stream.days);
             }
-            camera.range = m.range.clone();
+            stream.range = m.range.clone();
             if let Some(id) = m.new_next_recording_id {
-                camera.next_recording_id = id;
+                stream.next_recording_id = id;
             }
             if let Some(b) = m.new_retain_bytes {
-                camera.retain_bytes = b;
+                stream.retain_bytes = b;
             }
         }
         Ok(())
@@ -762,11 +806,11 @@ impl<'a> Transaction<'a> {
         Ok(())
     }
 
-    /// Looks up an existing entry in `mods` for a given camera or makes+inserts an identity entry.
-    fn get_mods_by_camera(mods: &mut fnv::FnvHashMap<i32, CameraModification>, camera_id: i32)
-                          -> &mut CameraModification {
-        mods.entry(camera_id).or_insert_with(|| {
-            CameraModification{
+    /// Looks up an existing entry in `mods` for a given stream or makes+inserts an identity entry.
+    fn get_mods_by_stream(mods: &mut fnv::FnvHashMap<i32, StreamModification>, stream_id: i32)
+                          -> &mut StreamModification {
+        mods.entry(stream_id).or_insert_with(|| {
+            StreamModification{
                 duration: recording::Duration(0),
                 sample_file_bytes: 0,
                 range: None,
@@ -777,14 +821,14 @@ impl<'a> Transaction<'a> {
         })
     }
 
-    /// Fills the `range` of each `CameraModification`. This is done prior to commit so that if the
+    /// Fills the `range` of each `StreamModification`. This is done prior to commit so that if the
     /// commit succeeds, there's no possibility that the correct state can't be retrieved.
     fn precommit(&mut self) -> Result<(), Error> {
         // Recompute start and end times for each camera.
-        for (&camera_id, m) in &mut self.mods_by_camera {
+        for (&stream_id, m) in &mut self.mods_by_stream {
             // The minimum is straightforward, taking advantage of the start_time_90k index.
-            let mut stmt = self.tx.prepare_cached(CAMERA_MIN_START_SQL)?;
-            let mut rows = stmt.query_named(&[(":camera_id", &camera_id)])?;
+            let mut stmt = self.tx.prepare_cached(STREAM_MIN_START_SQL)?;
+            let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
             let min_start = match rows.next() {
                 Some(row) => recording::Time(row?.get_checked(0)?),
                 None => continue,  // no data; leave m.range alone.
@@ -794,8 +838,8 @@ impl<'a> Transaction<'a> {
             // straightforward because recordings could overlap. All recordings starting in the
             // last MAX_RECORDING_DURATION must be examined in order to take advantage of the
             // start_time_90k index.
-            let mut stmt = self.tx.prepare_cached(CAMERA_MAX_START_SQL)?;
-            let mut rows = stmt.query_named(&[(":camera_id", &camera_id)])?;
+            let mut stmt = self.tx.prepare_cached(STREAM_MAX_START_SQL)?;
+            let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
             let mut maxes_opt = None;
             while let Some(row) = rows.next() {
                 let row = row?;
@@ -814,8 +858,8 @@ impl<'a> Transaction<'a> {
             let max_end = match maxes_opt {
                 Some(Range{end: e, ..}) => e,
                 None => {
-                    return Err(Error::new(format!("missing max for camera {} which had min {}",
-                                                  camera_id, min_start)));
+                    return Err(Error::new(format!("missing max for stream {} which had min {}",
+                                                  stream_id, min_start)));
                 }
             };
             m.range = Some(min_start .. max_end);
@@ -824,9 +868,54 @@ impl<'a> Transaction<'a> {
     }
 }
 
+struct StreamInserter<'tx> {
+    tx: &'tx rusqlite::Transaction<'tx>,
+    stmt: rusqlite::Statement<'tx>,
+    new_streams: BTreeMap<i32, Stream>,
+}
+
+impl<'tx> StreamInserter<'tx> {
+    fn new(tx: &'tx rusqlite::Transaction) -> Result<Self, Error> {
+        let stmt = tx.prepare(r#"
+            insert into stream (camera_id, type, rtsp_path, retain_bytes, next_recording_id)
+                        values (:camera_id, :type, :rtsp_path, 0, 1)
+        "#)?;
+        Ok(StreamInserter {
+            tx,
+            stmt,
+            new_streams: BTreeMap::new(),
+        })
+    }
+
+    fn add(&mut self, camera_id: i32, type_: StreamType, rtsp_path: String) -> Result<(), Error> {
+        self.stmt.execute_named(&[
+            (":camera_id", &camera_id),
+            (":type", &type_.as_str()),
+            (":rtsp_path", &rtsp_path)
+        ])?;
+        let id = self.tx.last_insert_rowid() as i32;
+        self.new_streams.insert(id, Stream {
+            id,
+            type_,
+            camera_id,
+            rtsp_path,
+            retain_bytes: 0,
+            range: None,
+            sample_file_bytes: 0,
+            duration: recording::Duration(0),
+            days: BTreeMap::new(),
+            next_recording_id: 1,
+        });
+        Ok(())
+    }
+
+    fn streams(self) -> BTreeMap<i32, Stream> { self.new_streams }
+}
+
 impl LockedDatabase {
     /// Returns an immutable view of the cameras by id.
     pub fn cameras_by_id(&self) -> &BTreeMap<i32, Camera> { &self.state.cameras_by_id }
+    pub fn streams_by_id(&self) -> &BTreeMap<i32, Stream> { &self.state.streams_by_id }
 
     /// Returns an immutable view of the video sample entries.
     pub fn video_sample_entries(&self) -> btree_map::Values<i32, Arc<VideoSampleEntry>> {
@@ -840,7 +929,7 @@ impl LockedDatabase {
     pub fn tx(&mut self) -> Result<Transaction, Error> {
         Ok(Transaction{
             state: &mut self.state,
-            mods_by_camera: fnv::FnvHashMap::default(),
+            mods_by_stream: fnv::FnvHashMap::default(),
             tx: self.conn.transaction()?,
             must_rollback: false,
             bypass_reservation_for_testing: false,
@@ -857,30 +946,30 @@ impl LockedDatabase {
 
     /// Lists the specified recordings in ascending order by start time, passing them to a supplied
     /// function. Given that the function is called with the database lock held, it should be quick.
-    pub fn list_recordings_by_time<F>(&self, camera_id: i32, desired_time: Range<recording::Time>,
+    pub fn list_recordings_by_time<F>(&self, stream_id: i32, desired_time: Range<recording::Time>,
                                       f: F) -> Result<(), Error>
     where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
         let mut stmt = self.conn.prepare_cached(&self.state.list_recordings_by_time_sql)?;
         let rows = stmt.query_named(&[
-            (":camera_id", &camera_id),
+            (":stream_id", &stream_id),
             (":start_time_90k", &desired_time.start.0),
             (":end_time_90k", &desired_time.end.0)])?;
-        self.list_recordings_inner(camera_id, rows, f)
+        self.list_recordings_inner(stream_id, rows, f)
     }
 
     /// Lists the specified recordigs in ascending order by id.
-    pub fn list_recordings_by_id<F>(&self, camera_id: i32, desired_ids: Range<i32>, f: F)
+    pub fn list_recordings_by_id<F>(&self, stream_id: i32, desired_ids: Range<i32>, f: F)
                                     -> Result<(), Error>
     where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
         let mut stmt = self.conn.prepare_cached(LIST_RECORDINGS_BY_ID_SQL)?;
         let rows = stmt.query_named(&[
-            (":start", &composite_id(camera_id, desired_ids.start)),
-            (":end", &composite_id(camera_id, desired_ids.end)),
+            (":start", &composite_id(stream_id, desired_ids.start)),
+            (":end", &composite_id(stream_id, desired_ids.end)),
         ])?;
-        self.list_recordings_inner(camera_id, rows, f)
+        self.list_recordings_inner(stream_id, rows, f)
     }
 
-    fn list_recordings_inner<F>(&self, camera_id: i32, mut rows: rusqlite::Rows, mut f: F)
+    fn list_recordings_inner<F>(&self, stream_id: i32, mut rows: rusqlite::Rows, mut f: F)
                                 -> Result<(), Error>
     where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
         while let Some(row) = rows.next() {
@@ -892,12 +981,12 @@ impl LockedDatabase {
                 None => {
                     return Err(Error::new(format!(
                         "recording {}/{} references nonexistent video_sample_entry {}",
-                        camera_id, id, vse_id)));
+                        stream_id, id, vse_id)));
                 },
             };
             let out = ListRecordingsRow{
-                camera_id: camera_id,
-                id: id,
+                stream_id,
+                id,
                 run_offset: row.get_checked(1)?,
                 flags: row.get_checked(2)?,
                 start: recording::Time(row.get_checked(3)?),
@@ -915,7 +1004,7 @@ impl LockedDatabase {
     /// Calls `list_recordings_by_time` and aggregates consecutive recordings.
     /// Rows are given to the callback in arbitrary order. Callers which care about ordering
     /// should do their own sorting.
-    pub fn list_aggregated_recordings<F>(&self, camera_id: i32,
+    pub fn list_aggregated_recordings<F>(&self, stream_id: i32,
                                          desired_time: Range<recording::Time>,
                                          forced_split: recording::Duration,
                                          mut f: F) -> Result<(), Error>
@@ -934,7 +1023,7 @@ impl LockedDatabase {
         // their timestamps overlap. Tracking all active runs prevents that interleaving from
         // causing problems.)
         let mut aggs: BTreeMap<i32, ListAggregatedRecordingsRow> = BTreeMap::new();
-        self.list_recordings_by_time(camera_id, desired_time, |row| {
+        self.list_recordings_by_time(stream_id, desired_time, |row| {
             let run_start_id = row.id - row.run_offset;
             let needs_flush = if let Some(a) = aggs.get(&run_start_id) {
                 let new_dur = a.time.end - a.time.start +
@@ -951,8 +1040,8 @@ impl LockedDatabase {
             let need_insert = if let Some(ref mut a) = aggs.get_mut(&run_start_id) {
                 if a.time.end != row.start {
                     return Err(Error::new(format!(
-                        "camera {} recording {} ends at {}; {} starts at {}; expected same",
-                        camera_id, a.ids.end - 1, a.time.end, row.id, row.start)));
+                        "stream {} recording {} ends at {}; {} starts at {}; expected same",
+                        stream_id, a.ids.end - 1, a.time.end, row.id, row.start)));
                 }
                 a.time.end.0 += row.duration_90k as i64;
                 a.ids.end = row.id + 1;
@@ -971,7 +1060,7 @@ impl LockedDatabase {
                         video_sync_samples: row.video_sync_samples as i64,
                         sample_file_bytes: row.sample_file_bytes as i64,
                         video_sample_entry: row.video_sample_entry,
-                        camera_id: camera_id,
+                        stream_id,
                         run_start_id: row.id - row.run_offset,
                         flags: row.flags,
                 });
@@ -987,16 +1076,16 @@ impl LockedDatabase {
     /// Calls `f` with a single `recording_playback` row.
     /// Note the lock is held for the duration of `f`.
     /// This uses a LRU cache to reduce the number of retrievals from the database.
-    pub fn with_recording_playback<F, R>(&self, camera_id: i32, recording_id: i32, f: F)
+    pub fn with_recording_playback<F, R>(&self, stream_id: i32, recording_id: i32, f: F)
                                       -> Result<R, Error>
     where F: FnOnce(&RecordingPlayback) -> Result<R, Error> {
-        let composite_id = composite_id(camera_id, recording_id);
+        let composite_id = composite_id(stream_id, recording_id);
         let mut cache = self.state.playback_cache.borrow_mut();
         if let Some(r) = cache.get_mut(&composite_id) {
-            trace!("cache hit for recording {}/{}", camera_id, recording_id);
+            trace!("cache hit for recording {}/{}", stream_id, recording_id);
             return f(&RecordingPlayback::new(r));
         }
-        trace!("cache miss for recording {}/{}", camera_id, recording_id);
+        trace!("cache miss for recording {}/{}", stream_id, recording_id);
         let mut stmt = self.conn.prepare_cached(GET_RECORDING_PLAYBACK_SQL)?;
         let mut rows = stmt.query_named(&[(":composite_id", &composite_id)])?;
         if let Some(row) = rows.next() {
@@ -1011,7 +1100,7 @@ impl LockedDatabase {
             cache.insert(composite_id, data);
             return result;
         }
-        Err(Error::new(format!("no such recording {}/{}", camera_id, recording_id)))
+        Err(Error::new(format!("no such recording {}/{}", stream_id, recording_id)))
     }
 
     /// Lists all reserved sample files.
@@ -1029,12 +1118,12 @@ impl LockedDatabase {
 
     /// Lists the oldest sample files (to delete to free room).
     /// `f` should return true as long as further rows are desired.
-    pub fn list_oldest_sample_files<F>(&self, camera_id: i32, mut f: F) -> Result<(), Error>
+    pub fn list_oldest_sample_files<F>(&self, stream_id: i32, mut f: F) -> Result<(), Error>
     where F: FnMut(ListOldestSampleFilesRow) -> bool {
         let mut stmt = self.conn.prepare_cached(LIST_OLDEST_SAMPLE_FILES_SQL)?;
         let mut rows = stmt.query_named(&[
-            (":start", &composite_id(camera_id, 0)),
-            (":end", &composite_id(camera_id + 1, 0)),
+            (":start", &composite_id(stream_id, 0)),
+            (":end", &composite_id(stream_id + 1, 0)),
         ])?;
         while let Some(row) = rows.next() {
             let row = row?;
@@ -1044,7 +1133,7 @@ impl LockedDatabase {
             let uuid: FromSqlUuid = row.get_checked(1)?;
             let should_continue = f(ListOldestSampleFilesRow{
                 recording_id: composite_id as i32,
-                camera_id: (composite_id >> 32) as i32,
+                stream_id: (composite_id >> 32) as i32,
                 uuid: uuid.0,
                 time: start .. start + duration,
                 sample_file_bytes: row.get_checked(4)?,
@@ -1106,17 +1195,13 @@ impl LockedDatabase {
         info!("Loading cameras");
         let mut stmt = self.conn.prepare(r#"
             select
-              camera.id,
-              camera.uuid,
-              camera.short_name,
-              camera.description,
-              camera.host,
-              camera.username,
-              camera.password,
-              camera.main_rtsp_path,
-              camera.sub_rtsp_path,
-              camera.retain_bytes,
-              next_recording_id
+              id,
+              uuid,
+              short_name,
+              description,
+              host,
+              username,
+              password
             from
               camera;
         "#)?;
@@ -1125,7 +1210,7 @@ impl LockedDatabase {
             let row = row?;
             let id = row.get_checked(0)?;
             let uuid: FromSqlUuid = row.get_checked(1)?;
-            self.state.cameras_by_id.insert(id, Camera{
+            self.state.cameras_by_id.insert(id, Camera {
                 id: id,
                 uuid: uuid.0,
                 short_name: row.get_checked(2)?,
@@ -1133,18 +1218,54 @@ impl LockedDatabase {
                 host: row.get_checked(4)?,
                 username: row.get_checked(5)?,
                 password: row.get_checked(6)?,
-                main_rtsp_path: row.get_checked(7)?,
-                sub_rtsp_path: row.get_checked(8)?,
-                retain_bytes: row.get_checked(9)?,
-                range: None,
-                sample_file_bytes: 0,
-                duration: recording::Duration(0),
-                days: BTreeMap::new(),
-                next_recording_id: row.get_checked(10)?,
+                streams: Default::default(),
             });
             self.state.cameras_by_uuid.insert(uuid.0, id);
         }
         info!("Loaded {} cameras", self.state.cameras_by_id.len());
+        Ok(())
+    }
+
+    /// Initializes the streams, but not their matching recordings.
+    /// To be called during construction.
+    fn init_streams(&mut self) -> Result<(), Error> {
+        info!("Loading streams");
+        let mut stmt = self.conn.prepare(r#"
+            select
+              id,
+              type,
+              camera_id,
+              rtsp_path,
+              retain_bytes,
+              next_recording_id
+            from
+              stream;
+        "#)?;
+        let mut rows = stmt.query(&[])?;
+        while let Some(row) = rows.next() {
+            let row = row?;
+            let id = row.get_checked(0)?;
+            let type_: String = row.get_checked(1)?;
+            let type_ = StreamType::parse(&type_).ok_or_else(
+                || Error::new(format!("no such stream type {}", type_)))?;
+            let camera_id = row.get_checked(2)?;
+            self.state.streams_by_id.insert(id, Stream {
+                id,
+                type_,
+                camera_id,
+                rtsp_path: row.get_checked(3)?,
+                retain_bytes: row.get_checked(4)?,
+                range: None,
+                sample_file_bytes: 0,
+                duration: recording::Duration(0),
+                days: BTreeMap::new(),
+                next_recording_id: row.get_checked(5)?,
+            });
+            let c = self.state.cameras_by_id.get_mut(&camera_id)
+                                            .ok_or_else(|| Error::new("missing camera".to_owned()))?;
+            c.streams[type_.index()] = Some(id);
+        }
+        info!("Loaded {} streams", self.state.streams_by_id.len());
         Ok(())
     }
 
@@ -1192,97 +1313,162 @@ impl LockedDatabase {
     }
 
     /// Adds a camera.
-    pub fn add_camera(&mut self, camera: CameraChange) -> Result<i32, Error> {
+    pub fn add_camera(&mut self, mut camera: CameraChange) -> Result<i32, Error> {
         let uuid = Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
-        let mut stmt = self.conn.prepare_cached(r#"
-            insert into camera (uuid, short_name, description, host, username, password,
-                                main_rtsp_path, sub_rtsp_path, retain_bytes, next_recording_id)
-                        values (:uuid, :short_name, :description, :host, :username, :password,
-                                :main_rtsp_path, :sub_rtsp_path, 0, 1)
-        "#)?;
-        stmt.execute_named(&[
-            (":uuid", &uuid_bytes),
-            (":short_name", &camera.short_name),
-            (":description", &camera.description),
-            (":host", &camera.host),
-            (":username", &camera.username),
-            (":password", &camera.password),
-            (":main_rtsp_path", &camera.main_rtsp_path),
-            (":sub_rtsp_path", &camera.sub_rtsp_path),
-        ])?;
-        let id = self.conn.last_insert_rowid() as i32;
-        self.state.cameras_by_id.insert(id, Camera{
-            id: id,
-            uuid: uuid,
+        let tx = self.conn.transaction()?;
+        let mut new_streams;
+        let camera_id;
+        {
+            let mut stmt = tx.prepare_cached(r#"
+                insert into camera (uuid, short_name, description, host, username, password)
+                            values (:uuid, :short_name, :description, :host, :username, :password)
+            "#)?;
+            stmt.execute_named(&[
+                (":uuid", &uuid_bytes),
+                (":short_name", &camera.short_name),
+                (":description", &camera.description),
+                (":host", &camera.host),
+                (":username", &camera.username),
+                (":password", &camera.password),
+            ])?;
+            camera_id = tx.last_insert_rowid() as i32;
+            let mut inserter = StreamInserter::new(&tx)?;
+            for (i, ref mut rtsp_path) in camera.rtsp_paths.iter_mut().enumerate() {
+                if rtsp_path.is_empty() { continue; }
+                inserter.add(camera_id, StreamType::from_index(i).unwrap(),
+                             mem::replace(rtsp_path, String::new()))?;
+            }
+            new_streams = inserter.streams();
+        }
+        tx.commit()?;
+        let mut streams = [None, None];
+        for (&id, s) in &new_streams {
+            streams[s.type_.index()] = Some(id);
+        }
+        self.state.streams_by_id.append(&mut new_streams);
+        self.state.cameras_by_id.insert(camera_id, Camera {
+            id: camera_id,
+            uuid,
             short_name: camera.short_name,
             description: camera.description,
             host: camera.host,
             username: camera.username,
             password: camera.password,
-            main_rtsp_path: camera.main_rtsp_path,
-            sub_rtsp_path: camera.sub_rtsp_path,
-            retain_bytes: 0,
-            range: None,
-            sample_file_bytes: 0,
-            duration: recording::Duration(0),
-            days: BTreeMap::new(),
-            next_recording_id: 1,
+            streams,
         });
-        self.state.cameras_by_uuid.insert(uuid, id);
-        Ok(id)
+        self.state.cameras_by_uuid.insert(uuid, camera_id);
+        Ok(camera_id)
     }
 
     /// Updates a camera.
-    pub fn update_camera(&mut self, id: i32, camera: CameraChange) -> Result<(), Error> {
-        let mut stmt = self.conn.prepare_cached(r#"
-            update camera set
-                short_name = :short_name,
-                description = :description,
-                host = :host,
-                username = :username,
-                password = :password,
-                main_rtsp_path = :main_rtsp_path,
-                sub_rtsp_path = :sub_rtsp_path
-            where
-                id = :id
-        "#)?;
-        stmt.execute_named(&[
-            (":id", &id),
-            (":short_name", &camera.short_name),
-            (":description", &camera.description),
-            (":host", &camera.host),
-            (":username", &camera.username),
-            (":password", &camera.password),
-            (":main_rtsp_path", &camera.main_rtsp_path),
-            (":sub_rtsp_path", &camera.sub_rtsp_path),
-        ])?;
-        let c = self.state.cameras_by_id.get_mut(&id).unwrap();
+    pub fn update_camera(&mut self, camera_id: i32, mut camera: CameraChange) -> Result<(), Error> {
+        let tx = self.conn.transaction()?;
+        let mut new_streams;
+        let mut stream_rtsp_changes = BTreeMap::new();
+        {
+            let mut stream_ids = [None; 2];
+            let mut stream_update_stmt = tx.prepare_cached(r#"
+                update stream set
+                    rtsp_path = :rtsp_path
+                where
+                    id = :id
+            "#)?;
+            for (&stream_id, stream) in &self.state.streams_by_id {
+                if stream.camera_id != camera_id {
+                    continue;
+                }
+                stream_ids[stream.type_.index()] = Some(stream_id);
+                let p = mem::replace(&mut camera.rtsp_paths[stream.type_.index()], String::new());
+                let rows = stream_update_stmt.execute_named(&[
+                    (":id", &stream_id),
+                    (":rtsp_path", &p),
+                ])?;
+                if rows != 1 {
+                    return Err(Error::new(format!("Stream {} missing from database",
+                                                  stream_id)));
+                }
+                stream_rtsp_changes.insert(stream_id, p);
+            }
+            let mut inserter = StreamInserter::new(&tx)?;
+            for (index, id) in stream_ids.iter().enumerate() {
+                if id.is_none() && !camera.rtsp_paths[index].is_empty() {
+                    inserter.add(camera_id, StreamType::from_index(index).unwrap(),
+                                 mem::replace(&mut camera.rtsp_paths[index], String::new()))?;
+                }
+            }
+            new_streams = inserter.streams();
+            let mut stmt = tx.prepare_cached(r#"
+                update camera set
+                    short_name = :short_name,
+                    description = :description,
+                    host = :host,
+                    username = :username,
+                    password = :password
+                where
+                    id = :id
+            "#)?;
+            let rows = stmt.execute_named(&[
+                (":id", &camera_id),
+                (":short_name", &camera.short_name),
+                (":description", &camera.description),
+                (":host", &camera.host),
+                (":username", &camera.username),
+                (":password", &camera.password),
+            ])?;
+            if rows != 1 {
+                return Err(Error::new(format!("Camera {} missing from database", camera_id)));
+            }
+        }
+        tx.commit()?;
+        let c = self.state.cameras_by_id.get_mut(&camera_id).unwrap();
         c.short_name = camera.short_name;
         c.description = camera.description;
         c.host = camera.host;
         c.username = camera.username;
         c.password = camera.password;
-        c.main_rtsp_path = camera.main_rtsp_path;
-        c.sub_rtsp_path = camera.sub_rtsp_path;
+        for (&id, s) in &new_streams {
+            c.streams[s.type_.index()] = Some(id);
+        }
+        self.state.streams_by_id.append(&mut new_streams);
+        for (id, p) in &mut stream_rtsp_changes {
+            let mut s = self.state.streams_by_id.get_mut(id)
+                            .ok_or_else(|| Error::new(format!("stream {} missing", id)))?;
+            mem::swap(&mut s.rtsp_path, p);
+        }
         Ok(())
     }
 
-    /// Deletes a camera. The camera must have no recordings.
+    /// Deletes a camera and its streams. The camera must have no recordings.
     pub fn delete_camera(&mut self, id: i32) -> Result<(), Error> {
-        let (has_recordings, uuid) =
-            self.state.cameras_by_id.get(&id)
-                .map(|c| (c.range.is_some(), c.uuid))
-                .ok_or_else(|| Error::new(format!("No such camera {} to remove", id)))?;
-        if has_recordings {
-            return Err(Error::new(format!("Can't remove camera {}; has recordings.", id)));
-        };
-        let mut stmt = self.conn.prepare_cached(r"delete from camera where id = :id")?;
-        let rows = stmt.execute_named(&[(":id", &id)])?;
-        if rows != 1 {
-            return Err(Error::new(format!("Camera {} missing from database", id)));
+        let uuid = self.state.cameras_by_id.get(&id)
+                       .map(|c| c.uuid)
+                       .ok_or_else(|| Error::new(format!("No such camera {} to remove", id)))?;
+        let mut streams_to_delete = Vec::new();
+        let tx = self.conn.transaction()?;
+        {
+            let mut stream_stmt = tx.prepare_cached(r"delete from stream where id = :id")?;
+            for (stream_id, stream) in &self.state.streams_by_id {
+                if stream.camera_id != id { continue };
+                if stream.range.is_some() {
+                    return Err(Error::new(format!("Can't remove camera {}; has recordings.", id)));
+                }
+                let rows = stream_stmt.execute_named(&[(":id", stream_id)])?;
+                if rows != 1 {
+                    return Err(Error::new(format!("Stream {} missing from database", id)));
+                }
+                streams_to_delete.push(*stream_id);
+            }
+            let mut cam_stmt = tx.prepare_cached(r"delete from camera where id = :id")?;
+            let rows = cam_stmt.execute_named(&[(":id", &id)])?;
+            if rows != 1 {
+                return Err(Error::new(format!("Camera {} missing from database", id)));
+            }
         }
-        self.state.cameras_by_id.remove(&id);
+        tx.commit()?;
+        for id in streams_to_delete {
+            self.state.streams_by_id.remove(&id);
+        }
         self.state.cameras_by_uuid.remove(&uuid);
         return Ok(())
     }
@@ -1326,7 +1512,7 @@ impl Database {
             from
                 recording
             where
-                camera_id = :camera_id and
+                stream_id = :stream_id and
                 recording.start_time_90k > :start_time_90k - {} and
                 recording.start_time_90k < :end_time_90k and
                 recording.start_time_90k + recording.duration_90k > :start_time_90k
@@ -1357,9 +1543,10 @@ impl Database {
         }
         let db = Database(Mutex::new(LockedDatabase{
             conn: conn,
-            state: State{
+            state: State {
                 cameras_by_id: BTreeMap::new(),
                 cameras_by_uuid: BTreeMap::new(),
+                streams_by_id: BTreeMap::new(),
                 video_sample_entries: BTreeMap::new(),
                 playback_cache: RefCell::new(LruCache::with_hasher(1024, Default::default())),
                 list_recordings_by_time_sql: list_recordings_by_time_sql,
@@ -1369,9 +1556,11 @@ impl Database {
             let l = &mut *db.lock();
             l.init_video_sample_entries().annotate_err("init_video_sample_entries")?;
             l.init_cameras().annotate_err("init_cameras")?;
-            for (&camera_id, ref mut camera) in &mut l.state.cameras_by_id {
-                // TODO: we could use one thread per camera if we had multiple db conns.
-                init_recordings(&mut l.conn, camera_id, camera)
+            l.init_streams().annotate_err("init_streams")?;
+            for (&stream_id, ref mut stream) in &mut l.state.streams_by_id {
+                // TODO: we could use one thread per stream if we had multiple db conns.
+                let camera = l.state.cameras_by_id.get(&stream.camera_id).unwrap();
+                init_recordings(&mut l.conn, stream_id, camera, stream)
                     .annotate_err("init_recordings")?;
             }
         }
@@ -1422,21 +1611,22 @@ mod tests {
                 assert_eq!("test-camera", row.host);
                 assert_eq!("foo", row.username);
                 assert_eq!("bar", row.password);
-                assert_eq!("/main", row.main_rtsp_path);
-                assert_eq!("/sub", row.sub_rtsp_path);
-                assert_eq!(42, row.retain_bytes);
-                assert_eq!(None, row.range);
-                assert_eq!(recording::Duration(0), row.duration);
-                assert_eq!(0, row.sample_file_bytes);
+                //assert_eq!("/main", row.main_rtsp_path);
+                //assert_eq!("/sub", row.sub_rtsp_path);
+                //assert_eq!(42, row.retain_bytes);
+                //assert_eq!(None, row.range);
+                //assert_eq!(recording::Duration(0), row.duration);
+                //assert_eq!(0, row.sample_file_bytes);
             }
         }
         assert_eq!(1, rows);
 
+        let stream_id = camera_id;  // TODO
         rows = 0;
         {
             let db = db.lock();
             let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
-            db.list_recordings_by_time(camera_id, all_time, |_row| {
+            db.list_recordings_by_time(stream_id, all_time, |_row| {
                 rows += 1;
                 Ok(())
             }).unwrap();
@@ -1444,30 +1634,24 @@ mod tests {
         assert_eq!(0, rows);
     }
 
-    fn assert_single_recording(db: &Database, camera_uuid: Uuid, r: &RecordingToInsert) {
-        let mut rows = 0;
-        let mut camera_id = -1;
+    fn assert_single_recording(db: &Database, stream_id: i32, r: &RecordingToInsert) {
         {
             let db = db.lock();
-            for row in db.cameras_by_id().values() {
-                rows += 1;
-                camera_id = row.id;
-                assert_eq!(camera_uuid, row.uuid);
-                assert_eq!(Some(r.time.clone()), row.range);
-                assert_eq!(r.sample_file_bytes as i64, row.sample_file_bytes);
-                assert_eq!(r.time.end - r.time.start, row.duration);
-            }
+            let stream = db.streams_by_id().get(&stream_id).unwrap();
+            assert_eq!(Some(r.time.clone()), stream.range);
+            assert_eq!(r.sample_file_bytes as i64, stream.sample_file_bytes);
+            assert_eq!(r.time.end - r.time.start, stream.duration);
+            db.cameras_by_id().get(&stream.camera_id).unwrap();
         }
-        assert_eq!(1, rows);
 
         // TODO(slamb): test that the days logic works correctly.
 
-        rows = 0;
+        let mut rows = 0;
         let mut recording_id = -1;
         {
             let db = db.lock();
             let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
-            db.list_recordings_by_time(camera_id, all_time, |row| {
+            db.list_recordings_by_time(stream_id, all_time, |row| {
                 rows += 1;
                 recording_id = row.id;
                 assert_eq!(r.time,
@@ -1482,7 +1666,7 @@ mod tests {
         assert_eq!(1, rows);
 
         rows = 0;
-        db.lock().list_oldest_sample_files(camera_id, |row| {
+        db.lock().list_oldest_sample_files(stream_id, |row| {
             rows += 1;
             assert_eq!(recording_id, row.recording_id);
             assert_eq!(r.sample_file_uuid, row.uuid);
@@ -1514,21 +1698,21 @@ mod tests {
         let two_min = recording::Duration(2 * 60 * TIME_UNITS_PER_SEC);
         let three_min = recording::Duration(3 * 60 * TIME_UNITS_PER_SEC);
         let four_min = recording::Duration(4 * 60 * TIME_UNITS_PER_SEC);
-        let test_day1 = &CameraDayKey(*b"2015-12-31");
-        let test_day2 = &CameraDayKey(*b"2016-01-01");
+        let test_day1 = &StreamDayKey(*b"2015-12-31");
+        let test_day2 = &StreamDayKey(*b"2016-01-01");
         adjust_days(test_time .. test_time + one_min, 1, &mut m);
         assert_eq!(1, m.len());
-        assert_eq!(Some(&CameraDayValue{recordings: 1, duration: one_min}), m.get(test_day1));
+        assert_eq!(Some(&StreamDayValue{recordings: 1, duration: one_min}), m.get(test_day1));
 
         // Add to a day.
         adjust_days(test_time .. test_time + one_min, 1, &mut m);
         assert_eq!(1, m.len());
-        assert_eq!(Some(&CameraDayValue{recordings: 2, duration: two_min}), m.get(test_day1));
+        assert_eq!(Some(&StreamDayValue{recordings: 2, duration: two_min}), m.get(test_day1));
 
         // Subtract from a day.
         adjust_days(test_time .. test_time + one_min, -1, &mut m);
         assert_eq!(1, m.len());
-        assert_eq!(Some(&CameraDayValue{recordings: 1, duration: one_min}), m.get(test_day1));
+        assert_eq!(Some(&StreamDayValue{recordings: 1, duration: one_min}), m.get(test_day1));
 
         // Remove a day.
         adjust_days(test_time .. test_time + one_min, -1, &mut m);
@@ -1537,20 +1721,20 @@ mod tests {
         // Create two days.
         adjust_days(test_time .. test_time + three_min, 1, &mut m);
         assert_eq!(2, m.len());
-        assert_eq!(Some(&CameraDayValue{recordings: 1, duration: one_min}), m.get(test_day1));
-        assert_eq!(Some(&CameraDayValue{recordings: 1, duration: two_min}), m.get(test_day2));
+        assert_eq!(Some(&StreamDayValue{recordings: 1, duration: one_min}), m.get(test_day1));
+        assert_eq!(Some(&StreamDayValue{recordings: 1, duration: two_min}), m.get(test_day2));
 
         // Add to two days.
         adjust_days(test_time .. test_time + three_min, 1, &mut m);
         assert_eq!(2, m.len());
-        assert_eq!(Some(&CameraDayValue{recordings: 2, duration: two_min}), m.get(test_day1));
-        assert_eq!(Some(&CameraDayValue{recordings: 2, duration: four_min}), m.get(test_day2));
+        assert_eq!(Some(&StreamDayValue{recordings: 2, duration: two_min}), m.get(test_day1));
+        assert_eq!(Some(&StreamDayValue{recordings: 2, duration: four_min}), m.get(test_day2));
 
         // Subtract from two days.
         adjust_days(test_time .. test_time + three_min, -1, &mut m);
         assert_eq!(2, m.len());
-        assert_eq!(Some(&CameraDayValue{recordings: 1, duration: one_min}), m.get(test_day1));
-        assert_eq!(Some(&CameraDayValue{recordings: 1, duration: two_min}), m.get(test_day2));
+        assert_eq!(Some(&StreamDayValue{recordings: 1, duration: one_min}), m.get(test_day1));
+        assert_eq!(Some(&StreamDayValue{recordings: 1, duration: two_min}), m.get(test_day2));
 
         // Remove two days.
         adjust_days(test_time .. test_time + three_min, -1, &mut m);
@@ -1560,11 +1744,11 @@ mod tests {
     #[test]
     fn test_day_bounds() {
         testutil::init();
-        assert_eq!(CameraDayKey(*b"2017-10-10").bounds(),  // normal day (24 hrs)
+        assert_eq!(StreamDayKey(*b"2017-10-10").bounds(),  // normal day (24 hrs)
                    recording::Time(135685692000000) .. recording::Time(135693468000000));
-        assert_eq!(CameraDayKey(*b"2017-03-12").bounds(),  // spring forward (23 hrs)
+        assert_eq!(StreamDayKey(*b"2017-03-12").bounds(),  // spring forward (23 hrs)
                    recording::Time(134037504000000) .. recording::Time(134044956000000));
-        assert_eq!(CameraDayKey(*b"2017-11-05").bounds(),  // fall back (25 hrs)
+        assert_eq!(StreamDayKey(*b"2017-11-05").bounds(),  // fall back (25 hrs)
                    recording::Time(135887868000000) .. recording::Time(135895968000000));
     }
 
@@ -1579,10 +1763,10 @@ mod tests {
     fn test_version_too_old() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (0, 0, '');").unwrap();
+        c.execute_batch("delete from version; insert into version values (1, 0, '');").unwrap();
         let e = Database::new(c).unwrap_err();
         assert!(e.description().starts_with(
-                "Database schema version 0 is too old (expected 1)"), "got: {:?}",
+                "Database schema version 1 is too old (expected 2)"), "got: {:?}",
                 e.description());
     }
 
@@ -1590,10 +1774,10 @@ mod tests {
     fn test_version_too_new() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (2, 0, '');").unwrap();
+        c.execute_batch("delete from version; insert into version values (3, 0, '');").unwrap();
         let e = Database::new(c).unwrap_err();
         assert!(e.description().starts_with(
-                "Database schema version 2 is too new (expected 1)"), "got: {:?}", e.description());
+                "Database schema version 3 is too new (expected 2)"), "got: {:?}", e.description());
     }
 
     /// Basic test of running some queries on a fresh database.
@@ -1618,13 +1802,16 @@ mod tests {
             host: "test-camera".to_owned(),
             username: "foo".to_owned(),
             password: "bar".to_owned(),
-            main_rtsp_path: "/main".to_owned(),
-            sub_rtsp_path: "/sub".to_owned(),
+            rtsp_paths: [
+                "/main".to_owned(),
+                "/sub".to_owned(),
+            ],
         }).unwrap();
         {
             let mut l = db.lock();
+            let stream_id = l.cameras_by_id().get(&camera_id).unwrap().streams[0].unwrap();
             let mut tx = l.tx().unwrap();
-            tx.update_retention(camera_id, 42).unwrap();
+            tx.update_retention(stream_id, 42).unwrap();
             tx.commit().unwrap();
         }
         let camera_uuid = { db.lock().cameras_by_id().get(&camera_id).unwrap().uuid };
@@ -1656,8 +1843,9 @@ mod tests {
 
         // Inserting a recording should succeed and remove its uuid from the reserved table.
         let start = recording::Time(1430006400 * TIME_UNITS_PER_SEC);
-        let recording = RecordingToInsert{
-            camera_id: camera_id,
+        let stream_id = camera_id;  // TODO
+        let recording = RecordingToInsert {
+            stream_id,
             sample_file_bytes: 42,
             run_offset: 0,
             flags: 0,
@@ -1680,19 +1868,19 @@ mod tests {
                            vec![uuid_to_keep]);
 
         // Queries should return the correct result (with caches update on insert).
-        assert_single_recording(&db, camera_uuid, &recording);
+        assert_single_recording(&db, stream_id, &recording);
 
         // Queries on a fresh database should return the correct result (with caches populated from
         // existing database contents rather than built on insert).
         let conn = db.close();
         let db = Database::new(conn).unwrap();
-        assert_single_recording(&db, camera_uuid, &recording);
+        assert_single_recording(&db, stream_id, &recording);
 
         // Deleting a recording should succeed, update the min/max times, and re-reserve the uuid.
         {
             let mut db = db.lock();
             let mut v = Vec::new();
-            db.list_oldest_sample_files(camera_id, |r| { v.push(r); true }).unwrap();
+            db.list_oldest_sample_files(stream_id, |r| { v.push(r); true }).unwrap();
             assert_eq!(1, v.len());
             let mut tx = db.tx().unwrap();
             tx.delete_recordings(&v).unwrap();

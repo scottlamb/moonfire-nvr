@@ -63,31 +63,34 @@ create table camera (
   username text,
 
   -- The password to use when accessing the camera.
-  password text,
+  password text
+);
 
-  -- The path (starting with "/") to use in rtsp:// URLs to reference this
-  -- camera's "main" (full-quality) video stream.
-  main_rtsp_path text,
+create table stream (
+  id integer primary key,
+  camera_id integer not null references camera (id),
+  type text not null check (type in ('main', 'sub')),
 
-  -- The path (starting with "/") to use in rtsp:// URLs to reference this
-  -- camera's "sub" (low-bandwidth) video stream.
-  sub_rtsp_path text,
+  -- The path (starting with "/") to use in rtsp:// URLs to for this stream.
+  rtsp_path text not null,
 
   -- The number of bytes of video to retain, excluding the currently-recording
   -- file. Older files will be deleted as necessary to stay within this limit.
   retain_bytes integer not null check (retain_bytes >= 0),
 
-  -- The low 32 bits of the next recording id to assign for this camera.
+  -- The low 32 bits of the next recording id to assign for this stream.
   -- Typically this is the maximum current recording + 1, but it does
   -- not decrease if that recording is deleted.
-  next_recording_id integer not null check (next_recording_id >= 0)
+  next_recording_id integer not null check (next_recording_id >= 0),
+
+  unique (camera_id, type)
 );
 
 -- Each row represents a single completed recorded segment of video.
 -- Recordings are typically ~60 seconds; never more than 5 minutes.
 create table recording (
-  -- The high 32 bits of composite_id are taken from the camera's id, which
-  -- improves locality. The low 32 bits are taken from the camera's
+  -- The high 32 bits of composite_id are taken from the stream's id, which
+  -- improves locality. The low 32 bits are taken from the stream's
   -- next_recording_id (which should be post-incremented in the same
   -- transaction). It'd be simpler to use a "without rowid" table and separate
   -- fields to make up the primary key, but
@@ -98,7 +101,7 @@ create table recording (
 
   -- This field is redundant with id above, but used to enforce the reference
   -- constraint and to structure the recording_start_time index.
-  camera_id integer not null references camera (id),
+  stream_id integer not null references stream (id),
 
   -- The offset of this recording within a run. 0 means this was the first
   -- recording made from a RTSP session. The start of the run has id
@@ -135,12 +138,12 @@ create table recording (
   video_sync_samples integer not null check (video_sync_samples > 0),
   video_sample_entry_id integer references video_sample_entry (id),
 
-  check (composite_id >> 32 = camera_id)
+  check (composite_id >> 32 = stream_id)
 );
 
 create index recording_cover on recording (
-  -- Typical queries use "where camera_id = ? order by start_time_90k".
-  camera_id,
+  -- Typical queries use "where stream_id = ? order by start_time_90k".
+  stream_id,
   start_time_90k,
 
   -- These fields are not used for ordering; they cover most queries so
@@ -202,4 +205,4 @@ create table video_sample_entry (
 );
 
 insert into version (id, unix_time,                           notes)
-             values (1,  cast(strftime('%s', 'now') as int), 'db creation');
+             values (2,  cast(strftime('%s', 'now') as int), 'db creation');
