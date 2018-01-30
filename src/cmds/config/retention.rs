@@ -45,6 +45,7 @@ use super::{decode_size, encode_size};
 struct Stream {
     label: String,
     used: i64,
+    record: bool,
     retain: Option<i64>,  // None if unparseable
 }
 
@@ -63,7 +64,7 @@ fn update_limits_inner(model: &Model) -> Result<(), Error> {
     let mut db = model.db.lock();
     let mut tx = db.tx()?;
     for (&id, stream) in &model.streams {
-        tx.update_retention(id, stream.retain.unwrap())?;
+        tx.update_retention(id, stream.record, stream.retain.unwrap())?;
     }
     tx.commit()
 }
@@ -112,6 +113,13 @@ fn edit_limit(model: &RefCell<Model>, siv: &mut Cursive, id: i32, content: &str)
            .unwrap()
            .set_enabled(model.errors == 0);
     }
+}
+
+fn edit_record(model: &RefCell<Model>, id: i32, record: bool) {
+    let mut model = model.borrow_mut();
+    let model: &mut Model = &mut *model;
+    let stream = model.streams.get_mut(&id).unwrap();
+    stream.record = record;
 }
 
 fn confirm_deletion(model: &RefCell<Model>, siv: &mut Cursive, to_delete: i64) {
@@ -188,6 +196,7 @@ pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &m
                 streams.insert(id, Stream {
                     label: format!("{}: {}: {}", id, c.short_name, s.type_.as_str()),
                     used: s.sample_file_bytes,
+                    record: s.record,
                     retain: Some(s.retain_bytes),
                 });
                 total_used += s.sample_file_bytes;
@@ -207,17 +216,28 @@ pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &m
         }))
     };
 
+    const RECORD_WIDTH: usize = 8;
+    const BYTES_WIDTH: usize = 20;
+
     let mut list = views::ListView::new();
     list.add_child(
         "stream",
         views::LinearLayout::horizontal()
-            .child(views::TextView::new("usage").fixed_width(25))
-            .child(views::TextView::new("limit").fixed_width(25)));
+            .child(views::TextView::new("record").fixed_width(RECORD_WIDTH))
+            .child(views::TextView::new("usage").fixed_width(BYTES_WIDTH))
+            .child(views::TextView::new("limit").fixed_width(BYTES_WIDTH)));
     for (&id, stream) in &model.borrow().streams {
+        let mut record_cb = views::Checkbox::new();
+        record_cb.set_checked(stream.record);
+        record_cb.set_on_change({
+            let model = model.clone();
+            move |_siv, record| edit_record(&model, id, record)
+        });
         list.add_child(
             &stream.label,
             views::LinearLayout::horizontal()
-                .child(views::TextView::new(encode_size(stream.used)).fixed_width(25))
+                .child(record_cb.fixed_width(RECORD_WIDTH))
+                .child(views::TextView::new(encode_size(stream.used)).fixed_width(BYTES_WIDTH))
                 .child(views::EditView::new()
                     .content(encode_size(stream.retain.unwrap()))
                     .on_edit({
@@ -228,21 +248,24 @@ pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &m
                         let model = model.clone();
                         move |siv, _| press_change(&model, siv)
                     })
-                    .fixed_width(25))
+                    .fixed_width(20))
                 .child(views::TextView::new("").with_id(format!("{}_ok", id)).fixed_width(1)));
     }
     let over = model.borrow().total_retain > model.borrow().fs_capacity;
     list.add_child(
         "total",
         views::LinearLayout::horizontal()
-            .child(views::TextView::new(encode_size(model.borrow().total_used)).fixed_width(25))
+            .child(views::DummyView{}.fixed_width(RECORD_WIDTH))
+            .child(views::TextView::new(encode_size(model.borrow().total_used))
+                   .fixed_width(BYTES_WIDTH))
             .child(views::TextView::new(encode_size(model.borrow().total_retain))
-                   .with_id("total_retain").fixed_width(25))
+                   .with_id("total_retain").fixed_width(BYTES_WIDTH))
             .child(views::TextView::new(if over { "*" } else { " " }).with_id("total_ok")));
     list.add_child(
         "filesystem",
         views::LinearLayout::horizontal()
-            .child(views::TextView::new("").fixed_width(25))
+            .child(views::DummyView{}.fixed_width(3))
+            .child(views::DummyView{}.fixed_width(20))
             .child(views::TextView::new(encode_size(model.borrow().fs_capacity)).fixed_width(25)));
     let mut change_button = views::Button::new("Change", {
         let model = model.clone();

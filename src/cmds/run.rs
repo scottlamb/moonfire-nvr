@@ -106,7 +106,6 @@ pub fn run() -> Result<(), Error> {
     let s = web::Service::new(db.clone(), dir.clone(), Some(&args.flag_ui_dir), resolve_zone())?;
 
     // Start a streamer for each stream.
-    // TODO: enabled only.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));
     let mut streamers = Vec::new();
     let syncer = if !args.flag_read_only {
@@ -121,6 +120,9 @@ pub fn run() -> Result<(), Error> {
             shutdown: &shutdown_streamers,
         };
         for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
+            if !stream.record {
+                continue;
+            }
             let camera = l.cameras_by_id().get(&stream.camera_id).unwrap();
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let mut streamer = streamer::Streamer::new(&env, syncer_channel.clone(), *id, camera,

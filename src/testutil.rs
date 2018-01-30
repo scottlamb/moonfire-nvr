@@ -97,7 +97,7 @@ impl TestDb {
             }).unwrap());
             test_camera_uuid = l.cameras_by_id().get(&TEST_CAMERA_ID).unwrap().uuid;
             let mut tx = l.tx().unwrap();
-            tx.update_retention(TEST_STREAM_ID, 1048576).unwrap();
+            tx.update_retention(TEST_STREAM_ID, true, 1048576).unwrap();
             tx.commit().unwrap();
         }
         let path = tmpdir.path().to_str().unwrap().to_owned();

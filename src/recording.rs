@@ -154,7 +154,7 @@ impl fmt::Display for Time {
 
 /// A duration specified in 1/90,000ths of a second.
 /// Durations are typically non-negative, but a `db::CameraDayValue::duration` may be negative.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Duration(pub i64);
 
 impl fmt::Display for Duration {

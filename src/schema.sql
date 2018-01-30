@@ -71,6 +71,11 @@ create table stream (
   camera_id integer not null references camera (id),
   type text not null check (type in ('main', 'sub')),
 
+  -- If record is true, the stream should start recording when moonfire
+  -- starts. If false, no new recordings will be made, but old recordings
+  -- will not be deleted.
+  record integer not null check (record in (1, 0)),
+
   -- The path (starting with "/") to use in rtsp:// URLs to for this stream.
   rtsp_path text not null,
 

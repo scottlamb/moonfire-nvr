@@ -420,6 +420,7 @@ pub struct Stream {
 
     /// Mapping of calendar day (in the server's time zone) to a summary of recordings on that day.
     pub days: BTreeMap<StreamDayKey, StreamDayValue>,
+    pub record: bool,
     next_recording_id: i32,
 }
 
@@ -592,6 +593,7 @@ pub struct Transaction<'a> {
 }
 
 /// A modification to be done to a `Stream` after a `Transaction` is committed.
+#[derive(Default)]
 struct StreamModification {
     /// Add this to `camera.duration`. Thus, positive values indicate a net addition;
     /// negative values indicate a net subtraction.
@@ -612,6 +614,9 @@ struct StreamModification {
 
     /// Reset the retain_bytes to the specified value.
     new_retain_bytes: Option<i64>,
+
+    /// Reset the record to the specified value.
+    new_record: Option<bool>,
 }
 
 fn composite_id(stream_id: i32, recording_id: i32) -> i64 {
@@ -754,22 +759,34 @@ impl<'a> Transaction<'a> {
         Ok(recording_id)
     }
 
-    /// Updates the `retain_bytes` for the given stream to the specified limit.
+    /// Updates the `record` and `retain_bytes` for the given stream.
     /// Note this just resets the limit in the database; it's the caller's responsibility to ensure
     /// current usage is under the new limit if desired.
-    pub fn update_retention(&mut self, stream_id: i32, new_limit: i64) -> Result<(), Error> {
+    pub fn update_retention(&mut self, stream_id: i32, new_record: bool, new_limit: i64)
+                            -> Result<(), Error> {
         if new_limit < 0 {
             return Err(Error::new(format!("can't set limit for stream {} to {}; must be >= 0",
                                           stream_id, new_limit)));
         }
         self.check_must_rollback()?;
-        let mut stmt =
-            self.tx.prepare_cached("update stream set retain_bytes = :retain where id = :id")?;
-        let changes = stmt.execute_named(&[(":retain", &new_limit), (":id", &stream_id)])?;
+        let mut stmt = self.tx.prepare_cached(r#"
+            update stream
+            set
+              record = :record,
+              retain_bytes = :retain
+            where
+              id = :id
+        "#)?;
+        let changes = stmt.execute_named(&[
+            (":record", &new_record),
+            (":retain", &new_limit),
+            (":id", &stream_id),
+        ])?;
         if changes != 1 {
             return Err(Error::new(format!("no such stream {}", stream_id)));
         }
         let m = Transaction::get_mods_by_stream(&mut self.mods_by_stream, stream_id);
+        m.new_record = Some(new_record);
         m.new_retain_bytes = Some(new_limit);
         Ok(())
     }
@@ -791,6 +808,9 @@ impl<'a> Transaction<'a> {
             if let Some(id) = m.new_next_recording_id {
                 stream.next_recording_id = id;
             }
+            if let Some(r) = m.new_record {
+                stream.record = r;
+            }
             if let Some(b) = m.new_retain_bytes {
                 stream.retain_bytes = b;
             }
@@ -809,16 +829,7 @@ impl<'a> Transaction<'a> {
     /// Looks up an existing entry in `mods` for a given stream or makes+inserts an identity entry.
     fn get_mods_by_stream(mods: &mut fnv::FnvHashMap<i32, StreamModification>, stream_id: i32)
                           -> &mut StreamModification {
-        mods.entry(stream_id).or_insert_with(|| {
-            StreamModification{
-                duration: recording::Duration(0),
-                sample_file_bytes: 0,
-                range: None,
-                days: BTreeMap::new(),
-                new_next_recording_id: None,
-                new_retain_bytes: None,
-            }
-        })
+        mods.entry(stream_id).or_insert_with(StreamModification::default)
     }
 
     /// Fills the `range` of each `StreamModification`. This is done prior to commit so that if the
@@ -877,8 +888,8 @@ struct StreamInserter<'tx> {
 impl<'tx> StreamInserter<'tx> {
     fn new(tx: &'tx rusqlite::Transaction) -> Result<Self, Error> {
         let stmt = tx.prepare(r#"
-            insert into stream (camera_id, type, rtsp_path, retain_bytes, next_recording_id)
-                        values (:camera_id, :type, :rtsp_path, 0, 1)
+            insert into stream (camera_id, type, rtsp_path, record, retain_bytes, next_recording_id)
+                        values (:camera_id, :type, :rtsp_path, 0, 0, 1)
         "#)?;
         Ok(StreamInserter {
             tx,
@@ -904,6 +915,7 @@ impl<'tx> StreamInserter<'tx> {
             sample_file_bytes: 0,
             duration: recording::Duration(0),
             days: BTreeMap::new(),
+            record: false,
             next_recording_id: 1,
         });
         Ok(())
@@ -1237,7 +1249,8 @@ impl LockedDatabase {
               camera_id,
               rtsp_path,
               retain_bytes,
-              next_recording_id
+              next_recording_id,
+              record
             from
               stream;
         "#)?;
@@ -1260,6 +1273,7 @@ impl LockedDatabase {
                 duration: recording::Duration(0),
                 days: BTreeMap::new(),
                 next_recording_id: row.get_checked(5)?,
+                record: row.get_checked(6)?,
             });
             let c = self.state.cameras_by_id.get_mut(&camera_id)
                                             .ok_or_else(|| Error::new("missing camera".to_owned()))?;
@@ -1811,7 +1825,7 @@ mod tests {
             let mut l = db.lock();
             let stream_id = l.cameras_by_id().get(&camera_id).unwrap().streams[0].unwrap();
             let mut tx = l.tx().unwrap();
-            tx.update_retention(stream_id, 42).unwrap();
+            tx.update_retention(stream_id, true, 42).unwrap();
             tx.commit().unwrap();
         }
         let camera_uuid = { db.lock().cameras_by_id().get(&camera_id).unwrap().uuid };
