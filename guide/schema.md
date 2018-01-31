@@ -26,20 +26,23 @@ read-only mode prior to deleting the old database.
 First ensure there is sufficient space available for four copies of the
 SQLite database:
 
-  1. the primary copy, which will be upgraded
-  2. a copy you create manually as a backup so that you can restore if you
+   * copy 1: the copy to upgrade
+   * copy 2: a backup you manually create so that you can restore if you
      discover a problem while running the new software against the upgraded
      database in read-only mode. If disk space is tight, you can save this
      to a different filesystem than the primary copy.
-  3. internal copies made and destroyed by Moonfire NVR and SQLite during the
-     upgrade:
+   * copies 3 and 4: internal copies made and destroyed by Moonfire NVR and
+     SQLite during the upgrade:
+
         * during earlier steps, possibly duplicate copies of tables, which
           may occupy space both in the main database and the journal
         * during the final vacuum step, a complete database copy
+
      If disk space is tight, and you are _very careful_, you can skip these
      copies with the `--preset-journal=off --no-vacuum` arguments to
      the updater. If you aren't confident in your ability to do this, *don't
      do it*. If you are confident, take additional safety precautions anyway:
+
         * double-check you have the full backup described above. Without the
           journal any problems during the upgrade will corrupt your database
           and you will need to restore.
@@ -84,11 +87,11 @@ Run the upgrade procedure using the new software binary (here referred to as
 `new-moonfire-nvr`; if you are installing from source, you may find it as
 `target/release/moonfire-nvr`).
 
-    $ sudo -u moonfire-nvr new-moonfire-nvr --upgrade
+    $ sudo -u moonfire-nvr new-moonfire-nvr upgrade
 
 Then run the system in read-only mode to verify correct operation:
 
-    $ sudo -u moonfire-nvr new-moonfire-nvr --read-only
+    $ sudo -u moonfire-nvr new-moonfire-nvr run --read-only
 
 Go to the web interface and ensure the system is operating correctly. If
 you detect a problem now, you can copy the old database back over the new one.
