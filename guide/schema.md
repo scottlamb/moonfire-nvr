@@ -98,9 +98,9 @@ more complicated.
 Then install the new software to the path expected by your systemd
 configuration and start it up:
 
-   $ sudo install -m 755 new-moonfire-nvr /usr/local/bin/moonfire-nvr
-   $ sudo systemctl enable moonfire-nvr
-   $ sudo systemctl start moonfire-nvr
+    $ sudo install -m 755 new-moonfire-nvr /usr/local/bin/moonfire-nvr
+    $ sudo systemctl enable moonfire-nvr
+    $ sudo systemctl start moonfire-nvr
 
 Hopefully your system is functioning correctly. If not, there are two options
 for restore; neither are easy:
