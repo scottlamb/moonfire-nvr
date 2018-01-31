@@ -37,6 +37,7 @@ use error::Error;
 use rusqlite;
 
 mod v0_to_v1;
+mod v1_to_v2;
 
 const USAGE: &'static str = r#"
 Upgrade to the latest database schema.
@@ -64,8 +65,9 @@ Options:
 const UPGRADE_NOTES: &'static str =
     concat!("upgraded using moonfire-nvr ", env!("CARGO_PKG_VERSION"));
 
-const UPGRADERS: [fn(&rusqlite::Transaction) -> Result<(), Error>; 1] = [
+const UPGRADERS: [fn(&rusqlite::Transaction) -> Result<(), Error>; 2] = [
     v0_to_v1::run,
+    v1_to_v2::run,
 ];
 
 #[derive(Debug, Deserialize)]

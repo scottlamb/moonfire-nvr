@@ -191,3 +191,10 @@ indexes, the number of (mostly 1024-byte) read syscalls on the database
 dropped from 605 to 39.
 
 The general upgrade procedure applies to this upgrade.
+
+### Version 1 to version 2
+
+Version 2 adds support for recording of sub streams. It adds a new table for
+this purpose.
+
+The general upgrade procedure applies to this upgrade.
