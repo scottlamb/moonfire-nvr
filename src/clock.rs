@@ -76,6 +76,34 @@ impl Clocks for RealClocks {
     }
 }
 
+/// Logs a warning if the TimerGuard lives "too long", using the label created by a supplied
+/// function.
+pub struct TimerGuard<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> {
+    clocks: &'a C,
+    label_f: Option<F>,
+    start: Timespec,
+}
+
+impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
+    pub fn new(clocks: &'a C, label_f: F) -> Self {
+        TimerGuard {
+            clocks,
+            label_f: Some(label_f),
+            start: clocks.monotonic(),
+        }
+    }
+}
+
+impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> Drop for TimerGuard<'a, C, S, F> {
+    fn drop(&mut self) {
+        let elapsed = self.clocks.monotonic() - self.start;
+        if elapsed.num_seconds() >= 1 {
+            let label_f = self.label_f.take().unwrap();
+            warn!("{} took {}!", label_f().as_ref(), elapsed);
+        }
+    }
+}
+
 /// Simulated clock for testing.
 #[cfg(test)]
 pub struct SimulatedClocks {
