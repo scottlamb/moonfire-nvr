@@ -883,7 +883,7 @@ impl FileBuilder {
             video_sample_entries: self.video_sample_entries,
             initial_sample_byte_pos,
             last_modified: mtime.into(),
-            etag: header::EntityTag::strong(strutil::hex(&etag.finish2()?)),
+            etag: header::EntityTag::strong(strutil::hex(&etag.finish()?)),
         })))
     }
 
@@ -1566,7 +1566,7 @@ mod tests {
          })
          .wait()
          .unwrap()
-         .finish2()
+         .finish()
          .unwrap()
     }
 

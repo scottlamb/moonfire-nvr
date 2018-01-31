@@ -656,7 +656,7 @@ impl<'a> InnerWriter<'a> {
         self.index.add_sample(duration, unflushed.len, unflushed.is_key);
         self.extend_local_start(unflushed.local_time);
         let mut sha1_bytes = [0u8; 20];
-        sha1_bytes.copy_from_slice(&self.hasher.finish2()?[..]);
+        sha1_bytes.copy_from_slice(&self.hasher.finish()?[..]);
         let start = self.prev_end.unwrap_or(self.local_start);
         let end = start + recording::Duration(self.index.total_duration_90k as i64);
         let flags = if self.index.has_trailing_zero() { db::RecordingFlags::TrailingZero as i32 }

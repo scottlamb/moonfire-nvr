@@ -1152,7 +1152,7 @@ impl LockedDatabase {
     /// On success, returns the id of a new or existing row.
     pub fn insert_video_sample_entry(&mut self, w: u16, h: u16, data: Vec<u8>,
                                      rfc6381_codec: String) -> Result<i32, Error> {
-        let sha1 = hash::hash2(hash::MessageDigest::sha1(), &data)?;
+        let sha1 = hash::hash(hash::MessageDigest::sha1(), &data)?;
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&sha1);
 
