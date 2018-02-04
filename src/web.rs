@@ -503,14 +503,17 @@ mod bench {
     use hyper;
     use self::test::Bencher;
     use testutil::{self, TestDb};
+    use uuid::Uuid;
 
     struct Server {
         base_url: String,
+        test_camera_uuid: Uuid,
     }
 
     impl Server {
         fn new() -> Server {
             let db = TestDb::new();
+            let test_camera_uuid = db.test_camera_uuid;
             testutil::add_dummy_recordings_to_db(&db.db, 1440);
             let (tx, rx) = ::std::sync::mpsc::channel();
             ::std::thread::spawn(move || {
@@ -524,7 +527,10 @@ mod bench {
                 server.run().unwrap();
             });
             let addr = rx.recv().unwrap();
-            Server{base_url: format!("http://{}:{}", addr.ip(), addr.port())}
+            Server {
+                base_url: format!("http://{}:{}", addr.ip(), addr.port()),
+                test_camera_uuid,
+            }
         }
     }
 
@@ -537,7 +543,7 @@ mod bench {
         testutil::init();
         let server = &*SERVER;
         let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/recordings", server.base_url,
-                                               *testutil::TEST_CAMERA_UUID)).unwrap();
+                                               server.test_camera_uuid)).unwrap();
         let mut buf = Vec::new();
         let client = reqwest::Client::new();
         let mut f = || {

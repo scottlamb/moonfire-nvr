@@ -43,11 +43,6 @@ use uuid::Uuid;
 
 static INIT: sync::Once = sync::ONCE_INIT;
 
-lazy_static! {
-    pub static ref TEST_CAMERA_UUID: Uuid =
-        Uuid::parse_str("ce2d9bc2-0cd3-4204-9324-7b5ccb07183c").unwrap();
-}
-
 /// id of the camera created by `TestDb::new` below.
 pub const TEST_CAMERA_ID: i32 = 1;
 
@@ -73,6 +68,7 @@ pub struct TestDb {
     pub syncer_channel: dir::SyncerChannel,
     pub syncer_join: thread::JoinHandle<()>,
     pub tmpdir: tempdir::TempDir,
+    pub test_camera_uuid: Uuid,
 }
 
 impl TestDb {
@@ -83,35 +79,34 @@ impl TestDb {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let schema = include_str!("schema.sql");
         conn.execute_batch(schema).unwrap();
-        let uuid_bytes = &TEST_CAMERA_UUID.as_bytes()[..];
-        conn.execute_named(r#"
-            insert into camera (uuid,  short_name,  description,  host,  username,  password,
-                                main_rtsp_path,  sub_rtsp_path,  retain_bytes,  next_recording_id)
-                        values (:uuid, :short_name, :description, :host, :username, :password,
-                                :main_rtsp_path, :sub_rtsp_path, :retain_bytes, :next_recording_id)
-        "#, &[
-            (":uuid", &uuid_bytes),
-            (":short_name", &"test camera"),
-            (":description", &""),
-            (":host", &"test-camera"),
-            (":username", &"foo"),
-            (":password", &"bar"),
-            (":main_rtsp_path", &"/main"),
-            (":sub_rtsp_path", &"/sub"),
-            (":retain_bytes", &1048576i64),
-            (":next_recording_id", &1i64),
-        ]).unwrap();
-        assert_eq!(TEST_CAMERA_ID as i64, conn.last_insert_rowid());
         let db = sync::Arc::new(db::Database::new(conn).unwrap());
+        let test_camera_uuid;
+        {
+            let mut l = db.lock();
+            assert_eq!(TEST_CAMERA_ID, l.add_camera(db::CameraChange {
+                short_name: "test camera".to_owned(),
+                description: "".to_owned(),
+                host: "test-camera".to_owned(),
+                username: "foo".to_owned(),
+                password: "bar".to_owned(),
+                main_rtsp_path: "/main".to_owned(),
+                sub_rtsp_path: "/sub".to_owned(),
+            }).unwrap());
+            test_camera_uuid = l.cameras_by_id().get(&TEST_CAMERA_ID).unwrap().uuid;
+            let mut tx = l.tx().unwrap();
+            tx.update_retention(TEST_CAMERA_ID, 1048576).unwrap();
+            tx.commit().unwrap();
+        }
         let path = tmpdir.path().to_str().unwrap().to_owned();
         let dir = dir::SampleFileDir::new(&path, db.clone()).unwrap();
         let (syncer_channel, syncer_join) = dir::start_syncer(dir.clone()).unwrap();
-        TestDb{
-            db: db,
-            dir: dir,
-            syncer_channel: syncer_channel,
-            syncer_join: syncer_join,
-            tmpdir: tmpdir,
+        TestDb {
+            db,
+            dir,
+            syncer_channel,
+            syncer_join,
+            tmpdir,
+            test_camera_uuid,
         }
     }
 

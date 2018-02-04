@@ -1410,28 +1410,6 @@ mod tests {
         conn
     }
 
-    fn setup_camera(conn: &Connection, uuid: Uuid, short_name: &str) -> i32 {
-        let uuid_bytes = &uuid.as_bytes()[..];
-        conn.execute_named(r#"
-            insert into camera (uuid,  short_name,  description,  host,  username,  password,
-                                main_rtsp_path,  sub_rtsp_path,  retain_bytes, next_recording_id)
-                        values (:uuid, :short_name, :description, :host, :username, :password,
-                                :main_rtsp_path, :sub_rtsp_path, :retain_bytes, :next_recording_id)
-        "#, &[
-            (":uuid", &uuid_bytes),
-            (":short_name", &short_name),
-            (":description", &""),
-            (":host", &"test-camera"),
-            (":username", &"foo"),
-            (":password", &"bar"),
-            (":main_rtsp_path", &"/main"),
-            (":sub_rtsp_path", &"/sub"),
-            (":retain_bytes", &42i64),
-            (":next_recording_id", &0i64),
-        ]).unwrap();
-        conn.last_insert_rowid() as i32
-    }
-
     fn assert_no_recordings(db: &Database, uuid: Uuid) {
         let mut rows = 0;
         let mut camera_id = -1;
@@ -1633,8 +1611,27 @@ mod tests {
     fn test_full_lifecycle() {
         testutil::init();
         let conn = setup_conn();
-        let camera_uuid = Uuid::new_v4();
-        let camera_id = setup_camera(&conn, camera_uuid, "testcam");
+        let db = Database::new(conn).unwrap();
+        let camera_id = { db.lock() }.add_camera(CameraChange {
+            short_name: "testcam".to_owned(),
+            description: "".to_owned(),
+            host: "test-camera".to_owned(),
+            username: "foo".to_owned(),
+            password: "bar".to_owned(),
+            main_rtsp_path: "/main".to_owned(),
+            sub_rtsp_path: "/sub".to_owned(),
+        }).unwrap();
+        {
+            let mut l = db.lock();
+            let mut tx = l.tx().unwrap();
+            tx.update_retention(camera_id, 42).unwrap();
+            tx.commit().unwrap();
+        }
+        let camera_uuid = { db.lock().cameras_by_id().get(&camera_id).unwrap().uuid };
+        assert_no_recordings(&db, camera_uuid);
+
+        // Closing and reopening the database should present the same contents.
+        let conn = db.close();
         let db = Database::new(conn).unwrap();
         assert_no_recordings(&db, camera_uuid);
 
