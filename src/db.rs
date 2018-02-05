@@ -53,7 +53,6 @@
 
 use error::{Error, ResultExt};
 use fnv;
-use h264;
 use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
@@ -106,8 +105,8 @@ enum ReservationState {
 }
 
 const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &'static str = r#"
-    insert into video_sample_entry (sha1,  width,  height,  data)
-                            values (:sha1, :width, :height, :data)
+    insert into video_sample_entry (sha1,  width,  height,  rfc6381_codec, data)
+                            values (:sha1, :width, :height, :rfc6381_codec, :data)
 "#;
 
 const INSERT_RECORDING_SQL: &'static str = r#"
@@ -1166,6 +1165,7 @@ impl LockedDatabase {
                 sha1,
                 width,
                 height,
+                rfc6381_codec,
                 data
             from
                 video_sample_entry
@@ -1182,10 +1182,7 @@ impl LockedDatabase {
                     id, sha1_vec.len())));
             }
             sha1.copy_from_slice(&sha1_vec);
-            let data: Vec<u8> = row.get_checked(4)?;
-
-            // TODO: store this in the database rather than have codec-specific dispatch logic here.
-            let rfc6381_codec = h264::rfc6381_codec_from_sample_entry(&data)?;
+            let data: Vec<u8> = row.get_checked(5)?;
 
             self.state.video_sample_entries.insert(id, Arc::new(VideoSampleEntry {
                 id: id as i32,
@@ -1193,7 +1190,7 @@ impl LockedDatabase {
                 height: row.get_checked::<_, i32>(3)? as u16,
                 sha1,
                 data,
-                rfc6381_codec,
+                rfc6381_codec: row.get_checked(4)?,
             }));
         }
         info!("Loaded {} video sample entries",
@@ -1285,7 +1282,7 @@ impl LockedDatabase {
 
     /// Inserts the specified video sample entry if absent.
     /// On success, returns the id of a new or existing row.
-    pub fn insert_video_sample_entry(&mut self, w: u16, h: u16, data: Vec<u8>,
+    pub fn insert_video_sample_entry(&mut self, width: u16, height: u16, data: Vec<u8>,
                                      rfc6381_codec: String) -> Result<i32, Error> {
         let sha1 = hash::hash(hash::MessageDigest::sha1(), &data)?;
         let mut sha1_bytes = [0u8; 20];
@@ -1297,9 +1294,9 @@ impl LockedDatabase {
             if v.sha1 == sha1_bytes {
                 // The width and height should match given that they're also specified within data
                 // and thus included in the just-compared hash.
-                if v.width != w || v.height != h {
+                if v.width != width || v.height != height {
                     return Err(Error::new(format!("database entry for {:?} is {}x{}, not {}x{}",
-                                                  &sha1[..], v.width, v.height, w, h)));
+                                                  &sha1[..], v.width, v.height, width, height)));
                 }
                 return Ok(id);
             }
@@ -1308,18 +1305,19 @@ impl LockedDatabase {
         let mut stmt = self.conn.prepare_cached(INSERT_VIDEO_SAMPLE_ENTRY_SQL)?;
         stmt.execute_named(&[
             (":sha1", &&sha1_bytes[..]),
-            (":width", &(w as i64)),
-            (":height", &(h as i64)),
+            (":width", &(width as i64)),
+            (":height", &(height as i64)),
+            (":rfc6381_codec", &rfc6381_codec),
             (":data", &data),
         ])?;
 
         let id = self.conn.last_insert_rowid() as i32;
         self.state.video_sample_entries.insert(id, Arc::new(VideoSampleEntry {
-            id: id,
-            width: w,
-            height: h,
+            id,
+            width,
+            height,
             sha1: sha1_bytes,
-            data: data,
+            data,
             rfc6381_codec,
         }));
 

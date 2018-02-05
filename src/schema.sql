@@ -204,6 +204,9 @@ create table video_sample_entry (
   width integer not null check (width > 0),
   height integer not null check (height > 0),
 
+  -- The codec in RFC-6381 format, such as "avc1.4d001f".
+  rfc6381_codec text not null,
+
   -- The serialized box, including the leading length and box type (avcC in
   -- the case of H.264).
   data blob not null check (length(data) > 86)

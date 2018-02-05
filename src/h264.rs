@@ -216,26 +216,18 @@ impl ExtraData {
                                            length {}", avc1_len, sample_entry.len() - avc1_len_pos,
                                            avc_decoder_config_len)));
         }
-        let rfc6381_codec = rfc6381_codec_from_sample_entry(&sample_entry)?;
+        let profile_idc = sample_entry[103];
+        let constraint_flags = sample_entry[104];
+        let level_idc = sample_entry[105];
+        let codec = format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags, level_idc);
         Ok(ExtraData {
             sample_entry,
-            rfc6381_codec,
+            rfc6381_codec: codec,
             width,
             height,
             need_transform,
         })
     }
-}
-
-pub fn rfc6381_codec_from_sample_entry(sample_entry: &[u8]) -> Result<String> {
-    if sample_entry.len() < 99 || &sample_entry[4..8] != b"avc1" ||
-       &sample_entry[90..94] != b"avcC" {
-        return Err(Error::new("not a valid AVCSampleEntry".to_owned()));
-    }
-    let profile_idc = sample_entry[103];
-    let constraint_flags_byte = sample_entry[104];
-    let level_idc = sample_entry[105];
-    Ok(format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags_byte, level_idc))
 }
 
 /// Transforms sample data from Annex B format to AVC format. Should be called on samples iff

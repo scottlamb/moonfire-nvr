@@ -194,7 +194,11 @@ The general upgrade procedure applies to this upgrade.
 
 ### Version 1 to version 2
 
-Version 2 adds support for recording of sub streams. It adds a new table for
-this purpose.
+Version 2 adds:
+
+*   recording of sub streams (splits a new `stream` table out of `camera`)
+*   records the RFC-6381 codec associated with a video sample entry, so that
+    logic for determining this is no longer needed as part of the database
+    layer.
 
 The general upgrade procedure applies to this upgrade.

@@ -38,6 +38,7 @@ pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
     tx.execute_batch(r#"
         alter table camera rename to old_camera;
         alter table recording rename to old_recording;
+        alter table video_sample_entry rename to old_video_sample_entry;
         drop index recording_cover;
 
         create table camera (
@@ -87,6 +88,15 @@ pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
           sample_file_bytes,
           run_offset,
           flags
+        );
+
+        create table video_sample_entry (
+          id integer primary key,
+          sha1 blob unique not null check (length(sha1) = 20),
+          width integer not null check (width > 0),
+          height integer not null check (height > 0),
+          rfc6381_codec text not null,
+          data blob not null check (length(data) > 86)
         );
 
         insert into camera
@@ -142,9 +152,57 @@ pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
           video_sample_entry_id
         from
           old_recording;
+    "#)?;
 
+    fix_video_sample_entry(tx)?;
+
+    tx.execute_batch(r#"
         drop table old_camera;
         drop table old_recording;
+        drop table old_video_sample_entry;
     "#)?;
+
     Ok(())
+}
+
+fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
+    let mut select = tx.prepare(r#"
+        select
+          id,
+          sha1,
+          width,
+          height,
+          data
+        from
+          old_video_sample_entry
+    "#)?;
+    let mut insert = tx.prepare(r#"
+        insert into video_sample_entry values (:id, :sha1, :width, :height, :rfc6381_codec, :data)
+    "#)?;
+    let mut rows = select.query(&[])?;
+    while let Some(row) = rows.next() {
+        let row = row?;
+        let data: Vec<u8> = row.get_checked(4)?;
+        insert.execute_named(&[
+            (":id", &row.get_checked::<_, i32>(0)?),
+            (":sha1", &row.get_checked::<_, Vec<u8>>(1)?),
+            (":width", &row.get_checked::<_, i32>(2)?),
+            (":height", &row.get_checked::<_, i32>(3)?),
+            (":rfc6381_codec", &rfc6381_codec_from_sample_entry(&data)?),
+            (":data", &data),
+        ])?;
+    }
+    Ok(())
+}
+
+// This previously lived in h264.rs. As of version 1, H.264 is the only supported codec.
+fn rfc6381_codec_from_sample_entry(sample_entry: &[u8]) -> Result<String, Error> {
+    if sample_entry.len() < 99 || &sample_entry[4..8] != b"avc1" ||
+       &sample_entry[90..94] != b"avcC" {
+        return Err(Error::new("not a valid AVCSampleEntry".to_owned()));
+    }
+    let profile_idc = sample_entry[103];
+    let constraint_flags_byte = sample_entry[104];
+    let level_idc = sample_entry[105];
+    Ok(format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags_byte, level_idc))
 }
