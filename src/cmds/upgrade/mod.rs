@@ -49,9 +49,8 @@ Options:
     --db-dir=DIR           Set the directory holding the SQLite3 index database.
                            This is typically on a flash device.
                            [default: /var/lib/moonfire-nvr/db]
-    --sample-file-dir=DIR  Set the directory holding video data.
+    --sample-file-dir=DIR  When upgrading from schema version 1 to 2, the sample file directory.
                            This is typically on a hard drive.
-                           [default: /var/lib/moonfire-nvr/sample]
     --preset-journal=MODE  Resets the SQLite journal_mode to the specified mode
                            prior to the upgrade. The default, delete, is
                            recommended. off is very dangerous but may be
@@ -65,15 +64,15 @@ Options:
 const UPGRADE_NOTES: &'static str =
     concat!("upgraded using moonfire-nvr ", env!("CARGO_PKG_VERSION"));
 
-const UPGRADERS: [fn(&rusqlite::Transaction) -> Result<(), Error>; 2] = [
+const UPGRADERS: [fn(&rusqlite::Transaction, &Args) -> Result<(), Error>; 2] = [
     v0_to_v1::run,
     v1_to_v2::run,
 ];
 
 #[derive(Debug, Deserialize)]
-struct Args {
+pub struct Args {
     flag_db_dir: String,
-    flag_sample_file_dir: String,
+    flag_sample_file_dir: Option<String>,
     flag_preset_journal: String,
     flag_no_vacuum: bool,
 }
@@ -105,7 +104,7 @@ pub fn run() -> Result<(), Error> {
         for ver in old_ver .. db::EXPECTED_VERSION {
             info!("...from version {} to version {}", ver, ver + 1);
             let tx = conn.transaction()?;
-            UPGRADERS[ver as usize](&tx)?;
+            UPGRADERS[ver as usize](&tx, &args)?;
             tx.execute(r#"
                 insert into version (id, unix_time, notes)
                              values (?, cast(strftime('%s', 'now') as int32), ?)

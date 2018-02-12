@@ -33,8 +33,32 @@
 use error::Error;
 use rusqlite;
 
-pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
+pub fn run(tx: &rusqlite::Transaction, args: &super::Args) -> Result<(), Error> {
     // These create statements match the schema.sql when version 2 was the latest.
+    tx.execute_batch(r#"
+        create table sample_file_dir (
+          id integer primary key,
+          path text unique not null,
+          uuid blob unique not null check (length(uuid) = 16)
+        );
+    "#)?;
+    {
+        let mut stmt = tx.prepare_cached(r#"
+            insert into sample_file_dir (path,  uuid)
+                                 values (:path, :uuid)
+        "#)?;
+        let uuid = ::uuid::Uuid::new_v4();
+        let uuid_bytes = &uuid.as_bytes()[..];
+        let path = args.flag_sample_file_dir
+                       .as_ref()
+                       .ok_or_else(|| Error::new("--sample-file-dir required when upgrading from 
+                                                  schema version 1 to 2.".to_owned()))?;
+        stmt.execute_named(&[
+            (":path", &path.as_str()),
+            (":uuid", &uuid_bytes),
+        ])?;
+    }
+
     tx.execute_batch(r#"
         alter table camera rename to old_camera;
         alter table recording rename to old_recording;
@@ -54,6 +78,7 @@ pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
         create table stream (
           id integer primary key,
           camera_id integer not null references camera (id),
+          sample_file_dir_id integer references sample_file_dir (id),
           type text not null check (type in ('main', 'sub')),
           record integer not null check (record in (1, 0)),
           rtsp_path text not null,
@@ -113,29 +138,32 @@ pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
         -- Insert main streams using the same id as the camera, to ease changing recordings.
         insert into stream
         select
-          id,
-          id,
+          old_camera.id,
+          old_camera.id,
+          sample_file_dir.id,
           'main',
           1,
-          main_rtsp_path,
-          retain_bytes,
-          next_recording_id
+          old_camera.main_rtsp_path,
+          old_camera.retain_bytes,
+          old_camera.next_recording_id
         from
-          old_camera;
+          old_camera cross join sample_file_dir;
 
         -- Insert sub stream (if path is non-empty) using any id.
-        insert into stream (camera_id, type, record, rtsp_path, retain_bytes, next_recording_id)
+        insert into stream (camera_id, sample_file_dir_id, type, record, rtsp_path, retain_bytes,
+                            next_recording_id)
         select
-          id,
+          old_camera.id,
+          sample_file_dir.id,
           'sub',
           0,
-          sub_rtsp_path,
+          old_camera.sub_rtsp_path,
           0,
           0
         from
-          old_camera
+          old_camera cross join sample_file_dir
         where
-          sub_rtsp_path != '';
+          old_camera.sub_rtsp_path != '';
 
         insert into recording
         select

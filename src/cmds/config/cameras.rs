@@ -36,6 +36,7 @@ use self::cursive::views;
 use db;
 use dir;
 use error::Error;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use stream::{self, Opener, Stream};
 use super::{decode_size, encode_size};
@@ -49,22 +50,33 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
     let h = siv.find_id::<views::EditView>("host").unwrap().get_content().as_str().into();
     let u = siv.find_id::<views::EditView>("username").unwrap().get_content().as_str().into();
     let p = siv.find_id::<views::EditView>("password").unwrap().get_content().as_str().into();
-    let m = siv.find_id::<views::EditView>("main_rtsp_path").unwrap().get_content().as_str().into();
-    let s = siv.find_id::<views::EditView>("sub_rtsp_path").unwrap().get_content().as_str().into();
-    db::CameraChange {
+    let mut c = db::CameraChange {
         short_name: sn,
         description: d,
         host: h,
         username: u,
         password: p,
-        rtsp_paths: [m, s],
+        streams: Default::default(),
+    };
+    for &t in &db::ALL_STREAM_TYPES {
+        let p = siv.find_id::<views::EditView>(&format!("{}_rtsp_path", t.as_str()))
+                .unwrap().get_content().as_str().into();
+        let r = siv.find_id::<views::Checkbox>(&format!("{}_record", t.as_str()))
+                .unwrap().is_checked();
+        let d = *siv.find_id::<views::SelectView<Option<i32>>>(
+            &format!("{}_sample_file_dir", t.as_str()))
+            .unwrap().selection();
+        c.streams[t.index()] = db::StreamChange {
+            rtsp_path: p,
+            sample_file_dir_id: d,
+            record: r,
+        };
     }
+    c
 }
 
-fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>,
-              id: Option<i32>) {
+fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
     let change = get_change(siv);
-    siv.pop_layer();  // get rid of the add/edit camera dialog.
 
     let result = {
         let mut l = db.lock();
@@ -79,9 +91,11 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::SampleFi
                       .title("Error")
                       .dismiss_button("Abort"));
     } else {
+        siv.pop_layer();  // get rid of the add/edit camera dialog.
+
         // Recreate the "Edit cameras" dialog from scratch; it's easier than adding the new entry.
         siv.pop_layer();
-        add_dialog(db, dir, siv);
+        top_dialog(db, siv);
     }
 }
 
@@ -91,25 +105,44 @@ fn press_test_inner(url: &str) -> Result<String, Error> {
     Ok(format!("{}x{} video stream", extra_data.width, extra_data.height))
 }
 
-fn press_test(siv: &mut Cursive, c: &db::CameraChange, stream: &str, path: &str) {
-    let url = format!("rtsp://{}:{}@{}{}", c.username, c.password, c.host, path);
-    let description = match press_test_inner(&url) {
-        Err(e) => {
-            siv.add_layer(
-                views::Dialog::text(format!("{} stream at {}:\n\n{}", stream, url, e))
-                .title("Stream test failed")
-                .dismiss_button("Back"));
-            return;
-        },
-        Ok(d) => d,
-    };
-    siv.add_layer(views::Dialog::text(format!("{} stream at {}:\n\n{}", stream, url, description))
-                  .title("Stream test succeeded")
-                  .dismiss_button("Back"));
+fn press_test(siv: &mut Cursive, t: db::StreamType) {
+    let c = get_change(siv);
+    let url = format!("rtsp://{}:{}@{}{}", c.username, c.password, c.host,
+                      c.streams[t.index()].rtsp_path);
+    siv.add_layer(views::Dialog::text(format!("Testing {} stream at {}. This may take a while \
+                                               on timeout or if you have a long key frame interval",
+                                              t.as_str(), url))
+                  .title("Testing"));
+
+    // Let siv have this thread for its event loop; do the work in a background thread.
+    // siv.cb_sink doesn't actually wake up the event loop. Tell siv to poll, as a workaround.
+    siv.set_fps(5);
+    let sink = siv.cb_sink().clone();
+    ::std::thread::spawn(move || {
+        let r = press_test_inner(&url);
+        sink.send(Box::new(move |siv| {
+            // Polling is no longer necessary.
+            siv.set_fps(0);
+            siv.pop_layer();
+            let description = match r {
+                Err(ref e) => {
+                    siv.add_layer(
+                        views::Dialog::text(format!("{} stream at {}:\n\n{}", t.as_str(), url, e))
+                        .title("Stream test failed")
+                        .dismiss_button("Back"));
+                    return;
+                },
+                Ok(ref d) => d,
+            };
+            siv.add_layer(views::Dialog::text(
+                    format!("{} stream at {}:\n\n{}", t.as_str(), url, description))
+                    .title("Stream test succeeded")
+                    .dismiss_button("Back"));
+        })).unwrap();
+    });
 }
 
-fn press_delete(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, id: i32,
-                name: String, to_delete: i64) {
+fn press_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, name: String, to_delete: i64) {
     let dialog = if to_delete > 0 {
         let prompt = format!("Camera {} has recorded video. Please confirm the amount \
                               of data to delete by typing it back:\n\n{}", name,
@@ -120,50 +153,51 @@ fn press_delete(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::Sample
             .child(views::DummyView)
             .child(views::EditView::new().on_submit({
                 let db = db.clone();
-                let dir = dir.clone();
-                move |siv, _| confirm_deletion(siv, &db, &dir, id, to_delete)
+                move |siv, _| confirm_deletion(siv, &db, id, to_delete)
             }).with_id("confirm")))
         .button("Delete", {
             let db = db.clone();
-            let dir = dir.clone();
-            move |siv| confirm_deletion(siv, &db, &dir, id, to_delete)
+            move |siv| confirm_deletion(siv, &db, id, to_delete)
         })
     } else {
         views::Dialog::text(format!("Delete camera {}? This camera has no recorded video.", name))
         .button("Delete", {
             let db = db.clone();
-            let dir = dir.clone();
-            move |s| actually_delete(s, &db, &dir, id)
+            move |s| actually_delete(s, &db, id)
         })
     }.title("Delete camera").dismiss_button("Cancel");
     siv.add_layer(dialog);
 }
 
-fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>,
-                    id: i32, to_delete: i64) {
+fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delete: i64) {
     let typed = siv.find_id::<views::EditView>("confirm").unwrap().get_content();
     if decode_size(typed.as_str()).ok() == Some(to_delete) {
         siv.pop_layer();  // deletion confirmation dialog
 
-        let mut zero_limits = Vec::new();
+        let mut zero_limits = BTreeMap::new();
         {
             let l = db.lock();
             for (&stream_id, stream) in l.streams_by_id() {
                 if stream.camera_id == id {
-                    zero_limits.push(dir::NewLimit {
+                    let dir_id = match stream.sample_file_dir_id {
+                        Some(d) => d,
+                        None => continue,
+                    };
+                    let l = zero_limits.entry(dir_id).or_insert_with(|| Vec::with_capacity(2));
+                    l.push(dir::NewLimit {
                         stream_id,
                         limit: 0,
                     });
                 }
             }
         }
-        if let Err(e) = dir::lower_retention(dir.clone(), &zero_limits) {
+        if let Err(e) = lower_retention(db, zero_limits) {
             siv.add_layer(views::Dialog::text(format!("Unable to delete recordings: {}", e))
                           .title("Error")
                           .dismiss_button("Abort"));
             return;
         }
-        actually_delete(siv, db, dir, id);
+        actually_delete(siv, db, id);
     } else {
         siv.add_layer(views::Dialog::text("Please confirm amount.")
                       .title("Try again")
@@ -171,8 +205,16 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::Sa
     }
 }
 
-fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>,
-                   id: i32) {
+fn lower_retention(db: &Arc<db::Database>, zero_limits: BTreeMap<i32, Vec<dir::NewLimit>>)
+                   -> Result<(), Error> {
+    for (dir_id, l) in &zero_limits {
+        let dir = db.lock().sample_file_dirs_by_id().get(dir_id).unwrap().open()?;
+        dir::lower_retention(dir, db.clone(), &l)?;
+    }
+    Ok(())
+}
+
+fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32) {
     siv.pop_layer();  // get rid of the add/edit camera dialog.
     let result = {
         let mut l = db.lock();
@@ -185,15 +227,14 @@ fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, dir: &Arc<dir::Sam
     } else {
         // Recreate the "Edit cameras" dialog from scratch; it's easier than adding the new entry.
         siv.pop_layer();
-        add_dialog(db, dir, siv);
+        top_dialog(db, siv);
     }
 }
 
 /// Adds or updates a camera.
 /// (The former if `item` is None; the latter otherwise.)
-fn edit_camera_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &mut Cursive,
-                      item: &Option<i32>) {
-    let list = views::ListView::new()
+fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i32>) {
+    let camera_list = views::ListView::new()
         .child("id", views::TextView::new(match *item {
             None => "<new>".to_string(),
             Some(id) => id.to_string(),
@@ -203,60 +244,85 @@ fn edit_camera_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv
         .child("host", views::EditView::new().with_id("host"))
         .child("username", views::EditView::new().with_id("username"))
         .child("password", views::EditView::new().with_id("password"))
-        .child("main_rtsp_path", views::LinearLayout::horizontal()
-               .child(views::EditView::new().with_id("main_rtsp_path").full_width())
-               .child(views::DummyView)
-               .child(views::Button::new("Test", |siv| {
-                   let c = get_change(siv);
-                   press_test(siv, &c, "main", &c.rtsp_paths[0])
-               })))
-        .child("sub_rtsp_path", views::LinearLayout::horizontal()
-               .child(views::EditView::new().with_id("sub_rtsp_path").full_width())
-               .child(views::DummyView)
-               .child(views::Button::new("Test", |siv| {
-                   let c = get_change(siv);
-                   press_test(siv, &c, "sub", &c.rtsp_paths[1])
-               })))
-        .min_height(8);
-    let layout = views::LinearLayout::vertical()
-        .child(list)
+        .min_height(6);
+    let mut layout = views::LinearLayout::vertical()
+        .child(camera_list)
         .child(views::TextView::new("description"))
-        .child(views::TextArea::new().with_id("description").min_height(3))
-        .full_width();
+        .child(views::TextArea::new().with_id("description").min_height(3));
+
+    let dirs: Vec<_> = ::std::iter::once(("<none>".to_owned(), None))
+                       .chain(db.lock()
+                                .sample_file_dirs_by_id()
+                                .iter()
+                                .map(|(&id, d)| (d.path.as_str().to_owned(), Some(id))))
+                       .collect();
+    for &type_ in &db::ALL_STREAM_TYPES {
+        let list = views::ListView::new()
+            .child("rtsp path", views::LinearLayout::horizontal()
+                .child(views::EditView::new()
+                       .with_id(format!("{}_rtsp_path", type_.as_str()))
+                       .full_width())
+                .child(views::DummyView)
+                .child(views::Button::new("Test", move |siv| press_test(siv, type_))))
+            .child("sample file dir",
+                   views::SelectView::<Option<i32>>::new()
+                   .with_all(dirs.iter().map(|d| d.clone()))
+                   .popup()
+                   .with_id(format!("{}_sample_file_dir", type_.as_str())))
+            .child("record", views::Checkbox::new().with_id(format!("{}_record", type_.as_str())))
+            .child("usage/capacity",
+                   views::TextView::new("").with_id(format!("{}_usage_cap", type_.as_str())))
+            .min_height(4);
+        layout.add_child(views::DummyView);
+        layout.add_child(views::TextView::new(format!("{} stream", type_.as_str())));
+        layout.add_child(list);
+    }
+
     let mut dialog = views::Dialog::around(layout);
     let dialog = if let Some(camera_id) = *item {
         let l = db.lock();
         let camera = l.cameras_by_id().get(&camera_id).expect("missing camera");
         dialog.find_id("uuid", |v: &mut views::TextView| v.set_content(camera.uuid.to_string()))
               .expect("missing TextView");
-        let mut main_rtsp_path = "";
-        let mut sub_rtsp_path = "";
+
         let mut bytes = 0;
-        for (_, s) in l.streams_by_id() {
-            if s.camera_id != camera_id { continue; }
-            bytes += s.sample_file_bytes;
-            match s.type_ {
-                db::StreamType::MAIN => main_rtsp_path = &s.rtsp_path,
-                db::StreamType::SUB => sub_rtsp_path = &s.rtsp_path,
-            };
+        for (i, sid) in camera.streams.iter().enumerate() {
+            let t = db::StreamType::from_index(i).unwrap();
+
+            // Find the index into dirs of the stored sample file dir.
+            let mut selected_dir = 0;
+            if let Some(s) = sid.map(|sid| l.streams_by_id().get(&sid).unwrap()) {
+                if let Some(id) = s.sample_file_dir_id {
+                    for (i, &(_, d_id)) in dirs.iter().skip(1).enumerate() {
+                        if Some(id) == d_id {
+                            selected_dir = i + 1;
+                            break;
+                        }
+                    }
+                }
+                bytes += s.sample_file_bytes;
+                let u = if s.retain_bytes == 0 {
+                    "0 / 0 (0.0%)".to_owned()
+                } else {
+                    format!("{} / {} ({:.1}%)", s.sample_file_bytes, s.retain_bytes,
+                                100. * s.sample_file_bytes as f32 / s.retain_bytes as f32)
+                };
+                dialog.find_id(&format!("{}_rtsp_path", t.as_str()),
+                               |v: &mut views::EditView| v.set_content(s.rtsp_path.to_owned()));
+                dialog.find_id(&format!("{}_usage_cap", t.as_str()),
+                               |v: &mut views::TextView| v.set_content(u));
+                dialog.find_id(&format!("{}_record", t.as_str()),
+                               |v: &mut views::Checkbox| v.set_checked(s.record));
+            }
+            dialog.find_id(&format!("{}_sample_file_dir", t.as_str()),
+                           |v: &mut views::SelectView<Option<i32>>| v.set_selection(selected_dir));
         }
         let name = camera.short_name.clone();
         for &(view_id, content) in &[("short_name", &*camera.short_name),
                                      ("host", &*camera.host),
                                      ("username", &*camera.username),
-                                     ("password", &*camera.password),
-                                     ("main_rtsp_path", main_rtsp_path),
-                                     ("sub_rtsp_path", sub_rtsp_path)] {
+                                     ("password", &*camera.password)] {
             dialog.find_id(view_id, |v: &mut views::EditView| v.set_content(content.to_string()))
-                  .expect("missing EditView");
-        }
-        for s in l.streams_by_id().values() {
-            if s.camera_id != camera_id { continue };
-            let id = match s.type_ {
-                db::StreamType::MAIN => "main_rtsp_path",
-                db::StreamType::SUB  => "sub_rtsp_path",
-            };
-            dialog.find_id(id, |v: &mut views::EditView| v.set_content(s.rtsp_path.to_string()))
                   .expect("missing EditView");
         }
         dialog.find_id("description",
@@ -265,32 +331,32 @@ fn edit_camera_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv
         dialog.title("Edit camera")
               .button("Edit", {
                   let db = db.clone();
-                  let dir = dir.clone();
-                  move |s| press_edit(s, &db, &dir, Some(camera_id))
+                  move |s| press_edit(s, &db, Some(camera_id))
               })
               .button("Delete", {
                   let db = db.clone();
-                  let dir = dir.clone();
-                  move |s| press_delete(s, &db, &dir, camera_id, name.clone(), bytes)
+                  move |s| press_delete(s, &db, camera_id, name.clone(), bytes)
               })
     } else {
+        for t in &db::ALL_STREAM_TYPES {
+            dialog.find_id(&format!("{}_usage_cap", t.as_str()),
+                           |v: &mut views::TextView| v.set_content("<new>"));
+        }
         dialog.title("Add camera")
               .button("Add", {
                   let db = db.clone();
-                  let dir = dir.clone();
-                  move |s| press_edit(s, &db, &dir, None)
+                  move |s| press_edit(s, &db, None)
               })
     };
     siv.add_layer(dialog.dismiss_button("Cancel"));
 }
 
-pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &mut Cursive) {
+pub fn top_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
     siv.add_layer(views::Dialog::around(
         views::SelectView::new()
             .on_submit({
                 let db = db.clone();
-                let dir = dir.clone();
-                move |siv, item| edit_camera_dialog(&db, &dir, siv, item)
+                move |siv, item| edit_camera_dialog(&db, siv, item)
             })
             .item("<new camera>".to_string(), None)
             .with_all(db.lock()

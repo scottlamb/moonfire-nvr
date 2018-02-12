@@ -47,7 +47,6 @@ pub struct Environment<'a, 'b, C, S> where C: 'a + Clocks, S: 'a + stream::Strea
     pub clocks: &'a C,
     pub opener: &'a stream::Opener<S>,
     pub db: &'b Arc<Database>,
-    pub dir: &'b Arc<dir::SampleFileDir>,
     pub shutdown: &'b Arc<AtomicBool>,
 }
 
@@ -76,7 +75,8 @@ struct WriterState<'a> {
 }
 
 impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
-    pub fn new<'b>(env: &Environment<'a, 'b, C, S>, syncer_channel: dir::SyncerChannel,
+    pub fn new<'b>(env: &Environment<'a, 'b, C, S>, dir: Arc<dir::SampleFileDir>,
+                   syncer_channel: dir::SyncerChannel,
                    stream_id: i32, c: &Camera, s: &Stream, rotate_offset_sec: i64,
                    rotate_interval_sec: i64) -> Self {
         Streamer {
@@ -84,7 +84,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             rotate_offset_sec: rotate_offset_sec,
             rotate_interval_sec: rotate_interval_sec,
             db: env.db.clone(),
-            dir: env.dir.clone(),
+            dir,
             syncer_channel: syncer_channel,
             clocks: env.clocks,
             opener: env.opener,
@@ -167,8 +167,8 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
                     let r = r + if prev.is_none() { self.rotate_interval_sec } else { 0 };
 
                     let _t = TimerGuard::new(self.clocks, || "creating writer");
-                    let w = self.dir.create_writer(&self.syncer_channel, prev, self.stream_id,
-                                                   video_sample_entry_id)?;
+                    let w = self.dir.create_writer(&self.db, &self.syncer_channel, prev,
+                                                   self.stream_id, video_sample_entry_id)?;
                     WriterState{
                         writer: w,
                         rotate: r,
@@ -351,7 +351,6 @@ mod tests {
             clocks: &clocks,
             opener: &opener,
             db: &db.db,
-            dir: &db.dir,
             shutdown: &opener.shutdown,
         };
         let mut stream;
@@ -359,8 +358,9 @@ mod tests {
             let l = db.db.lock();
             let camera = l.cameras_by_id().get(&testutil::TEST_CAMERA_ID).unwrap();
             let s = l.streams_by_id().get(&testutil::TEST_STREAM_ID).unwrap();
-            stream = super::Streamer::new(&env, db.syncer_channel.clone(), testutil::TEST_STREAM_ID,
-                                          camera, s, 0, 3);
+            let dir = db.dirs_by_stream_id.get(&testutil::TEST_STREAM_ID).unwrap().clone();
+            stream = super::Streamer::new(&env, dir, db.syncer_channel.clone(),
+                                          testutil::TEST_STREAM_ID, camera, s, 0, 3);
         }
         stream.run();
         assert!(opener.streams.lock().unwrap().is_empty());

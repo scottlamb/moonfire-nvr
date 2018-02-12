@@ -51,7 +51,7 @@ struct Stream {
 
 struct Model {
     db: Arc<db::Database>,
-    dir: Arc<dir::SampleFileDir>,
+    dir_id: i32,
     fs_capacity: i64,
     total_used: i64,
     total_retain: i64,
@@ -106,9 +106,9 @@ fn edit_limit(model: &RefCell<Model>, siv: &mut Cursive, id: i32, content: &str)
             .set_content(if new_value.is_none() { "*" } else { " " });
     }
     stream.retain = new_value;
-    info!("model.errors = {}", model.errors);
+    debug!("model.errors = {}", model.errors);
     if (model.errors == 0) != (old_errors == 0) {
-        info!("toggling change state: errors={}", model.errors);
+        trace!("toggling change state: errors={}", model.errors);
         siv.find_id::<views::Button>("change")
            .unwrap()
            .set_enabled(model.errors == 0);
@@ -144,7 +144,11 @@ fn actually_delete(model: &RefCell<Model>, siv: &mut Cursive) {
              .collect();
     siv.pop_layer();  // deletion confirmation
     siv.pop_layer();  // retention dialog
-    if let Err(e) = dir::lower_retention(model.dir.clone(), &new_limits[..]) {
+    let dir = {
+        let l = model.db.lock();
+        l.sample_file_dirs_by_id().get(&model.dir_id).unwrap().open().unwrap()
+    };
+    if let Err(e) = dir::lower_retention(dir, model.db.clone(), &new_limits[..]) {
         siv.add_layer(views::Dialog::text(format!("Unable to delete excess video: {}", e))
                       .title("Error")
                       .dismiss_button("Abort"));
@@ -179,20 +183,110 @@ fn press_change(model: &Rc<RefCell<Model>>, siv: &mut Cursive) {
             .title("Confirm deletion");
         siv.add_layer(dialog);
     } else {
-        siv.screen_mut().pop_layer();
+        siv.pop_layer();
         update_limits(&model.borrow(), siv);
     }
 }
 
-pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &mut Cursive) {
+pub fn top_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
+    siv.add_layer(views::Dialog::around(
+        views::SelectView::new()
+            .on_submit({
+                let db = db.clone();
+                move |siv, item| match *item {
+                    Some(d) => edit_dir_dialog(&db, siv, d),
+                    None => add_dir_dialog(&db, siv),
+                }
+            })
+            .item("<new sample file dir>".to_string(), None)
+            .with_all(db.lock()
+                        .sample_file_dirs_by_id()
+                        .iter()
+                        .map(|(&id, d)| (d.path.to_string(), Some(id))))
+            .full_width())
+        .dismiss_button("Done")
+        .title("Edit sample file directories"));
+}
+
+fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
+    siv.add_layer(
+        views::Dialog::around(
+            views::LinearLayout::vertical()
+                .child(views::TextView::new("path"))
+                .child(views::EditView::new()
+                    .on_submit({
+                        let db = db.clone();
+                        move |siv, path| add_dir(&db, siv, path)
+                    })
+                    .with_id("path")
+                    .fixed_width(60)))
+            .button("Add", {
+                let db = db.clone();
+                move |siv| {
+                    let path = siv.find_id::<views::EditView>("path").unwrap().get_content();
+                    add_dir(&db, siv, &path)
+                }
+            })
+            .button("Cancel", |siv| siv.pop_layer())
+        .title("Add sample file directory"));
+}
+
+fn add_dir(db: &Arc<db::Database>, siv: &mut Cursive, path: &str) {
+    if let Err(e) = db.lock().add_sample_file_dir(path.to_owned()) {
+        siv.add_layer(views::Dialog::text(format!("Unable to add path {}: {}", path, e))
+                      .dismiss_button("Back")
+                      .title("Error"));
+        return;
+    }
+    siv.pop_layer();
+
+    // Recreate the edit dialog from scratch; it's easier than adding the new entry.
+    siv.pop_layer();
+    top_dialog(db, siv);
+}
+
+fn delete_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
+    siv.add_layer(
+        views::Dialog::around(
+            views::TextView::new("Empty (no associated streams)."))
+            .button("Delete", {
+                let db = db.clone();
+                move |siv| {
+                    delete_dir(&db, siv, dir_id)
+                }
+            })
+            .button("Cancel", |siv| siv.pop_layer())
+        .title("Delete sample file directory"));
+}
+
+fn delete_dir(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
+    if let Err(e) = db.lock().delete_sample_file_dir(dir_id) {
+        siv.add_layer(views::Dialog::text(format!("Unable to delete dir id {}: {}", dir_id, e))
+                      .dismiss_button("Back")
+                      .title("Error"));
+        return;
+    }
+    siv.pop_layer();
+
+    // Recreate the edit dialog from scratch; it's easier than adding the new entry.
+    siv.pop_layer();
+    top_dialog(db, siv);
+}
+
+fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
+    let path;
     let model = {
         let mut streams = BTreeMap::new();
         let mut total_used = 0;
         let mut total_retain = 0;
+        let fs_capacity;
         {
-            let db = db.lock();
-            for (&id, s) in db.streams_by_id() {
-                let c = db.cameras_by_id().get(&s.camera_id).expect("stream without camera");
+            let l = db.lock();
+            for (&id, s) in l.streams_by_id() {
+                let c = l.cameras_by_id().get(&s.camera_id).expect("stream without camera");
+                if s.sample_file_dir_id != Some(dir_id) {
+                    continue;
+                }
                 streams.insert(id, Stream {
                     label: format!("{}: {}: {}", id, c.short_name, s.type_.as_str()),
                     used: s.sample_file_bytes,
@@ -202,11 +296,18 @@ pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &m
                 total_used += s.sample_file_bytes;
                 total_retain += s.retain_bytes;
             }
+            if streams.is_empty() {
+                return delete_dir_dialog(db, siv, dir_id);
+            }
+            let dir = l.sample_file_dirs_by_id().get(&dir_id).unwrap();
+
+            // TODO: go another way if open fails.
+            let stat = dir.open().unwrap().statfs().unwrap();
+            fs_capacity = stat.f_bsize as i64 * stat.f_bavail as i64 + total_used;
+            path = dir.path.clone();
         }
-        let stat = dir.statfs().unwrap();
-        let fs_capacity = stat.f_bsize as i64 * stat.f_bavail as i64 + total_used;
-        Rc::new(RefCell::new(Model{
-            dir: dir.clone(),
+        Rc::new(RefCell::new(Model {
+            dir_id,
             db: db.clone(),
             fs_capacity,
             total_used,
@@ -217,7 +318,7 @@ pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &m
     };
 
     const RECORD_WIDTH: usize = 8;
-    const BYTES_WIDTH: usize = 20;
+    const BYTES_WIDTH: usize = 22;
 
     let mut list = views::ListView::new();
     list.add_child(
@@ -276,12 +377,12 @@ pub fn add_dialog(db: &Arc<db::Database>, dir: &Arc<dir::SampleFileDir>, siv: &m
         .child(views::DummyView.full_width());
     buttons.add_child(change_button.with_id("change"));
     buttons.add_child(views::DummyView);
-    buttons.add_child(views::Button::new("Cancel", |siv| siv.screen_mut().pop_layer()));
+    buttons.add_child(views::Button::new("Cancel", |siv| siv.pop_layer()));
     siv.add_layer(
         views::Dialog::around(
             views::LinearLayout::vertical()
                 .child(list)
                 .child(views::DummyView)
                 .child(buttons))
-        .title("Edit retention"));
+        .title(format!("Edit retention for {}", path)));
 }

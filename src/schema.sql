@@ -45,6 +45,12 @@ create table version (
   notes text
 );
 
+create table sample_file_dir (
+  id integer primary key,
+  path text unique not null,
+  uuid blob unique not null check (length(uuid) = 16)
+);
+
 create table camera (
   id integer primary key,
   uuid blob unique not null check (length(uuid) = 16),
@@ -69,6 +75,7 @@ create table camera (
 create table stream (
   id integer primary key,
   camera_id integer not null references camera (id),
+  sample_file_dir_id integer references sample_file_dir (id),
   type text not null check (type in ('main', 'sub')),
 
   -- If record is true, the stream should start recording when moonfire

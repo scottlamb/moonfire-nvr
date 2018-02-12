@@ -99,9 +99,9 @@ state:
 
    * a SQLite database, typically <1 GiB. It should be stored on flash if
      available.
-   * the "sample file directory", which holds the actual samples/frames of
-     H.264 video. This should be quite large and typically is stored on a hard
-     drive.
+   * the "sample file directories", which hold the actual samples/frames of
+     H.264 video. These should be quite large and are typically stored on hard
+     drives.
 
 (See [schema.md](schema.md) for more information.)
 
@@ -134,23 +134,27 @@ You can configure the system through a text-based user interface:
 
     $ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
 
-In the user interface, add your cameras under the "Edit cameras" dialog.
-There's a "Test" button to verify your settings directly from the dialog.
+In the user interface,
 
-After the cameras look correct, go to "Edit retention" to assign disk space to
-each camera. Leave a little slack (at least 100 MB per camera) between the total
-limit and the filesystem capacity, even if you store nothing else on the disk.
-There are several reasons this is needed:
+ 1. add your sample file dirs under "Edit cameras and retention"
+ 2. add cameras under the "Edit cameras and streams" dialog.
+    There's a "Test" button to verify your settings directly from the dialog.
+    Be sure to assign each stream you want to capture to a sample file
+    directory.
+ 3. Assign disk space to your cameras back in "Edit cameras and retention".
+    Leave a little slack (at least 100 MB per camera) between the total limit
+    and the filesystem capacity, even if you store nothing else on the disk.
+    There are several reasons this is needed:
 
-   * The limit currently controls fully-written files only. There will be up
-     to two minutes of video per camera of additional video.
-   * The rotation happens after the limit is exceeded, not proactively.
-   * Moonfire NVR currently doesn't account for the unused space in the final
-     filesystem block at the end of each file.
-   * Moonfire NVR doesn't account for the space used for directory listings.
-   * If a file is open when it is deleted (such as if a HTTP client is
-     downloading it), it stays around until the file is closed. Moonfire NVR
-     currently doesn't account for this.
+       * The limit currently controls fully-written files only. There will be up
+         to two minutes of video per camera of additional video.
+       * The rotation happens after the limit is exceeded, not proactively.
+       * Moonfire NVR currently doesn't account for the unused space in the final
+         filesystem block at the end of each file.
+       * Moonfire NVR doesn't account for the space used for directory listings.
+       * If a file is open when it is deleted (such as if a HTTP client is
+         downloading it), it stays around until the file is closed. Moonfire NVR
+         currently doesn't account for this.
 
 When finished, start the daemon:
 
@@ -168,7 +172,6 @@ been done for you. If not, Create
 
     [Service]
     ExecStart=/usr/local/bin/moonfire-nvr run \
-        --sample-file-dir=/var/lib/moonfire-nvr/sample \
         --db-dir=/var/lib/moonfire-nvr/db \
         --http-addr=0.0.0.0:8080
     Environment=TZ=:/etc/localtime

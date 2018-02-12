@@ -197,6 +197,8 @@ The general upgrade procedure applies to this upgrade.
 Version 2 adds:
 
 *   recording of sub streams (splits a new `stream` table out of `camera`)
+*   support for multiple sample file directories, to take advantage of
+    multiple hard drives (or multiple RAID volumes).
 *   records the RFC-6381 codec associated with a video sample entry, so that
     logic for determining this is no longer needed as part of the database
     layer.

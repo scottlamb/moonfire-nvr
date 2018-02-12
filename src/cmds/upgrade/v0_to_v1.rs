@@ -37,7 +37,7 @@ use rusqlite;
 use std::collections::HashMap;
 use strutil;
 
-pub fn run(tx: &rusqlite::Transaction) -> Result<(), Error> {
+pub fn run(tx: &rusqlite::Transaction, _args: &super::Args) -> Result<(), Error> {
     // These create statements match the schema.sql when version 1 was the latest.
     tx.execute_batch(r#"
         alter table camera rename to old_camera;

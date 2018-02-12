@@ -776,7 +776,8 @@ impl FileBuilder {
     }
 
     /// Builds the `File`, consuming the builder.
-    pub fn build(mut self, db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>)
+    pub fn build(mut self, db: Arc<db::Database>,
+                 dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>)
                  -> Result<File, Error> {
         let mut max_end = None;
         let mut etag = hash::Hasher::new(hash::MessageDigest::sha1())?;
@@ -876,7 +877,7 @@ impl FileBuilder {
                     ::std::time::Duration::from_secs(max_end as u64);
         Ok(File(Arc::new(FileInner {
             db,
-            dir,
+            dirs_by_stream_id,
             segments: self.segments,
             slices: self.body.slices,
             buf: self.body.buf,
@@ -1418,7 +1419,7 @@ impl BodyState {
 
 struct FileInner {
     db: Arc<db::Database>,
-    dir: Arc<dir::SampleFileDir>,
+    dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
     segments: Vec<Segment>,
     slices: Slices<Slice>,
     buf: Vec<u8>,
@@ -1452,10 +1453,15 @@ impl FileInner {
     fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> Result<Chunk, Error> {
         let s = &self.segments[i];
         let uuid = {
-            self.db.lock().with_recording_playback(s.s.stream_id, s.s.recording_id,
-                                                   |p| Ok(p.sample_file_uuid))?
+            let l = self.db.lock();
+            l.with_recording_playback(s.s.stream_id, s.s.recording_id,
+                                      |p| Ok(p.sample_file_uuid))?
         };
-        let f = self.dir.open_sample_file(uuid)?;
+        let f = self.dirs_by_stream_id
+                    .get(&s.s.stream_id)
+                    .ok_or_else(|| Error::new(format!("{}/{}: stream not found",
+                                                      s.s.stream_id, s.s.recording_id)))?
+                    .open_sample_file(uuid)?;
         let start = s.s.sample_file_range().start + r.start;
         let mmap = Box::new(unsafe {
             memmap::MmapOptions::new()
@@ -1525,8 +1531,6 @@ impl http_serve::Entity for File {
 #[cfg(test)]
 mod tests {
     use byteorder::{BigEndian, ByteOrder};
-    use db;
-    use dir;
     use futures::Future;
     use futures::Stream as FuturesStream;
     use hyper::header;
@@ -1536,7 +1540,6 @@ mod tests {
     use std::fs;
     use std::ops::Range;
     use std::path::Path;
-    use std::sync::Arc;
     use std::str;
     use strutil;
     use super::*;
@@ -1764,8 +1767,9 @@ mod tests {
         let video_sample_entry_id = db.db.lock().insert_video_sample_entry(
             extra_data.width, extra_data.height, extra_data.sample_entry,
             extra_data.rfc6381_codec).unwrap();
-        let mut output = db.dir.create_writer(&db.syncer_channel, None,
-                                              TEST_STREAM_ID, video_sample_entry_id).unwrap();
+        let dir = db.dirs_by_stream_id.get(&TEST_STREAM_ID).unwrap();
+        let mut output = dir.create_writer(&db.db, &db.syncer_channel, None,
+                                           TEST_STREAM_ID, video_sample_entry_id).unwrap();
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
         // It's needed because dir::Writer calculates a packet's duration from its pts and the
@@ -1792,13 +1796,13 @@ mod tests {
         db.syncer_channel.flush();
     }
 
-    pub fn create_mp4_from_db(db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>,
+    pub fn create_mp4_from_db(tdb: &TestDb,
                               skip_90k: i32, shorten_90k: i32, include_subtitles: bool) -> File {
         let mut builder = FileBuilder::new(Type::Normal);
         builder.include_timestamp_subtitle_track(include_subtitles);
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
         {
-            let db = db.lock();
+            let db = tdb.db.lock();
             db.list_recordings_by_time(TEST_STREAM_ID, all_time, |r| {
                 let d = r.duration_90k;
                 assert!(skip_90k + shorten_90k < d);
@@ -1806,7 +1810,7 @@ mod tests {
                 Ok(())
             }).unwrap();
         }
-        builder.build(db, dir).unwrap()
+        builder.build(tdb.db.clone(), tdb.dirs_by_stream_id.clone()).unwrap()
     }
 
     fn write_mp4(mp4: &File, dir: &Path) -> String {
@@ -1879,7 +1883,7 @@ mod tests {
             duration_so_far += row.duration_90k;
             builder.append(&db.db.lock(), row, d_start .. d_end).unwrap();
         }
-        builder.build(db.db.clone(), db.dir.clone()).unwrap()
+        builder.build(db.db.clone(), db.dirs_by_stream_id.clone()).unwrap()
     }
 
     /// Tests sample table for a simple video index of all sync frames.
@@ -2104,7 +2108,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new();
         copy_mp4_to_db(&db);
-        let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
+        let mp4 = create_mp4_from_db(&db, 0, 0, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
         compare_mp4s(&new_filename, 0, 0);
 
@@ -2124,7 +2128,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new();
         copy_mp4_to_db(&db);
-        let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, true);
+        let mp4 = create_mp4_from_db(&db, 0, 0, true);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
         compare_mp4s(&new_filename, 0, 0);
 
@@ -2144,7 +2148,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new();
         copy_mp4_to_db(&db);
-        let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 1, 0, false);
+        let mp4 = create_mp4_from_db(&db, 1, 0, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
         compare_mp4s(&new_filename, 1, 0);
 
@@ -2164,7 +2168,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new();
         copy_mp4_to_db(&db);
-        let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 1, false);
+        let mp4 = create_mp4_from_db(&db, 0, 1, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
         compare_mp4s(&new_filename, 0, 1);
 
@@ -2212,7 +2216,7 @@ mod bench {
         fn new() -> BenchServer {
             let db = TestDb::new();
             testutil::add_dummy_recordings_to_db(&db.db, 60);
-            let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
+            let mp4 = create_mp4_from_db(&db, 0, 0, false);
             let p = mp4.0.initial_sample_byte_pos;
             let (tx, rx) = ::std::sync::mpsc::channel();
             ::std::thread::spawn(move || {
@@ -2306,7 +2310,7 @@ mod bench {
         let db = TestDb::new();
         testutil::add_dummy_recordings_to_db(&db.db, 60);
         b.iter(|| {
-            create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
+            create_mp4_from_db(&db, 0, 0, false);
         });
     }
 }

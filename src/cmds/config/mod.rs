@@ -38,7 +38,6 @@ extern crate cursive;
 use self::cursive::Cursive;
 use self::cursive::views;
 use db;
-use dir;
 use error::Error;
 use regex::Regex;
 use std::sync::Arc;
@@ -46,7 +45,7 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 mod cameras;
-mod retention;
+mod dirs;
 
 static USAGE: &'static str = r#"
 Interactive configuration editor.
@@ -61,9 +60,6 @@ Options:
     --db-dir=DIR           Set the directory holding the SQLite3 index database.
                            This is typically on a flash device.
                            [default: /var/lib/moonfire-nvr/db]
-    --sample-file-dir=DIR  Set the directory holding video data.
-                           This is typically on a hard drive.
-                           [default: /var/lib/moonfire-nvr/sample]
 "#;
 
 static MULTIPLIERS: [(char, u64); 4] = [
@@ -123,28 +119,24 @@ fn decode_size(encoded: &str) -> Result<i64, ()> {
 #[derive(Debug, Deserialize)]
 struct Args {
     flag_db_dir: String,
-    flag_sample_file_dir: String,
 }
 
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
     let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
     let db = Arc::new(db::Database::new(conn)?);
-    //let dir = Arc::new(dir::Fd::open(&args.flag_sample_file_dir)?);
-    let dir = dir::SampleFileDir::new(&args.flag_sample_file_dir, db.clone())?;
 
     let mut siv = Cursive::new();
     //siv.add_global_callback('q', |s| s.quit());
 
     siv.add_layer(views::Dialog::around(
-        views::SelectView::<fn(&Arc<db::Database>, &Arc<dir::SampleFileDir>, &mut Cursive)>::new()
+        views::SelectView::<fn(&Arc<db::Database>, &mut Cursive)>::new()
             .on_submit({
                 let db = db.clone();
-                let dir = dir.clone();
-                move |siv, item| item(&db, &dir, siv)
+                move |siv, item| item(&db, siv)
             })
-            .item("Edit cameras".to_string(), cameras::add_dialog)
-            .item("Edit retention".to_string(), retention::add_dialog)
+            .item("Directories and retention".to_string(), dirs::top_dialog)
+            .item("Cameras and streams".to_string(), cameras::top_dialog)
             )
         .button("Quit", |siv| siv.quit())
         .title("Main menu"));

@@ -51,6 +51,7 @@
 //!   * the `Transaction` interface allows callers to batch write operations to reduce latency and
 //!     SSD write cycles.
 
+use dir;
 use error::{Error, ResultExt};
 use fnv;
 use lru_cache::LruCache;
@@ -352,6 +353,26 @@ pub struct StreamDayValue {
     pub duration: recording::Duration,
 }
 
+#[derive(Debug)]
+pub struct SampleFileDir {
+    pub id: i32,
+    pub path: String,
+    pub uuid: Uuid,
+    dir: RefCell<Option<Arc<dir::SampleFileDir>>>,
+}
+
+impl SampleFileDir {
+    pub fn open(&self) -> Result<Arc<dir::SampleFileDir>, Error> {
+        let mut d = self.dir.borrow_mut();
+        if let Some(ref d) = *d {
+            return Ok(d.clone());
+        }
+        let dir = dir::SampleFileDir::open(&self.path)?;
+        *d = Some(dir.clone());
+        Ok(dir)
+    }
+}
+
 /// In-memory state about a camera.
 #[derive(Debug)]
 pub struct Camera {
@@ -400,10 +421,13 @@ impl StreamType {
     }
 }
 
-#[derive(Debug)]
+pub const ALL_STREAM_TYPES: [StreamType; 2] = [StreamType::MAIN, StreamType::SUB];
+
+#[derive(Clone, Debug)]
 pub struct Stream {
     pub id: i32,
     pub camera_id: i32,
+    pub sample_file_dir_id: Option<i32>,
     pub type_: StreamType,
     pub rtsp_path: String,
     pub retain_bytes: i64,
@@ -423,6 +447,13 @@ pub struct Stream {
     next_recording_id: i32,
 }
 
+#[derive(Debug, Default)]
+pub struct StreamChange {
+    pub sample_file_dir_id: Option<i32>,
+    pub rtsp_path: String,
+    pub record: bool,
+}
+
 /// Information about a camera, used by `add_camera` and `update_camera`.
 #[derive(Debug)]
 pub struct CameraChange {
@@ -431,7 +462,11 @@ pub struct CameraChange {
     pub host: String,
     pub username: String,
     pub password: String,
-    pub rtsp_paths: [String; 2],
+
+    /// `StreamType t` is represented by `streams[t.index()]`. A default StreamChange will
+    /// correspond to no stream in the database, provided there are no existing recordings for that
+    /// stream.
+    pub streams: [StreamChange; 2],
 }
 
 /// Adds non-zero `delta` to the day represented by `day` in the map `m`.
@@ -564,6 +599,7 @@ pub struct LockedDatabase {
 /// while its underlying `rusqlite::Transaction` is borrowing `conn`.
 #[derive(Debug)]
 struct State {
+    sample_file_dirs_by_id: BTreeMap<i32, SampleFileDir>,
     cameras_by_id: BTreeMap<i32, Camera>,
     streams_by_id: BTreeMap<i32, Stream>,
     cameras_by_uuid: BTreeMap<Uuid, i32>,
@@ -878,54 +914,139 @@ impl<'a> Transaction<'a> {
     }
 }
 
-struct StreamInserter<'tx> {
-    tx: &'tx rusqlite::Transaction<'tx>,
-    stmt: rusqlite::Statement<'tx>,
-    new_streams: BTreeMap<i32, Stream>,
+/// Inserts, updates, or removes streams in the `State` object to match a set of `StreamChange`
+/// structs.
+struct StreamStateChanger {
+    sids: [Option<i32>; 2],
+    streams: Vec<(i32, Option<Stream>)>,
 }
 
-impl<'tx> StreamInserter<'tx> {
-    fn new(tx: &'tx rusqlite::Transaction) -> Result<Self, Error> {
-        let stmt = tx.prepare(r#"
-            insert into stream (camera_id, type, rtsp_path, record, retain_bytes, next_recording_id)
-                        values (:camera_id, :type, :rtsp_path, 0, 0, 1)
-        "#)?;
-        Ok(StreamInserter {
-            tx,
-            stmt,
-            new_streams: BTreeMap::new(),
+impl StreamStateChanger {
+    /// Performs the database updates (guarded by the given transaction) and returns the state
+    /// change to be applied on successful commit.
+    fn new(tx: &rusqlite::Transaction, camera_id: i32, existing: Option<&Camera>,
+           streams_by_id: &BTreeMap<i32, Stream>, change: &mut CameraChange)
+           -> Result<Self, Error> {
+        let mut sids = [None; 2];
+        let mut streams = Vec::with_capacity(2);
+        let existing_streams = existing.map(|e| e.streams).unwrap_or_default();
+        for (i, ref mut sc) in change.streams.iter_mut().enumerate() {
+            let mut have_data = false;
+            if let Some(sid) = existing_streams[i] {
+                let s = streams_by_id.get(&sid).unwrap();
+                if s.range.is_some() {
+                    have_data = true;
+                    if let (Some(d), false) = (s.sample_file_dir_id,
+                                               s.sample_file_dir_id == sc.sample_file_dir_id) {
+                        return Err(Error::new(format!("can't change sample_file_dir_id \
+                                                       {:?}->{:?} for non-empty stream {}",
+                                                      d, sc.sample_file_dir_id, sid)));
+                    }
+                }
+                if !have_data && sc.rtsp_path.is_empty() && sc.sample_file_dir_id.is_none() &&
+                   !sc.record {
+                    // Delete stream.
+                    let mut stmt = tx.prepare_cached(r#"
+                        delete from stream where id = ?
+                    "#)?;
+                    if stmt.execute(&[&sid])? != 1 {
+                        return Err(Error::new(format!("missing stream {}", sid)));
+                    }
+                    streams.push((sid, None));
+                } else {
+                    // Update stream.
+                    let mut stmt = tx.prepare_cached(r#"
+                        update stream set
+                            rtsp_path = :rtsp_path,
+                            record = :record,
+                            sample_file_dir_id = :sample_file_dir_id
+                        where
+                            id = :id
+                    "#)?;
+                    let rows = stmt.execute_named(&[
+                        (":rtsp_path", &sc.rtsp_path),
+                        (":record", &sc.record),
+                        (":sample_file_dir_id", &sc.sample_file_dir_id),
+                        (":id", &sid),
+                    ])?;
+                    if rows != 1 {
+                        return Err(Error::new(format!("missing stream {}", sid)));
+                    }
+                    sids[i] = Some(sid);
+                    let s = (*s).clone();
+                    streams.push((sid, Some(Stream {
+                        sample_file_dir_id: sc.sample_file_dir_id,
+                        rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
+                        record: sc.record,
+                        ..s
+                    })));
+                }
+            } else {
+                if sc.rtsp_path.is_empty() && sc.sample_file_dir_id.is_none() && !sc.record {
+                    // Do nothing; there is no record and we want to keep it that way.
+                    continue;
+                }
+                // Insert stream.
+                let mut stmt = tx.prepare_cached(r#"
+                    insert into stream (camera_id,  sample_file_dir_id,  type,  rtsp_path,  record,
+                                        retain_bytes, next_recording_id)
+                                values (:camera_id, :sample_file_dir_id, :type, :rtsp_path, :record,
+                                        0,            1)
+                "#)?;
+                let type_ = StreamType::from_index(i).unwrap();
+                stmt.execute_named(&[
+                    (":camera_id", &camera_id),
+                    (":sample_file_dir_id", &sc.sample_file_dir_id),
+                    (":type", &type_.as_str()),
+                    (":rtsp_path", &sc.rtsp_path),
+                    (":record", &sc.record),
+                ])?;
+                let id = tx.last_insert_rowid() as i32;
+                sids[i] = Some(id);
+                streams.push((id, Some(Stream {
+                    id,
+                    type_,
+                    camera_id,
+                    sample_file_dir_id: sc.sample_file_dir_id,
+                    rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
+                    retain_bytes: 0,
+                    range: None,
+                    sample_file_bytes: 0,
+                    duration: recording::Duration(0),
+                    days: BTreeMap::new(),
+                    record: sc.record,
+                    next_recording_id: 1,
+                })));
+            }
+        }
+        Ok(StreamStateChanger {
+            sids,
+            streams,
         })
     }
 
-    fn add(&mut self, camera_id: i32, type_: StreamType, rtsp_path: String) -> Result<(), Error> {
-        self.stmt.execute_named(&[
-            (":camera_id", &camera_id),
-            (":type", &type_.as_str()),
-            (":rtsp_path", &rtsp_path)
-        ])?;
-        let id = self.tx.last_insert_rowid() as i32;
-        self.new_streams.insert(id, Stream {
-            id,
-            type_,
-            camera_id,
-            rtsp_path,
-            retain_bytes: 0,
-            range: None,
-            sample_file_bytes: 0,
-            duration: recording::Duration(0),
-            days: BTreeMap::new(),
-            record: false,
-            next_recording_id: 1,
-        });
-        Ok(())
+    /// Applies the change to the given `streams_by_id`. The caller is expected to set
+    /// `Camera::streams` to the return value.
+    fn apply(mut self, streams_by_id: &mut BTreeMap<i32, Stream>) -> [Option<i32>; 2] {
+        for (id, mut stream) in self.streams.drain(..) {
+            use ::std::collections::btree_map::Entry;
+            match (streams_by_id.entry(id), stream) {
+                (Entry::Vacant(mut e), Some(new)) => { e.insert(new); },
+                (Entry::Vacant(_), None) => {},
+                (Entry::Occupied(mut e), Some(new)) => { e.insert(new); },
+                (Entry::Occupied(mut e), None) => { e.remove(); },
+            };
+        }
+        self.sids
     }
-
-    fn streams(self) -> BTreeMap<i32, Stream> { self.new_streams }
 }
 
 impl LockedDatabase {
     /// Returns an immutable view of the cameras by id.
     pub fn cameras_by_id(&self) -> &BTreeMap<i32, Camera> { &self.state.cameras_by_id }
+    pub fn sample_file_dirs_by_id(&self) -> &BTreeMap<i32, SampleFileDir> {
+        &self.state.sample_file_dirs_by_id
+    }
     pub fn streams_by_id(&self) -> &BTreeMap<i32, Stream> { &self.state.streams_by_id }
 
     /// Returns an immutable view of the video sample entries.
@@ -1198,6 +1319,34 @@ impl LockedDatabase {
         Ok(())
     }
 
+    /// Initializes the sample file dirs.
+    /// To be called during construction.
+    fn init_sample_file_dirs(&mut self) -> Result<(), Error> {
+        info!("Loading sample file dirs");
+        let mut stmt = self.conn.prepare(r#"
+            select
+              id,
+              path,
+              uuid
+            from
+              sample_file_dir;
+        "#)?;
+        let mut rows = stmt.query(&[])?;
+        while let Some(row) = rows.next() {
+            let row = row?;
+            let id = row.get_checked(0)?;
+            let uuid: FromSqlUuid = row.get_checked(2)?;
+            self.state.sample_file_dirs_by_id.insert(id, SampleFileDir {
+                id,
+                uuid: uuid.0,
+                path: row.get_checked(1)?,
+                dir: RefCell::new(None),
+            });
+        }
+        info!("Loaded {} sample file dirs", self.state.sample_file_dirs_by_id.len());
+        Ok(())
+    }
+
     /// Initializes the cameras, but not their matching recordings.
     /// To be called during construction.
     fn init_cameras(&mut self) -> Result<(), Error> {
@@ -1244,6 +1393,7 @@ impl LockedDatabase {
               id,
               type,
               camera_id,
+              sample_file_dir_id,
               rtsp_path,
               retain_bytes,
               next_recording_id,
@@ -1259,21 +1409,24 @@ impl LockedDatabase {
             let type_ = StreamType::parse(&type_).ok_or_else(
                 || Error::new(format!("no such stream type {}", type_)))?;
             let camera_id = row.get_checked(2)?;
+            let c = self.state
+                        .cameras_by_id
+                        .get_mut(&camera_id)
+                        .ok_or_else(|| Error::new("missing camera".to_owned()))?;
             self.state.streams_by_id.insert(id, Stream {
                 id,
                 type_,
                 camera_id,
-                rtsp_path: row.get_checked(3)?,
-                retain_bytes: row.get_checked(4)?,
+                sample_file_dir_id: row.get_checked(3)?,
+                rtsp_path: row.get_checked(4)?,
+                retain_bytes: row.get_checked(5)?,
                 range: None,
                 sample_file_bytes: 0,
                 duration: recording::Duration(0),
                 days: BTreeMap::new(),
-                next_recording_id: row.get_checked(5)?,
-                record: row.get_checked(6)?,
+                next_recording_id: row.get_checked(6)?,
+                record: row.get_checked(7)?,
             });
-            let c = self.state.cameras_by_id.get_mut(&camera_id)
-                                            .ok_or_else(|| Error::new("missing camera".to_owned()))?;
             c.streams[type_.index()] = Some(id);
         }
         info!("Loaded {} streams", self.state.streams_by_id.len());
@@ -1324,16 +1477,61 @@ impl LockedDatabase {
         Ok(id)
     }
 
+    pub fn add_sample_file_dir(&mut self, path: String) -> Result<i32, Error> {
+        let dir = dir::SampleFileDir::create(&path)?;
+        let uuid = Uuid::new_v4();
+        let uuid_bytes = &uuid.as_bytes()[..];
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(r#"
+                insert into sample_file_dir (path, uuid) values (:path, :uuid)
+            "#)?;
+            stmt.execute_named(&[
+                (":uuid", &uuid_bytes),
+                (":path", &path),
+            ])?;
+        }
+        let id = tx.last_insert_rowid() as i32;
+        tx.commit()?;
+        self.state.sample_file_dirs_by_id.insert(id, SampleFileDir {
+            id,
+            path,
+            uuid,
+            dir: RefCell::new(Some(dir)),
+        });
+        Ok(id)
+    }
+
+    pub fn delete_sample_file_dir(&mut self, dir_id: i32) -> Result<(), Error> {
+        for (&id, s) in self.state.streams_by_id.iter() {
+            if s.sample_file_dir_id == Some(dir_id) {
+                return Err(Error::new(format!("can't delete dir referenced by stream {}", id)));
+            }
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(r#"
+                delete from sample_file_dir where id = ?
+            "#)?;
+            if stmt.execute(&[&dir_id])? != 1 {
+                return Err(Error::new(format!("no such dir {} to remove", dir_id)));
+            }
+        }
+        tx.commit()?;
+        self.state.sample_file_dirs_by_id.remove(&dir_id).expect("sample file dir should exist!");
+        Ok(())
+    }
+
     /// Adds a camera.
     pub fn add_camera(&mut self, mut camera: CameraChange) -> Result<i32, Error> {
         let uuid = Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
         let tx = self.conn.transaction()?;
-        let mut new_streams;
+        let streams;
         let camera_id;
         {
             let mut stmt = tx.prepare_cached(r#"
-                insert into camera (uuid, short_name, description, host, username, password)
+                insert into camera (uuid,  short_name,  description,  host,  username,  password)
                             values (:uuid, :short_name, :description, :host, :username, :password)
             "#)?;
             stmt.execute_named(&[
@@ -1345,20 +1543,11 @@ impl LockedDatabase {
                 (":password", &camera.password),
             ])?;
             camera_id = tx.last_insert_rowid() as i32;
-            let mut inserter = StreamInserter::new(&tx)?;
-            for (i, ref mut rtsp_path) in camera.rtsp_paths.iter_mut().enumerate() {
-                if rtsp_path.is_empty() { continue; }
-                inserter.add(camera_id, StreamType::from_index(i).unwrap(),
-                             mem::replace(rtsp_path, String::new()))?;
-            }
-            new_streams = inserter.streams();
+            streams = StreamStateChanger::new(&tx, camera_id, None, &self.state.streams_by_id,
+                                         &mut camera)?;
         }
         tx.commit()?;
-        let mut streams = [None, None];
-        for (&id, s) in &new_streams {
-            streams[s.type_.index()] = Some(id);
-        }
-        self.state.streams_by_id.append(&mut new_streams);
+        let streams = streams.apply(&mut self.state.streams_by_id);
         self.state.cameras_by_id.insert(camera_id, Camera {
             id: camera_id,
             uuid,
@@ -1375,41 +1564,16 @@ impl LockedDatabase {
 
     /// Updates a camera.
     pub fn update_camera(&mut self, camera_id: i32, mut camera: CameraChange) -> Result<(), Error> {
+        // TODO: sample_file_dir_id. disallow change when data is stored; change otherwise.
         let tx = self.conn.transaction()?;
-        let mut new_streams;
-        let mut stream_rtsp_changes = BTreeMap::new();
+        let streams;
+        let c = self.state
+                    .cameras_by_id
+                    .get_mut(&camera_id)
+                    .ok_or_else(|| Error::new(format!("no such camera {}", camera_id)))?;
         {
-            let mut stream_ids = [None; 2];
-            let mut stream_update_stmt = tx.prepare_cached(r#"
-                update stream set
-                    rtsp_path = :rtsp_path
-                where
-                    id = :id
-            "#)?;
-            for (&stream_id, stream) in &self.state.streams_by_id {
-                if stream.camera_id != camera_id {
-                    continue;
-                }
-                stream_ids[stream.type_.index()] = Some(stream_id);
-                let p = mem::replace(&mut camera.rtsp_paths[stream.type_.index()], String::new());
-                let rows = stream_update_stmt.execute_named(&[
-                    (":id", &stream_id),
-                    (":rtsp_path", &p),
-                ])?;
-                if rows != 1 {
-                    return Err(Error::new(format!("Stream {} missing from database",
-                                                  stream_id)));
-                }
-                stream_rtsp_changes.insert(stream_id, p);
-            }
-            let mut inserter = StreamInserter::new(&tx)?;
-            for (index, id) in stream_ids.iter().enumerate() {
-                if id.is_none() && !camera.rtsp_paths[index].is_empty() {
-                    inserter.add(camera_id, StreamType::from_index(index).unwrap(),
-                                 mem::replace(&mut camera.rtsp_paths[index], String::new()))?;
-                }
-            }
-            new_streams = inserter.streams();
+            streams = StreamStateChanger::new(&tx, camera_id, Some(c), &self.state.streams_by_id,
+                                         &mut camera)?;
             let mut stmt = tx.prepare_cached(r#"
                 update camera set
                     short_name = :short_name,
@@ -1433,21 +1597,12 @@ impl LockedDatabase {
             }
         }
         tx.commit()?;
-        let c = self.state.cameras_by_id.get_mut(&camera_id).unwrap();
         c.short_name = camera.short_name;
         c.description = camera.description;
         c.host = camera.host;
         c.username = camera.username;
         c.password = camera.password;
-        for (&id, s) in &new_streams {
-            c.streams[s.type_.index()] = Some(id);
-        }
-        self.state.streams_by_id.append(&mut new_streams);
-        for (id, p) in &mut stream_rtsp_changes {
-            let mut s = self.state.streams_by_id.get_mut(id)
-                            .ok_or_else(|| Error::new(format!("stream {} missing", id)))?;
-            mem::swap(&mut s.rtsp_path, p);
-        }
+        c.streams = streams.apply(&mut self.state.streams_by_id);
         Ok(())
     }
 
@@ -1481,6 +1636,7 @@ impl LockedDatabase {
         for id in streams_to_delete {
             self.state.streams_by_id.remove(&id);
         }
+        self.state.cameras_by_id.remove(&id);
         self.state.cameras_by_uuid.remove(&uuid);
         return Ok(())
     }
@@ -1556,6 +1712,7 @@ impl Database {
         let db = Database(Mutex::new(LockedDatabase{
             conn: conn,
             state: State {
+                sample_file_dirs_by_id: BTreeMap::new(),
                 cameras_by_id: BTreeMap::new(),
                 cameras_by_uuid: BTreeMap::new(),
                 streams_by_id: BTreeMap::new(),
@@ -1567,6 +1724,7 @@ impl Database {
         {
             let l = &mut *db.lock();
             l.init_video_sample_entries().annotate_err("init_video_sample_entries")?;
+            l.init_sample_file_dirs().annotate_err("init_sample_file_dirs")?;
             l.init_cameras().annotate_err("init_cameras")?;
             l.init_streams().annotate_err("init_streams")?;
             for (&stream_id, ref mut stream) in &mut l.state.streams_by_id {
@@ -1593,6 +1751,8 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
+    extern crate tempdir;
+
     use core::cmp::Ord;
     use recording::{self, TIME_UNITS_PER_SEC};
     use rusqlite::Connection;
@@ -1808,15 +1968,18 @@ mod tests {
         testutil::init();
         let conn = setup_conn();
         let db = Database::new(conn).unwrap();
+        let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
+        let path = tmpdir.path().to_str().unwrap().to_owned();
+        let sample_file_dir_id = Some({ db.lock() }.add_sample_file_dir(path).unwrap());
         let camera_id = { db.lock() }.add_camera(CameraChange {
             short_name: "testcam".to_owned(),
             description: "".to_owned(),
             host: "test-camera".to_owned(),
             username: "foo".to_owned(),
             password: "bar".to_owned(),
-            rtsp_paths: [
-                "/main".to_owned(),
-                "/sub".to_owned(),
+            streams: [
+                StreamChange { sample_file_dir_id, rtsp_path: "/main".to_owned(), record: true },
+                StreamChange { sample_file_dir_id, rtsp_path: "/sub".to_owned(), record: true },
             ],
         }).unwrap();
         {

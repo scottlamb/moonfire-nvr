@@ -35,6 +35,7 @@ use core::str::FromStr;
 use db;
 use dir::SampleFileDir;
 use error::Error;
+use fnv::FnvHashMap;
 use futures::{future, stream};
 use futures_cpupool;
 use json;
@@ -183,7 +184,7 @@ struct UiFile {
 
 struct ServiceInner {
     db: Arc<db::Database>,
-    dir: Arc<SampleFileDir>,
+    dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
     ui_files: HashMap<String, UiFile>,
     pool: futures_cpupool::CpuPool,
     time_zone_name: String,
@@ -286,7 +287,7 @@ impl ServiceInner {
         for ent in db.video_sample_entries() {
             if ent.sha1 == sha1 {
                 builder.append_video_sample_entry(ent.clone());
-                let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
+                let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
                 return Ok(http_serve::serve(mp4, req));
             }
         }
@@ -381,7 +382,7 @@ impl ServiceInner {
                 }
             };
         }
-        let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
+        let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
         Ok(http_serve::serve(mp4, req))
     }
 
@@ -400,16 +401,31 @@ impl ServiceInner {
 pub struct Service(Arc<ServiceInner>);
 
 impl Service {
-    pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>, ui_dir: Option<&str>, zone: String)
-               -> Result<Self, Error> {
+    pub fn new(db: Arc<db::Database>, ui_dir: Option<&str>, zone: String) -> Result<Self, Error> {
         let mut ui_files = HashMap::new();
         if let Some(d) = ui_dir {
             Service::fill_ui_files(d, &mut ui_files);
         }
         debug!("UI files: {:#?}", ui_files);
+        let dirs_by_stream_id = {
+            let l = db.lock();
+            let mut d =
+                FnvHashMap::with_capacity_and_hasher(l.streams_by_id().len(), Default::default());
+            for (&id, s) in l.streams_by_id().iter() {
+                let dir_id = match s.sample_file_dir_id {
+                    Some(d) => d,
+                    None => continue,
+                };
+                d.insert(id, l.sample_file_dirs_by_id()
+                              .get(&dir_id)
+                              .unwrap()
+                              .open()?);
+            }
+            Arc::new(d)
+        };
         Ok(Service(Arc::new(ServiceInner {
             db,
-            dir,
+            dirs_by_stream_id,
             ui_files,
             pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
             time_zone_name: zone,
@@ -535,8 +551,7 @@ mod bench {
             let (tx, rx) = ::std::sync::mpsc::channel();
             ::std::thread::spawn(move || {
                 let addr = "127.0.0.1:0".parse().unwrap();
-                let (db, dir) = (db.db.clone(), db.dir.clone());
-                let service = super::Service::new(db.clone(), dir.clone(), None, "".to_owned()).unwrap();
+                let service = super::Service::new(db.db.clone(), None, "".to_owned()).unwrap();
                 let server = hyper::server::Http::new()
                     .bind(&addr, move || Ok(service.clone()))
                     .unwrap();

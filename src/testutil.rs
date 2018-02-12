@@ -32,11 +32,12 @@ extern crate tempdir;
 
 use db;
 use dir;
+use fnv::FnvHashMap;
 use mylog;
 use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
 use std::env;
-use std::sync;
+use std::sync::{self, Arc};
 use std::thread;
 use time;
 use uuid::Uuid;
@@ -64,8 +65,8 @@ pub fn init() {
 }
 
 pub struct TestDb {
-    pub db: sync::Arc<db::Database>,
-    pub dir: sync::Arc<dir::SampleFileDir>,
+    pub db: Arc<db::Database>,
+    pub dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
     pub syncer_channel: dir::SyncerChannel,
     pub syncer_join: thread::JoinHandle<()>,
     pub tmpdir: tempdir::TempDir,
@@ -80,32 +81,42 @@ impl TestDb {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let schema = include_str!("schema.sql");
         conn.execute_batch(schema).unwrap();
-        let db = sync::Arc::new(db::Database::new(conn).unwrap());
-        let test_camera_uuid;
+        let db = Arc::new(db::Database::new(conn).unwrap());
+        let (test_camera_uuid, sample_file_dir_id);
+        let path = tmpdir.path().to_str().unwrap().to_owned();
+        let dir;
         {
             let mut l = db.lock();
-            assert_eq!(TEST_CAMERA_ID, l.add_camera(db::CameraChange {
-                short_name: "test camera".to_owned(),
-                description: "".to_owned(),
-                host: "test-camera".to_owned(),
-                username: "foo".to_owned(),
-                password: "bar".to_owned(),
-                rtsp_paths: [
-                    "/main".to_owned(),
-                    "/sub".to_owned(),
-                ],
-            }).unwrap());
-            test_camera_uuid = l.cameras_by_id().get(&TEST_CAMERA_ID).unwrap().uuid;
-            let mut tx = l.tx().unwrap();
-            tx.update_retention(TEST_STREAM_ID, true, 1048576).unwrap();
-            tx.commit().unwrap();
+            {
+                sample_file_dir_id = l.add_sample_file_dir(path.to_owned()).unwrap();
+                assert_eq!(TEST_CAMERA_ID, l.add_camera(db::CameraChange {
+                    short_name: "test camera".to_owned(),
+                    description: "".to_owned(),
+                    host: "test-camera".to_owned(),
+                    username: "foo".to_owned(),
+                    password: "bar".to_owned(),
+                    streams: [
+                        db::StreamChange {
+                            sample_file_dir_id: Some(sample_file_dir_id),
+                            rtsp_path: "/main".to_owned(),
+                            record: true,
+                        },
+                        Default::default(),
+                    ],
+                }).unwrap());
+                test_camera_uuid = l.cameras_by_id().get(&TEST_CAMERA_ID).unwrap().uuid;
+                let mut tx = l.tx().unwrap();
+                tx.update_retention(TEST_STREAM_ID, true, 1048576).unwrap();
+                tx.commit().unwrap();
+            }
+            dir = l.sample_file_dirs_by_id().get(&sample_file_dir_id).unwrap().open().unwrap();
         }
-        let path = tmpdir.path().to_str().unwrap().to_owned();
-        let dir = dir::SampleFileDir::new(&path, db.clone()).unwrap();
-        let (syncer_channel, syncer_join) = dir::start_syncer(dir.clone()).unwrap();
+        let mut dirs_by_stream_id = FnvHashMap::default();
+        dirs_by_stream_id.insert(TEST_STREAM_ID, dir.clone());
+        let (syncer_channel, syncer_join) = dir::start_syncer(dir, db.clone()).unwrap();
         TestDb {
             db,
-            dir,
+            dirs_by_stream_id: Arc::new(dirs_by_stream_id),
             syncer_channel,
             syncer_join,
             tmpdir,

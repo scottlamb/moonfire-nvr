@@ -48,16 +48,14 @@ use std::sync::mpsc;
 use std::thread;
 use uuid::Uuid;
 
-/// A sample file directory. This is currently a singleton in production. (Maybe in the future
-/// Moonfire will be extended to support multiple directories on different spindles.)
+/// A sample file directory. Typically one per physical disk drive.
 ///
 /// If the directory is used for writing, the `start_syncer` function should be called to start
 /// a background thread. This thread manages deleting files and writing new files. It synces the
 /// directory and commits these operations to the database in the correct order to maintain the
 /// invariants described in `design/schema.md`.
+#[derive(Debug)]
 pub struct SampleFileDir {
-    db: Arc<db::Database>,
-
     /// The open file descriptor for the directory. The worker uses it to create files and sync the
     /// directory. Other threads use it to open sample files for reading during video serving.
     fd: Fd,
@@ -67,6 +65,7 @@ pub struct SampleFileDir {
 }
 
 /// A file descriptor associated with a directory (not necessarily the sample file dir).
+#[derive(Debug)]
 pub struct Fd(libc::c_int);
 
 impl Drop for Fd {
@@ -80,9 +79,15 @@ impl Drop for Fd {
 
 impl Fd {
     /// Opens the given path as a directory.
-    pub fn open(path: &str) -> Result<Fd, io::Error> {
+    pub fn open(path: &str, mkdir: bool) -> Result<Fd, io::Error> {
         let cstring = ffi::CString::new(path)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+        if mkdir && unsafe { libc::mkdir(cstring.as_ptr(), 0o700) } != 0 {
+            let e = io::Error::last_os_error();
+            if e.kind() != io::ErrorKind::AlreadyExists {
+                return Err(e.into());
+            }
+        }
         let fd = unsafe { libc::open(cstring.as_ptr(), libc::O_DIRECTORY | libc::O_RDONLY, 0) };
         if fd < 0 {
             return Err(io::Error::last_os_error().into());
@@ -111,12 +116,19 @@ impl Fd {
 }
 
 impl SampleFileDir {
-    pub fn new(path: &str, db: Arc<db::Database>) -> Result<Arc<SampleFileDir>, Error> {
-        let fd = Fd::open(path)
+    pub fn open(path: &str) -> Result<Arc<SampleFileDir>, Error> {
+        SampleFileDir::open_self(path, false)
+    }
+
+    pub fn create(path: &str) -> Result<Arc<SampleFileDir>, Error> {
+        SampleFileDir::open_self(path, true)
+    }
+
+    fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
+        let fd = Fd::open(path, create)
             .map_err(|e| Error::new(format!("unable to open sample file dir {}: {}", path, e)))?;
-        Ok(Arc::new(SampleFileDir{
-            db: db,
-            fd: fd,
+        Ok(Arc::new(SampleFileDir {
+            fd,
             mutable: Mutex::new(SharedMutableState{
                 next_uuid: None,
             }),
@@ -135,8 +147,9 @@ impl SampleFileDir {
     ///
     /// The new recording will continue from `prev` if specified; this should be as returned from
     /// a previous `close` call.
-    pub fn create_writer<'a>(&self, channel: &'a SyncerChannel, prev: Option<PreviousWriter>,
-                             camera_id: i32, video_sample_entry_id: i32)
+    pub fn create_writer<'a>(&self, db: &db::Database, channel: &'a SyncerChannel,
+                             prev: Option<PreviousWriter>, camera_id: i32,
+                             video_sample_entry_id: i32)
                              -> Result<Writer<'a>, Error> {
         // Grab the next uuid. Typically one is cached—a sync has usually completed since the last
         // writer was created, and syncs ensure `next_uuid` is filled while performing their
@@ -145,8 +158,8 @@ impl SampleFileDir {
             Some(u) => u,
             None => {
                 info!("Committing extra transaction because there's no cached uuid");
-                let mut db = self.db.lock();
-                let mut tx = db.tx()?;
+                let mut l = db.lock();
+                let mut tx = l.tx()?;
                 let u = tx.reserve_sample_file()?;
                 tx.commit()?;
                 u
@@ -206,6 +219,7 @@ impl SampleFileDir {
 }
 
 /// State shared between users of the `SampleFileDirectory` struct and the syncer.
+#[derive(Debug)]
 struct SharedMutableState {
     next_uuid: Option<Uuid>,
 }
@@ -227,11 +241,15 @@ pub struct SyncerChannel(mpsc::Sender<SyncerCommand>);
 /// State of the worker thread.
 struct Syncer {
     dir: Arc<SampleFileDir>,
+    db: Arc<db::Database>,
     to_unlink: Vec<Uuid>,
     to_mark_deleted: Vec<Uuid>,
 }
 
 /// Starts a syncer for the given sample file directory.
+///
+/// The lock must not be held on `db` when this is called.
+///
 /// There should be only one syncer per directory, or 0 if operating in read-only mode.
 /// This function will perform the initial rotation synchronously, so that it is finished before
 /// file writing starts. Afterward the syncing happens in a background thread.
@@ -239,13 +257,14 @@ struct Syncer {
 /// Returns a `SyncerChannel` which can be used to send commands (and can be cloned freely) and
 /// a `JoinHandle` for the syncer thread. At program shutdown, all `SyncerChannel` clones should be
 /// removed and then the handle joined to allow all recordings to be persisted.
-pub fn start_syncer(dir: Arc<SampleFileDir>)
+pub fn start_syncer(dir: Arc<SampleFileDir>, db: Arc<db::Database>)
                     -> Result<(SyncerChannel, thread::JoinHandle<()>), Error> {
-    let to_unlink = dir.db.lock().list_reserved_sample_files()?;
+    let to_unlink = db.lock().list_reserved_sample_files()?;
     let (snd, rcv) = mpsc::channel();
     let mut syncer = Syncer {
-        dir: dir,
-        to_unlink: to_unlink,
+        dir,
+        db,
+        to_unlink,
         to_mark_deleted: Vec::new(),
     };
     syncer.initial_rotation()?;
@@ -261,11 +280,13 @@ pub struct NewLimit {
 /// Deletes recordings if necessary to fit within the given new `retain_bytes` limit.
 /// Note this doesn't change the limit in the database; it only deletes files.
 /// Pass a limit of 0 to delete all recordings associated with a camera.
-pub fn lower_retention(dir: Arc<SampleFileDir>, limits: &[NewLimit]) -> Result<(), Error> {
-    let to_unlink = dir.db.lock().list_reserved_sample_files()?;
+pub fn lower_retention(dir: Arc<SampleFileDir>, db: Arc<db::Database>, limits: &[NewLimit])
+                       -> Result<(), Error> {
+    let to_unlink = db.lock().list_reserved_sample_files()?;
     let mut syncer = Syncer {
-        dir: dir,
-        to_unlink: to_unlink,
+        dir,
+        db,
+        to_unlink,
         to_mark_deleted: Vec::new(),
     };
     syncer.do_rotation(|db| {
@@ -357,7 +378,7 @@ impl Syncer {
     fn do_rotation<F>(&mut self, get_rows_to_delete: F) -> Result<(), Error>
     where F: FnOnce(&db::LockedDatabase) -> Result<Vec<db::ListOldestSampleFilesRow>, Error> {
         let to_delete = {
-            let mut db = self.dir.db.lock();
+            let mut db = self.db.lock();
             let to_delete = get_rows_to_delete(&*db)?;
             let mut tx = db.tx()?;
             tx.delete_recordings(&to_delete)?;
@@ -374,7 +395,7 @@ impl Syncer {
         }
         self.dir.sync()?;
         {
-            let mut db = self.dir.db.lock();
+            let mut db = self.db.lock();
             let mut tx = db.tx()?;
             tx.mark_sample_files_deleted(&self.to_mark_deleted)?;
             tx.commit()?;
@@ -413,7 +434,7 @@ impl Syncer {
 
         let mut to_delete = Vec::new();
         let mut l = self.dir.mutable.lock().unwrap();
-        let mut db = self.dir.db.lock();
+        let mut db = self.db.lock();
         let mut new_next_uuid = l.next_uuid;
         {
             let stream =
