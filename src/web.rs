@@ -419,7 +419,7 @@ impl Service {
                 d.insert(id, l.sample_file_dirs_by_id()
                               .get(&dir_id)
                               .unwrap()
-                              .open()?);
+                              .get()?);
             }
             Arc::new(d)
         };

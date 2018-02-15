@@ -66,9 +66,7 @@ pub fn run() -> Result<(), Error> {
         pragma journal_mode = wal;
         pragma page_size = 16384;
     "#)?;
-    let tx = conn.transaction()?;
-    tx.execute_batch(include_str!("../schema.sql"))?;
-    tx.commit()?;
+    db::Database::init(&mut conn)?;
     info!("Database initialized.");
     Ok(())
 }

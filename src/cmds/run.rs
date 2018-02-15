@@ -100,8 +100,16 @@ pub fn run() -> Result<(), Error> {
     let (_db_dir, conn) = super::open_conn(
         &args.flag_db_dir,
         if args.flag_read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
-    let db = Arc::new(db::Database::new(conn).unwrap());
+    let db = Arc::new(db::Database::new(conn, !args.flag_read_only).unwrap());
     info!("Database is loaded.");
+
+    {
+        let mut l = db.lock();
+        let dirs_to_open: Vec<_> =
+            l.streams_by_id().values().filter_map(|s| s.sample_file_dir_id).collect();
+        l.open_sample_file_dirs(&dirs_to_open)?;
+    }
+    info!("Directories are opened.");
 
     let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), resolve_zone())?;
 
@@ -120,13 +128,13 @@ pub fn run() -> Result<(), Error> {
             shutdown: &shutdown_streamers,
         };
 
-        // Create directories for streams that need them.
+        // Get the directories that need syncers.
         for stream in l.streams_by_id().values() {
             if let (Some(id), true) = (stream.sample_file_dir_id, stream.record) {
                 dirs.entry(id).or_insert_with(|| {
                     let d = l.sample_file_dirs_by_id().get(&id).unwrap();
                     info!("Starting syncer for path {}", d.path);
-                    d.open()
+                    d.get().unwrap()
                 });
             }
         }
@@ -135,7 +143,6 @@ pub fn run() -> Result<(), Error> {
         drop(l);
         let mut syncers = FnvHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
         for (id, dir) in dirs.drain() {
-            let dir = dir?;
             let (channel, join) = dir::start_syncer(dir.clone(), db.clone())?;
             syncers.insert(id, Syncer {
                 dir,

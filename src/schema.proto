@@ -1,0 +1,73 @@
+// This file is part of Moonfire NVR, a security camera digital video recorder.
+// Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// In addition, as a special exception, the copyright holders give
+// permission to link the code of portions of this program with the
+// OpenSSL library under certain conditions as described in each
+// individual source file, and distribute linked combinations including
+// the two.
+//
+// You must obey the GNU General Public License in all respects for all
+// of the code used other than OpenSSL. If you modify file(s) with this
+// exception, you may extend this exception to your version of the
+// file(s), but you are not obligated to do so. If you do not wish to do
+// so, delete this exception statement from your version. If you delete
+// this exception statement from all source files in the program, then
+// also delete it here.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+syntax = "proto3";
+
+// Metadata stored in sample file dirs as "<dir>/meta". This is checked
+// against the metadata stored within the database to detect inconsistencies
+// between the directory and database, including the following:
+//
+// * sample file directory's disk not being mounted.
+// * mixing up mount points of two sample file directories belonging to the
+//   same database.
+// * directory renames not properly recorded in the database.
+// * restoration of the database from backup but not the sample file
+//   directory.
+// * restoration of the sample file directory but not the database.
+// * two sample file directory paths pointed at the same inode via symlinks
+//   or non-canonical paths. (Note that flock(2) has a design flaw in which
+//   multiple file descriptors can share a lock, so the current locking scheme
+//   is not sufficient to detect this otherwise.)
+// * database and sample file directories forked from the same version, opened
+//   the same number of times, then crossed.
+message DirMeta {
+  // A uuid associated with the database, in binary form. dir_uuid is strictly
+  // more powerful, but it improves diagnostics to know if the directory
+  // belongs to the expected database at all or not.
+  bytes db_uuid = 1;
+
+  // A uuid associated with the directory itself.
+  bytes dir_uuid = 2;
+
+  // Corresponds to an entry in the `open` database table.
+  message Open {
+    uint32 id = 1;
+    bytes uuid = 2;
+  }
+
+  // The last open that was known to be recorded in the database as completed.
+  // Absent if this has never happened.
+  Open last_complete_open = 3;
+
+  // The last run which is in progress, if different from last_complete_open.
+  // This may or may not have been recorded in the database, but it's
+  // guaranteed that no data has yet been written by this open.
+  Open in_progress_open = 4;
+}

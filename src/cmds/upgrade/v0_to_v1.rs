@@ -37,65 +37,73 @@ use rusqlite;
 use std::collections::HashMap;
 use strutil;
 
-pub fn run(tx: &rusqlite::Transaction, _args: &super::Args) -> Result<(), Error> {
-    // These create statements match the schema.sql when version 1 was the latest.
-    tx.execute_batch(r#"
-        alter table camera rename to old_camera;
-        create table camera (
-          id integer primary key,
-          uuid blob unique,
-          short_name text not null,
-          description text,
-          host text,
-          username text,
-          password text,
-          main_rtsp_path text,
-          sub_rtsp_path text,
-          retain_bytes integer not null check (retain_bytes >= 0),
-          next_recording_id integer not null check (next_recording_id >= 0)
-        );
-        alter table recording rename to old_recording;
-        drop index recording_cover;
-        create table recording (
-          composite_id integer primary key,
-          camera_id integer not null references camera (id),
-          run_offset integer not null,
-          flags integer not null,
-          sample_file_bytes integer not null check (sample_file_bytes > 0),
-          start_time_90k integer not null check (start_time_90k > 0),
-          duration_90k integer not null
-              check (duration_90k >= 0 and duration_90k < 5*60*90000),
-          local_time_delta_90k integer not null,
-          video_samples integer not null check (video_samples > 0),
-          video_sync_samples integer not null check (video_samples > 0),
-          video_sample_entry_id integer references video_sample_entry (id),
-          check (composite_id >> 32 = camera_id)
-        );
-        create index recording_cover on recording (
-          camera_id,
-          start_time_90k,
-          duration_90k,
-          video_samples,
-          video_sync_samples,
-          video_sample_entry_id,
-          sample_file_bytes,
-          run_offset,
-          flags
-        );
-        create table recording_playback (
-          composite_id integer primary key references recording (composite_id),
-          sample_file_uuid blob not null check (length(sample_file_uuid) = 16),
-          sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
-          video_index blob not null check (length(video_index) > 0)
-        );
-    "#)?;
-    let camera_state = fill_recording(tx).unwrap();
-    fill_camera(tx, camera_state).unwrap();
-    tx.execute_batch(r#"
-      drop table old_camera;
-      drop table old_recording;
-    "#)?;
-    Ok(())
+pub struct U;
+
+pub fn new<'a>(_args: &'a super::Args) -> Result<Box<super::Upgrader + 'a>, Error> {
+    Ok(Box::new(U))
+}
+
+impl super::Upgrader for U {
+    fn in_tx(&mut self, tx: &rusqlite::Transaction) -> Result<(), Error> {
+        // These create statements match the schema.sql when version 1 was the latest.
+        tx.execute_batch(r#"
+            alter table camera rename to old_camera;
+            create table camera (
+              id integer primary key,
+              uuid blob unique,
+              short_name text not null,
+              description text,
+              host text,
+              username text,
+              password text,
+              main_rtsp_path text,
+              sub_rtsp_path text,
+              retain_bytes integer not null check (retain_bytes >= 0),
+              next_recording_id integer not null check (next_recording_id >= 0)
+            );
+            alter table recording rename to old_recording;
+            drop index recording_cover;
+            create table recording (
+              composite_id integer primary key,
+              camera_id integer not null references camera (id),
+              run_offset integer not null,
+              flags integer not null,
+              sample_file_bytes integer not null check (sample_file_bytes > 0),
+              start_time_90k integer not null check (start_time_90k > 0),
+              duration_90k integer not null
+                  check (duration_90k >= 0 and duration_90k < 5*60*90000),
+              local_time_delta_90k integer not null,
+              video_samples integer not null check (video_samples > 0),
+              video_sync_samples integer not null check (video_samples > 0),
+              video_sample_entry_id integer references video_sample_entry (id),
+              check (composite_id >> 32 = camera_id)
+            );
+            create index recording_cover on recording (
+              camera_id,
+              start_time_90k,
+              duration_90k,
+              video_samples,
+              video_sync_samples,
+              video_sample_entry_id,
+              sample_file_bytes,
+              run_offset,
+              flags
+            );
+            create table recording_playback (
+              composite_id integer primary key references recording (composite_id),
+              sample_file_uuid blob not null check (length(sample_file_uuid) = 16),
+              sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
+              video_index blob not null check (length(video_index) > 0)
+            );
+        "#)?;
+        let camera_state = fill_recording(tx).unwrap();
+        fill_camera(tx, camera_state).unwrap();
+        tx.execute_batch(r#"
+          drop table old_camera;
+          drop table old_recording;
+        "#)?;
+        Ok(())
+    }
 }
 
 struct CameraState {

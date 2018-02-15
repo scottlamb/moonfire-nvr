@@ -31,6 +31,7 @@ moonfire-ffmpeg = { path = "ffmpeg" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.10"
 parking_lot = { version = "0.5", features = [] }
+protobuf = "1.4"
 reffers = { git = "https://github.com/diwic/reffers-rs" }
 regex = "0.2"
 rusqlite = "0.13"

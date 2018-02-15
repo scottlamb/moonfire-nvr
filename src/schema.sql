@@ -31,6 +31,11 @@
 -- schema.sql: SQLite3 database schema for Moonfire NVR.
 -- See also design/schema.md.
 
+-- Database metadata. There should be exactly one row in this table.
+create table meta (
+  uuid blob not null check (length(uuid) = 16)
+);
+
 -- This table tracks the schema version.
 -- There is one row for the initial database creation (inserted below, after the
 -- create statements) and one for each upgrade procedure (if any).
@@ -45,10 +50,23 @@ create table version (
   notes text
 );
 
+-- Tracks every time the database has been opened in read/write mode.
+-- This is used to ensure directories are in sync with the database (see
+-- schema.proto:DirMeta). It may be used in the API for etags and such in the
+-- future.
+create table open (
+  id integer primary key,
+  uuid blob unique not null check (length(uuid) = 16)
+);
+
 create table sample_file_dir (
   id integer primary key,
   path text unique not null,
-  uuid blob unique not null check (length(uuid) = 16)
+  uuid blob unique not null check (length(uuid) = 16),
+
+  -- The last (read/write) open of this directory which fully completed.
+  -- See schema.proto:DirMeta for a more complete description.
+  last_complete_open_id integer references open (id)
 );
 
 create table camera (

@@ -78,10 +78,9 @@ impl TestDb {
     pub fn new() -> TestDb {
         let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
 
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        let schema = include_str!("schema.sql");
-        conn.execute_batch(schema).unwrap();
-        let db = Arc::new(db::Database::new(conn).unwrap());
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        db::Database::init(&mut conn).unwrap();
+        let db = Arc::new(db::Database::new(conn, true).unwrap());
         let (test_camera_uuid, sample_file_dir_id);
         let path = tmpdir.path().to_str().unwrap().to_owned();
         let dir;
@@ -109,7 +108,7 @@ impl TestDb {
                 tx.update_retention(TEST_STREAM_ID, true, 1048576).unwrap();
                 tx.commit().unwrap();
             }
-            dir = l.sample_file_dirs_by_id().get(&sample_file_dir_id).unwrap().open().unwrap();
+            dir = l.sample_file_dirs_by_id().get(&sample_file_dir_id).unwrap().get().unwrap();
         }
         let mut dirs_by_stream_id = FnvHashMap::default();
         dirs_by_stream_id.insert(TEST_STREAM_ID, dir.clone());

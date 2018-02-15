@@ -199,6 +199,8 @@ Version 2 adds:
 *   recording of sub streams (splits a new `stream` table out of `camera`)
 *   support for multiple sample file directories, to take advantage of
     multiple hard drives (or multiple RAID volumes).
+*   interlock between database and sample file directories to avoid various
+    mixups that could cause data integrity problems.
 *   records the RFC-6381 codec associated with a video sample entry, so that
     logic for determining this is no longer needed as part of the database
     layer.

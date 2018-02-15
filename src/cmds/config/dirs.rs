@@ -145,8 +145,9 @@ fn actually_delete(model: &RefCell<Model>, siv: &mut Cursive) {
     siv.pop_layer();  // deletion confirmation
     siv.pop_layer();  // retention dialog
     let dir = {
-        let l = model.db.lock();
-        l.sample_file_dirs_by_id().get(&model.dir_id).unwrap().open().unwrap()
+        let mut l = model.db.lock();
+        l.open_sample_file_dirs(&[model.dir_id]).unwrap();  // TODO: don't unwrap.
+        l.sample_file_dirs_by_id().get(&model.dir_id).unwrap().get().unwrap()
     };
     if let Err(e) = dir::lower_retention(dir, model.db.clone(), &new_limits[..]) {
         siv.add_layer(views::Dialog::text(format!("Unable to delete excess video: {}", e))
@@ -281,7 +282,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
         let mut total_retain = 0;
         let fs_capacity;
         {
-            let l = db.lock();
+            let mut l = db.lock();
             for (&id, s) in l.streams_by_id() {
                 let c = l.cameras_by_id().get(&s.camera_id).expect("stream without camera");
                 if s.sample_file_dir_id != Some(dir_id) {
@@ -299,10 +300,9 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
             if streams.is_empty() {
                 return delete_dir_dialog(db, siv, dir_id);
             }
+            l.open_sample_file_dirs(&[dir_id]).unwrap();  // TODO: don't unwrap.
             let dir = l.sample_file_dirs_by_id().get(&dir_id).unwrap();
-
-            // TODO: go another way if open fails.
-            let stat = dir.open().unwrap().statfs().unwrap();
+            let stat = dir.get().unwrap().statfs().unwrap();
             fs_capacity = stat.f_bsize as i64 * stat.f_bavail as i64 + total_used;
             path = dir.path.clone();
         }

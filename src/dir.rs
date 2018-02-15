@@ -34,13 +34,15 @@
 
 use db;
 use error::Error;
-use libc;
+use libc::{self, c_char};
+use protobuf::{self, Message};
 use recording;
 use openssl::hash;
+use schema;
 use std::cmp;
 use std::ffi;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::mem;
 use std::os::unix::io::FromRawFd;
 use std::sync::{Arc, Mutex};
@@ -95,6 +97,24 @@ impl Fd {
         Ok(Fd(fd))
     }
 
+    /// Opens a sample file within this directory with the given flags and (if creating) mode.
+    unsafe fn openat(&self, p: *const c_char, flags: libc::c_int, mode: libc::c_int)
+                     -> Result<fs::File, io::Error> {
+        let fd = libc::openat(self.0, p, flags, mode);
+        if fd < 0 {
+            return Err(io::Error::last_os_error())
+        }
+        Ok(fs::File::from_raw_fd(fd))
+    }
+
+    unsafe fn renameat(&self, from: *const c_char, to: *const c_char) -> Result<(), io::Error> {
+        let result = libc::renameat(self.0, from, self.0, to);
+        if result < 0 {
+            return Err(io::Error::last_os_error())
+        }
+        Ok(())
+    }
+
     /// Locks the directory with the specified `flock` operation.
     pub fn lock(&self, operation: libc::c_int) -> Result<(), io::Error> {
         let ret = unsafe { libc::flock(self.0, operation) };
@@ -116,12 +136,60 @@ impl Fd {
 }
 
 impl SampleFileDir {
-    pub fn open(path: &str) -> Result<Arc<SampleFileDir>, Error> {
-        SampleFileDir::open_self(path, false)
+    /// Opens the directory using the given metadata.
+    ///
+    /// `db_meta.in_progress_open` should be filled if the directory should be opened in read/write
+    /// mode; absent in read-only mode.
+    pub fn open(path: &str, db_meta: &schema::DirMeta)
+                -> Result<Arc<SampleFileDir>, Error> {
+        let read_write = db_meta.in_progress_open.is_some();
+        let s = SampleFileDir::open_self(path, false)?;
+        s.fd.lock(if read_write { libc::LOCK_EX } else { libc::LOCK_SH } | libc::LOCK_NB)?;
+        let dir_meta = s.read_meta()?;
+        if !SampleFileDir::consistent(db_meta, &dir_meta) {
+            return Err(Error::new(format!("metadata mismatch. db: {:?} dir: {:?}",
+                                          db_meta, &dir_meta)));
+        }
+        if db_meta.in_progress_open.is_some() {
+            s.write_meta(db_meta)?;
+        }
+        Ok(s)
     }
 
-    pub fn create(path: &str) -> Result<Arc<SampleFileDir>, Error> {
-        SampleFileDir::open_self(path, true)
+    /// Returns true if the existing directory and database metadata are consistent; the directory
+    /// is then openable.
+    fn consistent(db_meta: &schema::DirMeta, dir_meta: &schema::DirMeta) -> bool {
+        if dir_meta.db_uuid != db_meta.db_uuid { return false; }
+        if dir_meta.dir_uuid != db_meta.dir_uuid { return false; }
+
+        if db_meta.last_complete_open.is_some() &&
+           (db_meta.last_complete_open != dir_meta.last_complete_open &&
+            db_meta.last_complete_open != dir_meta.in_progress_open) {
+            return false;
+        }
+
+        if db_meta.last_complete_open.is_none() && dir_meta.last_complete_open.is_some() {
+            return false;
+        }
+
+        true
+    }
+
+    pub fn create(path: &str, db_meta: &schema::DirMeta) -> Result<Arc<SampleFileDir>, Error> {
+        let s = SampleFileDir::open_self(path, true)?;
+        s.fd.lock(libc::LOCK_EX | libc::LOCK_NB)?;
+        let old_meta = s.read_meta()?;
+
+        // Verify metadata. We only care that it hasn't been completely opened.
+        // Partial opening by this or another database is fine; we won't overwrite anything.
+        // TODO: consider one exception: if the version 2 upgrade fails at the post_tx step.
+        if old_meta.last_complete_open.is_some() {
+            return Err(Error::new(format!("Can't create dir at path {}: is already in use:\n{:?}",
+                                          path, old_meta)));
+        }
+
+        s.write_meta(db_meta)?;
+        Ok(s)
     }
 
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
@@ -137,7 +205,50 @@ impl SampleFileDir {
 
     /// Opens the given sample file for reading.
     pub fn open_sample_file(&self, uuid: Uuid) -> Result<fs::File, io::Error> {
-        self.open_int(uuid, libc::O_RDONLY, 0)
+        let p = SampleFileDir::get_rel_pathname(uuid);
+        unsafe { self.fd.openat(p.as_ptr(), libc::O_RDONLY, 0) }
+    }
+
+    /// Reads the directory metadata. If none is found, returns an empty proto.
+    fn read_meta(&self) -> Result<schema::DirMeta, Error> {
+        let mut meta = schema::DirMeta::default();
+        let p = unsafe { ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char) };
+        let mut f = match unsafe { self.fd.openat(p.as_ptr(), libc::O_RDONLY, 0) } {
+            Err(e) => {
+                if e.kind() == ::std::io::ErrorKind::NotFound {
+                    return Ok(meta);
+                }
+                return Err(e.into());
+            },
+            Ok(f) => f,
+        };
+        let mut data = Vec::new();
+        f.read_to_end(&mut data)?;
+        let mut s = protobuf::CodedInputStream::from_bytes(&data);
+        meta.merge_from(&mut s).map_err(|e| Error {
+            description: format!("Unable to parse proto: {:?}", e),
+            cause: Some(Box::new(e)),
+        })?;
+        Ok(meta)
+    }
+
+    // TODO: this should be exposed only to the db layer.
+    pub fn write_meta(&self, meta: &schema::DirMeta) -> Result<(), Error> {
+        let (tmp_path, final_path) = unsafe {
+            (ffi::CStr::from_ptr("meta.tmp\0".as_ptr() as *const c_char),
+             ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char))
+        };
+        let mut f = unsafe { self.fd.openat(tmp_path.as_ptr(),
+                                            libc::O_CREAT | libc::O_TRUNC | libc::O_WRONLY,
+                                            0o600)? };
+        meta.write_to_writer(&mut f).map_err(|e| Error {
+            description: format!("Unable to write metadata proto: {:?}", e),
+            cause: Some(Box::new(e)),
+        })?;
+        f.sync_all()?;
+        unsafe { self.fd.renameat(tmp_path.as_ptr(), final_path.as_ptr())? };
+        self.sync()?;
+        Ok(())
     }
 
     /// Creates a new writer.
@@ -166,7 +277,10 @@ impl SampleFileDir {
             },
         };
 
-        let f = match self.open_int(uuid, libc::O_WRONLY | libc::O_EXCL | libc::O_CREAT, 0o600) {
+        let p = SampleFileDir::get_rel_pathname(uuid);
+        let f = match unsafe { self.fd.openat(p.as_ptr(),
+                                              libc::O_WRONLY | libc::O_EXCL | libc::O_CREAT,
+                                              0o600) } {
             Ok(f) => f,
             Err(e) => {
                 self.mutable.lock().unwrap().next_uuid = Some(uuid);
@@ -177,17 +291,6 @@ impl SampleFileDir {
     }
 
     pub fn statfs(&self) -> Result<libc::statvfs, io::Error> { self.fd.statfs() }
-
-    /// Opens a sample file within this directory with the given flags and (if creating) mode.
-    fn open_int(&self, uuid: Uuid, flags: libc::c_int, mode: libc::c_int)
-                -> Result<fs::File, io::Error> {
-        let p = SampleFileDir::get_rel_pathname(uuid);
-        let fd = unsafe { libc::openat(self.fd.0, p.as_ptr(), flags, mode) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error())
-        }
-        unsafe { Ok(fs::File::from_raw_fd(fd)) }
-    }
 
     /// Gets a pathname for a sample file suitable for passing to open or unlink.
     fn get_rel_pathname(uuid: Uuid) -> [libc::c_char; 37] {

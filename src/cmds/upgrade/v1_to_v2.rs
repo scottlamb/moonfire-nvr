@@ -31,166 +31,250 @@
 /// Upgrades a version 1 schema to a version 2 schema.
 
 use error::Error;
+use std::fs;
 use rusqlite;
+use schema::DirMeta;
+use uuid::Uuid;
 
-pub fn run(tx: &rusqlite::Transaction, args: &super::Args) -> Result<(), Error> {
-    // These create statements match the schema.sql when version 2 was the latest.
-    tx.execute_batch(r#"
-        create table sample_file_dir (
-          id integer primary key,
-          path text unique not null,
-          uuid blob unique not null check (length(uuid) = 16)
-        );
-    "#)?;
-    {
-        let mut stmt = tx.prepare_cached(r#"
-            insert into sample_file_dir (path,  uuid)
-                                 values (:path, :uuid)
+pub struct U<'a> {
+    sample_file_path: &'a str,
+    dir_meta: Option<DirMeta>,
+}
+
+pub fn new<'a>(args: &'a super::Args) -> Result<Box<super::Upgrader + 'a>, Error> {
+    let sample_file_path =
+        args.flag_sample_file_dir
+            .as_ref()
+            .ok_or_else(|| Error::new("--sample-file-dir required when upgrading from \
+                                       schema version 1 to 2.".to_owned()))?;
+    Ok(Box::new(U { sample_file_path, dir_meta: None }))
+}
+
+impl<'a> U<'a> {
+    /// Ensures there are sample files in the directory for all listed recordings.
+    /// Among other problems, this catches a fat-fingered `--sample-file-dir`.
+    fn verify_sample_files(&self, tx: &rusqlite::Transaction) -> Result<(), Error> {
+        // Build a hash of the uuids found in sample_file_path. Ignore other files.
+        let n: i64 = tx.query_row("select count(*) from recording", &[], |r| r.get_checked(0))??;
+        let mut files = ::fnv::FnvHashSet::with_capacity_and_hasher(n as usize, Default::default());
+        for e in fs::read_dir(self.sample_file_path)? {
+            let e = e?;
+            let f = e.file_name();
+            let s = match f.to_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            let uuid = match Uuid::parse_str(s) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            if s != uuid.hyphenated().to_string() {  // non-canonical form.
+                continue;
+            }
+            files.insert(uuid);
+        }
+
+        // Iterate through the database and check that everything has a matching file.
+        let mut stmt = tx.prepare(r"select sample_file_uuid from recording_playback")?;
+        let mut rows = stmt.query(&[])?;
+        while let Some(row) = rows.next() {
+            let row = row?;
+            let uuid: ::db::FromSqlUuid = row.get_checked(0)?;
+            if !files.contains(&uuid.0) {
+                return Err(Error::new(format!("{} is missing from dir {}!",
+                                              uuid.0, self.sample_file_path)));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a> super::Upgrader for U<'a> {
+    fn in_tx(&mut self, tx: &rusqlite::Transaction) -> Result<(), Error> {
+        self.verify_sample_files(tx)?;
+
+        // These create statements match the schema.sql when version 2 was the latest.
+        tx.execute_batch(r#"
+            create table meta (
+              uuid blob not null check (length(uuid) = 16)
+            );
+            create table open (
+              id integer primary key,
+              uuid blob unique not null check (length(uuid) = 16)
+            );
+            create table sample_file_dir (
+              id integer primary key,
+              path text unique not null,
+              uuid blob unique not null check (length(uuid) = 16),
+              last_complete_open_id integer references open (id)
+            );
         "#)?;
-        let uuid = ::uuid::Uuid::new_v4();
-        let uuid_bytes = &uuid.as_bytes()[..];
-        let path = args.flag_sample_file_dir
-                       .as_ref()
-                       .ok_or_else(|| Error::new("--sample-file-dir required when upgrading from 
-                                                  schema version 1 to 2.".to_owned()))?;
-        stmt.execute_named(&[
-            (":path", &path.as_str()),
-            (":uuid", &uuid_bytes),
-        ])?;
+        let db_uuid = ::uuid::Uuid::new_v4();
+        let db_uuid_bytes = &db_uuid.as_bytes()[..];
+        tx.execute("insert into meta (uuid) values (?)", &[&db_uuid_bytes])?;
+        let open_uuid = ::uuid::Uuid::new_v4();
+        let open_uuid_bytes = &open_uuid.as_bytes()[..];
+        tx.execute("insert into open (uuid) values (?)", &[&open_uuid_bytes])?;
+        let open_id = tx.last_insert_rowid() as u32;
+        let dir_uuid = ::uuid::Uuid::new_v4();
+        let dir_uuid_bytes = &dir_uuid.as_bytes()[..];
+
+        let mut meta = ::schema::DirMeta::default();
+        {
+            meta.db_uuid.extend_from_slice(db_uuid_bytes);
+            meta.dir_uuid.extend_from_slice(dir_uuid_bytes);
+            let open = meta.mut_in_progress_open();
+            open.id = open_id;
+            open.uuid.extend_from_slice(&open_uuid_bytes);
+        }
+
+        tx.execute(r#"
+            insert into sample_file_dir (path,  uuid, last_complete_open_id)
+                                 values (?,     ?,    ?)
+        "#, &[&self.sample_file_path, &dir_uuid_bytes, &open_id])?;
+        self.dir_meta = Some(meta);
+
+        tx.execute_batch(r#"
+            alter table camera rename to old_camera;
+            alter table recording rename to old_recording;
+            alter table video_sample_entry rename to old_video_sample_entry;
+            drop index recording_cover;
+
+            create table camera (
+              id integer primary key,
+              uuid blob unique not null check (length(uuid) = 16),
+              short_name text not null,
+              description text,
+              host text,
+              username text,
+              password text
+            );
+
+            create table stream (
+              id integer primary key,
+              camera_id integer not null references camera (id),
+              sample_file_dir_id integer references sample_file_dir (id),
+              type text not null check (type in ('main', 'sub')),
+              record integer not null check (record in (1, 0)),
+              rtsp_path text not null,
+              retain_bytes integer not null check (retain_bytes >= 0),
+              next_recording_id integer not null check (next_recording_id >= 0),
+              unique (camera_id, type)
+            );
+
+            create table recording (
+              composite_id integer primary key,
+              stream_id integer not null references stream (id),
+              run_offset integer not null,
+              flags integer not null,
+              sample_file_bytes integer not null check (sample_file_bytes > 0),
+              start_time_90k integer not null check (start_time_90k > 0),
+              duration_90k integer not null
+                  check (duration_90k >= 0 and duration_90k < 5*60*90000),
+              local_time_delta_90k integer not null,
+              video_samples integer not null check (video_samples > 0),
+              video_sync_samples integer not null check (video_sync_samples > 0),
+              video_sample_entry_id integer references video_sample_entry (id),
+              check (composite_id >> 32 = stream_id)
+            );
+
+            create index recording_cover on recording (
+              stream_id,
+              start_time_90k,
+              duration_90k,
+              video_samples,
+              video_sync_samples,
+              video_sample_entry_id,
+              sample_file_bytes,
+              run_offset,
+              flags
+            );
+
+            create table video_sample_entry (
+              id integer primary key,
+              sha1 blob unique not null check (length(sha1) = 20),
+              width integer not null check (width > 0),
+              height integer not null check (height > 0),
+              rfc6381_codec text not null,
+              data blob not null check (length(data) > 86)
+            );
+
+            insert into camera
+            select
+              id,
+              uuid,
+              short_name,
+              description,
+              host,
+              username,
+              password
+            from old_camera;
+
+            -- Insert main streams using the same id as the camera, to ease changing recordings.
+            insert into stream
+            select
+              old_camera.id,
+              old_camera.id,
+              sample_file_dir.id,
+              'main',
+              1,
+              old_camera.main_rtsp_path,
+              old_camera.retain_bytes,
+              old_camera.next_recording_id
+            from
+              old_camera cross join sample_file_dir;
+
+            -- Insert sub stream (if path is non-empty) using any id.
+            insert into stream (camera_id, sample_file_dir_id, type, record, rtsp_path,
+                                retain_bytes, next_recording_id)
+            select
+              old_camera.id,
+              sample_file_dir.id,
+              'sub',
+              0,
+              old_camera.sub_rtsp_path,
+              0,
+              0
+            from
+              old_camera cross join sample_file_dir
+            where
+              old_camera.sub_rtsp_path != '';
+
+            insert into recording
+            select
+              composite_id,
+              camera_id,
+              run_offset,
+              flags,
+              sample_file_bytes,
+              start_time_90k,
+              duration_90k,
+              local_time_delta_90k,
+              video_samples,
+              video_sync_samples,
+              video_sample_entry_id
+            from
+              old_recording;
+        "#)?;
+
+        fix_video_sample_entry(tx)?;
+
+        tx.execute_batch(r#"
+            drop table old_camera;
+            drop table old_recording;
+            drop table old_video_sample_entry;
+        "#)?;
+
+        Ok(())
     }
 
-    tx.execute_batch(r#"
-        alter table camera rename to old_camera;
-        alter table recording rename to old_recording;
-        alter table video_sample_entry rename to old_video_sample_entry;
-        drop index recording_cover;
-
-        create table camera (
-          id integer primary key,
-          uuid blob unique not null check (length(uuid) = 16),
-          short_name text not null,
-          description text,
-          host text,
-          username text,
-          password text
-        );
-
-        create table stream (
-          id integer primary key,
-          camera_id integer not null references camera (id),
-          sample_file_dir_id integer references sample_file_dir (id),
-          type text not null check (type in ('main', 'sub')),
-          record integer not null check (record in (1, 0)),
-          rtsp_path text not null,
-          retain_bytes integer not null check (retain_bytes >= 0),
-          next_recording_id integer not null check (next_recording_id >= 0),
-          unique (camera_id, type)
-        );
-
-        create table recording (
-          composite_id integer primary key,
-          stream_id integer not null references stream (id),
-          run_offset integer not null,
-          flags integer not null,
-          sample_file_bytes integer not null check (sample_file_bytes > 0),
-          start_time_90k integer not null check (start_time_90k > 0),
-          duration_90k integer not null
-              check (duration_90k >= 0 and duration_90k < 5*60*90000),
-          local_time_delta_90k integer not null,
-          video_samples integer not null check (video_samples > 0),
-          video_sync_samples integer not null check (video_sync_samples > 0),
-          video_sample_entry_id integer references video_sample_entry (id),
-          check (composite_id >> 32 = stream_id)
-        );
-
-        create index recording_cover on recording (
-          stream_id,
-          start_time_90k,
-          duration_90k,
-          video_samples,
-          video_sync_samples,
-          video_sample_entry_id,
-          sample_file_bytes,
-          run_offset,
-          flags
-        );
-
-        create table video_sample_entry (
-          id integer primary key,
-          sha1 blob unique not null check (length(sha1) = 20),
-          width integer not null check (width > 0),
-          height integer not null check (height > 0),
-          rfc6381_codec text not null,
-          data blob not null check (length(data) > 86)
-        );
-
-        insert into camera
-        select
-          id,
-          uuid,
-          short_name,
-          description,
-          host,
-          username,
-          password
-        from old_camera;
-
-        -- Insert main streams using the same id as the camera, to ease changing recordings.
-        insert into stream
-        select
-          old_camera.id,
-          old_camera.id,
-          sample_file_dir.id,
-          'main',
-          1,
-          old_camera.main_rtsp_path,
-          old_camera.retain_bytes,
-          old_camera.next_recording_id
-        from
-          old_camera cross join sample_file_dir;
-
-        -- Insert sub stream (if path is non-empty) using any id.
-        insert into stream (camera_id, sample_file_dir_id, type, record, rtsp_path, retain_bytes,
-                            next_recording_id)
-        select
-          old_camera.id,
-          sample_file_dir.id,
-          'sub',
-          0,
-          old_camera.sub_rtsp_path,
-          0,
-          0
-        from
-          old_camera cross join sample_file_dir
-        where
-          old_camera.sub_rtsp_path != '';
-
-        insert into recording
-        select
-          composite_id,
-          camera_id,
-          run_offset,
-          flags,
-          sample_file_bytes,
-          start_time_90k,
-          duration_90k,
-          local_time_delta_90k,
-          video_samples,
-          video_sync_samples,
-          video_sample_entry_id
-        from
-          old_recording;
-    "#)?;
-
-    fix_video_sample_entry(tx)?;
-
-    tx.execute_batch(r#"
-        drop table old_camera;
-        drop table old_recording;
-        drop table old_video_sample_entry;
-    "#)?;
-
-    Ok(())
+    fn post_tx(&mut self) -> Result<(), Error> {
+        let mut meta = self.dir_meta.take().unwrap();
+        let d = ::dir::SampleFileDir::create(self.sample_file_path, &meta)?;
+        ::std::mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
+        d.write_meta(&meta)?;
+        Ok(())
+    }
 }
 
 fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {

@@ -124,7 +124,7 @@ struct Args {
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
     let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
-    let db = Arc::new(db::Database::new(conn)?);
+    let db = Arc::new(db::Database::new(conn, true)?);
 
     let mut siv = Cursive::new();
     //siv.add_global_callback('q', |s| s.quit());

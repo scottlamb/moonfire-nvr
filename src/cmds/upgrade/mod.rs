@@ -64,10 +64,10 @@ Options:
 const UPGRADE_NOTES: &'static str =
     concat!("upgraded using moonfire-nvr ", env!("CARGO_PKG_VERSION"));
 
-const UPGRADERS: [fn(&rusqlite::Transaction, &Args) -> Result<(), Error>; 2] = [
-    v0_to_v1::run,
-    v1_to_v2::run,
-];
+pub trait Upgrader {
+    fn in_tx(&mut self, &rusqlite::Transaction) -> Result<(), Error> { Ok(()) }
+    fn post_tx(&mut self) -> Result<(), Error> { Ok(()) }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Args {
@@ -89,8 +89,13 @@ pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
     let (_db_dir, mut conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
 
+    let upgraders = [
+        v0_to_v1::new,
+        v1_to_v2::new,
+    ];
+
     {
-        assert_eq!(UPGRADERS.len(), db::EXPECTED_VERSION as usize);
+        assert_eq!(upgraders.len(), db::EXPECTED_VERSION as usize);
         let old_ver =
             conn.query_row("select max(id) from version", &[], |row| row.get_checked(0))??;
         if old_ver > db::EXPECTED_VERSION {
@@ -103,13 +108,15 @@ pub fn run() -> Result<(), Error> {
         set_journal_mode(&conn, &args.flag_preset_journal).unwrap();
         for ver in old_ver .. db::EXPECTED_VERSION {
             info!("...from version {} to version {}", ver, ver + 1);
+            let mut u = upgraders[ver as usize](&args)?;
             let tx = conn.transaction()?;
-            UPGRADERS[ver as usize](&tx, &args)?;
+            u.in_tx(&tx)?;
             tx.execute(r#"
                 insert into version (id, unix_time, notes)
                              values (?, cast(strftime('%s', 'now') as int32), ?)
             "#, &[&(ver + 1), &UPGRADE_NOTES])?;
             tx.commit()?;
+            u.post_tx()?;
         }
     }
 

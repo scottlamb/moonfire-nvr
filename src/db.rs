@@ -53,12 +53,13 @@
 
 use dir;
 use error::{Error, ResultExt};
-use fnv;
+use fnv::{self, FnvHashMap};
 use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
 use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
+use schema;
 use std::collections::BTreeMap;
 use std::collections::btree_map;
 use std::cell::RefCell;
@@ -194,7 +195,7 @@ const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
         recording.composite_id
 "#;
 
-struct FromSqlUuid(Uuid);
+pub struct FromSqlUuid(pub Uuid);
 
 impl rusqlite::types::FromSql for FromSqlUuid {
     fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
@@ -358,18 +359,19 @@ pub struct SampleFileDir {
     pub id: i32,
     pub path: String,
     pub uuid: Uuid,
-    dir: RefCell<Option<Arc<dir::SampleFileDir>>>,
+    dir: Option<Arc<dir::SampleFileDir>>,
+    last_complete_open: Option<Open>,
 }
 
 impl SampleFileDir {
-    pub fn open(&self) -> Result<Arc<dir::SampleFileDir>, Error> {
-        let mut d = self.dir.borrow_mut();
-        if let Some(ref d) = *d {
-            return Ok(d.clone());
-        }
-        let dir = dir::SampleFileDir::open(&self.path)?;
-        *d = Some(dir.clone());
-        Ok(dir)
+    /// Returns a cloned copy of the directory, or Err if closed.
+    ///
+    /// Use `LockedDatabase::open_sample_file_dirs` prior to calling this method.
+    pub fn get(&self) -> Result<Arc<dir::SampleFileDir>, Error> {
+        Ok(self.dir
+               .as_ref()
+               .ok_or_else(|| Error::new(format!("sample file dir {} is closed", self.id)))?
+               .clone())
     }
 }
 
@@ -599,6 +601,10 @@ pub struct LockedDatabase {
 /// while its underlying `rusqlite::Transaction` is borrowing `conn`.
 #[derive(Debug)]
 struct State {
+    uuid: Uuid,
+
+    /// If the database is open in read-write mode, the information about the current Open row.
+    open: Option<Open>,
     sample_file_dirs_by_id: BTreeMap<i32, SampleFileDir>,
     cameras_by_id: BTreeMap<i32, Camera>,
     streams_by_id: BTreeMap<i32, Stream>,
@@ -608,11 +614,17 @@ struct State {
     playback_cache: RefCell<LruCache<i64, Box<[u8]>, fnv::FnvBuildHasher>>,
 }
 
+#[derive(Copy, Clone, Debug)]
+struct Open {
+    id: u32,
+    uuid: Uuid,
+}
+
 /// A high-level transaction. This manages the SQLite transaction and the matching modification to
 /// be applied to the in-memory state on successful commit.
 pub struct Transaction<'a> {
     state: &'a mut State,
-    mods_by_stream: fnv::FnvHashMap<i32, StreamModification>,
+    mods_by_stream: FnvHashMap<i32, StreamModification>,
     tx: rusqlite::Transaction<'a>,
 
     /// True if due to an earlier error the transaction must be rolled back rather than committed.
@@ -862,7 +874,7 @@ impl<'a> Transaction<'a> {
     }
 
     /// Looks up an existing entry in `mods` for a given stream or makes+inserts an identity entry.
-    fn get_mods_by_stream(mods: &mut fnv::FnvHashMap<i32, StreamModification>, stream_id: i32)
+    fn get_mods_by_stream(mods: &mut FnvHashMap<i32, StreamModification>, stream_id: i32)
                           -> &mut StreamModification {
         mods.entry(stream_id).or_insert_with(StreamModification::default)
     }
@@ -1047,6 +1059,79 @@ impl LockedDatabase {
     pub fn sample_file_dirs_by_id(&self) -> &BTreeMap<i32, SampleFileDir> {
         &self.state.sample_file_dirs_by_id
     }
+
+    /// Opens the given sample file directories.
+    ///
+    /// `ids` is implicitly de-duplicated.
+    ///
+    /// When the database is in read-only mode, this simply opens all the directories after
+    /// locking and verifying their metadata matches the database state. In read-write mode, it
+    /// performs a single database transaction to update metadata for all dirs, then performs a like
+    /// update to the directories' on-disk metadata.
+    ///
+    /// Note this violates the principle of never accessing disk while holding the database lock.
+    /// Currently this only happens at startup (or during configuration), so this isn't a problem
+    /// in practice.
+    pub fn open_sample_file_dirs(&mut self, ids: &[i32]) -> Result<(), Error> {
+        let mut in_progress = FnvHashMap::with_capacity_and_hasher(ids.len(), Default::default());
+        let o = self.state.open.as_ref();
+        for &id in ids {
+            let e = in_progress.entry(id);
+            use ::std::collections::hash_map::Entry;
+            let e = match e {
+                Entry::Occupied(_) => continue,  // suppress duplicate.
+                Entry::Vacant(e) => e,
+            };
+            let dir = self.state
+                          .sample_file_dirs_by_id
+                          .get_mut(&id)
+                          .ok_or_else(|| Error::new(format!("no such dir {}", id)))?;
+            if dir.dir.is_some() { continue }
+            let mut meta = schema::DirMeta::default();
+            meta.db_uuid.extend_from_slice(&self.state.uuid.as_bytes()[..]);
+            meta.dir_uuid.extend_from_slice(&dir.uuid.as_bytes()[..]);
+            if let Some(o) = o {
+                let open = meta.mut_in_progress_open();
+                open.id = o.id;
+                open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
+            }
+            let d = dir::SampleFileDir::open(&dir.path, &meta)?;
+            if o.is_none() {  // read-only mode; it's already fully opened.
+                dir.dir = Some(d);
+            } else {  // read-write mode; there are more steps to do.
+                e.insert((meta, d));
+            }
+        }
+
+        let o = match o {
+            None => return Ok(()),  // read-only mode; all done.
+            Some(o) => o,
+        };
+
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(r#"
+                update sample_file_dir set last_complete_open_id = ? where id = ?
+            "#)?;
+            for &id in in_progress.keys() {
+                if stmt.execute(&[&o.id, &id])? != 1 {
+                    return Err(Error::new(format!("unable to update dir {}", id)));
+                }
+            }
+        }
+        tx.commit()?;
+
+        for (id, (mut meta, d)) in in_progress.drain() {
+            let dir = self.state.sample_file_dirs_by_id.get_mut(&id).unwrap();
+            meta.last_complete_open.clear();
+            mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
+            d.write_meta(&meta)?;
+            dir.dir = Some(d);
+        }
+
+        Ok(())
+    }
+
     pub fn streams_by_id(&self) -> &BTreeMap<i32, Stream> { &self.state.streams_by_id }
 
     /// Returns an immutable view of the video sample entries.
@@ -1061,7 +1146,7 @@ impl LockedDatabase {
     pub fn tx(&mut self) -> Result<Transaction, Error> {
         Ok(Transaction{
             state: &mut self.state,
-            mods_by_stream: fnv::FnvHashMap::default(),
+            mods_by_stream: FnvHashMap::default(),
             tx: self.conn.transaction()?,
             must_rollback: false,
             bypass_reservation_for_testing: false,
@@ -1325,22 +1410,32 @@ impl LockedDatabase {
         info!("Loading sample file dirs");
         let mut stmt = self.conn.prepare(r#"
             select
-              id,
-              path,
-              uuid
+              d.id,
+              d.path,
+              d.uuid,
+              d.last_complete_open_id,
+              o.uuid
             from
-              sample_file_dir;
+              sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
         "#)?;
         let mut rows = stmt.query(&[])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let id = row.get_checked(0)?;
-            let uuid: FromSqlUuid = row.get_checked(2)?;
+            let dir_uuid: FromSqlUuid = row.get_checked(2)?;
+            let open_id: Option<u32> = row.get_checked(3)?;
+            let open_uuid: Option<FromSqlUuid> = row.get_checked(4)?;
+            let last_complete_open = match (open_id, open_uuid) {
+                (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0, }),
+                (None, None) => None,
+                _ => return Err(Error::new(format!("open table missing id {}", id))),
+            };
             self.state.sample_file_dirs_by_id.insert(id, SampleFileDir {
                 id,
-                uuid: uuid.0,
+                uuid: dir_uuid.0,
                 path: row.get_checked(1)?,
-                dir: RefCell::new(None),
+                dir: None,
+                last_complete_open,
             });
         }
         info!("Loaded {} sample file dirs", self.state.sample_file_dirs_by_id.len());
@@ -1478,27 +1573,45 @@ impl LockedDatabase {
     }
 
     pub fn add_sample_file_dir(&mut self, path: String) -> Result<i32, Error> {
-        let dir = dir::SampleFileDir::create(&path)?;
+        let mut meta = schema::DirMeta::default();
         let uuid = Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
-        let tx = self.conn.transaction()?;
+        let o = self.state
+                    .open
+                    .as_ref()
+                    .ok_or_else(|| Error::new("database is read-only".to_owned()))?;
+
+        // Populate meta.
         {
-            let mut stmt = tx.prepare_cached(r#"
-                insert into sample_file_dir (path, uuid) values (:path, :uuid)
-            "#)?;
-            stmt.execute_named(&[
-                (":uuid", &uuid_bytes),
-                (":path", &path),
-            ])?;
+            meta.db_uuid.extend_from_slice(&self.state.uuid.as_bytes()[..]);
+            meta.dir_uuid.extend_from_slice(uuid_bytes);
+            let open = meta.mut_in_progress_open();
+            open.id = o.id;
+            open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
         }
-        let id = tx.last_insert_rowid() as i32;
-        tx.commit()?;
-        self.state.sample_file_dirs_by_id.insert(id, SampleFileDir {
-            id,
-            path,
-            uuid,
-            dir: RefCell::new(Some(dir)),
-        });
+
+        let dir = dir::SampleFileDir::create(&path, &meta)?;
+        let uuid = Uuid::new_v4();
+        self.conn.execute(r#"
+            insert into sample_file_dir (path, uuid, last_complete_open_id)
+                                 values (?,    ?,    ?)
+        "#, &[&path, &uuid_bytes, &o.id])?;
+        let id = self.conn.last_insert_rowid() as i32;
+        use ::std::collections::btree_map::Entry;
+        let e = self.state.sample_file_dirs_by_id.entry(id);
+        let d = match e {
+            Entry::Vacant(e) => e.insert(SampleFileDir {
+                id,
+                path,
+                uuid,
+                dir: Some(dir),
+                last_complete_open: None,
+            }),
+            Entry::Occupied(_) => Err(Error::new(format!("duplicate sample file dir id {}", id)))?,
+        };
+        d.last_complete_open = Some(*o);
+        mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
+        d.dir.as_ref().unwrap().write_meta(&meta)?;
         Ok(id)
     }
 
@@ -1508,16 +1621,11 @@ impl LockedDatabase {
                 return Err(Error::new(format!("can't delete dir referenced by stream {}", id)));
             }
         }
-        let tx = self.conn.transaction()?;
-        {
-            let mut stmt = tx.prepare_cached(r#"
-                delete from sample_file_dir where id = ?
-            "#)?;
-            if stmt.execute(&[&dir_id])? != 1 {
-                return Err(Error::new(format!("no such dir {} to remove", dir_id)));
-            }
+        // TODO: remove/update metadata stored in the directory? at present this will have to
+        // be manually deleted before the dir can be reused.
+        if self.conn.execute("delete from sample_file_dir where id = ?", &[&dir_id])? != 1 {
+            return Err(Error::new(format!("no such dir {} to remove", dir_id)));
         }
-        tx.commit()?;
         self.state.sample_file_dirs_by_id.remove(&dir_id).expect("sample file dir should exist!");
         Ok(())
     }
@@ -1664,29 +1772,8 @@ pub struct Database(Mutex<LockedDatabase>);
 
 impl Database {
     /// Creates the database from a caller-supplied SQLite connection.
-    pub fn new(conn: rusqlite::Connection) -> Result<Database, Error> {
+    pub fn new(conn: rusqlite::Connection, read_write: bool) -> Result<Database, Error> {
         conn.execute("pragma foreign_keys = on", &[])?;
-        let list_recordings_by_time_sql = format!(r#"
-            select
-                recording.composite_id,
-                recording.run_offset,
-                recording.flags,
-                recording.start_time_90k,
-                recording.duration_90k,
-                recording.sample_file_bytes,
-                recording.video_samples,
-                recording.video_sync_samples,
-                recording.video_sample_entry_id
-            from
-                recording
-            where
-                stream_id = :stream_id and
-                recording.start_time_90k > :start_time_90k - {} and
-                recording.start_time_90k < :end_time_90k and
-                recording.start_time_90k + recording.duration_90k > :start_time_90k
-            order by
-                recording.start_time_90k
-        "#, recording::MAX_RECORDING_DURATION);
         {
             let ver = get_schema_version(&conn)?.ok_or_else(|| Error::new(
                     "no such table: version. \
@@ -1709,9 +1796,49 @@ impl Database {
 
             }
         }
+
+        // Note: the meta check comes after the version check to improve the error message when
+        // trying to open a version 0 or version 1 database (which lacked the meta table).
+        let uuid = conn.query_row("select uuid from meta", &[], |row| -> Result<Uuid, Error> {
+            let uuid: FromSqlUuid = row.get_checked(0)?;
+            Ok(uuid.0)
+        })??;
+        let list_recordings_by_time_sql = format!(r#"
+            select
+                recording.composite_id,
+                recording.run_offset,
+                recording.flags,
+                recording.start_time_90k,
+                recording.duration_90k,
+                recording.sample_file_bytes,
+                recording.video_samples,
+                recording.video_sync_samples,
+                recording.video_sample_entry_id
+            from
+                recording
+            where
+                stream_id = :stream_id and
+                recording.start_time_90k > :start_time_90k - {} and
+                recording.start_time_90k < :end_time_90k and
+                recording.start_time_90k + recording.duration_90k > :start_time_90k
+            order by
+                recording.start_time_90k
+        "#, recording::MAX_RECORDING_DURATION);
+        let open = if read_write {
+            let mut stmt = conn.prepare(" insert into open (uuid) values (?)")?;
+            let uuid = Uuid::new_v4();
+            let uuid_bytes = &uuid.as_bytes()[..];
+            stmt.execute(&[&uuid_bytes])?;
+            Some(Open {
+                id: conn.last_insert_rowid() as u32,
+                uuid,
+            })
+        } else { None };
         let db = Database(Mutex::new(LockedDatabase{
             conn: conn,
             state: State {
+                uuid,
+                open,
                 sample_file_dirs_by_id: BTreeMap::new(),
                 cameras_by_id: BTreeMap::new(),
                 cameras_by_uuid: BTreeMap::new(),
@@ -1735,6 +1862,21 @@ impl Database {
             }
         }
         Ok(db)
+    }
+
+    /// Initializes a database.
+    /// Note this doesn't set journal options, so that it can be used on in-memory databases for
+    /// test code.
+    pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
+        let tx = conn.transaction()?;
+        tx.execute_batch(include_str!("schema.sql"))?;
+        {
+            let uuid = ::uuid::Uuid::new_v4();
+            let uuid_bytes = &uuid.as_bytes()[..];
+            tx.execute("insert into meta (uuid) values (?)", &[&uuid_bytes])?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Locks the database; the returned reference is the only way to perform (read or write)
@@ -1765,9 +1907,8 @@ mod tests {
     use uuid::Uuid;
 
     fn setup_conn() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        let schema = include_str!("schema.sql");
-        conn.execute_batch(schema).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        Database::init(&mut conn).unwrap();
         conn
     }
 
@@ -1925,10 +2066,10 @@ mod tests {
     }
 
     #[test]
-    fn test_no_version() {
+    fn test_no_meta_or_version() {
         testutil::init();
-        let e = Database::new(Connection::open_in_memory().unwrap()).unwrap_err();
-        assert!(e.description().starts_with("no such table: version"));
+        let e = Database::new(Connection::open_in_memory().unwrap(), false).unwrap_err();
+        assert!(e.description().starts_with("no such table"), "{}", e);
     }
 
     #[test]
@@ -1936,7 +2077,7 @@ mod tests {
         testutil::init();
         let c = setup_conn();
         c.execute_batch("delete from version; insert into version values (1, 0, '');").unwrap();
-        let e = Database::new(c).unwrap_err();
+        let e = Database::new(c, false).unwrap_err();
         assert!(e.description().starts_with(
                 "Database schema version 1 is too old (expected 2)"), "got: {:?}",
                 e.description());
@@ -1947,7 +2088,7 @@ mod tests {
         testutil::init();
         let c = setup_conn();
         c.execute_batch("delete from version; insert into version values (3, 0, '');").unwrap();
-        let e = Database::new(c).unwrap_err();
+        let e = Database::new(c, false).unwrap_err();
         assert!(e.description().starts_with(
                 "Database schema version 3 is too new (expected 2)"), "got: {:?}", e.description());
     }
@@ -1957,7 +2098,7 @@ mod tests {
     fn test_fresh_db() {
         testutil::init();
         let conn = setup_conn();
-        let db = Database::new(conn).unwrap();
+        let db = Database::new(conn, true).unwrap();
         let db = db.lock();
         assert_eq!(0, db.cameras_by_id().values().count());
     }
@@ -1967,7 +2108,7 @@ mod tests {
     fn test_full_lifecycle() {
         testutil::init();
         let conn = setup_conn();
-        let db = Database::new(conn).unwrap();
+        let db = Database::new(conn, true).unwrap();
         let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
         let path = tmpdir.path().to_str().unwrap().to_owned();
         let sample_file_dir_id = Some({ db.lock() }.add_sample_file_dir(path).unwrap());
@@ -1994,7 +2135,7 @@ mod tests {
 
         // Closing and reopening the database should present the same contents.
         let conn = db.close();
-        let db = Database::new(conn).unwrap();
+        let db = Database::new(conn, true).unwrap();
         assert_no_recordings(&db, camera_uuid);
 
         assert_eq!(db.lock().list_reserved_sample_files().unwrap(), &[]);
@@ -2048,7 +2189,7 @@ mod tests {
         // Queries on a fresh database should return the correct result (with caches populated from
         // existing database contents rather than built on insert).
         let conn = db.close();
-        let db = Database::new(conn).unwrap();
+        let db = Database::new(conn, true).unwrap();
         assert_single_recording(&db, stream_id, &recording);
 
         // Deleting a recording should succeed, update the min/max times, and re-reserve the uuid.
@@ -2070,7 +2211,7 @@ mod tests {
     fn test_drop_tx() {
         testutil::init();
         let conn = setup_conn();
-        let db = Database::new(conn).unwrap();
+        let db = Database::new(conn, true).unwrap();
         let mut db = db.lock();
         {
             let mut tx = db.tx().unwrap();

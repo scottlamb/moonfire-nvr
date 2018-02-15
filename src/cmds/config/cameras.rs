@@ -207,9 +207,11 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
 
 fn lower_retention(db: &Arc<db::Database>, zero_limits: BTreeMap<i32, Vec<dir::NewLimit>>)
                    -> Result<(), Error> {
+    let dirs_to_open: Vec<_> = zero_limits.keys().map(|id| *id).collect();
+    db.lock().open_sample_file_dirs(&dirs_to_open[..])?;
     for (dir_id, l) in &zero_limits {
-        let dir = db.lock().sample_file_dirs_by_id().get(dir_id).unwrap().open()?;
-        dir::lower_retention(dir, db.clone(), &l)?;
+        let dir = db.lock().sample_file_dirs_by_id().get(dir_id).unwrap().get()?;
+        dir::lower_retention(dir.clone(), db.clone(), &l)?;
     }
     Ok(())
 }
