@@ -144,12 +144,11 @@ fn actually_delete(model: &RefCell<Model>, siv: &mut Cursive) {
              .collect();
     siv.pop_layer();  // deletion confirmation
     siv.pop_layer();  // retention dialog
-    let dir = {
+    {
         let mut l = model.db.lock();
         l.open_sample_file_dirs(&[model.dir_id]).unwrap();  // TODO: don't unwrap.
-        l.sample_file_dirs_by_id().get(&model.dir_id).unwrap().get().unwrap()
-    };
-    if let Err(e) = dir::lower_retention(dir, model.db.clone(), &new_limits[..]) {
+    }
+    if let Err(e) = dir::lower_retention(model.db.clone(), model.dir_id, &new_limits[..]) {
         siv.add_layer(views::Dialog::text(format!("Unable to delete excess video: {}", e))
                       .title("Error")
                       .dismiss_button("Abort"));

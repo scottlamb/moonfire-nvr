@@ -209,9 +209,8 @@ fn lower_retention(db: &Arc<db::Database>, zero_limits: BTreeMap<i32, Vec<dir::N
                    -> Result<(), Error> {
     let dirs_to_open: Vec<_> = zero_limits.keys().map(|id| *id).collect();
     db.lock().open_sample_file_dirs(&dirs_to_open[..])?;
-    for (dir_id, l) in &zero_limits {
-        let dir = db.lock().sample_file_dirs_by_id().get(dir_id).unwrap().get()?;
-        dir::lower_retention(dir.clone(), db.clone(), &l)?;
+    for (&dir_id, l) in &zero_limits {
+        dir::lower_retention(db.clone(), dir_id, &l)?;
     }
     Ok(())
 }

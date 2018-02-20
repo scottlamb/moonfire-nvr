@@ -201,7 +201,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
 #[cfg(test)]
 mod tests {
     use clock::{self, Clocks};
-    use db;
+    use db::{self, CompositeId};
     use error::Error;
     use h264;
     use moonfire_ffmpeg;
@@ -314,8 +314,8 @@ mod tests {
         is_key: bool,
     }
 
-    fn get_frames(db: &db::LockedDatabase, camera_id: i32, recording_id: i32) -> Vec<Frame> {
-        db.with_recording_playback(camera_id, recording_id, |rec| {
+    fn get_frames(db: &db::LockedDatabase, id: CompositeId) -> Vec<Frame> {
+        db.with_recording_playback(id, |rec| {
             let mut it = recording::SampleIndexIterator::new();
             let mut frames = Vec::new();
             while it.next(&rec.video_index).unwrap() {
@@ -371,7 +371,7 @@ mod tests {
         // 3-second boundaries (such as 2016-04-26 00:00:03), rotation happens somewhat later:
         // * the first rotation is always skipped
         // * the second rotation is deferred until a key frame.
-        assert_eq!(get_frames(&db, testutil::TEST_STREAM_ID, 1), &[
+        assert_eq!(get_frames(&db, CompositeId::new(testutil::TEST_STREAM_ID, 1)), &[
             Frame{start_90k:      0, duration_90k: 90379, is_key:  true},
             Frame{start_90k:  90379, duration_90k: 89884, is_key: false},
             Frame{start_90k: 180263, duration_90k: 89749, is_key: false},
@@ -381,7 +381,7 @@ mod tests {
             Frame{start_90k: 540015, duration_90k: 90021, is_key: false},  // pts_time 6.0001...
             Frame{start_90k: 630036, duration_90k: 89958, is_key: false},
         ]);
-        assert_eq!(get_frames(&db, testutil::TEST_STREAM_ID, 2), &[
+        assert_eq!(get_frames(&db, CompositeId::new(testutil::TEST_STREAM_ID, 2)), &[
             Frame{start_90k:      0, duration_90k: 90011, is_key:  true},
             Frame{start_90k:  90011, duration_90k:     0, is_key: false},
         ]);
@@ -391,10 +391,10 @@ mod tests {
             Ok(())
         }).unwrap();
         assert_eq!(2, recordings.len());
-        assert_eq!(1, recordings[0].id);
+        assert_eq!(1, recordings[0].id.recording());
         assert_eq!(recording::Time(128700575999999), recordings[0].start);
         assert_eq!(0, recordings[0].flags);
-        assert_eq!(2, recordings[1].id);
+        assert_eq!(2, recordings[1].id.recording());
         assert_eq!(recording::Time(128700576719993), recordings[1].start);
         assert_eq!(db::RecordingFlags::TrailingZero as i32, recordings[1].flags);
     }

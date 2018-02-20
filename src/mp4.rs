@@ -381,8 +381,7 @@ impl Segment {
         self.index_once.call_once(|| {
             let index = unsafe { &mut *self.index.get() };
             *index = db.lock()
-                       .with_recording_playback(self.s.stream_id, self.s.recording_id,
-                                                |playback| self.build_index(playback))
+                       .with_recording_playback(self.s.id, |playback| self.build_index(playback))
                        .map_err(|e| { error!("Unable to build index for segment: {:?}", e); });
         });
         let index: &'a _ = unsafe { &*self.index.get() };
@@ -629,8 +628,7 @@ impl Slice {
         }
         let truns =
             mp4.0.db.lock()
-               .with_recording_playback(s.s.stream_id, s.s.recording_id,
-                                        |playback| s.truns(playback, pos, len))
+               .with_recording_playback(s.s.id, |playback| s.truns(playback, pos, len))
                .map_err(|e| { Error::new(format!("Unable to build index for segment: {:?}", e)) })?;
         let truns = ARefs::new(truns);
         Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]))
@@ -761,8 +759,8 @@ impl FileBuilder {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero() {
                 return Err(Error::new(format!(
-                    "unable to append recording {}/{} after recording {}/{} with trailing zero",
-                    row.stream_id, row.id, prev.s.stream_id, prev.s.recording_id)));
+                    "unable to append recording {} after recording {} with trailing zero",
+                    row.id, prev.s.id)));
             }
         }
         let s = Segment::new(db, &row, rel_range_90k, self.next_frame_num)?;
@@ -812,8 +810,7 @@ impl FileBuilder {
             // Update the etag to reflect this segment.
             let mut data = [0_u8; 24];
             let mut cursor = io::Cursor::new(&mut data[..]);
-            cursor.write_i32::<BigEndian>(s.s.stream_id)?;
-            cursor.write_i32::<BigEndian>(s.s.recording_id)?;
+            cursor.write_i64::<BigEndian>(s.s.id.0)?;
             cursor.write_i64::<BigEndian>(s.s.start.0)?;
             cursor.write_i32::<BigEndian>(d.start)?;
             cursor.write_i32::<BigEndian>(d.end)?;
@@ -1452,16 +1449,10 @@ impl FileInner {
     ///      happen because nothing should be touching Moonfire NVR's files but itself.
     fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> Result<Chunk, Error> {
         let s = &self.segments[i];
-        let uuid = {
-            let l = self.db.lock();
-            l.with_recording_playback(s.s.stream_id, s.s.recording_id,
-                                      |p| Ok(p.sample_file_uuid))?
-        };
         let f = self.dirs_by_stream_id
-                    .get(&s.s.stream_id)
-                    .ok_or_else(|| Error::new(format!("{}/{}: stream not found",
-                                                      s.s.stream_id, s.s.recording_id)))?
-                    .open_sample_file(uuid)?;
+                    .get(&s.s.id.stream())
+                    .ok_or_else(|| Error::new(format!("{}: stream not found", s.s.id)))?
+                    .open_sample_file(s.s.id)?;
         let start = s.s.sample_file_range().start + r.start;
         let mmap = Box::new(unsafe {
             memmap::MmapOptions::new()
@@ -2271,7 +2262,7 @@ mod bench {
             let rel_range_90k = 0 .. row.duration_90k;
             super::Segment::new(&db, &row, rel_range_90k, 1).unwrap()
         };
-        db.with_recording_playback(segment.s.stream_id, segment.s.recording_id, |playback| {
+        db.with_recording_playback(segment.s.id, |playback| {
             let v = segment.build_index(playback).unwrap();  // warm.
             b.bytes = v.len() as u64;  // define the benchmark performance in terms of output bytes.
             b.iter(|| segment.build_index(playback).unwrap());

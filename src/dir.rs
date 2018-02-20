@@ -32,8 +32,9 @@
 //!
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
-use db;
+use db::{self, CompositeId};
 use error::Error;
+use fnv::FnvHashMap;
 use libc::{self, c_char};
 use protobuf::{self, Message};
 use recording;
@@ -44,11 +45,11 @@ use std::ffi;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::mem;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::FromRawFd;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::thread;
-use uuid::Uuid;
 
 /// A sample file directory. Typically one per physical disk drive.
 ///
@@ -81,16 +82,18 @@ impl Drop for Fd {
 
 impl Fd {
     /// Opens the given path as a directory.
-    pub fn open(path: &str, mkdir: bool) -> Result<Fd, io::Error> {
+    pub fn open(fd: Option<&Fd>, path: &str, mkdir: bool) -> Result<Fd, io::Error> {
+        let fd = fd.map(|fd| fd.0).unwrap_or(libc::AT_FDCWD);
         let cstring = ffi::CString::new(path)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if mkdir && unsafe { libc::mkdir(cstring.as_ptr(), 0o700) } != 0 {
+        if mkdir && unsafe { libc::mkdirat(fd, cstring.as_ptr(), 0o700) } != 0 {
             let e = io::Error::last_os_error();
             if e.kind() != io::ErrorKind::AlreadyExists {
                 return Err(e.into());
             }
         }
-        let fd = unsafe { libc::open(cstring.as_ptr(), libc::O_DIRECTORY | libc::O_RDONLY, 0) };
+        let fd = unsafe { libc::openat(fd, cstring.as_ptr(), libc::O_DIRECTORY | libc::O_RDONLY,
+                                       0) };
         if fd < 0 {
             return Err(io::Error::last_os_error().into());
         }
@@ -105,14 +108,6 @@ impl Fd {
             return Err(io::Error::last_os_error())
         }
         Ok(fs::File::from_raw_fd(fd))
-    }
-
-    unsafe fn renameat(&self, from: *const c_char, to: *const c_char) -> Result<(), io::Error> {
-        let result = libc::renameat(self.0, from, self.0, to);
-        if result < 0 {
-            return Err(io::Error::last_os_error())
-        }
-        Ok(())
     }
 
     /// Locks the directory with the specified `flock` operation.
@@ -135,6 +130,15 @@ impl Fd {
     }
 }
 
+pub unsafe fn renameat(from_fd: &Fd, from_path: *const c_char,
+                   to_fd: &Fd, to_path: *const c_char) -> Result<(), io::Error> {
+    let result = libc::renameat(from_fd.0, from_path, to_fd.0, to_path);
+    if result < 0 {
+        return Err(io::Error::last_os_error())
+    }
+    Ok(())
+}
+
 impl SampleFileDir {
     /// Opens the directory using the given metadata.
     ///
@@ -147,7 +151,7 @@ impl SampleFileDir {
         s.fd.lock(if read_write { libc::LOCK_EX } else { libc::LOCK_SH } | libc::LOCK_NB)?;
         let dir_meta = s.read_meta()?;
         if !SampleFileDir::consistent(db_meta, &dir_meta) {
-            return Err(Error::new(format!("metadata mismatch. db: {:?} dir: {:?}",
+            return Err(Error::new(format!("metadata mismatch.\ndb: {:#?}\ndir: {:#?}",
                                           db_meta, &dir_meta)));
         }
         if db_meta.in_progress_open.is_some() {
@@ -193,19 +197,19 @@ impl SampleFileDir {
     }
 
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
-        let fd = Fd::open(path, create)
+        let fd = Fd::open(None, path, create)
             .map_err(|e| Error::new(format!("unable to open sample file dir {}: {}", path, e)))?;
         Ok(Arc::new(SampleFileDir {
             fd,
             mutable: Mutex::new(SharedMutableState{
-                next_uuid: None,
+                next_id_by_stream: FnvHashMap::default(),
             }),
         }))
     }
 
     /// Opens the given sample file for reading.
-    pub fn open_sample_file(&self, uuid: Uuid) -> Result<fs::File, io::Error> {
-        let p = SampleFileDir::get_rel_pathname(uuid);
+    pub fn open_sample_file(&self, composite_id: CompositeId) -> Result<fs::File, io::Error> {
+        let p = SampleFileDir::get_rel_pathname(composite_id);
         unsafe { self.fd.openat(p.as_ptr(), libc::O_RDONLY, 0) }
     }
 
@@ -246,7 +250,7 @@ impl SampleFileDir {
             cause: Some(Box::new(e)),
         })?;
         f.sync_all()?;
-        unsafe { self.fd.renameat(tmp_path.as_ptr(), final_path.as_ptr())? };
+        unsafe { renameat(&self.fd, tmp_path.as_ptr(), &self.fd, final_path.as_ptr())? };
         self.sync()?;
         Ok(())
     }
@@ -258,52 +262,60 @@ impl SampleFileDir {
     ///
     /// The new recording will continue from `prev` if specified; this should be as returned from
     /// a previous `close` call.
-    pub fn create_writer<'a>(&self, db: &db::Database, channel: &'a SyncerChannel,
-                             prev: Option<PreviousWriter>, camera_id: i32,
+    pub fn create_writer<'a>(&'a self, db: &db::Database, channel: &'a SyncerChannel,
+                             prev: Option<PreviousWriter>, stream_id: i32,
                              video_sample_entry_id: i32)
                              -> Result<Writer<'a>, Error> {
-        // Grab the next uuid. Typically one is cached—a sync has usually completed since the last
-        // writer was created, and syncs ensure `next_uuid` is filled while performing their
-        // transaction. But if not, perform an extra database transaction to reserve a new one.
-        let uuid = match self.mutable.lock().unwrap().next_uuid.take() {
-            Some(u) => u,
-            None => {
-                info!("Committing extra transaction because there's no cached uuid");
+        // Grab the next id. The dir itself will typically have an id (possibly one ahead of what's
+        // stored in the database), but not on the first attempt for a stream.
+        use std::collections::hash_map::Entry;
+        let recording_id;
+        match self.mutable.lock().unwrap().next_id_by_stream.entry(stream_id) {
+            Entry::Occupied(mut e) => {
+                let v = e.get_mut();
+                recording_id = *v;
+                *v += 1;
+            },
+            Entry::Vacant(e) => {
                 let mut l = db.lock();
-                let mut tx = l.tx()?;
-                let u = tx.reserve_sample_file()?;
-                tx.commit()?;
-                u
+                recording_id = l.streams_by_id().get(&stream_id).unwrap().next_recording_id;
+                e.insert(recording_id + 1);
             },
         };
 
-        let p = SampleFileDir::get_rel_pathname(uuid);
+        let id = CompositeId::new(stream_id, recording_id);
+        let p = SampleFileDir::get_rel_pathname(id);
+
         let f = match unsafe { self.fd.openat(p.as_ptr(),
                                               libc::O_WRONLY | libc::O_EXCL | libc::O_CREAT,
                                               0o600) } {
             Ok(f) => f,
             Err(e) => {
-                self.mutable.lock().unwrap().next_uuid = Some(uuid);
+                // Put the id back to try again later.
+                let mut l = self.mutable.lock().unwrap();
+                let v = l.next_id_by_stream.get_mut(&stream_id).unwrap();
+                assert_eq!(*v, recording_id + 1);
+                *v -= 1;
                 return Err(e.into());
             },
         };
-        Writer::open(f, uuid, prev, camera_id, video_sample_entry_id, channel)
+        Writer::open(f, id, prev, video_sample_entry_id, channel)
     }
 
     pub fn statfs(&self) -> Result<libc::statvfs, io::Error> { self.fd.statfs() }
 
     /// Gets a pathname for a sample file suitable for passing to open or unlink.
-    fn get_rel_pathname(uuid: Uuid) -> [libc::c_char; 37] {
-        let mut buf = [0u8; 37];
-        write!(&mut buf[..36], "{}", uuid.hyphenated()).expect("can't format uuid to pathname buf");
+    fn get_rel_pathname(id: CompositeId) -> [libc::c_char; 17] {
+        let mut buf = [0u8; 17];
+        write!(&mut buf[..16], "{:016x}", id.0).expect("can't format id to pathname buf");
 
         // libc::c_char seems to be i8 on some platforms (Linux/arm) and u8 on others (Linux/amd64).
-        unsafe { mem::transmute::<[u8; 37], [libc::c_char; 37]>(buf) }
+        unsafe { mem::transmute::<[u8; 17], [libc::c_char; 17]>(buf) }
     }
 
     /// Unlinks the given sample file within this directory.
-    fn unlink(fd: &Fd, uuid: Uuid) -> Result<(), io::Error> {
-        let p = SampleFileDir::get_rel_pathname(uuid);
+    fn unlink(fd: &Fd, id: CompositeId) -> Result<(), io::Error> {
+        let p = SampleFileDir::get_rel_pathname(id);
         let res = unsafe { libc::unlinkat(fd.0, p.as_ptr(), 0) };
         if res < 0 {
             return Err(io::Error::last_os_error())
@@ -316,7 +328,7 @@ impl SampleFileDir {
         let res = unsafe { libc::fsync(self.fd.0) };
         if res < 0 {
             return Err(io::Error::last_os_error())
-        };
+        }
         Ok(())
     }
 }
@@ -324,13 +336,13 @@ impl SampleFileDir {
 /// State shared between users of the `SampleFileDirectory` struct and the syncer.
 #[derive(Debug)]
 struct SharedMutableState {
-    next_uuid: Option<Uuid>,
+    next_id_by_stream: FnvHashMap<i32, i32>,
 }
 
 /// A command sent to the syncer. These correspond to methods in the `SyncerChannel` struct.
 enum SyncerCommand {
     AsyncSaveRecording(db::RecordingToInsert, fs::File),
-    AsyncAbandonRecording(Uuid),
+    AsyncAbandonRecording(CompositeId),
 
     #[cfg(test)]
     Flush(mpsc::SyncSender<()>),
@@ -345,8 +357,18 @@ pub struct SyncerChannel(mpsc::Sender<SyncerCommand>);
 struct Syncer {
     dir: Arc<SampleFileDir>,
     db: Arc<db::Database>,
-    to_unlink: Vec<Uuid>,
-    to_mark_deleted: Vec<Uuid>,
+
+    /// Files to be unlinked then immediately forgotten about. They are `>= next_recording_id` for
+    /// their stream, `next_recording_id` won't be advanced without a sync of the directory, and
+    /// extraneous files `>= next_recording_id` are unlinked on startup, so this should be
+    /// sufficient.
+    to_abandon: Vec<CompositeId>,
+
+    /// Files to be unlinked then removed from the garbage table.
+    to_unlink: Vec<CompositeId>,
+
+    /// Files to be removed from the garbage table.
+    to_mark_deleted: Vec<CompositeId>,
 }
 
 /// Starts a syncer for the given sample file directory.
@@ -360,19 +382,16 @@ struct Syncer {
 /// Returns a `SyncerChannel` which can be used to send commands (and can be cloned freely) and
 /// a `JoinHandle` for the syncer thread. At program shutdown, all `SyncerChannel` clones should be
 /// removed and then the handle joined to allow all recordings to be persisted.
-pub fn start_syncer(dir: Arc<SampleFileDir>, db: Arc<db::Database>)
+pub fn start_syncer(db: Arc<db::Database>, dir_id: i32)
                     -> Result<(SyncerChannel, thread::JoinHandle<()>), Error> {
-    let to_unlink = db.lock().list_reserved_sample_files()?;
-    let (snd, rcv) = mpsc::channel();
-    let mut syncer = Syncer {
-        dir,
-        db,
-        to_unlink,
-        to_mark_deleted: Vec::new(),
-    };
+    let db2 = db.clone();
+    let (mut syncer, path) = Syncer::new(&db.lock(), db2, dir_id)?;
     syncer.initial_rotation()?;
+    let (snd, rcv) = mpsc::channel();
     Ok((SyncerChannel(snd),
-        thread::Builder::new().name("syncer".into()).spawn(move || syncer.run(rcv)).unwrap()))
+        thread::Builder::new()
+            .name(format!("sync-{}", path))
+            .spawn(move || syncer.run(rcv)).unwrap()))
 }
 
 pub struct NewLimit {
@@ -383,15 +402,10 @@ pub struct NewLimit {
 /// Deletes recordings if necessary to fit within the given new `retain_bytes` limit.
 /// Note this doesn't change the limit in the database; it only deletes files.
 /// Pass a limit of 0 to delete all recordings associated with a camera.
-pub fn lower_retention(dir: Arc<SampleFileDir>, db: Arc<db::Database>, limits: &[NewLimit])
+pub fn lower_retention(db: Arc<db::Database>, dir_id: i32, limits: &[NewLimit])
                        -> Result<(), Error> {
-    let to_unlink = db.lock().list_reserved_sample_files()?;
-    let mut syncer = Syncer {
-        dir,
-        db,
-        to_unlink,
-        to_mark_deleted: Vec::new(),
-    };
+    let db2 = db.clone();
+    let (mut syncer, _) = Syncer::new(&db.lock(), db2, dir_id)?;
     syncer.do_rotation(|db| {
         let mut to_delete = Vec::new();
         for l in limits {
@@ -441,8 +455,8 @@ impl SyncerChannel {
         self.0.send(SyncerCommand::AsyncSaveRecording(recording, f)).unwrap();
     }
 
-    fn async_abandon_recording(&self, uuid: Uuid) {
-        self.0.send(SyncerCommand::AsyncAbandonRecording(uuid)).unwrap();
+    fn async_abandon_recording(&self, id: CompositeId) {
+        self.0.send(SyncerCommand::AsyncAbandonRecording(id)).unwrap();
     }
 
     /// For testing: flushes the syncer, waiting for all currently-queued commands to complete.
@@ -455,6 +469,60 @@ impl SyncerChannel {
 }
 
 impl Syncer {
+    fn new(l: &db::LockedDatabase, db: Arc<db::Database>, dir_id: i32)
+           -> Result<(Self, String), Error> {
+        let d = l.sample_file_dirs_by_id()
+                 .get(&dir_id)
+                 .ok_or_else(|| Error::new(format!("no dir {}", dir_id)))?;
+        let dir = d.get()?;
+        let to_unlink = l.list_garbage(dir_id)?;
+
+        // Get files to abandon.
+        // First, get a list of the streams in question.
+        let streams_to_next: FnvHashMap<_, _> =
+            l.streams_by_id()
+             .iter()
+             .filter_map(|(&k, v)| {
+                 if v.sample_file_dir_id == Some(dir_id) {
+                    Some((k, v.next_recording_id))
+                 } else {
+                     None
+                 }
+             })
+             .collect();
+        let to_abandon = Syncer::list_files_to_abandon(&d.path, streams_to_next)?;
+
+        Ok((Syncer {
+            dir,
+            db,
+            to_abandon,
+            to_unlink,
+            to_mark_deleted: Vec::new(),
+        }, d.path.clone()))
+    }
+
+    /// Lists files which should be "abandoned" (deleted without ever recording in the database)
+    /// on opening.
+    fn list_files_to_abandon(path: &str, streams_to_next: FnvHashMap<i32, i32>)
+                             -> Result<Vec<CompositeId>, Error> {
+        let mut v = Vec::new();
+        for e in ::std::fs::read_dir(path)? {
+            let e = e?;
+            let id = match parse_id(e.file_name().as_bytes()) {
+                Ok(i) => i,
+                Err(_) => continue,
+            };
+            let next = match streams_to_next.get(&id.stream()) {
+                Some(n) => *n,
+                None => continue,  // unknown stream.
+            };
+            if id.recording() >= next {
+                v.push(id);
+            }
+        }
+        Ok(v)
+    }
+
     fn run(&mut self, cmds: mpsc::Receiver<SyncerCommand>) {
         loop {
             match cmds.recv() {
@@ -467,7 +535,7 @@ impl Syncer {
         }
     }
 
-    /// Rotates files for all streams and deletes stale reserved uuids from previous runs.
+    /// Rotates files for all streams and deletes stale files from previous runs.
     fn initial_rotation(&mut self) -> Result<(), Error> {
         self.do_rotation(|db| {
             let mut to_delete = Vec::new();
@@ -489,7 +557,7 @@ impl Syncer {
             to_delete
         };
         for row in to_delete {
-            self.to_unlink.push(row.uuid);
+            self.to_unlink.push(row.id);
         }
         self.try_unlink();
         if !self.to_unlink.is_empty() {
@@ -512,15 +580,14 @@ impl Syncer {
     /// so that there can be only one dir sync and database transaction per save.
     fn save(&mut self, recording: db::RecordingToInsert, f: fs::File) {
         if let Err(e) = self.save_helper(&recording, f) {
-            error!("camera {}: will discard recording {} due to error while saving: {}",
-                   recording.stream_id, recording.sample_file_uuid, e);
-            self.to_unlink.push(recording.sample_file_uuid);
+            error!("will discard recording {} due to error while saving: {}", recording.id, e);
+            self.abandon(recording.id);
             return;
         }
     }
 
-    fn abandon(&mut self, uuid: Uuid) {
-        self.to_unlink.push(uuid);
+    fn abandon(&mut self, id: CompositeId) {
+        self.to_abandon.push(id);
         self.try_unlink();
     }
 
@@ -532,55 +599,56 @@ impl Syncer {
         if !self.to_unlink.is_empty() {
             return Err(Error::new(format!("failed to unlink {} files.", self.to_unlink.len())));
         }
+
+        // XXX: if these calls fail, any other writes are likely to fail as well.
         f.sync_all()?;
         self.dir.sync()?;
 
         let mut to_delete = Vec::new();
-        let mut l = self.dir.mutable.lock().unwrap();
         let mut db = self.db.lock();
-        let mut new_next_uuid = l.next_uuid;
         {
+            let stream_id = recording.id.stream();
             let stream =
-                db.streams_by_id().get(&recording.stream_id)
-                  .ok_or_else(|| Error::new(format!("no such stream {}", recording.stream_id)))?;
-            get_rows_to_delete(&db, recording.stream_id, stream,
+                db.streams_by_id().get(&stream_id)
+                  .ok_or_else(|| Error::new(format!("no such stream {}", stream_id)))?;
+            get_rows_to_delete(&db, stream_id, stream,
                                recording.sample_file_bytes as i64, &mut to_delete)?;
         }
         let mut tx = db.tx()?;
         tx.mark_sample_files_deleted(&self.to_mark_deleted)?;
         tx.delete_recordings(&to_delete)?;
-        if new_next_uuid.is_none() {
-            new_next_uuid = Some(tx.reserve_sample_file()?);
-        }
         tx.insert_recording(recording)?;
         tx.commit()?;
-        l.next_uuid = new_next_uuid;
 
         self.to_mark_deleted.clear();
-        self.to_unlink.extend(to_delete.iter().map(|row| row.uuid));
+        self.to_unlink.extend(to_delete.iter().map(|row| row.id));
+        self.to_unlink.extend_from_slice(&self.to_abandon);
+        self.to_abandon.clear();
         Ok(())
     }
 
-    /// Tries to unlink all the uuids in `self.to_unlink`. Any which can't be unlinked will
-    /// be retained in the vec.
+    /// Tries to unlink all the files in `self.to_unlink` and `self.to_abandon`.
+    /// Any which can't be unlinked will be retained in the vec.
     fn try_unlink(&mut self) {
         let to_mark_deleted = &mut self.to_mark_deleted;
         let fd = &self.dir.fd;
-        self.to_unlink.retain(|uuid| {
-            if let Err(e) = SampleFileDir::unlink(fd, *uuid) {
-                if e.kind() == io::ErrorKind::NotFound {
-                    warn!("dir: Sample file {} already deleted!", uuid.hyphenated());
-                    to_mark_deleted.push(*uuid);
-                    false
-                } else {
-                    warn!("dir: Unable to unlink {}: {}", uuid.hyphenated(), e);
-                    true
+        for &mut (ref mut v, mark_deleted) in &mut [(&mut self.to_unlink, true),
+                                                    (&mut self.to_abandon, false)] {
+            v.retain(|&id| {
+                if let Err(e) = SampleFileDir::unlink(fd, id) {
+                    if e.kind() == io::ErrorKind::NotFound {
+                        warn!("dir: recording {} already deleted!", id);
+                    } else {
+                        warn!("dir: Unable to unlink {}: {}", id, e);
+                        return true;
+                    }
                 }
-            } else {
-                to_mark_deleted.push(*uuid);
+                if mark_deleted {
+                    to_mark_deleted.push(id);
+                }
                 false
-            }
-        });
+            });
+        }
     }
 }
 
@@ -598,7 +666,7 @@ struct InnerWriter<'a> {
     syncer_channel: &'a SyncerChannel,
     f: fs::File,
     index: recording::SampleIndexEncoder,
-    uuid: Uuid,
+    id: CompositeId,
     corrupt: bool,
     hasher: hash::Hasher,
 
@@ -614,7 +682,6 @@ struct InnerWriter<'a> {
 
     adjuster: ClockAdjuster,
 
-    stream_id: i32,
     video_sample_entry_id: i32,
     run_offset: i32,
 
@@ -691,19 +758,18 @@ pub struct PreviousWriter {
 
 impl<'a> Writer<'a> {
     /// Opens the writer; for use by `SampleFileDir` (which should supply `f`).
-    fn open(f: fs::File, uuid: Uuid, prev: Option<PreviousWriter>, stream_id: i32,
+    fn open(f: fs::File, id: CompositeId, prev: Option<PreviousWriter>,
             video_sample_entry_id: i32, syncer_channel: &'a SyncerChannel) -> Result<Self, Error> {
-        Ok(Writer(Some(InnerWriter{
+        Ok(Writer(Some(InnerWriter {
             syncer_channel,
             f,
             index: recording::SampleIndexEncoder::new(),
-            uuid,
+            id,
             corrupt: false,
             hasher: hash::Hasher::new(hash::MessageDigest::sha1())?,
             prev_end: prev.map(|p| p.end_time),
             local_start: recording::Time(i64::max_value()),
             adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
-            stream_id,
             video_sample_entry_id,
             run_offset: prev.map(|p| p.run_offset + 1).unwrap_or(0),
             unflushed_sample: None,
@@ -734,7 +800,7 @@ impl<'a> Writer<'a> {
                         // Partially written packet. Truncate if possible.
                         if let Err(e2) = w.f.set_len(w.index.sample_file_bytes as u64) {
                             error!("After write to {} failed with {}, truncate failed with {}; \
-                                    sample file is corrupt.", w.uuid.hyphenated(), e, e2);
+                                    sample file is corrupt.", w.id, e, e2);
                             w.corrupt = true;
                         }
                     }
@@ -768,8 +834,8 @@ impl<'a> InnerWriter<'a> {
 
     fn close(mut self, next_pts: Option<i64>) -> Result<PreviousWriter, Error> {
         if self.corrupt {
-            self.syncer_channel.async_abandon_recording(self.uuid);
-            return Err(Error::new(format!("recording {} is corrupt", self.uuid)));
+            self.syncer_channel.async_abandon_recording(self.id);
+            return Err(Error::new(format!("recording {} is corrupt", self.id)));
         }
         let unflushed =
             self.unflushed_sample.take().ok_or_else(|| Error::new("no packets!".to_owned()))?;
@@ -787,14 +853,13 @@ impl<'a> InnerWriter<'a> {
                     else { 0 };
         let local_start_delta = self.local_start - start;
         let recording = db::RecordingToInsert{
-            stream_id: self.stream_id,
+            id: self.id,
             sample_file_bytes: self.index.sample_file_bytes,
             time: start .. end,
             local_time_delta: local_start_delta,
             video_samples: self.index.video_samples,
             video_sync_samples: self.index.video_sync_samples,
             video_sample_entry_id: self.video_sample_entry_id,
-            sample_file_uuid: self.uuid,
             video_index: self.index.video_index,
             sample_file_sha1: sha1_bytes,
             run_offset: self.run_offset,
@@ -818,6 +883,24 @@ impl<'a> Drop for Writer<'a> {
             let _ = w.close(None);
         }
     }
+}
+
+/// Parse a composite id filename.
+///
+/// These are exactly 16 bytes, lowercase hex.
+fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
+    if id.len() != 16 {
+        return Err(());
+    }
+    let mut v: u64 = 0;
+    for i in 0..16 {
+        v = (v << 4) | match id[i] {
+            b @ b'0'...b'9' => b - b'0',
+            b @ b'a'...b'f' => b - b'a' + 10,
+            _ => return Err(()),
+        } as u64;
+    }
+    Ok(CompositeId(v as i64))
 }
 
 #[cfg(test)]
@@ -882,5 +965,16 @@ mod tests {
         let expected = 1800*3000 + 2700;
         assert!(total == expected || total == expected + 1, "total={} vs expected={}",
                 total, expected);
+    }
+
+    #[test]
+    fn parse_id() {
+        use super::parse_id;
+        assert_eq!(parse_id(b"0000000000000000").unwrap().0, 0);
+        assert_eq!(parse_id(b"0000000100000002").unwrap().0, 0x0000000100000002);
+        parse_id(b"").unwrap_err();
+        parse_id(b"meta").unwrap_err();
+        parse_id(b"0").unwrap_err();
+        parse_id(b"000000010000000x").unwrap_err();
     }
 }

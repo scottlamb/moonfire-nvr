@@ -143,7 +143,7 @@ pub fn run() -> Result<(), Error> {
         drop(l);
         let mut syncers = FnvHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
         for (id, dir) in dirs.drain() {
-            let (channel, join) = dir::start_syncer(dir.clone(), db.clone())?;
+            let (channel, join) = dir::start_syncer(db.clone(), id)?;
             syncers.insert(id, Syncer {
                 dir,
                 channel,

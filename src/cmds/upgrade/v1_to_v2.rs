@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera digital video recorder.
-// Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
+// Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -135,6 +135,7 @@ impl<'a> super::Upgrader for U<'a> {
         self.dir_meta = Some(meta);
 
         tx.execute_batch(r#"
+            drop table reserved_sample_files;
             alter table camera rename to old_camera;
             alter table recording rename to old_recording;
             alter table video_sample_entry rename to old_video_sample_entry;
@@ -198,6 +199,12 @@ impl<'a> super::Upgrader for U<'a> {
               rfc6381_codec text not null,
               data blob not null check (length(data) > 86)
             );
+
+            create table garbage (
+              sample_file_dir_id integer references sample_file_dir (id),
+              composite_id integer,
+              primary key (sample_file_dir_id, composite_id)
+            ) without rowid;
 
             insert into camera
             select

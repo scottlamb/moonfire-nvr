@@ -38,6 +38,7 @@ use rusqlite;
 
 mod v0_to_v1;
 mod v1_to_v2;
+mod v2_to_v3;
 
 const USAGE: &'static str = r#"
 Upgrade to the latest database schema.
@@ -92,6 +93,7 @@ pub fn run() -> Result<(), Error> {
     let upgraders = [
         v0_to_v1::new,
         v1_to_v2::new,
+        v2_to_v3::new,
     ];
 
     {

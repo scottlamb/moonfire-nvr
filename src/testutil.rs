@@ -112,7 +112,8 @@ impl TestDb {
         }
         let mut dirs_by_stream_id = FnvHashMap::default();
         dirs_by_stream_id.insert(TEST_STREAM_ID, dir.clone());
-        let (syncer_channel, syncer_join) = dir::start_syncer(dir, db.clone()).unwrap();
+        let (syncer_channel, syncer_join) =
+            dir::start_syncer(db.clone(), sample_file_dir_id).unwrap();
         TestDb {
             db,
             dirs_by_stream_id: Arc::new(dirs_by_stream_id),
@@ -128,13 +129,12 @@ impl TestDb {
         let mut db = self.db.lock();
         let video_sample_entry_id = db.insert_video_sample_entry(
             1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
-        let row_id;
+        let next = db.streams_by_id().get(&TEST_STREAM_ID).unwrap().next_recording_id;
         {
             let mut tx = db.tx().unwrap();
-            tx.bypass_reservation_for_testing = true;
             const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-            row_id = tx.insert_recording(&db::RecordingToInsert{
-                stream_id: TEST_STREAM_ID,
+            tx.insert_recording(&db::RecordingToInsert {
+                id: db::CompositeId::new(TEST_STREAM_ID, next),
                 sample_file_bytes: encoder.sample_file_bytes,
                 time: START_TIME ..
                       START_TIME + recording::Duration(encoder.total_duration_90k as i64),
@@ -142,16 +142,15 @@ impl TestDb {
                 video_samples: encoder.video_samples,
                 video_sync_samples: encoder.video_sync_samples,
                 video_sample_entry_id: video_sample_entry_id,
-                sample_file_uuid: Uuid::nil(),
                 video_index: encoder.video_index,
                 sample_file_sha1: [0u8; 20],
-                run_offset: 0,  // TODO
-                flags: 0,  // TODO
+                run_offset: 0,
+                flags: db::RecordingFlags::TrailingZero as i32,
             }).unwrap();
             tx.commit().unwrap();
         }
         let mut row = None;
-        db.list_recordings_by_id(TEST_STREAM_ID, row_id .. row_id + 1,
+        db.list_recordings_by_id(TEST_STREAM_ID, next .. next+1,
                                    |r| { row = Some(r); Ok(()) }).unwrap();
         row.unwrap()
     }
@@ -167,8 +166,8 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
         1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
     const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
     const DURATION: recording::Duration = recording::Duration(5399985);
-    let mut recording = db::RecordingToInsert{
-        stream_id: TEST_STREAM_ID,
+    let mut recording = db::RecordingToInsert {
+        id: db::CompositeId::new(TEST_STREAM_ID, 1),
         sample_file_bytes: 30104460,
         flags: 0,
         time: START_TIME .. (START_TIME + DURATION),
@@ -176,15 +175,14 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
         video_samples: 1800,
         video_sync_samples: 60,
         video_sample_entry_id: video_sample_entry_id,
-        sample_file_uuid: Uuid::nil(),
         video_index: data,
         sample_file_sha1: [0; 20],
         run_offset: 0,
     };
     let mut tx = db.tx().unwrap();
-    tx.bypass_reservation_for_testing = true;
-    for _ in 0..num {
+    for i in 0..num {
         tx.insert_recording(&recording).unwrap();
+        recording.id = db::CompositeId::new(TEST_STREAM_ID, 2 + i as i32);
         recording.time.start += DURATION;
         recording.time.end += DURATION;
         recording.run_offset += 1;

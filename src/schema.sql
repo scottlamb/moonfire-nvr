@@ -197,10 +197,6 @@ create table recording_playback (
   -- See description on recording table.
   composite_id integer primary key references recording (composite_id),
 
-  -- The binary representation of the sample file's uuid. The canonical text
-  -- representation of this uuid is the filename within the sample file dir.
-  sample_file_uuid blob not null check (length(sample_file_uuid) = 16),
-
   -- The sha1 hash of the contents of the sample file.
   sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
 
@@ -208,12 +204,21 @@ create table recording_playback (
   video_index blob not null check (length(video_index) > 0)
 );
 
--- Files in the sample file directory which may be present but should simply be
--- discarded on startup. (Recordings which were never completed or have been
--- marked for completion.)
-create table reserved_sample_files (
-  uuid blob primary key check (length(uuid) = 16),
-  state integer not null  -- 0 (writing) or 1 (deleted)
+-- Files which are to be deleted (may or may not still exist).
+-- Note that besides these files, for each stream, any recordings >= its
+-- next_recording_id should be discarded on startup.
+create table garbage (
+  -- This is _mostly_ redundant with composite_id, which contains the stream
+  -- id and thus a linkage to the sample file directory. Listing it here
+  -- explicitly means that streams can be deleted without losing the
+  -- association of garbage to directory.
+  sample_file_dir_id integer not null references sample_file_dir (id),
+
+  -- See description on recording table.
+  composite_id integer not null,
+
+  -- Organize the table first by directory, as that's how it will be queried.
+  primary key (sample_file_dir_id, composite_id)
 ) without rowid;
 
 -- A concrete box derived from a ISO/IEC 14496-12 section 8.5.2
@@ -238,4 +243,4 @@ create table video_sample_entry (
 );
 
 insert into version (id, unix_time,                           notes)
-             values (2,  cast(strftime('%s', 'now') as int), 'db creation');
+             values (3,  cast(strftime('%s', 'now') as int), 'db creation');

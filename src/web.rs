@@ -328,18 +328,20 @@ impl ServiceInner {
                         let mut prev = None;
                         let mut cur_off = 0;
                         db.list_recordings_by_id(stream_id, s.ids.clone(), |r| {
+                            let recording_id = r.id.recording();
+
                             // Check for missing recordings.
                             match prev {
-                                None if r.id == s.ids.start => {},
+                                None if recording_id == s.ids.start => {},
                                 None => return Err(Error::new(format!("no such recording {}/{}",
                                                                       stream_id, s.ids.start))),
-                                Some(id) if r.id != id + 1 => {
+                                Some(id) if r.id.recording() != id + 1 => {
                                     return Err(Error::new(format!("no such recording {}/{}",
                                                                   stream_id, id + 1)));
                                 },
                                 _ => {},
                             };
-                            prev = Some(r.id);
+                            prev = Some(recording_id);
 
                             // Add a segment for the relevant part of the recording, if any.
                             let end_time = s.end_time.unwrap_or(i64::max_value());
@@ -348,11 +350,11 @@ impl ServiceInner {
                                 let start = cmp::max(0, s.start_time - cur_off);
                                 let end = cmp::min(d, end_time - cur_off);
                                 let times = start as i32 .. end as i32;
-                                debug!("...appending recording {}/{} with times {:?} \
-                                       (out of dur {})", r.stream_id, r.id, times, d);
+                                debug!("...appending recording {} with times {:?} \
+                                       (out of dur {})", r.id, times, d);
                                 builder.append(&db, r, start as i32 .. end as i32)?;
                             } else {
-                                debug!("...skipping recording {}/{} dur {}", r.stream_id, r.id, d);
+                                debug!("...skipping recording {} dur {}", r.id, d);
                             }
                             cur_off += d;
                             Ok(())
