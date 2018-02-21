@@ -30,7 +30,7 @@
 
 use dir;
 use docopt;
-use error::Error;
+use failure::{Error, Fail};
 use libc;
 use rusqlite;
 use std::path::Path;
@@ -78,10 +78,8 @@ fn open_conn(db_dir: &str, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connect
     let dir = dir::Fd::open(None, db_dir, mode == OpenMode::Create)?;
     let ro = mode == OpenMode::ReadOnly;
     dir.lock(if ro { libc::LOCK_SH } else { libc::LOCK_EX } | libc::LOCK_NB)
-       .map_err(|e| Error{description: format!("db dir {:?} already in use; can't get {} lock",
-                                               db_dir,
-                                               if ro { "shared" } else { "exclusive" }),
-                          cause: Some(Box::new(e))})?;
+       .map_err(|e| e.context(format!("db dir {:?} already in use; can't get {} lock",
+                                      db_dir, if ro { "shared" } else { "exclusive" })))?;
     let conn = rusqlite::Connection::open_with_flags(
         Path::new(&db_dir).join("db"),
         match mode {

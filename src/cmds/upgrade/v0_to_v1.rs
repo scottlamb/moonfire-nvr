@@ -31,7 +31,7 @@
 /// Upgrades a version 0 schema to a version 1 schema.
 
 use db;
-use error::Error;
+use failure::Error;
 use recording;
 use rusqlite;
 use std::collections::HashMap;

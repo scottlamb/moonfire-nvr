@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use db;
-use error::Error;
+use failure::Error;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -104,7 +104,7 @@ impl<'a> Stream<'a> {
             Some(id) => id,
             None => return Ok(None),
         };
-        let s = db.streams_by_id().get(&id).ok_or_else(|| Error::new(format!("missing stream {}", id)))?;
+        let s = db.streams_by_id().get(&id).ok_or_else(|| format_err!("missing stream {}", id))?;
         Ok(Some(Stream {
             retain_bytes: s.retain_bytes,
             min_start_time_90k: s.range.as_ref().map(|r| r.start.0),

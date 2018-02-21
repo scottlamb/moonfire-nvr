@@ -31,12 +31,11 @@
 use coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
 use core::str::FromStr;
 use db;
-use error::Error;
+use failure::Error;
 use regex::Regex;
 use std::ops;
 use std::fmt;
 use std::ops::Range;
-use std::string::String;
 use time;
 
 pub const TIME_UNITS_PER_SEC: i64 = 90000;
@@ -77,7 +76,7 @@ impl Time {
         }
 
         // If that failed, parse as a time string or bust.
-        let c = RE.captures(s).ok_or_else(|| Error::new(format!("unparseable time {:?}", s)))?;
+        let c = RE.captures(s).ok_or_else(|| format_err!("unparseable time {:?}", s))?;
         let mut tm = time::Tm{
             tm_sec: i32::from_str(c.get(6).unwrap().as_str()).unwrap(),
             tm_min: i32::from_str(c.get(5).unwrap().as_str()).unwrap(),
@@ -92,11 +91,11 @@ impl Time {
             tm_nsec: 0,
         };
         if tm.tm_mon == 0 {
-            return Err(Error::new(format!("time {:?} has month 0", s)));
+            bail!("time {:?} has month 0", s);
         }
         tm.tm_mon -= 1;
         if tm.tm_year < 1900 {
-            return Err(Error::new(format!("time {:?} has year before 1900", s)));
+            bail!("time {:?} has year before 1900", s);
         }
         tm.tm_year -= 1900;
 
@@ -250,25 +249,20 @@ impl SampleIndexIterator {
         }
         let (raw1, i1) = match decode_varint32(data, i) {
             Ok(tuple) => tuple,
-            Err(()) => return Err(Error::new(format!("bad varint 1 at offset {}", i))),
+            Err(()) => bail!("bad varint 1 at offset {}", i),
         };
         let (raw2, i2) = match decode_varint32(data, i1) {
             Ok(tuple) => tuple,
-            Err(()) => return Err(Error::new(format!("bad varint 2 at offset {}", i1))),
+            Err(()) => bail!("bad varint 2 at offset {}", i1),
         };
         let duration_90k_delta = unzigzag32(raw1 >> 1);
         self.duration_90k += duration_90k_delta;
         if self.duration_90k < 0 {
-            return Err(Error{
-                description: format!("negative duration {} after applying delta {}",
-                                     self.duration_90k, duration_90k_delta),
-                cause: None});
+            bail!("negative duration {} after applying delta {}",
+                  self.duration_90k, duration_90k_delta);
         }
         if self.duration_90k == 0 && data.len() > i2 {
-            return Err(Error{
-                description: format!("zero duration only allowed at end; have {} bytes left",
-                                     data.len() - i2),
-                cause: None});
+            bail!("zero duration only allowed at end; have {} bytes left", data.len() - i2);
         }
         let (prev_bytes_key, prev_bytes_nonkey) = match self.is_key() {
             true => (self.bytes, self.bytes_other),
@@ -284,11 +278,8 @@ impl SampleIndexIterator {
             self.bytes_other = prev_bytes_key;
         }
         if self.bytes <= 0 {
-            return Err(Error{
-                description: format!("non-positive bytes {} after applying delta {} to key={} \
-                                      frame at ts {}", self.bytes, bytes_delta, self.is_key(),
-                                      self.start_90k),
-                cause: None});
+            bail!("non-positive bytes {} after applying delta {} to key={} frame at ts {}",
+                  self.bytes, bytes_delta, self.is_key(), self.start_90k);
         }
         Ok(true)
     }
@@ -395,10 +386,9 @@ impl Segment {
 
         if self_.desired_range_90k.start > self_.desired_range_90k.end ||
            self_.desired_range_90k.end > recording.duration_90k {
-            return Err(Error::new(format!(
-                "desired range [{}, {}) invalid for recording of length {}",
-                self_.desired_range_90k.start, self_.desired_range_90k.end,
-                recording.duration_90k)));
+            bail!("desired range [{}, {}) invalid for recording of length {}",
+                  self_.desired_range_90k.start, self_.desired_range_90k.end,
+                  recording.duration_90k);
         }
 
         if self_.desired_range_90k.start == 0 &&
@@ -416,12 +406,10 @@ impl Segment {
             let data = &(&playback).video_index;
             let mut it = SampleIndexIterator::new();
             if !it.next(data)? {
-                return Err(Error{description: String::from("no index"),
-                                 cause: None});
+                bail!("no index");
             }
             if !it.is_key() {
-                return Err(Error{description: String::from("not key frame"),
-                                 cause: None});
+                bail!("not key frame");
             }
 
             // Stop when hitting a frame with this start time.
@@ -487,26 +475,23 @@ impl Segment {
         };
         if it.uninitialized() {
             if !it.next(data)? {
-                return Err(Error::new(format!("recording {}: no frames", self.id)));
+                bail!("recording {}: no frames", self.id);
             }
             if !it.is_key() {
-                return Err(Error::new(format!("recording {}: doesn't start with key frame",
-                                              self.id)));
+                bail!("recording {}: doesn't start with key frame", self.id);
             }
         }
         let mut have_frame = true;
         let mut key_frame = 0;
         for i in 0 .. self.frames {
             if !have_frame {
-                return Err(Error::new(format!("recording {}: expected {} frames, found only {}",
-                                              self.id, self.frames, i+1)));
+                bail!("recording {}: expected {} frames, found only {}", self.id, self.frames, i+1);
             }
             if it.is_key() {
                 key_frame += 1;
                 if key_frame > self.key_frames {
-                    return Err(Error::new(format!(
-                        "recording {}: more than expected {} key frames",
-                        self.id, self.key_frames)));
+                    bail!("recording {}: more than expected {} key frames",
+                          self.id, self.key_frames);
                 }
             }
 
@@ -517,8 +502,8 @@ impl Segment {
             have_frame = try!(it.next(data));
         }
         if key_frame < self.key_frames {
-            return Err(Error::new(format!("recording {}: expected {} key frames, found only {}",
-                                          self.id, self.key_frames, key_frame)));
+            bail!("recording {}: expected {} key frames, found only {}",
+                  self.id, self.key_frames, key_frame);
         }
         Ok(())
     }
@@ -644,7 +629,7 @@ mod tests {
         ];
         for test in &tests {
             let mut it = SampleIndexIterator::new();
-            assert_eq!(it.next(test.encoded).unwrap_err().description, test.err);
+            assert_eq!(it.next(test.encoded).unwrap_err().to_string(), test.err);
         }
     }
 

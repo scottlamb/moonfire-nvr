@@ -33,7 +33,7 @@
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
 use db::{self, CompositeId};
-use error::Error;
+use failure::{Error, Fail};
 use fnv::FnvHashMap;
 use libc::{self, c_char};
 use protobuf::{self, Message};
@@ -151,8 +151,7 @@ impl SampleFileDir {
         s.fd.lock(if read_write { libc::LOCK_EX } else { libc::LOCK_SH } | libc::LOCK_NB)?;
         let dir_meta = s.read_meta()?;
         if !SampleFileDir::consistent(db_meta, &dir_meta) {
-            return Err(Error::new(format!("metadata mismatch.\ndb: {:#?}\ndir: {:#?}",
-                                          db_meta, &dir_meta)));
+            bail!("metadata mismatch.\ndb: {:#?}\ndir: {:#?}", db_meta, &dir_meta);
         }
         if db_meta.in_progress_open.is_some() {
             s.write_meta(db_meta)?;
@@ -188,8 +187,7 @@ impl SampleFileDir {
         // Partial opening by this or another database is fine; we won't overwrite anything.
         // TODO: consider one exception: if the version 2 upgrade fails at the post_tx step.
         if old_meta.last_complete_open.is_some() {
-            return Err(Error::new(format!("Can't create dir at path {}: is already in use:\n{:?}",
-                                          path, old_meta)));
+            bail!("Can't create dir at path {}: is already in use:\n{:?}", path, old_meta);
         }
 
         s.write_meta(db_meta)?;
@@ -198,7 +196,7 @@ impl SampleFileDir {
 
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
         let fd = Fd::open(None, path, create)
-            .map_err(|e| Error::new(format!("unable to open sample file dir {}: {}", path, e)))?;
+            .map_err(|e| format_err!("unable to open sample file dir {}: {}", path, e))?;
         Ok(Arc::new(SampleFileDir {
             fd,
             mutable: Mutex::new(SharedMutableState{
@@ -229,10 +227,7 @@ impl SampleFileDir {
         let mut data = Vec::new();
         f.read_to_end(&mut data)?;
         let mut s = protobuf::CodedInputStream::from_bytes(&data);
-        meta.merge_from(&mut s).map_err(|e| Error {
-            description: format!("Unable to parse proto: {:?}", e),
-            cause: Some(Box::new(e)),
-        })?;
+        meta.merge_from(&mut s).map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
         Ok(meta)
     }
 
@@ -245,10 +240,7 @@ impl SampleFileDir {
         let mut f = unsafe { self.fd.openat(tmp_path.as_ptr(),
                                             libc::O_CREAT | libc::O_TRUNC | libc::O_WRONLY,
                                             0o600)? };
-        meta.write_to_writer(&mut f).map_err(|e| Error {
-            description: format!("Unable to write metadata proto: {:?}", e),
-            cause: Some(Box::new(e)),
-        })?;
+        meta.write_to_writer(&mut f)?;
         f.sync_all()?;
         unsafe { renameat(&self.fd, tmp_path.as_ptr(), &self.fd, final_path.as_ptr())? };
         self.sync()?;
@@ -411,7 +403,7 @@ pub fn lower_retention(db: Arc<db::Database>, dir_id: i32, limits: &[NewLimit])
         for l in limits {
             let before = to_delete.len();
             let stream = db.streams_by_id().get(&l.stream_id)
-                           .ok_or_else(|| Error::new(format!("no such stream {}", l.stream_id)))?;
+                           .ok_or_else(|| format_err!("no such stream {}", l.stream_id))?;
             if l.limit >= stream.sample_file_bytes { continue }
             get_rows_to_delete(db, l.stream_id, stream, stream.retain_bytes - l.limit,
                                &mut to_delete)?;
@@ -440,8 +432,7 @@ fn get_rows_to_delete(db: &db::LockedDatabase, stream_id: i32,
         bytes_needed > bytes_to_delete  // continue as long as more deletions are needed.
     })?;
     if bytes_needed > bytes_to_delete {
-        return Err(Error::new(format!("{}: couldn't find enough files to delete: {} left.",
-                                      stream.id, bytes_needed)));
+        bail!("{}: couldn't find enough files to delete: {} left.", stream.id, bytes_needed);
     }
     info!("{}: deleting {} bytes in {} recordings ({} bytes needed)",
           stream.id, bytes_to_delete, n, bytes_needed);
@@ -473,7 +464,7 @@ impl Syncer {
            -> Result<(Self, String), Error> {
         let d = l.sample_file_dirs_by_id()
                  .get(&dir_id)
-                 .ok_or_else(|| Error::new(format!("no dir {}", dir_id)))?;
+                 .ok_or_else(|| format_err!("no dir {}", dir_id))?;
         let dir = d.get()?;
         let to_unlink = l.list_garbage(dir_id)?;
 
@@ -561,8 +552,7 @@ impl Syncer {
         }
         self.try_unlink();
         if !self.to_unlink.is_empty() {
-            return Err(Error::new(format!("failed to unlink {} sample files",
-                                          self.to_unlink.len())));
+            bail!("failed to unlink {} sample files", self.to_unlink.len());
         }
         self.dir.sync()?;
         {
@@ -597,7 +587,7 @@ impl Syncer {
                    -> Result<(), Error> {
         self.try_unlink();
         if !self.to_unlink.is_empty() {
-            return Err(Error::new(format!("failed to unlink {} files.", self.to_unlink.len())));
+            bail!("failed to unlink {} files.", self.to_unlink.len());
         }
 
         // XXX: if these calls fail, any other writes are likely to fail as well.
@@ -610,7 +600,7 @@ impl Syncer {
             let stream_id = recording.id.stream();
             let stream =
                 db.streams_by_id().get(&stream_id)
-                  .ok_or_else(|| Error::new(format!("no such stream {}", stream_id)))?;
+                  .ok_or_else(|| format_err!("no such stream {}", stream_id))?;
             get_rows_to_delete(&db, stream_id, stream,
                                recording.sample_file_bytes as i64, &mut to_delete)?;
         }
@@ -784,8 +774,8 @@ impl<'a> Writer<'a> {
         if let Some(unflushed) = w.unflushed_sample.take() {
             let duration = (pts_90k - unflushed.pts_90k) as i32;
             if duration <= 0 {
-                return Err(Error::new(format!("pts not monotonically increasing; got {} then {}",
-                                              unflushed.pts_90k, pts_90k)));
+                bail!("pts not monotonically increasing; got {} then {}",
+                      unflushed.pts_90k, pts_90k);
             }
             let duration = w.adjuster.adjust(duration);
             w.index.add_sample(duration, unflushed.len, unflushed.is_key);
@@ -835,10 +825,11 @@ impl<'a> InnerWriter<'a> {
     fn close(mut self, next_pts: Option<i64>) -> Result<PreviousWriter, Error> {
         if self.corrupt {
             self.syncer_channel.async_abandon_recording(self.id);
-            return Err(Error::new(format!("recording {} is corrupt", self.id)));
+            bail!("recording {} is corrupt", self.id);
         }
         let unflushed =
-            self.unflushed_sample.take().ok_or_else(|| Error::new("no packets!".to_owned()))?;
+            self.unflushed_sample.take()
+            .ok_or_else(|| format_err!("recording {} has no packets", self.id))?;
         let duration = self.adjuster.adjust(match next_pts {
             None => 0,
             Some(p) => (p - unflushed.pts_90k) as i32,

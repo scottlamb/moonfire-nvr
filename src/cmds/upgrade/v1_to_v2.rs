@@ -30,7 +30,7 @@
 
 /// Upgrades a version 1 schema to a version 2 schema.
 
-use error::Error;
+use failure::Error;
 use std::fs;
 use rusqlite;
 use schema::DirMeta;
@@ -45,8 +45,8 @@ pub fn new<'a>(args: &'a super::Args) -> Result<Box<super::Upgrader + 'a>, Error
     let sample_file_path =
         args.flag_sample_file_dir
             .as_ref()
-            .ok_or_else(|| Error::new("--sample-file-dir required when upgrading from \
-                                       schema version 1 to 2.".to_owned()))?;
+            .ok_or_else(|| format_err!("--sample-file-dir required when upgrading from \
+                                        schema version 1 to 2."))?;
     Ok(Box::new(U { sample_file_path, dir_meta: None }))
 }
 
@@ -81,8 +81,7 @@ impl<'a> U<'a> {
             let row = row?;
             let uuid: ::db::FromSqlUuid = row.get_checked(0)?;
             if !files.contains(&uuid.0) {
-                return Err(Error::new(format!("{} is missing from dir {}!",
-                                              uuid.0, self.sample_file_path)));
+                bail!("{} is missing from dir {}!", uuid.0, self.sample_file_path);
             }
         }
         Ok(())
@@ -318,7 +317,7 @@ fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
 fn rfc6381_codec_from_sample_entry(sample_entry: &[u8]) -> Result<String, Error> {
     if sample_entry.len() < 99 || &sample_entry[4..8] != b"avc1" ||
        &sample_entry[90..94] != b"avcC" {
-        return Err(Error::new("not a valid AVCSampleEntry".to_owned()));
+        bail!("not a valid AVCSampleEntry");
     }
     let profile_idc = sample_entry[103];
     let constraint_flags_byte = sample_entry[104];

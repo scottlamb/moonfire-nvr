@@ -31,7 +31,7 @@
 use clock::{Clocks, TimerGuard};
 use db::{Camera, Database, Stream};
 use dir;
-use error::Error;
+use failure::Error;
 use h264;
 use recording;
 use std::result::Result;
@@ -134,7 +134,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
                 let _t = TimerGuard::new(self.clocks, || "getting next packet");
                 stream.get_next()?
             };
-            let pts = pkt.pts().ok_or_else(|| Error::new("packet with no pts".to_owned()))?;
+            let pts = pkt.pts().ok_or_else(|| format_err!("packet with no pts"))?;
             if !seen_key_frame && !pkt.is_key() {
                 continue;
             } else if !seen_key_frame {
@@ -177,7 +177,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             };
             let orig_data = match pkt.data() {
                 Some(d) => d,
-                None => return Err(Error::new("packet has no data".to_owned())),
+                None => bail!("packet has no data"),
             };
             let transformed_data = if extra_data.need_transform {
                 h264::transform_sample_data(orig_data, &mut transformed)?;
@@ -202,7 +202,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
 mod tests {
     use clock::{self, Clocks};
     use db::{self, CompositeId};
-    use error::Error;
+    use failure::Error;
     use h264;
     use moonfire_ffmpeg;
     use recording;
@@ -301,7 +301,7 @@ mod tests {
                 None => {
                     trace!("MockOpener shutting down");
                     self.shutdown.store(true, Ordering::SeqCst);
-                    Err(Error::new("done".to_owned()))
+                    bail!("done")
                 },
             }
         }

@@ -32,7 +32,7 @@
 
 use db::{self, FromSqlUuid};
 use dir;
-use error::Error;
+use failure::Error;
 use libc;
 use std::io::{self, Write};
 use std::mem;

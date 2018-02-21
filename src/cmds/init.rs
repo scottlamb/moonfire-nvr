@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use db;
-use error::Error;
+use failure::Error;
 
 static USAGE: &'static str = r#"
 Initializes a database.

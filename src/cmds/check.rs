@@ -31,7 +31,7 @@
 //! Subcommand to check the database and sample file dir for errors.
 
 use db;
-use error::Error;
+use failure::Error;
 use recording;
 use std::fs;
 use uuid::Uuid;
@@ -153,9 +153,7 @@ pub fn run() -> Result<(), Error> {
                 error!("composite id {} has recording_playback row but no recording row", id2);
                 continue;
             },
-            (None, None) => {
-                return Err(Error::new("outer join returned fully empty row".to_owned()));
-            },
+            (None, None) => bail!("outer join returned fully empty row"),
         };
         let row_summary = RecordingSummary{
             flags: row.get_checked(1)?,

@@ -52,7 +52,7 @@
 //!     SSD write cycles.
 
 use dir;
-use error::{Error, ResultExt};
+use failure::Error;
 use fnv::{self, FnvHashMap};
 use lru_cache::LruCache;
 use openssl::hash;
@@ -338,7 +338,7 @@ impl SampleFileDir {
     pub fn get(&self) -> Result<Arc<dir::SampleFileDir>, Error> {
         Ok(self.dir
                .as_ref()
-               .ok_or_else(|| Error::new(format!("sample file dir {} is closed", self.id)))?
+               .ok_or_else(|| format_err!("sample file dir {} is closed", self.id))?
                .clone())
     }
 }
@@ -388,6 +388,12 @@ impl StreamType {
             "sub" => Some(StreamType::SUB),
             _ => None,
         }
+    }
+}
+
+impl ::std::fmt::Display for StreamType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
+        f.write_str(self.as_str())
     }
 }
 
@@ -661,19 +667,19 @@ impl<'a> Transaction<'a> {
         for row in rows {
             let changes = del1.execute_named(&[(":composite_id", &row.id.0)])?;
             if changes != 1 {
-                return Err(Error::new(format!("no such recording {}", row.id)));
+                bail!("no such recording {}", row.id);
             }
             let changes = del2.execute_named(&[(":composite_id", &row.id.0)])?;
             if changes != 1 {
-                return Err(Error::new(format!("no such recording_playback {}", row.id)));
+                bail!("no such recording_playback {}", row.id);
             }
             let sid = row.id.stream();
             let did = self.state
                         .streams_by_id
                         .get(&sid)
-                        .ok_or_else(|| Error::new(format!("no such stream {}", sid)))?
+                        .ok_or_else(|| format_err!("no such stream {}", sid))?
                         .sample_file_dir_id
-                        .ok_or_else(|| Error::new(format!("stream {} has no dir", sid)))?;
+                        .ok_or_else(|| format_err!("stream {} has no dir", sid))?;
             insert.execute_named(&[
                 (":sample_file_dir_id", &did),
                 (":composite_id", &row.id.0)],
@@ -695,7 +701,7 @@ impl<'a> Transaction<'a> {
         for &id in ids {
             let changes = stmt.execute_named(&[(":composite_id", &id.0)])?;
             if changes != 1 {
-                return Err(Error::new(format!("no garbage row for {}", id)));
+                bail!("no garbage row for {}", id);
             }
         }
         Ok(())
@@ -706,13 +712,12 @@ impl<'a> Transaction<'a> {
         self.check_must_rollback()?;
 
         if r.time.end < r.time.start {
-            return Err(Error::new(format!("end time {} must be >= start time {}",
-                                          r.time.end, r.time.start)));
+            bail!("end time {} must be >= start time {}", r.time.end, r.time.start);
         }
 
         // Check that the recording id is acceptable and do the insertion.
         let stream = match self.state.streams_by_id.get(&r.id.stream()) {
-            None => return Err(Error::new(format!("no such stream id {}", r.id.stream()))),
+            None => bail!("no such stream id {}", r.id.stream()),
             Some(s) => s,
         };
         self.must_rollback = true;
@@ -720,8 +725,7 @@ impl<'a> Transaction<'a> {
         {
             let next = m.new_next_recording_id.unwrap_or(stream.next_recording_id);
             if r.id.recording() < next {
-                return Err(Error::new(format!("recording {} out of order; next id is {}!",
-                                              r.id, next)));
+                bail!("recording {} out of order; next id is {}!", r.id, next);
             }
             let mut stmt = self.tx.prepare_cached(INSERT_RECORDING_SQL)?;
             stmt.execute_named(&[
@@ -764,8 +768,7 @@ impl<'a> Transaction<'a> {
     pub fn update_retention(&mut self, stream_id: i32, new_record: bool, new_limit: i64)
                             -> Result<(), Error> {
         if new_limit < 0 {
-            return Err(Error::new(format!("can't set limit for stream {} to {}; must be >= 0",
-                                          stream_id, new_limit)));
+            bail!("can't set limit for stream {} to {}; must be >= 0", stream_id, new_limit);
         }
         self.check_must_rollback()?;
         let mut stmt = self.tx.prepare_cached(r#"
@@ -782,7 +785,7 @@ impl<'a> Transaction<'a> {
             (":id", &stream_id),
         ])?;
         if changes != 1 {
-            return Err(Error::new(format!("no such stream {}", stream_id)));
+            bail!("no such stream {}", stream_id);
         }
         let m = Transaction::get_mods_by_stream(&mut self.mods_by_stream, stream_id);
         m.new_record = Some(new_record);
@@ -820,7 +823,7 @@ impl<'a> Transaction<'a> {
     /// Raises an error if `must_rollback` is true. To be used on commit and in modifications.
     fn check_must_rollback(&self) -> Result<(), Error> {
         if self.must_rollback {
-            return Err(Error::new("failing due to previous error".to_owned()));
+            bail!("failing due to previous error");
         }
         Ok(())
     }
@@ -867,10 +870,7 @@ impl<'a> Transaction<'a> {
             }
             let max_end = match maxes_opt {
                 Some(Range{end: e, ..}) => e,
-                None => {
-                    return Err(Error::new(format!("missing max for stream {} which had min {}",
-                                                  stream_id, min_start)));
-                }
+                None => bail!("missing max for stream {} which had min {}", stream_id, min_start),
             };
             m.range = Some(min_start .. max_end);
         }
@@ -902,9 +902,8 @@ impl StreamStateChanger {
                     have_data = true;
                     if let (Some(d), false) = (s.sample_file_dir_id,
                                                s.sample_file_dir_id == sc.sample_file_dir_id) {
-                        return Err(Error::new(format!("can't change sample_file_dir_id \
-                                                       {:?}->{:?} for non-empty stream {}",
-                                                      d, sc.sample_file_dir_id, sid)));
+                        bail!("can't change sample_file_dir_id {:?}->{:?} for non-empty stream {}",
+                              d, sc.sample_file_dir_id, sid);
                     }
                 }
                 if !have_data && sc.rtsp_path.is_empty() && sc.sample_file_dir_id.is_none() &&
@@ -914,7 +913,7 @@ impl StreamStateChanger {
                         delete from stream where id = ?
                     "#)?;
                     if stmt.execute(&[&sid])? != 1 {
-                        return Err(Error::new(format!("missing stream {}", sid)));
+                        bail!("missing stream {}", sid);
                     }
                     streams.push((sid, None));
                 } else {
@@ -934,7 +933,7 @@ impl StreamStateChanger {
                         (":id", &sid),
                     ])?;
                     if rows != 1 {
-                        return Err(Error::new(format!("missing stream {}", sid)));
+                        bail!("missing stream {}", sid);
                     }
                     sids[i] = Some(sid);
                     let s = (*s).clone();
@@ -1037,7 +1036,7 @@ impl LockedDatabase {
             let dir = self.state
                           .sample_file_dirs_by_id
                           .get_mut(&id)
-                          .ok_or_else(|| Error::new(format!("no such dir {}", id)))?;
+                          .ok_or_else(|| format_err!("no such dir {}", id))?;
             if dir.dir.is_some() { continue }
             let mut meta = schema::DirMeta::default();
             meta.db_uuid.extend_from_slice(&self.state.uuid.as_bytes()[..]);
@@ -1072,7 +1071,7 @@ impl LockedDatabase {
             "#)?;
             for &id in in_progress.keys() {
                 if stmt.execute(&[&o.id, &id])? != 1 {
-                    return Err(Error::new(format!("unable to update dir {}", id)));
+                    bail!("unable to update dir {}", id);
                 }
             }
         }
@@ -1150,10 +1149,8 @@ impl LockedDatabase {
             let vse_id = row.get_checked(8)?;
             let video_sample_entry = match self.state.video_sample_entries.get(&vse_id) {
                 Some(v) => v,
-                None => {
-                    return Err(Error::new(format!(
-                        "recording {} references nonexistent video_sample_entry {}", id, vse_id)));
-                },
+                None => bail!("recording {} references nonexistent video_sample_entry {}",
+                              id, vse_id),
             };
             let out = ListRecordingsRow {
                 id,
@@ -1210,9 +1207,8 @@ impl LockedDatabase {
             }
             let need_insert = if let Some(ref mut a) = aggs.get_mut(&run_start_id) {
                 if a.time.end != row.start {
-                    return Err(Error::new(format!(
-                        "stream {} recording {} ends at {}; {} starts at {}; expected same",
-                        stream_id, a.ids.end - 1, a.time.end, row.id, row.start)));
+                    bail!("stream {} recording {} ends at {}; {} starts at {}; expected same",
+                          stream_id, a.ids.end - 1, a.time.end, row.id, row.start);
                 }
                 a.time.end.0 += row.duration_90k as i64;
                 a.ids.end = recording_id + 1;
@@ -1264,7 +1260,7 @@ impl LockedDatabase {
             cache.insert(id.0, video_index.0);
             return result;
         }
-        Err(Error::new(format!("no such recording {}", id)))
+        Err(format_err!("no such recording {}", id))
     }
 
     /// Lists all garbage ids.
@@ -1327,9 +1323,7 @@ impl LockedDatabase {
             let mut sha1 = [0u8; 20];
             let sha1_vec: Vec<u8> = row.get_checked(1)?;
             if sha1_vec.len() != 20 {
-                return Err(Error::new(format!(
-                    "video sample entry id {} has sha1 {} of wrong length",
-                    id, sha1_vec.len())));
+                bail!("video sample entry id {} has sha1 {} of wrong length", id, sha1_vec.len());
             }
             sha1.copy_from_slice(&sha1_vec);
             let data: Vec<u8> = row.get_checked(5)?;
@@ -1372,7 +1366,7 @@ impl LockedDatabase {
             let last_complete_open = match (open_id, open_uuid) {
                 (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0, }),
                 (None, None) => None,
-                _ => return Err(Error::new(format!("open table missing id {}", id))),
+                _ => bail!("open table missing id {}", id),
             };
             self.state.sample_file_dirs_by_id.insert(id, SampleFileDir {
                 id,
@@ -1446,12 +1440,13 @@ impl LockedDatabase {
             let id = row.get_checked(0)?;
             let type_: String = row.get_checked(1)?;
             let type_ = StreamType::parse(&type_).ok_or_else(
-                || Error::new(format!("no such stream type {}", type_)))?;
+                || format_err!("no such stream type {}", type_))?;
             let camera_id = row.get_checked(2)?;
             let c = self.state
                         .cameras_by_id
                         .get_mut(&camera_id)
-                        .ok_or_else(|| Error::new("missing camera".to_owned()))?;
+                        .ok_or_else(|| format_err!("missing camera {} for stream {}",
+                                                   camera_id, id))?;
             self.state.streams_by_id.insert(id, Stream {
                 id,
                 type_,
@@ -1487,8 +1482,8 @@ impl LockedDatabase {
                 // The width and height should match given that they're also specified within data
                 // and thus included in the just-compared hash.
                 if v.width != width || v.height != height {
-                    return Err(Error::new(format!("database entry for {:?} is {}x{}, not {}x{}",
-                                                  &sha1[..], v.width, v.height, width, height)));
+                    bail!("database entry for {:?} is {}x{}, not {}x{}",
+                          &sha1[..], v.width, v.height, width, height);
                 }
                 return Ok(id);
             }
@@ -1523,7 +1518,7 @@ impl LockedDatabase {
         let o = self.state
                     .open
                     .as_ref()
-                    .ok_or_else(|| Error::new("database is read-only".to_owned()))?;
+                    .ok_or_else(|| format_err!("database is read-only"))?;
 
         // Populate meta.
         {
@@ -1551,7 +1546,7 @@ impl LockedDatabase {
                 dir: Some(dir),
                 last_complete_open: None,
             }),
-            Entry::Occupied(_) => Err(Error::new(format!("duplicate sample file dir id {}", id)))?,
+            Entry::Occupied(_) => Err(format_err!("duplicate sample file dir id {}", id))?,
         };
         d.last_complete_open = Some(*o);
         mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
@@ -1562,13 +1557,13 @@ impl LockedDatabase {
     pub fn delete_sample_file_dir(&mut self, dir_id: i32) -> Result<(), Error> {
         for (&id, s) in self.state.streams_by_id.iter() {
             if s.sample_file_dir_id == Some(dir_id) {
-                return Err(Error::new(format!("can't delete dir referenced by stream {}", id)));
+                bail!("can't delete dir referenced by stream {}", id);
             }
         }
         // TODO: remove/update metadata stored in the directory? at present this will have to
         // be manually deleted before the dir can be reused.
         if self.conn.execute("delete from sample_file_dir where id = ?", &[&dir_id])? != 1 {
-            return Err(Error::new(format!("no such dir {} to remove", dir_id)));
+            bail!("no such dir {} to remove", dir_id);
         }
         self.state.sample_file_dirs_by_id.remove(&dir_id).expect("sample file dir should exist!");
         Ok(())
@@ -1622,7 +1617,7 @@ impl LockedDatabase {
         let c = self.state
                     .cameras_by_id
                     .get_mut(&camera_id)
-                    .ok_or_else(|| Error::new(format!("no such camera {}", camera_id)))?;
+                    .ok_or_else(|| format_err!("no such camera {}", camera_id))?;
         {
             streams = StreamStateChanger::new(&tx, camera_id, Some(c), &self.state.streams_by_id,
                                          &mut camera)?;
@@ -1645,7 +1640,7 @@ impl LockedDatabase {
                 (":password", &camera.password),
             ])?;
             if rows != 1 {
-                return Err(Error::new(format!("Camera {} missing from database", camera_id)));
+                bail!("Camera {} missing from database", camera_id);
             }
         }
         tx.commit()?;
@@ -1662,7 +1657,7 @@ impl LockedDatabase {
     pub fn delete_camera(&mut self, id: i32) -> Result<(), Error> {
         let uuid = self.state.cameras_by_id.get(&id)
                        .map(|c| c.uuid)
-                       .ok_or_else(|| Error::new(format!("No such camera {} to remove", id)))?;
+                       .ok_or_else(|| format_err!("No such camera {} to remove", id))?;
         let mut streams_to_delete = Vec::new();
         let tx = self.conn.transaction()?;
         {
@@ -1670,18 +1665,18 @@ impl LockedDatabase {
             for (stream_id, stream) in &self.state.streams_by_id {
                 if stream.camera_id != id { continue };
                 if stream.range.is_some() {
-                    return Err(Error::new(format!("Can't remove camera {}; has recordings.", id)));
+                    bail!("Can't remove camera {}; has recordings.", id);
                 }
                 let rows = stream_stmt.execute_named(&[(":id", stream_id)])?;
                 if rows != 1 {
-                    return Err(Error::new(format!("Stream {} missing from database", id)));
+                    bail!("Stream {} missing from database", id);
                 }
                 streams_to_delete.push(*stream_id);
             }
             let mut cam_stmt = tx.prepare_cached(r"delete from camera where id = :id")?;
             let rows = cam_stmt.execute_named(&[(":id", &id)])?;
             if rows != 1 {
-                return Err(Error::new(format!("Camera {} missing from database", id)));
+                bail!("Camera {} missing from database", id);
             }
         }
         tx.commit()?;
@@ -1719,24 +1714,21 @@ impl Database {
     pub fn new(conn: rusqlite::Connection, read_write: bool) -> Result<Database, Error> {
         conn.execute("pragma foreign_keys = on", &[])?;
         {
-            let ver = get_schema_version(&conn)?.ok_or_else(|| Error::new(
+            let ver = get_schema_version(&conn)?.ok_or_else(|| format_err!(
                     "no such table: version. \
                     \
                     If you are starting from an \
                     empty database, see README.md to complete the \
                     installation. If you are starting from a database \
-                    that predates schema versioning, see guide/schema.md."
-                    .to_owned()))?;
+                    that predates schema versioning, see guide/schema.md."))?;
             if ver < EXPECTED_VERSION {
-                return Err(Error::new(format!(
-                            "Database schema version {} is too old (expected {}); \
-                            see upgrade instructions in guide/upgrade.md.",
-                            ver, EXPECTED_VERSION)));
+                bail!("Database schema version {} is too old (expected {}); \
+                       see upgrade instructions in guide/upgrade.md.",
+                      ver, EXPECTED_VERSION);
             } else if ver > EXPECTED_VERSION {
-                return Err(Error::new(format!(
-                            "Database schema version {} is too new (expected {}); \
-                            must use a newer binary to match.", ver,
-                            EXPECTED_VERSION)));
+                bail!("Database schema version {} is too new (expected {}); \
+                       must use a newer binary to match.", ver,
+                      EXPECTED_VERSION);
 
             }
         }
@@ -1794,15 +1786,14 @@ impl Database {
         }));
         {
             let l = &mut *db.lock();
-            l.init_video_sample_entries().annotate_err("init_video_sample_entries")?;
-            l.init_sample_file_dirs().annotate_err("init_sample_file_dirs")?;
-            l.init_cameras().annotate_err("init_cameras")?;
-            l.init_streams().annotate_err("init_streams")?;
+            l.init_video_sample_entries()?;
+            l.init_sample_file_dirs()?;
+            l.init_cameras()?;
+            l.init_streams()?;
             for (&stream_id, ref mut stream) in &mut l.state.streams_by_id {
                 // TODO: we could use one thread per stream if we had multiple db conns.
                 let camera = l.state.cameras_by_id.get(&stream.camera_id).unwrap();
-                init_recordings(&mut l.conn, stream_id, camera, stream)
-                    .annotate_err("init_recordings")?;
+                init_recordings(&mut l.conn, stream_id, camera, stream)?;
             }
         }
         Ok(db)
@@ -1842,7 +1833,6 @@ mod tests {
     use recording::{self, TIME_UNITS_PER_SEC};
     use rusqlite::Connection;
     use std::collections::BTreeMap;
-    use std::error::Error as E;
     use testutil;
     use super::*;
     use super::adjust_days;  // non-public.
@@ -2003,7 +1993,7 @@ mod tests {
     fn test_no_meta_or_version() {
         testutil::init();
         let e = Database::new(Connection::open_in_memory().unwrap(), false).unwrap_err();
-        assert!(e.description().starts_with("no such table"), "{}", e);
+        assert!(e.to_string().starts_with("no such table"), "{}", e);
     }
 
     #[test]
@@ -2012,9 +2002,8 @@ mod tests {
         let c = setup_conn();
         c.execute_batch("delete from version; insert into version values (2, 0, '');").unwrap();
         let e = Database::new(c, false).unwrap_err();
-        assert!(e.description().starts_with(
-                "Database schema version 2 is too old (expected 3)"), "got: {:?}",
-                e.description());
+        assert!(e.to_string().starts_with(
+                "Database schema version 2 is too old (expected 3)"), "got: {:?}", e);
     }
 
     #[test]
@@ -2023,8 +2012,8 @@ mod tests {
         let c = setup_conn();
         c.execute_batch("delete from version; insert into version values (4, 0, '');").unwrap();
         let e = Database::new(c, false).unwrap_err();
-        assert!(e.description().starts_with(
-                "Database schema version 4 is too new (expected 3)"), "got: {:?}", e.description());
+        assert!(e.to_string().starts_with(
+                "Database schema version 4 is too new (expected 3)"), "got: {:?}", e);
     }
 
     /// Basic test of running some queries on a fresh database.

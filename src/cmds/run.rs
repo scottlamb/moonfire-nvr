@@ -31,7 +31,7 @@
 use clock;
 use db;
 use dir;
-use error::Error;
+use failure::Error;
 use fnv::FnvHashMap;
 use futures::{Future, Stream};
 use std::sync::Arc;

@@ -81,7 +81,7 @@ extern crate time;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db;
 use dir;
-use error::Error;
+use failure::Error;
 use futures::stream;
 use http_serve;
 use hyper::header;
@@ -387,9 +387,7 @@ impl Segment {
         let index: &'a _ = unsafe { &*self.index.get() };
         match *index {
             Ok(ref b) => return Ok(f(&b[..], self.lens())),
-            Err(()) => {
-                return Err(Error::new("Unable to build index; see previous error.".to_owned()))
-            },
+            Err(()) => bail!("Unable to build index; see previous error."),
         }
     }
 
@@ -598,7 +596,7 @@ enum SliceType {
 impl Slice {
     fn new(end: u64, t: SliceType, p: usize) -> Result<Self, Error> {
         if end >= (1<<40) || p >= (1<<20) {
-            return Err(Error::new(format!("end={} p={} too large for Slice", end, p)));
+            bail!("end={} p={} too large for Slice", end, p);
         }
 
         Ok(Slice(end | ((t as u64) << 40) | ((p as u64) << 44)))
@@ -628,8 +626,7 @@ impl Slice {
         }
         let truns =
             mp4.0.db.lock()
-               .with_recording_playback(s.s.id, |playback| s.truns(playback, pos, len))
-               .map_err(|e| { Error::new(format!("Unable to build index for segment: {:?}", e)) })?;
+               .with_recording_playback(s.s.id, |playback| s.truns(playback, pos, len))?;
         let truns = ARefs::new(truns);
         Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]))
     }
@@ -758,9 +755,8 @@ impl FileBuilder {
                   rel_range_90k: Range<i32>) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero() {
-                return Err(Error::new(format!(
-                    "unable to append recording {} after recording {} with trailing zero",
-                    row.id, prev.s.id)));
+                bail!("unable to append recording {} after recording {} with trailing zero",
+                      row.id, prev.s.id);
             }
         }
         let s = Segment::new(db, &row, rel_range_90k, self.next_frame_num)?;
@@ -836,9 +832,8 @@ impl FileBuilder {
                 // If the segment is > 4 GiB, the 32-bit trun data offsets are untrustworthy.
                 // We'd need multiple moof+mdat sequences to support large media segments properly.
                 if self.body.slices.len() > u32::max_value() as u64 {
-                    return Err(Error::new(format!(
-                                "media segment has length {}, greater than allowed 4 GiB",
-                                self.body.slices.len())));
+                    bail!("media segment has length {}, greater than allowed 4 GiB",
+                          self.body.slices.len());
                 }
 
                 p
@@ -1086,7 +1081,7 @@ impl FileBuilder {
             let skip = s.s.desired_range_90k.start - actual_start_90k;
             let keep = s.s.desired_range_90k.end - s.s.desired_range_90k.start;
             if skip < 0 || keep < 0 {
-                return Err(Error::new(format!("skip={} keep={} on segment {:#?}", skip, keep, s)));
+                bail!("skip={} keep={} on segment {:#?}", skip, keep, s);
             }
             cur_media_time += skip as u64;
             if unflushed.segment_duration + unflushed.media_time == cur_media_time {
@@ -1451,7 +1446,7 @@ impl FileInner {
         let s = &self.segments[i];
         let f = self.dirs_by_stream_id
                     .get(&s.s.id.stream())
-                    .ok_or_else(|| Error::new(format!("{}: stream not found", s.s.id)))?
+                    .ok_or_else(|| format_err!("{}: stream not found", s.s.id))?
                     .open_sample_file(s.s.id)?;
         let start = s.s.sample_file_range().start + r.start;
         let mmap = Box::new(unsafe {

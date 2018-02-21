@@ -34,7 +34,7 @@ use core::borrow::Borrow;
 use core::str::FromStr;
 use db;
 use dir::SampleFileDir;
-use error::Error;
+use failure::Error;
 use fnv::FnvHashMap;
 use futures::{future, stream};
 use futures_cpupool;
@@ -227,7 +227,7 @@ impl ServiceInner {
         if let Some(mut w) = http_serve::streaming_body(&req, &mut resp).build() {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
-                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
+                           .ok_or_else(|| format_err!("no such camera {}", uuid))?;
             serde_json::to_writer(&mut w, &json::Camera::wrap(camera, &db, true)?)?
         };
         Ok(resp)
@@ -255,9 +255,9 @@ impl ServiceInner {
         {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
-                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
+                           .ok_or_else(|| format_err!("no such camera {}", uuid))?;
             let stream_id = camera.streams[type_.index()]
-                                  .ok_or_else(|| Error::new("no such stream".to_owned()))?;
+                                  .ok_or_else(|| format_err!("no such stream {}/{}", uuid, type_))?;
             db.list_aggregated_recordings(stream_id, r, split, |row| {
                 let end = row.ids.end - 1;  // in api, ids are inclusive.
                 out.recordings.push(json::Recording {
@@ -299,8 +299,9 @@ impl ServiceInner {
         let stream_id = {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
-                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            camera.streams[stream_type_.index()].ok_or_else(|| Error::new("no such stream".to_owned()))?
+                           .ok_or_else(|| format_err!("no such camera {}", uuid))?;
+            camera.streams[stream_type_.index()]
+                  .ok_or_else(|| format_err!("no such stream {}/{}", uuid, stream_type_))?
         };
         let mut builder = mp4::FileBuilder::new(mp4_type_);
         if let Some(q) = req.uri().query() {
@@ -309,7 +310,7 @@ impl ServiceInner {
                 match key {
                     "s" => {
                         let s = Segments::parse(value).map_err(
-                            |_| Error::new(format!("invalid s parameter: {}", value)))?;
+                            |_| format_err!("invalid s parameter: {}", value))?;
                         debug!("stream_view_mp4: appending s={:?}", s);
                         let mut est_segments = (s.ids.end - s.ids.start) as usize;
                         if let Some(end) = s.end_time {
@@ -333,11 +334,9 @@ impl ServiceInner {
                             // Check for missing recordings.
                             match prev {
                                 None if recording_id == s.ids.start => {},
-                                None => return Err(Error::new(format!("no such recording {}/{}",
-                                                                      stream_id, s.ids.start))),
+                                None => bail!("no such recording {}/{}", stream_id, s.ids.start),
                                 Some(id) if r.id.recording() != id + 1 => {
-                                    return Err(Error::new(format!("no such recording {}/{}",
-                                                                  stream_id, id + 1)));
+                                    bail!("no such recording {}/{}", stream_id, id + 1);
                                 },
                                 _ => {},
                             };
@@ -363,24 +362,21 @@ impl ServiceInner {
                         // Check for missing recordings.
                         match prev {
                             Some(id) if s.ids.end != id + 1 => {
-                                return Err(Error::new(format!("no such recording {}/{}",
-                                                              stream_id, s.ids.end - 1)));
+                                bail!("no such recording {}/{}", stream_id, s.ids.end - 1);
                             },
                             None => {
-                                return Err(Error::new(format!("no such recording {}/{}",
-                                                              stream_id, s.ids.start)));
+                                bail!("no such recording {}/{}", stream_id, s.ids.start);
                             },
                             _ => {},
                         };
                         if let Some(end) = s.end_time {
                             if end > cur_off {
-                                return Err(Error::new(
-                                        format!("end time {} is beyond specified recordings", end)));
+                                bail!("end time {} is beyond specified recordings", end);
                             }
                         }
                     },
                     "ts" => builder.include_timestamp_subtitle_track(value == "true"),
-                    _ => return Err(Error::new(format!("parameter {} not understood", key))),
+                    _ => bail!("parameter {} not understood", key),
                 }
             };
         }

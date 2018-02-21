@@ -35,7 +35,7 @@ use self::cursive::traits::{Boxable, Identifiable, Finder};
 use self::cursive::views;
 use db;
 use dir;
-use error::Error;
+use failure::Error;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use stream::{self, Opener, Stream};

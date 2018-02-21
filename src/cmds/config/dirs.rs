@@ -35,7 +35,7 @@ use self::cursive::traits::{Boxable, Identifiable};
 use self::cursive::views;
 use db;
 use dir;
-use error::Error;
+use failure::Error;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;

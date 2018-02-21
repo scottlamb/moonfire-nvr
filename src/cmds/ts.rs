@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use error::Error;
+use failure::Error;
 use recording;
 
 const USAGE: &'static str = r#"

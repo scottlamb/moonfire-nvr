@@ -33,7 +33,7 @@
 /// See `guide/schema.md` for more information.
 
 use db;
-use error::Error;
+use failure::Error;
 use rusqlite;
 
 mod v0_to_v1;
@@ -101,10 +101,10 @@ pub fn run() -> Result<(), Error> {
         let old_ver =
             conn.query_row("select max(id) from version", &[], |row| row.get_checked(0))??;
         if old_ver > db::EXPECTED_VERSION {
-            return Err(Error::new(format!("Database is at version {}, later than expected {}",
-                                          old_ver, db::EXPECTED_VERSION)))?;
+            bail!("Database is at version {}, later than expected {}",
+                  old_ver, db::EXPECTED_VERSION);
         } else if old_ver < 0 {
-            return Err(Error::new(format!("Database is at negative version {}!", old_ver)));
+            bail!("Database is at negative version {}!", old_ver);
         }
         info!("Upgrading database from version {} to version {}...", old_ver, db::EXPECTED_VERSION);
         set_journal_mode(&conn, &args.flag_preset_journal).unwrap();
