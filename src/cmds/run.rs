@@ -29,8 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use clock;
-use db;
-use dir;
+use db::{self, dir};
 use failure::Error;
 use fnv::FnvHashMap;
 use futures::{Future, Stream};

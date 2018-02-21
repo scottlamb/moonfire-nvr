@@ -248,7 +248,7 @@ pub fn transform_sample_data(annexb_sample: &[u8], avc_sample: &mut Vec<u8>) -> 
 
 #[cfg(test)]
 mod tests {
-    use testutil;
+    use db::testutil;
 
     const ANNEX_B_TEST_INPUT: [u8; 35] = [
         0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x00, 0x1f,

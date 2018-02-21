@@ -30,8 +30,7 @@
 
 /// Upgrades a version 2 schema to a version 3 schema.
 
-use db::{self, FromSqlUuid};
-use dir;
+use db::{self, dir, FromSqlUuid};
 use failure::Error;
 use libc;
 use std::io::{self, Write};

@@ -79,8 +79,8 @@
 extern crate time;
 
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use db;
-use dir;
+use db::recording::{self, TIME_UNITS_PER_SEC};
+use db::{self, dir};
 use failure::Error;
 use futures::stream;
 use http_serve;
@@ -88,7 +88,6 @@ use hyper::header;
 use memmap;
 use openssl::hash;
 use parking_lot::{Once, ONCE_INIT};
-use recording::{self, TIME_UNITS_PER_SEC};
 use reffers::ARefs;
 use slices::{self, Body, Chunk, Slices};
 use smallvec::SmallVec;
@@ -1517,11 +1516,12 @@ impl http_serve::Entity for File {
 #[cfg(test)]
 mod tests {
     use byteorder::{BigEndian, ByteOrder};
+    use db::recording::{self, TIME_UNITS_PER_SEC};
+    use db::testutil::{self, TestDb, TEST_STREAM_ID};
     use futures::Future;
     use futures::Stream as FuturesStream;
     use hyper::header;
     use openssl::hash;
-    use recording::{self, TIME_UNITS_PER_SEC};
     use http_serve::{self, Entity};
     use std::fs;
     use std::ops::Range;
@@ -1530,7 +1530,6 @@ mod tests {
     use strutil;
     use super::*;
     use stream::{self, Opener, Stream};
-    use testutil::{self, TestDb, TEST_STREAM_ID};
 
     fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64) {
         let mut p = 0;
@@ -2175,15 +2174,15 @@ mod bench {
     extern crate reqwest;
     extern crate test;
 
+    use db::recording;
+    use db::testutil::{self, TestDb};
     use futures::Stream;
     use futures::future;
     use hyper;
     use http_serve;
-    use recording;
     use reffers::ARefs;
     use self::test::Bencher;
     use super::tests::create_mp4_from_db;
-    use testutil::{self, TestDb};
     use url::Url;
 
     /// An HTTP server for benchmarking.

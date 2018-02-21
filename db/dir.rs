@@ -335,8 +335,6 @@ struct SharedMutableState {
 enum SyncerCommand {
     AsyncSaveRecording(db::RecordingToInsert, fs::File),
     AsyncAbandonRecording(CompositeId),
-
-    #[cfg(test)]
     Flush(mpsc::SyncSender<()>),
 }
 
@@ -451,7 +449,6 @@ impl SyncerChannel {
     }
 
     /// For testing: flushes the syncer, waiting for all currently-queued commands to complete.
-    #[cfg(test)]
     pub fn flush(&self) {
         let (snd, rcv) = mpsc::sync_channel(0);
         self.0.send(SyncerCommand::Flush(snd)).unwrap();
@@ -520,7 +517,6 @@ impl Syncer {
                 Err(_) => return,  // all senders have closed the channel; shutdown
                 Ok(SyncerCommand::AsyncSaveRecording(recording, f)) => self.save(recording, f),
                 Ok(SyncerCommand::AsyncAbandonRecording(uuid)) => self.abandon(uuid),
-                #[cfg(test)]
                 Ok(SyncerCommand::Flush(_)) => {},  // just drop the supplied sender, closing it.
             };
         }

@@ -42,16 +42,15 @@ extern crate hyper;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 #[macro_use] extern crate log;
-extern crate lru_cache;
 extern crate reffers;
 extern crate rusqlite;
 extern crate memmap;
 extern crate mime;
+extern crate moonfire_db as db;
 extern crate moonfire_ffmpeg;
 extern crate mylog;
 extern crate openssl;
 extern crate parking_lot;
-extern crate protobuf;
 extern crate regex;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
@@ -64,20 +63,14 @@ extern crate url;
 extern crate uuid;
 
 mod clock;
-mod coding;
 mod cmds;
-mod db;
-mod dir;
 mod h264;
 mod json;
 mod mp4;
-mod recording;
-mod schema;
 mod slices;
 mod stream;
 mod streamer;
 mod strutil;
-#[cfg(test)] mod testutil;
 mod web;
 
 /// Commandline usage string. This is in the particular format expected by the `docopt` crate.

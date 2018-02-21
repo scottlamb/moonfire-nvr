@@ -32,8 +32,8 @@ extern crate hyper;
 
 use core::borrow::Borrow;
 use core::str::FromStr;
-use db;
-use dir::SampleFileDir;
+use db::{self, recording};
+use db::dir::SampleFileDir;
 use failure::Error;
 use fnv::FnvHashMap;
 use futures::{future, stream};
@@ -44,7 +44,6 @@ use hyper::header;
 use hyper::server::{self, Request, Response};
 use mime;
 use mp4;
-use recording;
 use reffers::ARefs;
 use regex::Regex;
 use serde_json;
@@ -501,8 +500,8 @@ impl server::Service for Service {
 
 #[cfg(test)]
 mod tests {
+    use db::testutil;
     use super::Segments;
-    use testutil;
 
     #[test]
     fn test_segments() {
@@ -531,9 +530,9 @@ mod bench {
     extern crate reqwest;
     extern crate test;
 
+    use db::testutil::{self, TestDb};
     use hyper;
     use self::test::Bencher;
-    use testutil::{self, TestDb};
     use uuid::Uuid;
 
     struct Server {

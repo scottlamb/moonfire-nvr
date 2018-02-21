@@ -29,11 +29,9 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use clock::{Clocks, TimerGuard};
-use db::{Camera, Database, Stream};
-use dir;
+use db::{Camera, Database, Stream, dir, recording};
 use failure::Error;
 use h264;
-use recording;
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -202,15 +200,15 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
 mod tests {
     use clock::{self, Clocks};
     use db::{self, CompositeId};
+    use db::recording;
+    use db::testutil;
     use failure::Error;
     use h264;
     use moonfire_ffmpeg;
-    use recording;
     use std::cmp;
     use std::sync::{Arc, Mutex};
     use std::sync::atomic::{AtomicBool, Ordering};
     use stream::{self, Opener, Stream};
-    use testutil;
     use time;
 
     struct ProxyingStream<'a> {

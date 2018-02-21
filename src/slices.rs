@@ -151,11 +151,11 @@ impl<S> Slices<S> where S: Slice {
 
 #[cfg(test)]
 mod tests {
+    use db::testutil;
     use futures::{Future, Stream};
     use futures::stream;
     use std::ops::Range;
     use super::{Slice, Slices};
-    use testutil;
 
     #[derive(Debug, Eq, PartialEq)]
     pub struct FakeChunk {

@@ -30,9 +30,8 @@
 
 //! Subcommand to check the database and sample file dir for errors.
 
-use db;
+use db::{self, recording};
 use failure::Error;
-use recording;
 use std::fs;
 use uuid::Uuid;
 

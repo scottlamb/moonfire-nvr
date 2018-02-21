@@ -30,10 +30,11 @@
 
 /// Upgrades a version 1 schema to a version 2 schema.
 
+use db::schema::DirMeta;
+use db::dir;
 use failure::Error;
 use std::fs;
 use rusqlite;
-use schema::DirMeta;
 use uuid::Uuid;
 
 pub struct U<'a> {
@@ -118,7 +119,7 @@ impl<'a> super::Upgrader for U<'a> {
         let dir_uuid = ::uuid::Uuid::new_v4();
         let dir_uuid_bytes = &dir_uuid.as_bytes()[..];
 
-        let mut meta = ::schema::DirMeta::default();
+        let mut meta = DirMeta::default();
         {
             meta.db_uuid.extend_from_slice(db_uuid_bytes);
             meta.dir_uuid.extend_from_slice(dir_uuid_bytes);
@@ -276,7 +277,7 @@ impl<'a> super::Upgrader for U<'a> {
 
     fn post_tx(&mut self) -> Result<(), Error> {
         let mut meta = self.dir_meta.take().unwrap();
-        let d = ::dir::SampleFileDir::create(self.sample_file_path, &meta)?;
+        let d = dir::SampleFileDir::create(self.sample_file_path, &meta)?;
         ::std::mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
         d.write_meta(&meta)?;
         Ok(())

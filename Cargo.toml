@@ -7,11 +7,14 @@ authors = ["Scott Lamb <slamb@slamb.org>"]
 
 # The nightly feature is used within moonfire-nvr itself to gate the
 # benchmarks. Also pass it along to crates that can benefit from it.
-nightly = ["parking_lot/nightly"]
+nightly = ["moonfire-db/nightly", "parking_lot/nightly"]
 
 # The bundled feature includes bundled (aka statically linked) versions of
 # native libraries where possible.
 bundled = ["rusqlite/bundled"]
+
+[workspace]
+members = ["db", "ffmpeg"]
 
 [dependencies]
 byteorder = "1.0"
@@ -25,14 +28,13 @@ hyper = "0.11.16"
 lazy_static = "1.0"
 libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }
-lru-cache = "0.1"
 memmap = "0.6"
 mime = "0.3"
+moonfire-db = { path = "db" }
 moonfire-ffmpeg = { path = "ffmpeg" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.10"
 parking_lot = { version = "0.5", features = [] }
-protobuf = "1.4"
 reffers = { git = "https://github.com/diwic/reffers-rs" }
 regex = "0.2"
 rusqlite = "0.13"
@@ -44,7 +46,7 @@ time = "0.1"
 tokio-core = "0.1"
 tokio-signal = "0.1"
 url = "1.4"
-uuid = { version = "0.5", features = ["serde", "v4"] }
+uuid = { version = "0.6", features = ["serde", "std", "v4"] }
 
 [dev-dependencies]
 reqwest = "0.8"

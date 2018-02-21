@@ -29,13 +29,13 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
-use core::str::FromStr;
 use db;
 use failure::Error;
 use regex::Regex;
 use std::ops;
 use std::fmt;
 use std::ops::Range;
+use std::str::FromStr;
 use time;
 
 pub const TIME_UNITS_PER_SEC: i64 = 90000;
