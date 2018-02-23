@@ -202,6 +202,12 @@ create table recording_playback (
   -- See description on recording table.
   composite_id integer primary key references recording (composite_id),
 
+  -- The open in which this was committed to the database. For a given
+  -- composite_id, only one recording will ever be committed to the database,
+  -- but in-memory state may reflect a recording which never gets committed.
+  -- This field allows disambiguation in etags and such.
+  open_id integer not null references open (id),
+
   -- The sha1 hash of the contents of the sample file.
   sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
 

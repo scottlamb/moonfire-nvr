@@ -47,8 +47,8 @@ const INSERT_RECORDING_SQL: &'static str = r#"
 "#;
 
 const INSERT_RECORDING_PLAYBACK_SQL: &'static str = r#"
-    insert into recording_playback (composite_id,  sample_file_sha1,  video_index)
-                            values (:composite_id, :sample_file_sha1, :video_index)
+    insert into recording_playback (composite_id,  open_id,  sample_file_sha1,  video_index)
+                            values (:composite_id, :open_id, :sample_file_sha1, :video_index)
 "#;
 
 const STREAM_MIN_START_SQL: &'static str = r#"
@@ -73,7 +73,7 @@ const STREAM_MAX_START_SQL: &'static str = r#"
 "#;
 
 /// Inserts the specified recording (for from `try_flush` only).
-pub(crate) fn insert_recording(tx: &rusqlite::Transaction, id: CompositeId,
+pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: CompositeId,
                     r: &db::RecordingToInsert) -> Result<(), Error> {
     if r.time.end < r.time.start {
         bail!("end time {} must be >= start time {}", r.time.end, r.time.start);
@@ -98,6 +98,7 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, id: CompositeId,
     let sha1 = &r.sample_file_sha1[..];
     stmt.execute_named(&[
         (":composite_id", &id.0),
+        (":open_id", &o.id),
         (":sample_file_sha1", &sha1),
         (":video_index", &r.video_index),
     ])?;

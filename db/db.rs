@@ -584,10 +584,11 @@ pub struct LockedDatabase {
     to_delete: Vec<ListOldestSampleFilesRow>,
 }
 
+/// Represents a row of the `open` database table.
 #[derive(Copy, Clone, Debug)]
-struct Open {
-    id: u32,
-    uuid: Uuid,
+pub(crate) struct Open {
+    pub(crate) id: u32,
+    pub(crate) uuid: Uuid,
 }
 
 /// A modification to be done to a `Stream`, used within `LockedDatabase::flush`.
@@ -802,6 +803,10 @@ impl LockedDatabase {
     /// On success, for each affected sample file directory with a flush watcher set, sends a
     /// `Flush` event.
     pub(crate) fn flush(&mut self, reason: &str) -> Result<(), Error> {
+        let o = match self.open.as_ref() {
+            None => bail!("database is read-only"),
+            Some(o) => o,
+        };
         let tx = self.conn.transaction()?;
         let mut mods = FnvHashMap::with_capacity_and_hasher(self.streams_by_id.len(),
                                                             Default::default());
@@ -825,7 +830,7 @@ impl LockedDatabase {
                     if !l.synced { break; }
                     if let Some(ref r) = l.recording {
                         raw::insert_recording(
-                            &tx, CompositeId::new(stream_id, s.next_recording_id + i), &r)?;
+                            &tx, o, CompositeId::new(stream_id, s.next_recording_id + i), &r)?;
                     }
                     i += 1;
                 }

@@ -603,7 +603,9 @@ impl Syncer {
             format!("{}-{}: unflushed={} >= if={}",
                     c.short_name, s.type_.as_str(), unflushed, s.flush_if)
         };
-        let _ = db.flush(&reason);
+        if let Err(e) = db.flush(&reason) {
+            error!("flush failure on save: {:?}", e);
+        }
     }
 }
 

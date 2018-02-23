@@ -136,7 +136,7 @@ fn main() {
     h.clone().install().unwrap();
 
     if let Err(e) = { let _a = h.async(); args.arg_command.unwrap().run() } {
-        error!("{}", e);
+        error!("{:?}", e);
         ::std::process::exit(1);
     }
     info!("Success.");

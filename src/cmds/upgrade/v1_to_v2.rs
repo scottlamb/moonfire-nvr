@@ -235,7 +235,7 @@ impl<'a> super::Upgrader for U<'a> {
 
             -- Insert sub stream (if path is non-empty) using any id.
             insert into stream (camera_id, sample_file_dir_id, type, record, rtsp_path,
-                                retain_bytes, next_recording_id)
+                                retain_bytes, flush_if_sec, next_recording_id)
             select
               old_camera.id,
               sample_file_dir.id,
@@ -243,7 +243,7 @@ impl<'a> super::Upgrader for U<'a> {
               0,
               old_camera.sub_rtsp_path,
               0,
-              60,
+              90,
               1
             from
               old_camera cross join sample_file_dir
