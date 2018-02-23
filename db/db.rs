@@ -413,7 +413,7 @@ pub(crate) struct UncommittedRecording {
     pub(crate) recording: Option<RecordingToInsert>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct StreamChange {
     pub sample_file_dir_id: Option<i32>,
     pub rtsp_path: String,
@@ -422,7 +422,7 @@ pub struct StreamChange {
 }
 
 /// Information about a camera, used by `add_camera` and `update_camera`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CameraChange {
     pub short_name: String,
     pub description: String,
@@ -647,6 +647,7 @@ impl StreamStateChanger {
                         update stream set
                             rtsp_path = :rtsp_path,
                             record = :record,
+                            flush_if_sec = :flush_if_sec,
                             sample_file_dir_id = :sample_file_dir_id
                         where
                             id = :id
@@ -654,6 +655,7 @@ impl StreamStateChanger {
                     let rows = stmt.execute_named(&[
                         (":rtsp_path", &sc.rtsp_path),
                         (":record", &sc.record),
+                        (":flush_if_sec", &sc.flush_if_sec),
                         (":sample_file_dir_id", &sc.sample_file_dir_id),
                         (":id", &sid),
                     ])?;
@@ -1959,7 +1961,7 @@ mod tests {
         let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
         let path = tmpdir.path().to_str().unwrap().to_owned();
         let sample_file_dir_id = { db.lock() }.add_sample_file_dir(path).unwrap();
-        let camera_id = { db.lock() }.add_camera(CameraChange {
+        let mut c = CameraChange {
             short_name: "testcam".to_owned(),
             description: "".to_owned(),
             host: "test-camera".to_owned(),
@@ -1969,25 +1971,42 @@ mod tests {
                 StreamChange {
                     sample_file_dir_id: Some(sample_file_dir_id),
                     rtsp_path: "/main".to_owned(),
-                    record: true,
-                    flush_if_sec: 0,
+                    record: false,
+                    flush_if_sec: 1,
                 },
                 StreamChange {
                     sample_file_dir_id: Some(sample_file_dir_id),
                     rtsp_path: "/sub".to_owned(),
                     record: true,
-                    flush_if_sec: 0,
+                    flush_if_sec: 1,
                 },
             ],
-        }).unwrap();
+        };
+        let camera_id = db.lock().add_camera(c.clone()).unwrap();
+        let (main_stream_id, sub_stream_id);
         {
             let mut l = db.lock();
-            let stream_id = l.cameras_by_id().get(&camera_id).unwrap().streams[0].unwrap();
+            {
+                let c = l.cameras_by_id().get(&camera_id).unwrap();
+                main_stream_id = c.streams[0].unwrap();
+                sub_stream_id = c.streams[1].unwrap();
+            }
             l.update_retention(&[super::RetentionChange {
-                stream_id,
+                stream_id: main_stream_id,
                 new_record: true,
                 new_limit: 42,
             }]).unwrap();
+            {
+                let main = l.streams_by_id().get(&main_stream_id).unwrap();
+                assert!(main.record);
+                assert_eq!(main.retain_bytes, 42);
+                assert_eq!(main.flush_if_sec, 1);
+            }
+
+            assert_eq!(l.streams_by_id().get(&sub_stream_id).unwrap().flush_if_sec, 1);
+            c.streams[1].flush_if_sec = 2;
+            l.update_camera(camera_id, c).unwrap();
+            assert_eq!(l.streams_by_id().get(&sub_stream_id).unwrap().flush_if_sec, 2);
         }
         let camera_uuid = { db.lock().cameras_by_id().get(&camera_id).unwrap().uuid };
         assert_no_recordings(&db, camera_uuid);
@@ -1995,6 +2014,7 @@ mod tests {
         // Closing and reopening the database should present the same contents.
         let conn = db.close();
         let db = Database::new(conn, true).unwrap();
+        assert_eq!(db.lock().streams_by_id().get(&sub_stream_id).unwrap().flush_if_sec, 2);
         assert_no_recordings(&db, camera_uuid);
 
         // TODO: assert_eq!(db.lock().list_garbage(sample_file_dir_id).unwrap(), &[]);
@@ -2006,7 +2026,6 @@ mod tests {
 
         // Inserting a recording should succeed and advance the next recording id.
         let start = recording::Time(1430006400 * TIME_UNITS_PER_SEC);
-        let stream_id = camera_id;  // TODO
         let recording = RecordingToInsert {
             sample_file_bytes: 42,
             run_offset: 0,
@@ -2021,42 +2040,42 @@ mod tests {
         };
         let id = {
             let mut db = db.lock();
-            let (id, u) = db.add_recording(stream_id).unwrap();
+            let (id, u) = db.add_recording(main_stream_id).unwrap();
             u.lock().recording = Some(recording.clone());
             u.lock().synced = true;
             db.flush("add test").unwrap();
             id
         };
-        assert_eq!(db.lock().streams_by_id().get(&stream_id).unwrap().next_recording_id, 2);
+        assert_eq!(db.lock().streams_by_id().get(&main_stream_id).unwrap().next_recording_id, 2);
 
         // Queries should return the correct result (with caches update on insert).
-        assert_single_recording(&db, stream_id, &recording);
+        assert_single_recording(&db, main_stream_id, &recording);
 
         // Queries on a fresh database should return the correct result (with caches populated from
         // existing database contents rather than built on insert).
         let conn = db.close();
         let db = Database::new(conn, true).unwrap();
-        assert_single_recording(&db, stream_id, &recording);
+        assert_single_recording(&db, main_stream_id, &recording);
 
         // Deleting a recording should succeed, update the min/max times, and mark it as garbage.
         {
             let mut db = db.lock();
             let mut n = 0;
-            db.delete_oldest_recordings(stream_id, &mut |_| { n += 1; true }).unwrap();
+            db.delete_oldest_recordings(main_stream_id, &mut |_| { n += 1; true }).unwrap();
             assert_eq!(n, 1);
             {
-                let s = db.streams_by_id().get(&stream_id).unwrap();
+                let s = db.streams_by_id().get(&main_stream_id).unwrap();
                 assert_eq!(s.sample_file_bytes, 42);
                 assert_eq!(s.bytes_to_delete, 42);
             }
             n = 0;
 
             // A second run
-            db.delete_oldest_recordings(stream_id, &mut |_| { n += 1; true }).unwrap();
+            db.delete_oldest_recordings(main_stream_id, &mut |_| { n += 1; true }).unwrap();
             assert_eq!(n, 0);
-            assert_eq!(db.streams_by_id().get(&stream_id).unwrap().bytes_to_delete, 42);
+            assert_eq!(db.streams_by_id().get(&main_stream_id).unwrap().bytes_to_delete, 42);
             db.flush("delete test").unwrap();
-            let s = db.streams_by_id().get(&stream_id).unwrap();
+            let s = db.streams_by_id().get(&main_stream_id).unwrap();
             assert_eq!(s.sample_file_bytes, 0);
             assert_eq!(s.bytes_to_delete, 0);
         }
