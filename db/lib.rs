@@ -48,6 +48,7 @@ extern crate uuid;
 mod coding;
 pub mod db;
 pub mod dir;
+mod raw;
 pub mod recording;
 pub mod schema;
 

@@ -2105,6 +2105,7 @@ mod tests {
         const EXPECTED_ETAG: &'static str = "c56ef7eb3b4a713ceafebc3dc7958bd9e62a2fae";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
     }
 
@@ -2125,6 +2126,7 @@ mod tests {
         const EXPECTED_ETAG: &'static str = "3bdc2c8ce521df50155d0ca4d7497ada448fa7c3";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
     }
 
@@ -2145,6 +2147,7 @@ mod tests {
         const EXPECTED_ETAG: &'static str = "3986d3bd9b866c3455fb7359fb134aa2d9107af7";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
     }
 
@@ -2165,6 +2168,7 @@ mod tests {
         const EXPECTED_ETAG: &'static str = "9e789398c9a71ca834fec8fbc55b389f99d12dda";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
     }
 }

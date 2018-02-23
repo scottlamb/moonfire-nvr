@@ -159,6 +159,7 @@ impl<'a> super::Upgrader for U<'a> {
               record integer not null check (record in (1, 0)),
               rtsp_path text not null,
               retain_bytes integer not null check (retain_bytes >= 0),
+              flush_if_sec integer not null,
               next_recording_id integer not null check (next_recording_id >= 0),
               unique (camera_id, type)
             );
@@ -227,6 +228,7 @@ impl<'a> super::Upgrader for U<'a> {
               1,
               old_camera.main_rtsp_path,
               old_camera.retain_bytes,
+              0,
               old_camera.next_recording_id
             from
               old_camera cross join sample_file_dir;
@@ -241,7 +243,8 @@ impl<'a> super::Upgrader for U<'a> {
               0,
               old_camera.sub_rtsp_path,
               0,
-              0
+              60,
+              1
             from
               old_camera cross join sample_file_dir
             where

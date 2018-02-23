@@ -31,7 +31,7 @@
 //! Clock interface and implementations for testability.
 
 use libc;
-#[cfg(test)] use std::sync::Mutex;
+#[cfg(test)] use parking_lot::Mutex;
 use std::mem;
 use std::thread;
 use time::{Duration, Timespec};
@@ -123,12 +123,12 @@ impl SimulatedClocks {
 
 #[cfg(test)]
 impl Clocks for SimulatedClocks {
-    fn realtime(&self) -> Timespec { self.boot + *self.uptime.lock().unwrap() }
-    fn monotonic(&self) -> Timespec { Timespec::new(0, 0) + *self.uptime.lock().unwrap() }
+    fn realtime(&self) -> Timespec { self.boot + *self.uptime.lock() }
+    fn monotonic(&self) -> Timespec { Timespec::new(0, 0) + *self.uptime.lock() }
 
     /// Advances the clock by the specified amount without actually sleeping.
     fn sleep(&self, how_long: Duration) {
-        let mut l = self.uptime.lock().unwrap();
+        let mut l = self.uptime.lock();
         *l = *l + how_long;
     }
 }

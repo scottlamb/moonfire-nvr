@@ -86,28 +86,29 @@ impl TestDb {
         let dir;
         {
             let mut l = db.lock();
-            {
-                sample_file_dir_id = l.add_sample_file_dir(path.to_owned()).unwrap();
-                assert_eq!(TEST_CAMERA_ID, l.add_camera(db::CameraChange {
-                    short_name: "test camera".to_owned(),
-                    description: "".to_owned(),
-                    host: "test-camera".to_owned(),
-                    username: "foo".to_owned(),
-                    password: "bar".to_owned(),
-                    streams: [
-                        db::StreamChange {
-                            sample_file_dir_id: Some(sample_file_dir_id),
-                            rtsp_path: "/main".to_owned(),
-                            record: true,
-                        },
-                        Default::default(),
-                    ],
-                }).unwrap());
-                test_camera_uuid = l.cameras_by_id().get(&TEST_CAMERA_ID).unwrap().uuid;
-                let mut tx = l.tx().unwrap();
-                tx.update_retention(TEST_STREAM_ID, true, 1048576).unwrap();
-                tx.commit().unwrap();
-            }
+            sample_file_dir_id = l.add_sample_file_dir(path.to_owned()).unwrap();
+            assert_eq!(TEST_CAMERA_ID, l.add_camera(db::CameraChange {
+                short_name: "test camera".to_owned(),
+                description: "".to_owned(),
+                host: "test-camera".to_owned(),
+                username: "foo".to_owned(),
+                password: "bar".to_owned(),
+                streams: [
+                    db::StreamChange {
+                        sample_file_dir_id: Some(sample_file_dir_id),
+                        rtsp_path: "/main".to_owned(),
+                        record: true,
+                        flush_if_sec: 0,
+                    },
+                    Default::default(),
+                ],
+            }).unwrap());
+            test_camera_uuid = l.cameras_by_id().get(&TEST_CAMERA_ID).unwrap().uuid;
+            l.update_retention(&[db::RetentionChange {
+                stream_id: TEST_STREAM_ID,
+                new_record: true,
+                new_limit: 1048576,
+            }]).unwrap();
             dir = l.sample_file_dirs_by_id().get(&sample_file_dir_id).unwrap().get().unwrap();
         }
         let mut dirs_by_stream_id = FnvHashMap::default();
@@ -129,28 +130,25 @@ impl TestDb {
         let mut db = self.db.lock();
         let video_sample_entry_id = db.insert_video_sample_entry(
             1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
-        let next = db.streams_by_id().get(&TEST_STREAM_ID).unwrap().next_recording_id;
-        {
-            let mut tx = db.tx().unwrap();
-            const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-            tx.insert_recording(&db::RecordingToInsert {
-                id: db::CompositeId::new(TEST_STREAM_ID, next),
-                sample_file_bytes: encoder.sample_file_bytes,
-                time: START_TIME ..
-                      START_TIME + recording::Duration(encoder.total_duration_90k as i64),
-                local_time_delta: recording::Duration(0),
-                video_samples: encoder.video_samples,
-                video_sync_samples: encoder.video_sync_samples,
-                video_sample_entry_id: video_sample_entry_id,
-                video_index: encoder.video_index,
-                sample_file_sha1: [0u8; 20],
-                run_offset: 0,
-                flags: db::RecordingFlags::TrailingZero as i32,
-            }).unwrap();
-            tx.commit().unwrap();
-        }
+        const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
+        let (id, u) = db.add_recording(TEST_STREAM_ID).unwrap();
+        u.lock().recording = Some(db::RecordingToInsert {
+            sample_file_bytes: encoder.sample_file_bytes,
+            time: START_TIME ..
+                  START_TIME + recording::Duration(encoder.total_duration_90k as i64),
+            local_time_delta: recording::Duration(0),
+            video_samples: encoder.video_samples,
+            video_sync_samples: encoder.video_sync_samples,
+            video_sample_entry_id: video_sample_entry_id,
+            video_index: encoder.video_index,
+            sample_file_sha1: [0u8; 20],
+            run_offset: 0,
+            flags: db::RecordingFlags::TrailingZero as i32,
+        });
+        u.lock().synced = true;
+        db.flush("create_recording_from_encoder").unwrap();
         let mut row = None;
-        db.list_recordings_by_id(TEST_STREAM_ID, next .. next+1,
+        db.list_recordings_by_id(TEST_STREAM_ID, id.recording() .. id.recording()+1,
                                    |r| { row = Some(r); Ok(()) }).unwrap();
         row.unwrap()
     }

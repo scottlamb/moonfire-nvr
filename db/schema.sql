@@ -108,6 +108,11 @@ create table stream (
   -- file. Older files will be deleted as necessary to stay within this limit.
   retain_bytes integer not null check (retain_bytes >= 0),
 
+  -- Flush the database when completing a recording if this stream has at
+  -- least this many seconds of unflushed recordings. A value of 0 means that
+  -- every completed recording will cause a flush.
+  flush_if_sec integer not null,
+
   -- The low 32 bits of the next recording id to assign for this stream.
   -- Typically this is the maximum current recording + 1, but it does
   -- not decrease if that recording is deleted.

@@ -34,7 +34,7 @@ use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct TopLevel<'a> {
     pub time_zone_name: &'a str,

@@ -199,6 +199,9 @@ pub fn run() -> Result<(), Error> {
     }
 
     if let Some(mut ss) = syncers {
+        // The syncers shut down when all channels to them have been dropped.
+        // The database maintains one; and `ss` holds one. Drop both.
+        db.lock().clear_on_flush();
         for (_, s) in ss.drain() {
             drop(s.channel);
             s.join.join().unwrap();

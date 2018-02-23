@@ -36,6 +36,7 @@ use self::cursive::views;
 use db::{self, dir};
 use failure::Error;
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use stream::{self, Opener, Stream};
 use super::{decode_size, encode_size};
@@ -62,6 +63,9 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
                 .unwrap().get_content().as_str().into();
         let r = siv.find_id::<views::Checkbox>(&format!("{}_record", t.as_str()))
                 .unwrap().is_checked();
+        let f = i64::from_str(siv.find_id::<views::EditView>(
+                &format!("{}_flush_if_sec", t.as_str())).unwrap().get_content().as_str())
+                .unwrap_or(0);
         let d = *siv.find_id::<views::SelectView<Option<i32>>>(
             &format!("{}_sample_file_dir", t.as_str()))
             .unwrap().selection();
@@ -69,6 +73,7 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
             rtsp_path: p,
             sample_file_dir_id: d,
             record: r,
+            flush_if_sec: f,
         };
     }
     c
@@ -270,9 +275,11 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                    .popup()
                    .with_id(format!("{}_sample_file_dir", type_.as_str())))
             .child("record", views::Checkbox::new().with_id(format!("{}_record", type_.as_str())))
+            .child("flush_if_sec", views::EditView::new()
+                   .with_id(format!("{}_flush_if_sec", type_.as_str())))
             .child("usage/capacity",
                    views::TextView::new("").with_id(format!("{}_usage_cap", type_.as_str())))
-            .min_height(4);
+            .min_height(5);
         layout.add_child(views::DummyView);
         layout.add_child(views::TextView::new(format!("{} stream", type_.as_str())));
         layout.add_child(list);
@@ -313,6 +320,8 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                                |v: &mut views::TextView| v.set_content(u));
                 dialog.find_id(&format!("{}_record", t.as_str()),
                                |v: &mut views::Checkbox| v.set_checked(s.record));
+                dialog.find_id(&format!("{}_flush_if_sec", t.as_str()),
+                               |v: &mut views::EditView| v.set_content(s.flush_if_sec.to_string()));
             }
             dialog.find_id(&format!("{}_sample_file_dir", t.as_str()),
                            |v: &mut views::SelectView<Option<i32>>| v.set_selection(selected_dir));

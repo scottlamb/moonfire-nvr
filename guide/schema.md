@@ -207,6 +207,8 @@ is never used.
 Version 3 adds over version 1:
 
 *   recording of sub streams (splits a new `stream` table out of `camera`)
+*   a per-stream knob `flush_if_sec` meant to reduce database commits (and
+    thus SSD write cycles). This improves practicality of many streams.
 *   support for multiple sample file directories, to take advantage of
     multiple hard drives (or multiple RAID volumes).
 *   an interlock between database and sample file directories to avoid various

@@ -205,8 +205,9 @@ mod tests {
     use failure::Error;
     use h264;
     use moonfire_ffmpeg;
+    use parking_lot::Mutex;
     use std::cmp;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use stream::{self, Opener, Stream};
     use time;
@@ -290,7 +291,7 @@ mod tests {
                 stream::Source::Rtsp(url) => assert_eq!(url, &self.expected_url),
                 stream::Source::File(_) => panic!("expected rtsp url"),
             };
-            let mut l = self.streams.lock().unwrap();
+            let mut l = self.streams.lock();
             match l.pop() {
                 Some(stream) => {
                     trace!("MockOpener returning next stream");
@@ -361,7 +362,7 @@ mod tests {
                                           testutil::TEST_STREAM_ID, camera, s, 0, 3);
         }
         stream.run();
-        assert!(opener.streams.lock().unwrap().is_empty());
+        assert!(opener.streams.lock().is_empty());
         db.syncer_channel.flush();
         let db = db.db.lock();
 

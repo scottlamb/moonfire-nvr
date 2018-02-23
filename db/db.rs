@@ -48,19 +48,21 @@
 //!     the critical path of recording frames. The caller should preallocate sample file uuids
 //!     and such to avoid database operations in these paths.
 //!
-//!   * the `Transaction` interface allows callers to batch write operations to reduce latency and
-//!     SSD write cycles.
+//!   * adding and removing recordings done during normal operations use a batch interface.
+//!     A list of mutations is built up in-memory and occasionally flushed to reduce SSD write
+//!     cycles.
 
 use dir;
 use failure::Error;
-use fnv::{self, FnvHashMap};
+use fnv::{self, FnvHashMap, FnvHashSet};
 use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
+use raw;
 use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
 use schema;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::collections::btree_map;
 use std::cell::RefCell;
 use std::cmp;
@@ -86,30 +88,9 @@ const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
       composite_id = :composite_id
 "#;
 
-const DELETE_GARBAGE_SQL: &'static str =
-    "delete from garbage where composite_id = :composite_id";
-
-const INSERT_GARBAGE_SQL: &'static str =
-    "insert into garbage (sample_file_dir_id, composite_id)
-                  values (:sample_file_dir_id, :composite_id)";
-
 const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &'static str = r#"
     insert into video_sample_entry (sha1,  width,  height,  rfc6381_codec, data)
                             values (:sha1, :width, :height, :rfc6381_codec, :data)
-"#;
-
-const INSERT_RECORDING_SQL: &'static str = r#"
-    insert into recording (composite_id, stream_id, run_offset, flags, sample_file_bytes,
-                           start_time_90k, duration_90k, local_time_delta_90k, video_samples,
-                           video_sync_samples, video_sample_entry_id)
-                   values (:composite_id, :stream_id, :run_offset, :flags, :sample_file_bytes,
-                           :start_time_90k, :duration_90k, :local_time_delta_90k,
-                           :video_samples, :video_sync_samples, :video_sample_entry_id)
-"#;
-
-const INSERT_RECORDING_PLAYBACK_SQL: &'static str = r#"
-    insert into recording_playback (composite_id,  sample_file_sha1,  video_index)
-                            values (:composite_id, :sample_file_sha1, :video_index)
 "#;
 
 const UPDATE_NEXT_RECORDING_ID_SQL: &'static str =
@@ -128,35 +109,6 @@ const LIST_OLDEST_SAMPLE_FILES_SQL: &'static str = r#"
       composite_id < :end
     order by
       composite_id
-"#;
-
-const DELETE_RECORDING_SQL: &'static str = r#"
-    delete from recording where composite_id = :composite_id
-"#;
-
-const DELETE_RECORDING_PLAYBACK_SQL: &'static str = r#"
-    delete from recording_playback where composite_id = :composite_id
-"#;
-
-const STREAM_MIN_START_SQL: &'static str = r#"
-    select
-      start_time_90k
-    from
-      recording
-    where
-      stream_id = :stream_id
-    order by start_time_90k limit 1
-"#;
-
-const STREAM_MAX_START_SQL: &'static str = r#"
-    select
-      start_time_90k,
-      duration_90k
-    from
-      recording
-    where
-      stream_id = :stream_id
-    order by start_time_90k desc;
 "#;
 
 const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
@@ -257,9 +209,8 @@ pub enum RecordingFlags {
 }
 
 /// A recording to pass to `insert_recording`.
-#[derive(Debug)]
-pub struct RecordingToInsert {
-    pub id: CompositeId,
+#[derive(Clone, Debug)]
+pub(crate) struct RecordingToInsert {
     pub run_offset: i32,
     pub flags: i32,
     pub sample_file_bytes: i32,
@@ -274,8 +225,9 @@ pub struct RecordingToInsert {
 
 /// A row used in `list_oldest_sample_files`.
 #[derive(Debug)]
-pub struct ListOldestSampleFilesRow {
+pub(crate) struct ListOldestSampleFilesRow {
     pub id: CompositeId,
+    pub sample_file_dir_id: i32,
     pub time: Range<recording::Time>,
     pub sample_file_bytes: i32,
 }
@@ -329,6 +281,8 @@ pub struct SampleFileDir {
     pub uuid: Uuid,
     dir: Option<Arc<dir::SampleFileDir>>,
     last_complete_open: Option<Open>,
+    to_gc: Vec<CompositeId>,
+    pub(crate) garbage: FnvHashSet<CompositeId>,
 }
 
 impl SampleFileDir {
@@ -407,6 +361,10 @@ pub struct Stream {
     pub type_: StreamType,
     pub rtsp_path: String,
     pub retain_bytes: i64,
+    pub flush_if_sec: i64,
+
+    /// `flush_if_sec` converted to a duration for convenience.
+    pub flush_if: recording::Duration,
 
     /// The time range of recorded data associated with this stream (minimum start time and maximum
     /// end time). `None` iff there are no recordings for this camera.
@@ -420,7 +378,48 @@ pub struct Stream {
     /// Mapping of calendar day (in the server's time zone) to a summary of recordings on that day.
     pub days: BTreeMap<StreamDayKey, StreamDayValue>,
     pub record: bool,
-    pub next_recording_id: i32,
+
+    /// The `next_recording_id` currently committed to the database.
+    pub(crate) next_recording_id: i32,
+
+    /// The recordings which have been added via `LockedDatabase::add_recording` but have yet to
+    /// committed to the database.
+    ///
+    /// `uncommitted[i]` uses sample filename `CompositeId::new(id, next_recording_id + 1)`;
+    /// `next_recording_id` should be advanced when one is committed to maintain this invariant.
+    ///
+    /// TODO: alter the serving path to show these just as if they were already committed.
+    uncommitted: VecDeque<Arc<Mutex<UncommittedRecording>>>,
+}
+
+impl Stream {
+    /// Returns the duration of synced but uncommitted recordings for the given stream.
+    /// Note recordings must be flushed in order, so a recording is considered unsynced if any
+    /// before it are unsynced.
+    pub(crate) fn unflushed(&self) -> recording::Duration {
+        let mut dur = recording::Duration(0);
+        for u in &self.uncommitted {
+            let l = u.lock();
+            if !l.synced {
+                break;
+            }
+            if let Some(ref r) = l.recording {
+                dur += r.time.end - r.time.start;
+            }
+        }
+        dur
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct UncommittedRecording {
+    /// If this recording has been synced to disk and thus is ready to commit to the database.
+    /// `recording` should not be modified after this is set to true.
+    pub(crate) synced: bool,
+
+    /// The recording to add. Absent iff the recording has been abandoned.
+    /// TODO: modify `SampleIndexEncoder` to update this record as it goes.
+    pub(crate) recording: Option<RecordingToInsert>,
 }
 
 #[derive(Debug, Default)]
@@ -428,6 +427,7 @@ pub struct StreamChange {
     pub sample_file_dir_id: Option<i32>,
     pub rtsp_path: String,
     pub record: bool,
+    pub flush_if_sec: i64,
 }
 
 /// Information about a camera, used by `add_camera` and `update_camera`.
@@ -564,17 +564,8 @@ fn init_recordings(conn: &mut rusqlite::Connection, stream_id: i32, camera: &Cam
     Ok(())
 }
 
-#[derive(Debug)]
 pub struct LockedDatabase {
     conn: rusqlite::Connection,
-    state: State,
-}
-
-/// In-memory state from the database.
-/// This is separated out of `LockedDatabase` so that `Transaction` can mutably borrow `state`
-/// while its underlying `rusqlite::Transaction` is borrowing `conn`.
-#[derive(Debug)]
-struct State {
     uuid: Uuid,
 
     /// If the database is open in read-write mode, the information about the current Open row.
@@ -582,10 +573,15 @@ struct State {
     sample_file_dirs_by_id: BTreeMap<i32, SampleFileDir>,
     cameras_by_id: BTreeMap<i32, Camera>,
     streams_by_id: BTreeMap<i32, Stream>,
-    cameras_by_uuid: BTreeMap<Uuid, i32>,
+    cameras_by_uuid: BTreeMap<Uuid, i32>,  // values are ids.
     video_sample_entries: BTreeMap<i32, Arc<VideoSampleEntry>>,
     list_recordings_by_time_sql: String,
     video_index_cache: RefCell<LruCache<i64, Box<[u8]>, fnv::FnvBuildHasher>>,
+    on_flush: Vec<Box<Fn() + Send>>,
+
+    /// Recordings which have been enqueued for deletion via `LockedDatabase::delete_recordings`
+    /// but have yet to be committed.
+    to_delete: Vec<ListOldestSampleFilesRow>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -594,48 +590,14 @@ struct Open {
     uuid: Uuid,
 }
 
-/// A high-level transaction. This manages the SQLite transaction and the matching modification to
-/// be applied to the in-memory state on successful commit.
-pub struct Transaction<'a> {
-    state: &'a mut State,
-    mods_by_stream: FnvHashMap<i32, StreamModification>,
-    tx: rusqlite::Transaction<'a>,
-
-    /// True if due to an earlier error the transaction must be rolled back rather than committed.
-    /// Insert and delete are multi-part. If later parts fail, earlier parts should be aborted as
-    /// well. We could use savepoints (nested transactions) for this, but for simplicity we just
-    /// require the entire transaction be rolled back.
-    must_rollback: bool,
-}
-
-/// A modification to be done to a `Stream` after a `Transaction` is committed.
+/// A modification to be done to a `Stream`, used within `LockedDatabase::flush`.
 #[derive(Default)]
 struct StreamModification {
-    /// Add this to `camera.duration`. Thus, positive values indicate a net addition;
-    /// negative values indicate a net subtraction.
-    duration: recording::Duration,
-
-    /// Add this to `camera.sample_file_bytes`.
-    sample_file_bytes: i64,
-
-    /// Add this to `stream.days`.
-    days: BTreeMap<StreamDayKey, StreamDayValue>,
-
-    /// Reset the Stream range to this value. This should be populated immediately prior to the
-    /// commit.
+    num_recordings_to_commit: i32,
     range: Option<Range<recording::Time>>,
-
-    /// Reset the next_recording_id to the specified value.
-    new_next_recording_id: Option<i32>,
-
-    /// Reset the retain_bytes to the specified value.
-    new_retain_bytes: Option<i64>,
-
-    /// Reset the record to the specified value.
-    new_record: Option<bool>,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CompositeId(pub i64);
 
 impl CompositeId {
@@ -650,231 +612,6 @@ impl CompositeId {
 impl ::std::fmt::Display for CompositeId {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
         write!(f, "{}/{}", self.stream(), self.recording())
-    }
-}
-
-impl<'a> Transaction<'a> {
-    /// Deletes the given recordings from the `recording` and `recording_playback` tables.
-    /// Note they are not fully removed from the database; the uuids are transferred to the
-    /// `garbage` table. The caller should `unlink` the files, then remove the `garbage` row.
-    pub fn delete_recordings(&mut self, rows: &[ListOldestSampleFilesRow]) -> Result<(), Error> {
-        let mut del1 = self.tx.prepare_cached(DELETE_RECORDING_PLAYBACK_SQL)?;
-        let mut del2 = self.tx.prepare_cached(DELETE_RECORDING_SQL)?;
-        let mut insert = self.tx.prepare_cached(INSERT_GARBAGE_SQL)?;
-
-        self.check_must_rollback()?;
-        self.must_rollback = true;
-        for row in rows {
-            let changes = del1.execute_named(&[(":composite_id", &row.id.0)])?;
-            if changes != 1 {
-                bail!("no such recording {}", row.id);
-            }
-            let changes = del2.execute_named(&[(":composite_id", &row.id.0)])?;
-            if changes != 1 {
-                bail!("no such recording_playback {}", row.id);
-            }
-            let sid = row.id.stream();
-            let did = self.state
-                        .streams_by_id
-                        .get(&sid)
-                        .ok_or_else(|| format_err!("no such stream {}", sid))?
-                        .sample_file_dir_id
-                        .ok_or_else(|| format_err!("stream {} has no dir", sid))?;
-            insert.execute_named(&[
-                (":sample_file_dir_id", &did),
-                (":composite_id", &row.id.0)],
-            )?;
-            let m = Transaction::get_mods_by_stream(&mut self.mods_by_stream, row.id.stream());
-            m.duration -= row.time.end - row.time.start;
-            m.sample_file_bytes -= row.sample_file_bytes as i64;
-            adjust_days(row.time.clone(), -1, &mut m.days);
-        }
-        self.must_rollback = false;
-        Ok(())
-    }
-
-    /// Marks the given sample files as deleted. This shouldn't be called until the files have
-    /// been `unlink()`ed and the parent directory `fsync()`ed.
-    pub fn mark_sample_files_deleted(&mut self, ids: &[CompositeId]) -> Result<(), Error> {
-        if ids.is_empty() { return Ok(()); }
-        let mut stmt = self.tx.prepare_cached(DELETE_GARBAGE_SQL)?;
-        for &id in ids {
-            let changes = stmt.execute_named(&[(":composite_id", &id.0)])?;
-            if changes != 1 {
-                bail!("no garbage row for {}", id);
-            }
-        }
-        Ok(())
-    }
-
-    /// Inserts the specified recording.
-    pub fn insert_recording(&mut self, r: &RecordingToInsert) -> Result<(), Error> {
-        self.check_must_rollback()?;
-
-        if r.time.end < r.time.start {
-            bail!("end time {} must be >= start time {}", r.time.end, r.time.start);
-        }
-
-        // Check that the recording id is acceptable and do the insertion.
-        let stream = match self.state.streams_by_id.get(&r.id.stream()) {
-            None => bail!("no such stream id {}", r.id.stream()),
-            Some(s) => s,
-        };
-        self.must_rollback = true;
-        let m = Transaction::get_mods_by_stream(&mut self.mods_by_stream, r.id.stream());
-        {
-            let next = m.new_next_recording_id.unwrap_or(stream.next_recording_id);
-            if r.id.recording() < next {
-                bail!("recording {} out of order; next id is {}!", r.id, next);
-            }
-            let mut stmt = self.tx.prepare_cached(INSERT_RECORDING_SQL)?;
-            stmt.execute_named(&[
-                (":composite_id", &r.id.0),
-                (":stream_id", &(r.id.stream() as i64)),
-                (":run_offset", &r.run_offset),
-                (":flags", &r.flags),
-                (":sample_file_bytes", &r.sample_file_bytes),
-                (":start_time_90k", &r.time.start.0),
-                (":duration_90k", &(r.time.end.0 - r.time.start.0)),
-                (":local_time_delta_90k", &r.local_time_delta.0),
-                (":video_samples", &r.video_samples),
-                (":video_sync_samples", &r.video_sync_samples),
-                (":video_sample_entry_id", &r.video_sample_entry_id),
-            ])?;
-            m.new_next_recording_id = Some(r.id.recording() + 1);
-            let mut stmt = self.tx.prepare_cached(INSERT_RECORDING_PLAYBACK_SQL)?;
-            let sha1 = &r.sample_file_sha1[..];
-            stmt.execute_named(&[
-                (":composite_id", &r.id.0),
-                (":sample_file_sha1", &sha1),
-                (":video_index", &r.video_index),
-            ])?;
-            let mut stmt = self.tx.prepare_cached(UPDATE_NEXT_RECORDING_ID_SQL)?;
-            stmt.execute_named(&[
-                (":stream_id", &(r.id.stream() as i64)),
-                (":next_recording_id", &m.new_next_recording_id),
-            ])?;
-        }
-        self.must_rollback = false;
-        m.duration += r.time.end - r.time.start;
-        m.sample_file_bytes += r.sample_file_bytes as i64;
-        adjust_days(r.time.clone(), 1, &mut m.days);
-        Ok(())
-    }
-
-    /// Updates the `record` and `retain_bytes` for the given stream.
-    /// Note this just resets the limit in the database; it's the caller's responsibility to ensure
-    /// current usage is under the new limit if desired.
-    pub fn update_retention(&mut self, stream_id: i32, new_record: bool, new_limit: i64)
-                            -> Result<(), Error> {
-        if new_limit < 0 {
-            bail!("can't set limit for stream {} to {}; must be >= 0", stream_id, new_limit);
-        }
-        self.check_must_rollback()?;
-        let mut stmt = self.tx.prepare_cached(r#"
-            update stream
-            set
-              record = :record,
-              retain_bytes = :retain
-            where
-              id = :id
-        "#)?;
-        let changes = stmt.execute_named(&[
-            (":record", &new_record),
-            (":retain", &new_limit),
-            (":id", &stream_id),
-        ])?;
-        if changes != 1 {
-            bail!("no such stream {}", stream_id);
-        }
-        let m = Transaction::get_mods_by_stream(&mut self.mods_by_stream, stream_id);
-        m.new_record = Some(new_record);
-        m.new_retain_bytes = Some(new_limit);
-        Ok(())
-    }
-
-    /// Commits these changes, consuming the Transaction.
-    pub fn commit(mut self) -> Result<(), Error> {
-        self.check_must_rollback()?;
-        self.precommit()?;
-        self.tx.commit()?;
-        for (&stream_id, m) in &self.mods_by_stream {
-            let stream = self.state.streams_by_id.get_mut(&stream_id)
-                                                 .expect("modified stream must exist");
-            stream.duration += m.duration;
-            stream.sample_file_bytes += m.sample_file_bytes;
-            for (k, v) in &m.days {
-                adjust_day(*k, *v, &mut stream.days);
-            }
-            stream.range = m.range.clone();
-            if let Some(id) = m.new_next_recording_id {
-                stream.next_recording_id = id;
-            }
-            if let Some(r) = m.new_record {
-                stream.record = r;
-            }
-            if let Some(b) = m.new_retain_bytes {
-                stream.retain_bytes = b;
-            }
-        }
-        Ok(())
-    }
-
-    /// Raises an error if `must_rollback` is true. To be used on commit and in modifications.
-    fn check_must_rollback(&self) -> Result<(), Error> {
-        if self.must_rollback {
-            bail!("failing due to previous error");
-        }
-        Ok(())
-    }
-
-    /// Looks up an existing entry in `mods` for a given stream or makes+inserts an identity entry.
-    fn get_mods_by_stream(mods: &mut FnvHashMap<i32, StreamModification>, stream_id: i32)
-                          -> &mut StreamModification {
-        mods.entry(stream_id).or_insert_with(StreamModification::default)
-    }
-
-    /// Fills the `range` of each `StreamModification`. This is done prior to commit so that if the
-    /// commit succeeds, there's no possibility that the correct state can't be retrieved.
-    fn precommit(&mut self) -> Result<(), Error> {
-        // Recompute start and end times for each camera.
-        for (&stream_id, m) in &mut self.mods_by_stream {
-            // The minimum is straightforward, taking advantage of the start_time_90k index.
-            let mut stmt = self.tx.prepare_cached(STREAM_MIN_START_SQL)?;
-            let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
-            let min_start = match rows.next() {
-                Some(row) => recording::Time(row?.get_checked(0)?),
-                None => continue,  // no data; leave m.range alone.
-            };
-
-            // There was a minimum, so there should be a maximum too. Calculating it is less
-            // straightforward because recordings could overlap. All recordings starting in the
-            // last MAX_RECORDING_DURATION must be examined in order to take advantage of the
-            // start_time_90k index.
-            let mut stmt = self.tx.prepare_cached(STREAM_MAX_START_SQL)?;
-            let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
-            let mut maxes_opt = None;
-            while let Some(row) = rows.next() {
-                let row = row?;
-                let row_start = recording::Time(row.get_checked(0)?);
-                let row_duration: i64 = row.get_checked(1)?;
-                let row_end = recording::Time(row_start.0 + row_duration);
-                let maxes = match maxes_opt {
-                    None => row_start .. row_end,
-                    Some(Range{start: s, end: e}) => s .. cmp::max(e, row_end),
-                };
-                if row_start.0 <= maxes.start.0 - recording::MAX_RECORDING_DURATION {
-                    break;
-                }
-                maxes_opt = Some(maxes);
-            }
-            let max_end = match maxes_opt {
-                Some(Range{end: e, ..}) => e,
-                None => bail!("missing max for stream {} which had min {}", stream_id, min_start),
-            };
-            m.range = Some(min_start .. max_end);
-        }
-        Ok(())
     }
 }
 
@@ -941,6 +678,9 @@ impl StreamStateChanger {
                         sample_file_dir_id: sc.sample_file_dir_id,
                         rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
                         record: sc.record,
+                        flush_if_sec: sc.flush_if_sec,
+                        flush_if: recording::Duration(sc.flush_if_sec *
+                                                      recording::TIME_UNITS_PER_SEC),
                         ..s
                     })));
                 }
@@ -952,9 +692,9 @@ impl StreamStateChanger {
                 // Insert stream.
                 let mut stmt = tx.prepare_cached(r#"
                     insert into stream (camera_id,  sample_file_dir_id,  type,  rtsp_path,  record,
-                                        retain_bytes, next_recording_id)
+                                        retain_bytes, flush_if_sec,  next_recording_id)
                                 values (:camera_id, :sample_file_dir_id, :type, :rtsp_path, :record,
-                                        0,            1)
+                                        0,            :flush_if_sec, 1)
                 "#)?;
                 let type_ = StreamType::from_index(i).unwrap();
                 stmt.execute_named(&[
@@ -963,6 +703,7 @@ impl StreamStateChanger {
                     (":type", &type_.as_str()),
                     (":rtsp_path", &sc.rtsp_path),
                     (":record", &sc.record),
+                    (":flush_if_sec", &sc.flush_if_sec),
                 ])?;
                 let id = tx.last_insert_rowid() as i32;
                 sids[i] = Some(id);
@@ -973,12 +714,15 @@ impl StreamStateChanger {
                     sample_file_dir_id: sc.sample_file_dir_id,
                     rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
                     retain_bytes: 0,
+                    flush_if_sec: sc.flush_if_sec,
+                    flush_if: recording::Duration(sc.flush_if_sec * recording::TIME_UNITS_PER_SEC),
                     range: None,
                     sample_file_bytes: 0,
                     duration: recording::Duration(0),
                     days: BTreeMap::new(),
                     record: sc.record,
                     next_recording_id: 1,
+                    uncommitted: VecDeque::new(),
                 })));
             }
         }
@@ -1004,11 +748,156 @@ impl StreamStateChanger {
     }
 }
 
+/// A retention change as expected by `LockedDatabase::update_retention`.
+pub struct RetentionChange {
+    pub stream_id: i32,
+    pub new_record: bool,
+    pub new_limit: i64,
+}
+
 impl LockedDatabase {
     /// Returns an immutable view of the cameras by id.
-    pub fn cameras_by_id(&self) -> &BTreeMap<i32, Camera> { &self.state.cameras_by_id }
+    pub fn cameras_by_id(&self) -> &BTreeMap<i32, Camera> { &self.cameras_by_id }
     pub fn sample_file_dirs_by_id(&self) -> &BTreeMap<i32, SampleFileDir> {
-        &self.state.sample_file_dirs_by_id
+        &self.sample_file_dirs_by_id
+    }
+
+    pub(crate) fn add_recording(&mut self, stream_id: i32)
+                             -> Result<(CompositeId, Arc<Mutex<UncommittedRecording>>), Error> {
+        let stream = match self.streams_by_id.get_mut(&stream_id) {
+            None => bail!("no such stream {}", stream_id),
+            Some(s) => s,
+        };
+        let id = CompositeId::new(stream_id,
+                                  stream.next_recording_id + (stream.uncommitted.len() as i32));
+        let recording = Arc::new(Mutex::new(UncommittedRecording {
+            synced: false,
+            recording: None,
+        }));
+        stream.uncommitted.push_back(Arc::clone(&recording));
+        Ok((id, recording))
+    }
+
+    pub(crate) fn delete_recordings(&mut self, rows: &mut Vec<ListOldestSampleFilesRow>) {
+        self.to_delete.append(rows);
+    }
+
+    pub(crate) fn delete_garbage(&mut self, dir_id: i32, ids: &mut Vec<CompositeId>)
+                                 -> Result<(), Error> {
+        let dir = match self.sample_file_dirs_by_id.get_mut(&dir_id) {
+            None => bail!("no such dir {}", dir_id),
+            Some(d) => d,
+        };
+        dir.to_gc.append(ids);
+        Ok(())
+    }
+
+    /// Tries to flush unwritten changes from the stream directories.
+    ///
+    ///    * commits any recordings added with `add_recording` that have since been marked as
+    ///      synced.
+    ///    * moves old recordings to the garbage table as requested by `delete_recordings`.
+    ///    * removes entries from the garbage table as requested by `mark_sample_files_deleted`.
+    ///
+    /// On success, for each affected sample file directory with a flush watcher set, sends a
+    /// `Flush` event.
+    pub(crate) fn flush(&mut self, reason: &str) -> Result<(), Error> {
+        let tx = self.conn.transaction()?;
+        let mut mods = FnvHashMap::with_capacity_and_hasher(self.streams_by_id.len(),
+                                                            Default::default());
+        raw::delete_recordings(&tx, &self.to_delete)?;
+        for row in &self.to_delete {
+            // Add a placeholder for recomputing the range.
+            mods.entry(row.id.stream()).or_insert_with(StreamModification::default);
+
+            let dir = match self.sample_file_dirs_by_id.get_mut(&row.sample_file_dir_id) {
+                None => bail!("Row refers to nonexistent sample file dir: {:#?}", row),
+                Some(d) => d,
+            };
+            dir.garbage.insert(row.id);
+        }
+        {
+            let mut stmt = tx.prepare_cached(UPDATE_NEXT_RECORDING_ID_SQL)?;
+            for (&stream_id, s) in &self.streams_by_id {
+                let mut i = 0;
+                for recording in &s.uncommitted {
+                    let l = recording.lock();
+                    if !l.synced { break; }
+                    if let Some(ref r) = l.recording {
+                        raw::insert_recording(
+                            &tx, CompositeId::new(stream_id, s.next_recording_id + i), &r)?;
+                    }
+                    i += 1;
+                }
+                if i > 0 {
+                    let m = mods.entry(stream_id).or_insert_with(StreamModification::default);
+                    m.num_recordings_to_commit = i;
+                    stmt.execute_named(&[
+                        (":stream_id", &stream_id),
+                        (":next_recording_id", &(s.next_recording_id + i)),
+                    ])?;
+                }
+            }
+        }
+        for dir in self.sample_file_dirs_by_id.values() {
+            raw::mark_sample_files_deleted(&tx, &dir.to_gc)?;
+        }
+        for (&stream_id, m) in &mut mods {
+            m.range = raw::get_range(&tx, stream_id)?;
+        }
+        tx.commit()?;
+
+        // Process delete_recordings.
+        let deleted = self.to_delete.len();
+        for row in self.to_delete.drain(..) {
+            let s = self.streams_by_id.get_mut(&row.id.stream()).unwrap();
+            s.duration -= row.time.end - row.time.start;
+            s.sample_file_bytes -= row.sample_file_bytes as i64;
+            adjust_days(row.time, -1, &mut s.days);
+        }
+
+        // Process delete_garbage.
+        let mut gced = 0;
+        for dir in self.sample_file_dirs_by_id.values_mut() {
+            gced += dir.to_gc.len();
+            for id in dir.to_gc.drain(..) {
+                dir.garbage.remove(&id);
+            }
+        }
+
+        // Process add_recordings.
+        let mut added = 0;
+        for (stream_id, m) in mods.drain() {
+            let s = self.streams_by_id.get_mut(&stream_id).unwrap();
+            s.next_recording_id += m.num_recordings_to_commit;
+            added += m.num_recordings_to_commit;
+            for _ in 0..m.num_recordings_to_commit {
+                let u = s.uncommitted.pop_front().unwrap();
+                let l = u.lock();
+                if let Some(ref r) = l.recording {
+                    s.add_recording(r.time.clone(), r.sample_file_bytes);
+                }
+            }
+            s.range = m.range;
+        }
+        info!("Flush due to {}: added {} recordings, deleted {}, marked {} files GCed.",
+              reason, added, deleted, gced);
+        for cb in &self.on_flush {
+            cb();
+        }
+        Ok(())
+    }
+
+    /// Sets a watcher which will receive an (empty) event on successful flush.
+    /// The lock will be held while this is run, so it should not do any I/O.
+    pub(crate) fn on_flush(&mut self, run: Box<Fn() + Send>) {
+        self.on_flush.push(run);
+    }
+
+    // TODO: find a cleaner way to do this. Seems weird for src/cmds/run.rs to clear the on flush
+    // handlers given that it didn't add them.
+    pub fn clear_on_flush(&mut self) {
+        self.on_flush.clear();
     }
 
     /// Opens the given sample file directories.
@@ -1025,7 +914,7 @@ impl LockedDatabase {
     /// in practice.
     pub fn open_sample_file_dirs(&mut self, ids: &[i32]) -> Result<(), Error> {
         let mut in_progress = FnvHashMap::with_capacity_and_hasher(ids.len(), Default::default());
-        let o = self.state.open.as_ref();
+        let o = self.open.as_ref();
         for &id in ids {
             let e = in_progress.entry(id);
             use ::std::collections::hash_map::Entry;
@@ -1033,13 +922,13 @@ impl LockedDatabase {
                 Entry::Occupied(_) => continue,  // suppress duplicate.
                 Entry::Vacant(e) => e,
             };
-            let dir = self.state
+            let dir = self
                           .sample_file_dirs_by_id
                           .get_mut(&id)
                           .ok_or_else(|| format_err!("no such dir {}", id))?;
             if dir.dir.is_some() { continue }
             let mut meta = schema::DirMeta::default();
-            meta.db_uuid.extend_from_slice(&self.state.uuid.as_bytes()[..]);
+            meta.db_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
             meta.dir_uuid.extend_from_slice(&dir.uuid.as_bytes()[..]);
             if let Some(o) = dir.last_complete_open {
                 let open = meta.mut_last_complete_open();
@@ -1078,7 +967,7 @@ impl LockedDatabase {
         tx.commit()?;
 
         for (id, (mut meta, d)) in in_progress.drain() {
-            let dir = self.state.sample_file_dirs_by_id.get_mut(&id).unwrap();
+            let dir = self.sample_file_dirs_by_id.get_mut(&id).unwrap();
             meta.last_complete_open.clear();
             mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
             d.write_meta(&meta)?;
@@ -1088,30 +977,17 @@ impl LockedDatabase {
         Ok(())
     }
 
-    pub fn streams_by_id(&self) -> &BTreeMap<i32, Stream> { &self.state.streams_by_id }
+    pub fn streams_by_id(&self) -> &BTreeMap<i32, Stream> { &self.streams_by_id }
 
     /// Returns an immutable view of the video sample entries.
     pub fn video_sample_entries(&self) -> btree_map::Values<i32, Arc<VideoSampleEntry>> {
-        self.state.video_sample_entries.values()
-    }
-
-    /// Starts a transaction for a write operation.
-    /// Note transactions are not needed for read operations; this process holds a lock on the
-    /// database directory, and the connection is locked within the process, so having a
-    /// `LockedDatabase` is sufficient to ensure a consistent view.
-    pub fn tx(&mut self) -> Result<Transaction, Error> {
-        Ok(Transaction {
-            state: &mut self.state,
-            mods_by_stream: FnvHashMap::default(),
-            tx: self.conn.transaction()?,
-            must_rollback: false,
-        })
+        self.video_sample_entries.values()
     }
 
     /// Gets a given camera by uuid.
     pub fn get_camera(&self, uuid: Uuid) -> Option<&Camera> {
-        match self.state.cameras_by_uuid.get(&uuid) {
-            Some(id) => Some(self.state.cameras_by_id.get(id).expect("uuid->id requires id->cam")),
+        match self.cameras_by_uuid.get(&uuid) {
+            Some(id) => Some(self.cameras_by_id.get(id).expect("uuid->id requires id->cam")),
             None => None,
         }
     }
@@ -1121,7 +997,7 @@ impl LockedDatabase {
     pub fn list_recordings_by_time<F>(&self, stream_id: i32, desired_time: Range<recording::Time>,
                                       f: F) -> Result<(), Error>
     where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
-        let mut stmt = self.conn.prepare_cached(&self.state.list_recordings_by_time_sql)?;
+        let mut stmt = self.conn.prepare_cached(&self.list_recordings_by_time_sql)?;
         let rows = stmt.query_named(&[
             (":stream_id", &stream_id),
             (":start_time_90k", &desired_time.start.0),
@@ -1147,7 +1023,7 @@ impl LockedDatabase {
             let row = row?;
             let id = CompositeId(row.get_checked::<_, i64>(0)?);
             let vse_id = row.get_checked(8)?;
-            let video_sample_entry = match self.state.video_sample_entries.get(&vse_id) {
+            let video_sample_entry = match self.video_sample_entries.get(&vse_id) {
                 Some(v) => v,
                 None => bail!("recording {} references nonexistent video_sample_entry {}",
                               id, vse_id),
@@ -1245,7 +1121,7 @@ impl LockedDatabase {
     /// This uses a LRU cache to reduce the number of retrievals from the database.
     pub fn with_recording_playback<F, R>(&self, id: CompositeId, f: F) -> Result<R, Error>
     where F: FnOnce(&RecordingPlayback) -> Result<R, Error> {
-        let mut cache = self.state.video_index_cache.borrow_mut();
+        let mut cache = self.video_index_cache.borrow_mut();
         if let Some(video_index) = cache.get_mut(&id.0) {
             trace!("cache hit for recording {}", id);
             return f(&RecordingPlayback { video_index });
@@ -1263,23 +1139,18 @@ impl LockedDatabase {
         Err(format_err!("no such recording {}", id))
     }
 
-    /// Lists all garbage ids.
-    pub fn list_garbage(&self, dir_id: i32) -> Result<Vec<CompositeId>, Error> {
-        let mut garbage = Vec::new();
-        let mut stmt = self.conn.prepare_cached(
-            "select composite_id from garbage where sample_file_dir_id = ?")?;
-        let mut rows = stmt.query(&[&dir_id])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            garbage.push(CompositeId(row.get_checked(0)?));
-        }
-        Ok(garbage)
-    }
-
     /// Lists the oldest sample files (to delete to free room).
     /// `f` should return true as long as further rows are desired.
-    pub fn list_oldest_sample_files<F>(&self, stream_id: i32, mut f: F) -> Result<(), Error>
+    pub(crate) fn list_oldest_sample_files<F>(&self, stream_id: i32, mut f: F) -> Result<(), Error>
     where F: FnMut(ListOldestSampleFilesRow) -> bool {
+        let s = match self.streams_by_id.get(&stream_id) {
+            None => bail!("no stream {}", stream_id),
+            Some(s) => s,
+        };
+        let sample_file_dir_id = match s.sample_file_dir_id {
+            None => bail!("stream {} has no dir", stream_id),
+            Some(d) => d,
+        };
         let mut stmt = self.conn.prepare_cached(LIST_OLDEST_SAMPLE_FILES_SQL)?;
         let mut rows = stmt.query_named(&[
             (":start", &CompositeId::new(stream_id, 0).0),
@@ -1292,6 +1163,7 @@ impl LockedDatabase {
             let duration = recording::Duration(row.get_checked(2)?);
             let should_continue = f(ListOldestSampleFilesRow{
                 id,
+                sample_file_dir_id,
                 time: start .. start + duration,
                 sample_file_bytes: row.get_checked(3)?,
             });
@@ -1328,7 +1200,7 @@ impl LockedDatabase {
             sha1.copy_from_slice(&sha1_vec);
             let data: Vec<u8> = row.get_checked(5)?;
 
-            self.state.video_sample_entries.insert(id, Arc::new(VideoSampleEntry {
+            self.video_sample_entries.insert(id, Arc::new(VideoSampleEntry {
                 id: id as i32,
                 width: row.get_checked::<_, i32>(2)? as u16,
                 height: row.get_checked::<_, i32>(3)? as u16,
@@ -1338,7 +1210,7 @@ impl LockedDatabase {
             }));
         }
         info!("Loaded {} video sample entries",
-              self.state.video_sample_entries.len());
+              self.video_sample_entries.len());
         Ok(())
     }
 
@@ -1368,15 +1240,17 @@ impl LockedDatabase {
                 (None, None) => None,
                 _ => bail!("open table missing id {}", id),
             };
-            self.state.sample_file_dirs_by_id.insert(id, SampleFileDir {
+            self.sample_file_dirs_by_id.insert(id, SampleFileDir {
                 id,
                 uuid: dir_uuid.0,
                 path: row.get_checked(1)?,
                 dir: None,
                 last_complete_open,
+                to_gc: Vec::new(),
+                garbage: raw::list_garbage(&self.conn, id)?,
             });
         }
-        info!("Loaded {} sample file dirs", self.state.sample_file_dirs_by_id.len());
+        info!("Loaded {} sample file dirs", self.sample_file_dirs_by_id.len());
         Ok(())
     }
 
@@ -1401,7 +1275,7 @@ impl LockedDatabase {
             let row = row?;
             let id = row.get_checked(0)?;
             let uuid: FromSqlUuid = row.get_checked(1)?;
-            self.state.cameras_by_id.insert(id, Camera {
+            self.cameras_by_id.insert(id, Camera {
                 id: id,
                 uuid: uuid.0,
                 short_name: row.get_checked(2)?,
@@ -1411,9 +1285,9 @@ impl LockedDatabase {
                 password: row.get_checked(6)?,
                 streams: Default::default(),
             });
-            self.state.cameras_by_uuid.insert(uuid.0, id);
+            self.cameras_by_uuid.insert(uuid.0, id);
         }
-        info!("Loaded {} cameras", self.state.cameras_by_id.len());
+        info!("Loaded {} cameras", self.cameras_by_id.len());
         Ok(())
     }
 
@@ -1429,6 +1303,7 @@ impl LockedDatabase {
               sample_file_dir_id,
               rtsp_path,
               retain_bytes,
+              flush_if_sec,
               next_recording_id,
               record
             from
@@ -1442,28 +1317,32 @@ impl LockedDatabase {
             let type_ = StreamType::parse(&type_).ok_or_else(
                 || format_err!("no such stream type {}", type_))?;
             let camera_id = row.get_checked(2)?;
-            let c = self.state
+            let c = self
                         .cameras_by_id
                         .get_mut(&camera_id)
                         .ok_or_else(|| format_err!("missing camera {} for stream {}",
                                                    camera_id, id))?;
-            self.state.streams_by_id.insert(id, Stream {
+            let flush_if_sec = row.get_checked(6)?;
+            self.streams_by_id.insert(id, Stream {
                 id,
                 type_,
                 camera_id,
                 sample_file_dir_id: row.get_checked(3)?,
                 rtsp_path: row.get_checked(4)?,
                 retain_bytes: row.get_checked(5)?,
+                flush_if_sec,
+                flush_if: recording::Duration(flush_if_sec * recording::TIME_UNITS_PER_SEC),
                 range: None,
                 sample_file_bytes: 0,
                 duration: recording::Duration(0),
                 days: BTreeMap::new(),
-                next_recording_id: row.get_checked(6)?,
-                record: row.get_checked(7)?,
+                next_recording_id: row.get_checked(7)?,
+                record: row.get_checked(8)?,
+                uncommitted: VecDeque::new(),
             });
             c.streams[type_.index()] = Some(id);
         }
-        info!("Loaded {} streams", self.state.streams_by_id.len());
+        info!("Loaded {} streams", self.streams_by_id.len());
         Ok(())
     }
 
@@ -1477,7 +1356,7 @@ impl LockedDatabase {
 
         // Check if it already exists.
         // There shouldn't be too many entries, so it's fine to enumerate everything.
-        for (&id, v) in &self.state.video_sample_entries {
+        for (&id, v) in &self.video_sample_entries {
             if v.sha1 == sha1_bytes {
                 // The width and height should match given that they're also specified within data
                 // and thus included in the just-compared hash.
@@ -1499,7 +1378,7 @@ impl LockedDatabase {
         ])?;
 
         let id = self.conn.last_insert_rowid() as i32;
-        self.state.video_sample_entries.insert(id, Arc::new(VideoSampleEntry {
+        self.video_sample_entries.insert(id, Arc::new(VideoSampleEntry {
             id,
             width,
             height,
@@ -1515,14 +1394,14 @@ impl LockedDatabase {
         let mut meta = schema::DirMeta::default();
         let uuid = Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
-        let o = self.state
+        let o = self
                     .open
                     .as_ref()
                     .ok_or_else(|| format_err!("database is read-only"))?;
 
         // Populate meta.
         {
-            meta.db_uuid.extend_from_slice(&self.state.uuid.as_bytes()[..]);
+            meta.db_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
             meta.dir_uuid.extend_from_slice(uuid_bytes);
             let open = meta.mut_in_progress_open();
             open.id = o.id;
@@ -1530,6 +1409,7 @@ impl LockedDatabase {
         }
 
         let dir = dir::SampleFileDir::create(&path, &meta)?;
+        // TODO: ensure the dir is empty?
         let uuid = Uuid::new_v4();
         self.conn.execute(r#"
             insert into sample_file_dir (path, uuid, last_complete_open_id)
@@ -1537,7 +1417,7 @@ impl LockedDatabase {
         "#, &[&path, &uuid_bytes, &o.id])?;
         let id = self.conn.last_insert_rowid() as i32;
         use ::std::collections::btree_map::Entry;
-        let e = self.state.sample_file_dirs_by_id.entry(id);
+        let e = self.sample_file_dirs_by_id.entry(id);
         let d = match e {
             Entry::Vacant(e) => e.insert(SampleFileDir {
                 id,
@@ -1545,6 +1425,8 @@ impl LockedDatabase {
                 uuid,
                 dir: Some(dir),
                 last_complete_open: None,
+                to_gc: Vec::new(),
+                garbage: FnvHashSet::default(),
             }),
             Entry::Occupied(_) => Err(format_err!("duplicate sample file dir id {}", id))?,
         };
@@ -1555,7 +1437,7 @@ impl LockedDatabase {
     }
 
     pub fn delete_sample_file_dir(&mut self, dir_id: i32) -> Result<(), Error> {
-        for (&id, s) in self.state.streams_by_id.iter() {
+        for (&id, s) in self.streams_by_id.iter() {
             if s.sample_file_dir_id == Some(dir_id) {
                 bail!("can't delete dir referenced by stream {}", id);
             }
@@ -1565,7 +1447,7 @@ impl LockedDatabase {
         if self.conn.execute("delete from sample_file_dir where id = ?", &[&dir_id])? != 1 {
             bail!("no such dir {} to remove", dir_id);
         }
-        self.state.sample_file_dirs_by_id.remove(&dir_id).expect("sample file dir should exist!");
+        self.sample_file_dirs_by_id.remove(&dir_id).expect("sample file dir should exist!");
         Ok(())
     }
 
@@ -1590,12 +1472,12 @@ impl LockedDatabase {
                 (":password", &camera.password),
             ])?;
             camera_id = tx.last_insert_rowid() as i32;
-            streams = StreamStateChanger::new(&tx, camera_id, None, &self.state.streams_by_id,
+            streams = StreamStateChanger::new(&tx, camera_id, None, &self.streams_by_id,
                                          &mut camera)?;
         }
         tx.commit()?;
-        let streams = streams.apply(&mut self.state.streams_by_id);
-        self.state.cameras_by_id.insert(camera_id, Camera {
+        let streams = streams.apply(&mut self.streams_by_id);
+        self.cameras_by_id.insert(camera_id, Camera {
             id: camera_id,
             uuid,
             short_name: camera.short_name,
@@ -1605,7 +1487,7 @@ impl LockedDatabase {
             password: camera.password,
             streams,
         });
-        self.state.cameras_by_uuid.insert(uuid, camera_id);
+        self.cameras_by_uuid.insert(uuid, camera_id);
         Ok(camera_id)
     }
 
@@ -1614,12 +1496,12 @@ impl LockedDatabase {
         // TODO: sample_file_dir_id. disallow change when data is stored; change otherwise.
         let tx = self.conn.transaction()?;
         let streams;
-        let c = self.state
+        let c = self
                     .cameras_by_id
                     .get_mut(&camera_id)
                     .ok_or_else(|| format_err!("no such camera {}", camera_id))?;
         {
-            streams = StreamStateChanger::new(&tx, camera_id, Some(c), &self.state.streams_by_id,
+            streams = StreamStateChanger::new(&tx, camera_id, Some(c), &self.streams_by_id,
                                          &mut camera)?;
             let mut stmt = tx.prepare_cached(r#"
                 update camera set
@@ -1649,20 +1531,20 @@ impl LockedDatabase {
         c.host = camera.host;
         c.username = camera.username;
         c.password = camera.password;
-        c.streams = streams.apply(&mut self.state.streams_by_id);
+        c.streams = streams.apply(&mut self.streams_by_id);
         Ok(())
     }
 
     /// Deletes a camera and its streams. The camera must have no recordings.
     pub fn delete_camera(&mut self, id: i32) -> Result<(), Error> {
-        let uuid = self.state.cameras_by_id.get(&id)
+        let uuid = self.cameras_by_id.get(&id)
                        .map(|c| c.uuid)
                        .ok_or_else(|| format_err!("No such camera {} to remove", id))?;
         let mut streams_to_delete = Vec::new();
         let tx = self.conn.transaction()?;
         {
             let mut stream_stmt = tx.prepare_cached(r"delete from stream where id = :id")?;
-            for (stream_id, stream) in &self.state.streams_by_id {
+            for (stream_id, stream) in &self.streams_by_id {
                 if stream.camera_id != id { continue };
                 if stream.range.is_some() {
                     bail!("Can't remove camera {}; has recordings.", id);
@@ -1681,11 +1563,46 @@ impl LockedDatabase {
         }
         tx.commit()?;
         for id in streams_to_delete {
-            self.state.streams_by_id.remove(&id);
+            self.streams_by_id.remove(&id);
         }
-        self.state.cameras_by_id.remove(&id);
-        self.state.cameras_by_uuid.remove(&uuid);
+        self.cameras_by_id.remove(&id);
+        self.cameras_by_uuid.remove(&uuid);
         return Ok(())
+    }
+
+    pub fn update_retention(&mut self, changes: &[RetentionChange]) -> Result<(), Error> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(r#"
+                update stream
+                set
+                  record = :record,
+                  retain_bytes = :retain
+                where
+                  id = :id
+            "#)?;
+            for c in changes {
+                if c.new_limit < 0 {
+                    bail!("can't set limit for stream {} to {}; must be >= 0",
+                          c.stream_id, c.new_limit);
+                }
+                let rows = stmt.execute_named(&[
+                    (":record", &c.new_record),
+                    (":retain", &c.new_limit),
+                    (":id", &c.stream_id),
+                ])?;
+                if rows != 1 {
+                    bail!("no such stream {}", c.stream_id);
+                }
+            }
+        }
+        tx.commit()?;
+        for c in changes {
+            let s = self.streams_by_id.get_mut(&c.stream_id).expect("stream in db but not state");
+            s.record = c.new_record;
+            s.retain_bytes = c.new_limit;
+        }
+        Ok(())
     }
 }
 
@@ -1706,8 +1623,20 @@ pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Er
 /// The recording database. Abstracts away SQLite queries. Also maintains in-memory state
 /// (loaded on startup, and updated on successful commit) to avoid expensive scans over the
 /// recording table on common queries.
-#[derive(Debug)]
-pub struct Database(Mutex<LockedDatabase>);
+pub struct Database(
+    /// This is wrapped in an `Option` to allow the `Drop` implementation and `close` to coexist.
+    Option<Mutex<LockedDatabase>>
+);
+
+impl Drop for Database {
+    fn drop(&mut self) {
+        if let Some(m) = self.0.take() {
+            if let Err(e) = m.into_inner().flush("drop") {
+                error!("Final database flush failed: {}", e);
+            }
+        }
+    }
+}
 
 impl Database {
     /// Creates the database from a caller-supplied SQLite connection.
@@ -1770,29 +1699,29 @@ impl Database {
                 uuid,
             })
         } else { None };
-        let db = Database(Mutex::new(LockedDatabase{
+        let db = Database(Some(Mutex::new(LockedDatabase {
             conn: conn,
-            state: State {
-                uuid,
-                open,
-                sample_file_dirs_by_id: BTreeMap::new(),
-                cameras_by_id: BTreeMap::new(),
-                cameras_by_uuid: BTreeMap::new(),
-                streams_by_id: BTreeMap::new(),
-                video_sample_entries: BTreeMap::new(),
-                video_index_cache: RefCell::new(LruCache::with_hasher(1024, Default::default())),
-                list_recordings_by_time_sql: list_recordings_by_time_sql,
-            },
-        }));
+            uuid,
+            open,
+            sample_file_dirs_by_id: BTreeMap::new(),
+            cameras_by_id: BTreeMap::new(),
+            cameras_by_uuid: BTreeMap::new(),
+            streams_by_id: BTreeMap::new(),
+            video_sample_entries: BTreeMap::new(),
+            video_index_cache: RefCell::new(LruCache::with_hasher(1024, Default::default())),
+            list_recordings_by_time_sql,
+            to_delete: Vec::new(),
+            on_flush: Vec::new(),
+        })));
         {
             let l = &mut *db.lock();
             l.init_video_sample_entries()?;
             l.init_sample_file_dirs()?;
             l.init_cameras()?;
             l.init_streams()?;
-            for (&stream_id, ref mut stream) in &mut l.state.streams_by_id {
+            for (&stream_id, ref mut stream) in &mut l.streams_by_id {
                 // TODO: we could use one thread per stream if we had multiple db conns.
-                let camera = l.state.cameras_by_id.get(&stream.camera_id).unwrap();
+                let camera = l.cameras_by_id.get(&stream.camera_id).unwrap();
                 init_recordings(&mut l.conn, stream_id, camera, stream)?;
             }
         }
@@ -1816,13 +1745,13 @@ impl Database {
 
     /// Locks the database; the returned reference is the only way to perform (read or write)
     /// operations.
-    pub fn lock(&self) -> MutexGuard<LockedDatabase> { self.0.lock() }
+    pub fn lock(&self) -> MutexGuard<LockedDatabase> { self.0.as_ref().unwrap().lock() }
 
-    /// For testing. Closes the database and return the connection. This allows verification that
-    /// a newly opened database is in an acceptable state.
+    /// For testing: closes the database (without flushing) and returns the connection.
+    /// This allows verification that a newly opened database is in an acceptable state.
     #[cfg(test)]
-    fn close(self) -> rusqlite::Connection {
-        self.0.into_inner().conn
+    fn close(mut self) -> rusqlite::Connection {
+        self.0.take().unwrap().into_inner().conn
     }
 }
 
@@ -1992,7 +1921,7 @@ mod tests {
     #[test]
     fn test_no_meta_or_version() {
         testutil::init();
-        let e = Database::new(Connection::open_in_memory().unwrap(), false).unwrap_err();
+        let e = Database::new(Connection::open_in_memory().unwrap(), false).err().unwrap();
         assert!(e.to_string().starts_with("no such table"), "{}", e);
     }
 
@@ -2001,7 +1930,7 @@ mod tests {
         testutil::init();
         let c = setup_conn();
         c.execute_batch("delete from version; insert into version values (2, 0, '');").unwrap();
-        let e = Database::new(c, false).unwrap_err();
+        let e = Database::new(c, false).err().unwrap();
         assert!(e.to_string().starts_with(
                 "Database schema version 2 is too old (expected 3)"), "got: {:?}", e);
     }
@@ -2011,7 +1940,7 @@ mod tests {
         testutil::init();
         let c = setup_conn();
         c.execute_batch("delete from version; insert into version values (4, 0, '');").unwrap();
-        let e = Database::new(c, false).unwrap_err();
+        let e = Database::new(c, false).err().unwrap();
         assert!(e.to_string().starts_with(
                 "Database schema version 4 is too new (expected 3)"), "got: {:?}", e);
     }
@@ -2034,7 +1963,7 @@ mod tests {
         let db = Database::new(conn, true).unwrap();
         let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
         let path = tmpdir.path().to_str().unwrap().to_owned();
-        let sample_file_dir_id = Some({ db.lock() }.add_sample_file_dir(path).unwrap());
+        let sample_file_dir_id = { db.lock() }.add_sample_file_dir(path).unwrap();
         let camera_id = { db.lock() }.add_camera(CameraChange {
             short_name: "testcam".to_owned(),
             description: "".to_owned(),
@@ -2042,16 +1971,28 @@ mod tests {
             username: "foo".to_owned(),
             password: "bar".to_owned(),
             streams: [
-                StreamChange { sample_file_dir_id, rtsp_path: "/main".to_owned(), record: true },
-                StreamChange { sample_file_dir_id, rtsp_path: "/sub".to_owned(), record: true },
+                StreamChange {
+                    sample_file_dir_id: Some(sample_file_dir_id),
+                    rtsp_path: "/main".to_owned(),
+                    record: true,
+                    flush_if_sec: 0,
+                },
+                StreamChange {
+                    sample_file_dir_id: Some(sample_file_dir_id),
+                    rtsp_path: "/sub".to_owned(),
+                    record: true,
+                    flush_if_sec: 0,
+                },
             ],
         }).unwrap();
         {
             let mut l = db.lock();
             let stream_id = l.cameras_by_id().get(&camera_id).unwrap().streams[0].unwrap();
-            let mut tx = l.tx().unwrap();
-            tx.update_retention(stream_id, true, 42).unwrap();
-            tx.commit().unwrap();
+            l.update_retention(&[super::RetentionChange {
+                stream_id,
+                new_record: true,
+                new_limit: 42,
+            }]).unwrap();
         }
         let camera_uuid = { db.lock().cameras_by_id().get(&camera_id).unwrap().uuid };
         assert_no_recordings(&db, camera_uuid);
@@ -2061,7 +2002,7 @@ mod tests {
         let db = Database::new(conn, true).unwrap();
         assert_no_recordings(&db, camera_uuid);
 
-        assert_eq!(db.lock().list_garbage(sample_file_dir_id.unwrap()).unwrap(), &[]);
+        // TODO: assert_eq!(db.lock().list_garbage(sample_file_dir_id).unwrap(), &[]);
 
         let vse_id = db.lock().insert_video_sample_entry(
             1920, 1080, include_bytes!("testdata/avc1").to_vec(),
@@ -2071,9 +2012,7 @@ mod tests {
         // Inserting a recording should succeed and advance the next recording id.
         let start = recording::Time(1430006400 * TIME_UNITS_PER_SEC);
         let stream_id = camera_id;  // TODO
-        let id = CompositeId::new(stream_id, 1);
         let recording = RecordingToInsert {
-            id,
             sample_file_bytes: 42,
             run_offset: 0,
             flags: 0,
@@ -2085,12 +2024,14 @@ mod tests {
             video_index: [0u8; 100].to_vec(),
             sample_file_sha1: [0u8; 20],
         };
-        {
+        let id = {
             let mut db = db.lock();
-            let mut tx = db.tx().unwrap();
-            tx.insert_recording(&recording).unwrap();
-            tx.commit().unwrap();
-        }
+            let (id, u) = db.add_recording(stream_id).unwrap();
+            u.lock().recording = Some(recording.clone());
+            u.lock().synced = true;
+            db.flush("add test").unwrap();
+            id
+        };
         assert_eq!(db.lock().streams_by_id().get(&stream_id).unwrap().next_recording_id, 2);
 
         // Queries should return the correct result (with caches update on insert).
@@ -2108,36 +2049,18 @@ mod tests {
             let mut v = Vec::new();
             db.list_oldest_sample_files(stream_id, |r| { v.push(r); true }).unwrap();
             assert_eq!(1, v.len());
-            let mut tx = db.tx().unwrap();
-            tx.delete_recordings(&v).unwrap();
-            tx.commit().unwrap();
+            db.delete_recordings(&mut v);
+            db.flush("delete test").unwrap();
         }
         assert_no_recordings(&db, camera_uuid);
-        assert_eq!(db.lock().list_garbage(sample_file_dir_id.unwrap()).unwrap(), vec![id]);
-    }
-
-    #[test]
-    fn test_drop_tx() {
-        testutil::init();
-        let conn = setup_conn();
-        conn.execute("insert into garbage values (1, ?)", &[&CompositeId::new(1, 1).0]).unwrap();
-        let db = Database::new(conn, true).unwrap();
-        let mut db = db.lock();
-        {
-            let mut tx = db.tx().unwrap();
-            tx.mark_sample_files_deleted(&[CompositeId::new(1, 1)]).unwrap();
-            // drop tx without committing.
-        }
-
-        // The dropped tx should have done nothing.
-        assert_eq!(db.list_garbage(1).unwrap(), &[CompositeId::new(1, 1)]);
-
-        // Following transactions should succeed.
-        {
-            let mut tx = db.tx().unwrap();
-            tx.mark_sample_files_deleted(&[CompositeId::new(1, 1)]).unwrap();
-            tx.commit().unwrap();
-        }
-        assert_eq!(db.list_garbage(1).unwrap(), &[]);
+        let g: Vec<_> = db.lock()
+                          .sample_file_dirs_by_id()
+                          .get(&sample_file_dir_id)
+                          .unwrap()
+                          .garbage
+                          .iter()
+                          .map(|&id| id)
+                          .collect();
+        assert_eq!(&g, &[id]);
     }
 }

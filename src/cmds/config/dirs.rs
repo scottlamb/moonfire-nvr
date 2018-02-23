@@ -60,12 +60,15 @@ struct Model {
 
 /// Updates the limits in the database. Doesn't delete excess data (if any).
 fn update_limits_inner(model: &Model) -> Result<(), Error> {
-    let mut db = model.db.lock();
-    let mut tx = db.tx()?;
-    for (&id, stream) in &model.streams {
-        tx.update_retention(id, stream.record, stream.retain.unwrap())?;
+    let mut changes = Vec::with_capacity(model.streams.len());
+    for (&stream_id, stream) in &model.streams {
+        changes.push(db::RetentionChange {
+            stream_id,
+            new_record: stream.record,
+            new_limit: stream.retain.unwrap(),
+        });
     }
-    tx.commit()
+    model.db.lock().update_retention(&changes)
 }
 
 fn update_limits(model: &Model, siv: &mut Cursive) {
