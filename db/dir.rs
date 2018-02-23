@@ -383,7 +383,7 @@ fn get_rows_to_delete(db: &db::LockedDatabase, stream_id: i32,
         return Ok(());
     }
     let mut n = 0;
-    db.list_oldest_sample_files(stream_id, |row| {
+    db.list_oldest_sample_files(stream_id, &mut |row| {
         bytes_to_delete += row.sample_file_bytes as i64;
         to_delete.push(row);
         n += 1;

@@ -385,7 +385,7 @@ mod tests {
             Frame{start_90k:  90011, duration_90k:     0, is_key: false},
         ]);
         let mut recordings = Vec::new();
-        db.list_recordings_by_id(testutil::TEST_STREAM_ID, 1..3, |r| {
+        db.list_recordings_by_id(testutil::TEST_STREAM_ID, 1..3, &mut |r| {
             recordings.push(r);
             Ok(())
         }).unwrap();

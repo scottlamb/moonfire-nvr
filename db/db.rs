@@ -999,9 +999,9 @@ impl LockedDatabase {
 
     /// Lists the specified recordings in ascending order by start time, passing them to a supplied
     /// function. Given that the function is called with the database lock held, it should be quick.
-    pub fn list_recordings_by_time<F>(&self, stream_id: i32, desired_time: Range<recording::Time>,
-                                      f: F) -> Result<(), Error>
-    where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
+    pub fn list_recordings_by_time(
+        &self, stream_id: i32, desired_time: Range<recording::Time>,
+        f: &mut FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
         let mut stmt = self.conn.prepare_cached(&self.list_recordings_by_time_sql)?;
         let rows = stmt.query_named(&[
             (":stream_id", &stream_id),
@@ -1011,9 +1011,9 @@ impl LockedDatabase {
     }
 
     /// Lists the specified recordigs in ascending order by id.
-    pub fn list_recordings_by_id<F>(&self, stream_id: i32, desired_ids: Range<i32>, f: F)
-                                    -> Result<(), Error>
-    where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
+    pub fn list_recordings_by_id(
+        &self, stream_id: i32, desired_ids: Range<i32>,
+        f: &mut FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
         let mut stmt = self.conn.prepare_cached(LIST_RECORDINGS_BY_ID_SQL)?;
         let rows = stmt.query_named(&[
             (":start", &CompositeId::new(stream_id, desired_ids.start).0),
@@ -1022,8 +1022,9 @@ impl LockedDatabase {
         self.list_recordings_inner(rows, f)
     }
 
-    fn list_recordings_inner<F>(&self, mut rows: rusqlite::Rows, mut f: F) -> Result<(), Error>
-    where F: FnMut(ListRecordingsRow) -> Result<(), Error> {
+    fn list_recordings_inner(
+        &self, mut rows: rusqlite::Rows,
+        f: &mut FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
         while let Some(row) = rows.next() {
             let row = row?;
             let id = CompositeId(row.get_checked::<_, i64>(0)?);
@@ -1052,11 +1053,11 @@ impl LockedDatabase {
     /// Calls `list_recordings_by_time` and aggregates consecutive recordings.
     /// Rows are given to the callback in arbitrary order. Callers which care about ordering
     /// should do their own sorting.
-    pub fn list_aggregated_recordings<F>(&self, stream_id: i32,
-                                         desired_time: Range<recording::Time>,
-                                         forced_split: recording::Duration,
-                                         mut f: F) -> Result<(), Error>
-    where F: FnMut(&ListAggregatedRecordingsRow) -> Result<(), Error> {
+    pub fn list_aggregated_recordings(
+        &self, stream_id: i32, desired_time: Range<recording::Time>,
+        forced_split: recording::Duration,
+        f: &mut FnMut(&ListAggregatedRecordingsRow) -> Result<(), Error>)
+        -> Result<(), Error> {
         // Iterate, maintaining a map from a recording_id to the aggregated row for the latest
         // batch of recordings from the run starting at that id. Runs can be split into multiple
         // batches for a few reasons:
@@ -1071,7 +1072,7 @@ impl LockedDatabase {
         // their timestamps overlap. Tracking all active runs prevents that interleaving from
         // causing problems.)
         let mut aggs: BTreeMap<i32, ListAggregatedRecordingsRow> = BTreeMap::new();
-        self.list_recordings_by_time(stream_id, desired_time, |row| {
+        self.list_recordings_by_time(stream_id, desired_time, &mut |row| {
             let recording_id = row.id.recording();
             let run_start_id = recording_id - row.run_offset;
             let needs_flush = if let Some(a) = aggs.get(&run_start_id) {
@@ -1146,8 +1147,9 @@ impl LockedDatabase {
 
     /// Lists the oldest sample files (to delete to free room).
     /// `f` should return true as long as further rows are desired.
-    pub(crate) fn list_oldest_sample_files<F>(&self, stream_id: i32, mut f: F) -> Result<(), Error>
-    where F: FnMut(ListOldestSampleFilesRow) -> bool {
+    pub(crate) fn list_oldest_sample_files(
+        &self, stream_id: i32, f: &mut FnMut(ListOldestSampleFilesRow) -> bool)
+        -> Result<(), Error> {
         let s = match self.streams_by_id.get(&stream_id) {
             None => bail!("no stream {}", stream_id),
             Some(s) => s,
@@ -1805,7 +1807,7 @@ mod tests {
         {
             let db = db.lock();
             let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
-            db.list_recordings_by_time(stream_id, all_time, |_row| {
+            db.list_recordings_by_time(stream_id, all_time, &mut |_row| {
                 rows += 1;
                 Ok(())
             }).unwrap();
@@ -1830,7 +1832,7 @@ mod tests {
         {
             let db = db.lock();
             let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
-            db.list_recordings_by_time(stream_id, all_time, |row| {
+            db.list_recordings_by_time(stream_id, all_time, &mut |row| {
                 rows += 1;
                 recording_id = Some(row.id);
                 assert_eq!(r.time,
@@ -1845,7 +1847,7 @@ mod tests {
         assert_eq!(1, rows);
 
         rows = 0;
-        db.lock().list_oldest_sample_files(stream_id, |row| {
+        db.lock().list_oldest_sample_files(stream_id, &mut |row| {
             rows += 1;
             assert_eq!(recording_id, Some(row.id));
             assert_eq!(r.time, row.time);
@@ -2052,7 +2054,7 @@ mod tests {
         {
             let mut db = db.lock();
             let mut v = Vec::new();
-            db.list_oldest_sample_files(stream_id, |r| { v.push(r); true }).unwrap();
+            db.list_oldest_sample_files(stream_id, &mut |r| { v.push(r); true }).unwrap();
             assert_eq!(1, v.len());
             db.delete_recordings(&mut v);
             db.flush("delete test").unwrap();

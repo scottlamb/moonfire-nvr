@@ -257,7 +257,7 @@ impl ServiceInner {
                            .ok_or_else(|| format_err!("no such camera {}", uuid))?;
             let stream_id = camera.streams[type_.index()]
                                   .ok_or_else(|| format_err!("no such stream {}/{}", uuid, type_))?;
-            db.list_aggregated_recordings(stream_id, r, split, |row| {
+            db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
                 let end = row.ids.end - 1;  // in api, ids are inclusive.
                 out.recordings.push(json::Recording {
                     start_id: row.ids.start,
@@ -327,7 +327,7 @@ impl ServiceInner {
                         let db = self.db.lock();
                         let mut prev = None;
                         let mut cur_off = 0;
-                        db.list_recordings_by_id(stream_id, s.ids.clone(), |r| {
+                        db.list_recordings_by_id(stream_id, s.ids.clone(), &mut |r| {
                             let recording_id = r.id.recording();
 
                             // Check for missing recordings.

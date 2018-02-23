@@ -1788,7 +1788,7 @@ mod tests {
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
         {
             let db = tdb.db.lock();
-            db.list_recordings_by_time(TEST_STREAM_ID, all_time, |r| {
+            db.list_recordings_by_time(TEST_STREAM_ID, all_time, &mut |r| {
                 let d = r.duration_90k;
                 assert!(skip_90k + shorten_90k < d);
                 builder.append(&*db, r, skip_90k .. d - shorten_90k).unwrap();
@@ -2252,7 +2252,7 @@ mod bench {
         let segment = {
             let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
             let mut row = None;
-            db.list_recordings_by_time(testutil::TEST_STREAM_ID, all_time, |r| {
+            db.list_recordings_by_time(testutil::TEST_STREAM_ID, all_time, &mut |r| {
                 row = Some(r);
                 Ok(())
             }).unwrap();

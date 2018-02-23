@@ -149,7 +149,7 @@ impl TestDb {
         db.flush("create_recording_from_encoder").unwrap();
         let mut row = None;
         db.list_recordings_by_id(TEST_STREAM_ID, id.recording() .. id.recording()+1,
-                                   |r| { row = Some(r); Ok(()) }).unwrap();
+                                 &mut |r| { row = Some(r); Ok(()) }).unwrap();
         row.unwrap()
     }
 }
