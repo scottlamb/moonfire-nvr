@@ -826,8 +826,13 @@ impl LockedDatabase {
                         None => bail!("stream {} has no directory!", stream_id),
                         Some(d) => d,
                     };
+                    let start = CompositeId::new(stream_id, 0);
                     let end = CompositeId(l.id.0 + 1);
-                    raw::delete_recordings(&tx, dir, CompositeId::new(stream_id, 0) .. end)?;
+                    let n = raw::delete_recordings(&tx, dir, start .. end)? as usize;
+                    if n != s.to_delete.len() {
+                        bail!("Found {} rows in {} .. {}, expected {}: {:?}",
+                              n, start, end, s.to_delete.len(), &s.to_delete);
+                    }
                 }
             }
         }

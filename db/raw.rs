@@ -122,9 +122,11 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
 
 /// Tranfers the given recording range from the `recording` and `recording_playback` tables to the
 /// `garbage` table. `sample_file_dir_id` is assumed to be correct.
+///
+/// Returns the number of recordings which were deleted.
 pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: i32,
                                 ids: Range<CompositeId>)
-                                -> Result<(), Error> {
+                                -> Result<i32, Error> {
     let mut insert = tx.prepare_cached(r#"
         insert into garbage (sample_file_dir_id, composite_id)
         select
@@ -148,7 +150,7 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
           :start <= composite_id and
           composite_id < :end
     "#)?;
-    insert.execute_named(&[
+    let n = insert.execute_named(&[
         (":sample_file_dir_id", &sample_file_dir_id),
         (":start", &ids.start.0),
         (":end", &ids.end.0),
@@ -157,9 +159,15 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
         (":start", &ids.start.0),
         (":end", &ids.end.0),
     ];
-    del1.execute_named(p)?;
-    del2.execute_named(p)?;
-    Ok(())
+    let n1 = del1.execute_named(p)?;
+    if n1 != n {
+        bail!("inserted {} rows but deleted {} recording rows!", n, n1);
+    }
+    let n2 = del2.execute_named(p)?;
+    if n2 != n {
+        bail!("deleted {} recording rows but {} recording_playback rows!", n, n2);
+    }
+    Ok(n)
 }
 
 /// Marks the given sample files as deleted. This shouldn't be called until the files have
