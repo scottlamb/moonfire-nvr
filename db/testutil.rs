@@ -165,7 +165,6 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
     const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
     const DURATION: recording::Duration = recording::Duration(5399985);
     let mut recording = db::RecordingToInsert {
-        id: db::CompositeId::new(TEST_STREAM_ID, 1),
         sample_file_bytes: 30104460,
         flags: 0,
         time: START_TIME .. (START_TIME + DURATION),
@@ -177,13 +176,13 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
         sample_file_sha1: [0; 20],
         run_offset: 0,
     };
-    let mut tx = db.tx().unwrap();
-    for i in 0..num {
-        tx.insert_recording(&recording).unwrap();
-        recording.id = db::CompositeId::new(TEST_STREAM_ID, 2 + i as i32);
+    for _ in 0..num {
+        let (_, u) = db.add_recording(TEST_STREAM_ID).unwrap();
+        u.lock().recording = Some(recording.clone());
+        u.lock().synced = true;
         recording.time.start += DURATION;
         recording.time.end += DURATION;
         recording.run_offset += 1;
     }
-    tx.commit().unwrap();
+    db.flush("add_dummy_recordings_to_db").unwrap();
 }
