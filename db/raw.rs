@@ -72,6 +72,21 @@ const STREAM_MAX_START_SQL: &'static str = r#"
     order by start_time_90k desc;
 "#;
 
+const LIST_OLDEST_RECORDINGS_SQL: &'static str = r#"
+    select
+      composite_id,
+      start_time_90k,
+      duration_90k,
+      sample_file_bytes
+    from
+      recording
+    where
+      :start <= composite_id and
+      composite_id < :end
+    order by
+      composite_id
+"#;
+
 /// Inserts the specified recording (for from `try_flush` only).
 pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: CompositeId,
                     r: &db::RecordingToInsert) -> Result<(), Error> {
@@ -105,33 +120,45 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
     Ok(())
 }
 
-/// Deletes the given recordings from the `recording` and `recording_playback` tables.
-/// Note they are not fully removed from the database; the ids are transferred to the
-/// `garbage` table.
-pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, rows: &[db::ListOldestSampleFilesRow])
+/// Tranfers the given recording range from the `recording` and `recording_playback` tables to the
+/// `garbage` table. `sample_file_dir_id` is assumed to be correct.
+pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: i32,
+                                ids: Range<CompositeId>)
                                 -> Result<(), Error> {
-    let mut del1 = tx.prepare_cached(
-        "delete from recording_playback where composite_id = :composite_id")?;
-    let mut del2 = tx.prepare_cached(
-        "delete from recording where composite_id = :composite_id")?;
     let mut insert = tx.prepare_cached(r#"
-        insert into garbage (sample_file_dir_id,  composite_id)
-                     values (:sample_file_dir_id, :composite_id)
+        insert into garbage (sample_file_dir_id, composite_id)
+        select
+          :sample_file_dir_id,
+          composite_id
+        from
+          recording
+        where
+          :start <= composite_id and
+          composite_id < :end
     "#)?;
-    for row in rows {
-        let changes = del1.execute_named(&[(":composite_id", &row.id.0)])?;
-        if changes != 1 {
-            bail!("no such recording_playback {}", row.id);
-        }
-        let changes = del2.execute_named(&[(":composite_id", &row.id.0)])?;
-        if changes != 1 {
-            bail!("no such recording {}", row.id);
-        }
-        insert.execute_named(&[
-            (":sample_file_dir_id", &row.sample_file_dir_id),
-            (":composite_id", &row.id.0)],
-        )?;
-    }
+    let mut del1 = tx.prepare_cached(r#"
+        delete from recording_playback
+        where
+          :start <= composite_id and
+          composite_id < :end
+    "#)?;
+    let mut del2 = tx.prepare_cached(r#"
+        delete from recording
+        where
+          :start <= composite_id and
+          composite_id < :end
+    "#)?;
+    insert.execute_named(&[
+        (":sample_file_dir_id", &sample_file_dir_id),
+        (":start", &ids.start.0),
+        (":end", &ids.end.0),
+    ])?;
+    let p: &[(&str, &rusqlite::types::ToSql)] = &[
+        (":start", &ids.start.0),
+        (":end", &ids.end.0),
+    ];
+    del1.execute_named(p)?;
+    del2.execute_named(p)?;
     Ok(())
 }
 
@@ -201,4 +228,29 @@ pub(crate) fn list_garbage(conn: &rusqlite::Connection, dir_id: i32)
         garbage.insert(CompositeId(row.get_checked(0)?));
     }
     Ok(garbage)
+}
+
+/// Lists the oldest recordings for a stream, starting with the given id.
+/// `f` should return true as long as further rows are desired.
+pub(crate) fn list_oldest_recordings(conn: &rusqlite::Connection, start: CompositeId,
+                                     f: &mut FnMut(db::ListOldestRecordingsRow) -> bool)
+    -> Result<(), Error> {
+    let mut stmt = conn.prepare_cached(LIST_OLDEST_RECORDINGS_SQL)?;
+    let mut rows = stmt.query_named(&[
+        (":start", &start.0),
+        (":end", &CompositeId::new(start.stream() + 1, 0).0),
+    ])?;
+    while let Some(row) = rows.next() {
+        let row = row?;
+        let should_continue = f(db::ListOldestRecordingsRow {
+            id: CompositeId(row.get_checked(0)?),
+            start: recording::Time(row.get_checked(1)?),
+            duration: row.get_checked(2)?,
+            sample_file_bytes: row.get_checked(3)?,
+        });
+        if !should_continue {
+            break;
+        }
+    }
+    Ok(())
 }

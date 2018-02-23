@@ -357,43 +357,52 @@ pub fn lower_retention(db: Arc<db::Database>, dir_id: i32, limits: &[NewLimit])
     let db2 = db.clone();
     let (mut syncer, _) = Syncer::new(&db.lock(), db2, dir_id)?;
     syncer.do_rotation(|db| {
-        let mut to_delete = Vec::new();
         for l in limits {
-            let before = to_delete.len();
-            let stream = db.streams_by_id().get(&l.stream_id)
-                           .ok_or_else(|| format_err!("no such stream {}", l.stream_id))?;
-            if l.limit >= stream.sample_file_bytes { continue }
-            get_rows_to_delete(db, l.stream_id, stream, stream.retain_bytes - l.limit,
-                               &mut to_delete)?;
-            info!("stream {}, {}->{}, deleting {} rows", stream.id,
-                  stream.sample_file_bytes, l.limit, to_delete.len() - before);
+            let (bytes_before, extra);
+            {
+                let stream = db.streams_by_id().get(&l.stream_id)
+                               .ok_or_else(|| format_err!("no such stream {}", l.stream_id))?;
+                bytes_before = stream.sample_file_bytes - stream.bytes_to_delete;
+                extra = stream.retain_bytes - l.limit;
+            }
+            if l.limit >= bytes_before { continue }
+            delete_recordings(db, l.stream_id, extra)?;
+            let stream = db.streams_by_id().get(&l.stream_id).unwrap();
+            info!("stream {}, deleting: {}->{}", l.stream_id, bytes_before,
+                  stream.sample_file_bytes - stream.bytes_to_delete);
         }
-        Ok(to_delete)
+        Ok(())
     })
 }
 
-/// Gets rows to delete to bring a stream's disk usage within bounds.
-fn get_rows_to_delete(db: &db::LockedDatabase, stream_id: i32,
-                      stream: &db::Stream, extra_bytes_needed: i64,
-                      to_delete: &mut Vec<db::ListOldestSampleFilesRow>) -> Result<(), Error> {
-    let bytes_needed = stream.sample_file_bytes + extra_bytes_needed - stream.retain_bytes;
+/// Deletes recordings to bring a stream's disk usage within bounds.
+fn delete_recordings(db: &mut db::LockedDatabase, stream_id: i32,
+                     extra_bytes_needed: i64) -> Result<(), Error> {
+    let bytes_needed = {
+        let stream = match db.streams_by_id().get(&stream_id) {
+            None => bail!("no stream {}", stream_id),
+            Some(s) => s,
+        };
+        stream.sample_file_bytes - stream.bytes_to_delete + extra_bytes_needed
+            - stream.retain_bytes
+    };
     let mut bytes_to_delete = 0;
     if bytes_needed <= 0 {
-        debug!("{}: have remaining quota of {}", stream.id, -bytes_needed);
+        debug!("{}: have remaining quota of {}", stream_id, -bytes_needed);
         return Ok(());
     }
     let mut n = 0;
-    db.list_oldest_sample_files(stream_id, &mut |row| {
-        bytes_to_delete += row.sample_file_bytes as i64;
-        to_delete.push(row);
+    db.delete_oldest_recordings(stream_id, &mut |row| {
         n += 1;
-        bytes_needed > bytes_to_delete  // continue as long as more deletions are needed.
+        if bytes_needed >= bytes_to_delete {
+            bytes_to_delete += row.sample_file_bytes as i64;
+            n += 1;
+            return true;
+        }
+        false
     })?;
-    if bytes_needed > bytes_to_delete {
-        bail!("{}: couldn't find enough files to delete: {} left.", stream.id, bytes_needed);
-    }
     info!("{}: deleting {} bytes in {} recordings ({} bytes needed)",
-          stream.id, bytes_to_delete, n, bytes_needed);
+          stream_id, bytes_to_delete, n, bytes_needed);
     Ok(())
 }
 
@@ -498,20 +507,19 @@ impl Syncer {
     /// Rotates files for all streams and deletes stale files from previous runs.
     fn initial_rotation(&mut self) -> Result<(), Error> {
         self.do_rotation(|db| {
-            let mut to_delete = Vec::new();
-            for (stream_id, stream) in db.streams_by_id() {
-                get_rows_to_delete(&db, *stream_id, stream, 0, &mut to_delete)?;
+            let streams: Vec<i32> = db.streams_by_id().keys().map(|&id| id).collect();
+            for &stream_id in &streams {
+                delete_recordings(db, stream_id, 0)?;
             }
-            Ok(to_delete)
+            Ok(())
         })
     }
 
-    fn do_rotation<F>(&mut self, get_rows_to_delete: F) -> Result<(), Error>
-    where F: FnOnce(&db::LockedDatabase) -> Result<Vec<db::ListOldestSampleFilesRow>, Error> {
+    fn do_rotation<F>(&mut self, delete_recordings: F) -> Result<(), Error>
+    where F: FnOnce(&mut db::LockedDatabase) -> Result<(), Error> {
         {
             let mut db = self.db.lock();
-            let mut to_delete = get_rows_to_delete(&*db)?;
-            db.delete_recordings(&mut to_delete);
+            delete_recordings(&mut *db)?;
             db.flush("synchronous deletion")?;
         }
         self.collect_garbage(false)?;
@@ -576,16 +584,7 @@ impl Syncer {
         let stream_id = id.stream();
 
         // Free up a like number of bytes.
-        {
-            let mut to_delete = Vec::new();
-            let len = recording.lock().recording.as_ref().unwrap().sample_file_bytes as i64;
-            let mut db = self.db.lock();
-            {
-                let stream = db.streams_by_id().get(&stream_id).unwrap();
-                get_rows_to_delete(&db, stream_id, stream, len, &mut to_delete).unwrap();
-            }
-            db.delete_recordings(&mut to_delete);
-        }
+        delete_recordings(&mut self.db.lock(), stream_id, 0).unwrap();
 
         f.sync_all().unwrap();
         self.dir.sync().unwrap();
