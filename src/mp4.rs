@@ -1753,8 +1753,8 @@ mod tests {
             extra_data.width, extra_data.height, extra_data.sample_entry,
             extra_data.rfc6381_codec).unwrap();
         let dir = db.dirs_by_stream_id.get(&TEST_STREAM_ID).unwrap();
-        let mut output = dir.create_writer(&db.db, &db.syncer_channel, None,
-                                           TEST_STREAM_ID, video_sample_entry_id).unwrap();
+        let mut output = dir::Writer::new(dir, &db.db, &db.syncer_channel, TEST_STREAM_ID,
+                                          video_sample_entry_id);
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
         // It's needed because dir::Writer calculates a packet's duration from its pts and the
@@ -1777,7 +1777,7 @@ mod tests {
                          pkt.is_key()).unwrap();
             end_pts = Some(pts + pkt.duration() as i64);
         }
-        output.close(end_pts).unwrap();
+        output.close(end_pts);
         db.syncer_channel.flush();
     }
 

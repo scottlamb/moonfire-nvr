@@ -65,13 +65,6 @@ pub struct Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     redacted_url: String,
 }
 
-struct WriterState<'a> {
-    writer: dir::Writer<'a>,
-
-    /// Seconds since epoch at which to next rotate.
-    rotate: i64,
-}
-
 impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     pub fn new<'b>(env: &Environment<'a, 'b, C, S>, dir: Arc<dir::SampleFileDir>,
                    syncer_channel: dir::SyncerChannel,
@@ -124,9 +117,12 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
         };
         debug!("{}: video_sample_entry_id={}", self.short_name, video_sample_entry_id);
         let mut seen_key_frame = false;
-        let mut state: Option<WriterState> = None;
+
+        // Seconds since epoch at which to next rotate.
+        let mut rotate: Option<i64> = None;
         let mut transformed = Vec::new();
-        let mut prev = None;
+        let mut w = dir::Writer::new(&self.dir, &self.db, &self.syncer_channel, self.stream_id,
+                                     video_sample_entry_id);
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = {
                 let _t = TimerGuard::new(self.clocks, || "getting next packet");
@@ -141,18 +137,18 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             }
             let frame_realtime = self.clocks.monotonic() + realtime_offset;
             let local_time = recording::Time::new(frame_realtime);
-            state = if let Some(s) = state {
-                if frame_realtime.sec > s.rotate && pkt.is_key() {
+            rotate = if let Some(r) = rotate {
+                if frame_realtime.sec > r && pkt.is_key() {
                     trace!("{}: write on normal rotation", self.short_name);
                     let _t = TimerGuard::new(self.clocks, || "closing writer");
-                    prev = Some(s.writer.close(Some(pts))?);
+                    w.close(Some(pts));
                     None
                 } else {
-                    Some(s)
+                    Some(r)
                 }
             } else { None };
-            let mut s = match state {
-                Some(s) => s,
+            let r = match rotate {
+                Some(r) => r,
                 None => {
                     let sec = frame_realtime.sec;
                     let r = sec - (sec % self.rotate_interval_sec) + self.rotate_offset_sec;
@@ -162,15 +158,9 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
                     // the one after, so that it's longer than usual rather than shorter than
                     // usual.  This ensures there's plenty of frame times to use when calculating
                     // the start time.
-                    let r = r + if prev.is_none() { self.rotate_interval_sec } else { 0 };
-
+                    let r = r + if w.previously_opened()? { 0 } else { self.rotate_interval_sec };
                     let _t = TimerGuard::new(self.clocks, || "creating writer");
-                    let w = self.dir.create_writer(&self.db, &self.syncer_channel, prev,
-                                                   self.stream_id, video_sample_entry_id)?;
-                    WriterState{
-                        writer: w,
-                        rotate: r,
-                    }
+                    r
                 },
             };
             let orig_data = match pkt.data() {
@@ -185,12 +175,12 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             };
             let _t = TimerGuard::new(self.clocks,
                                       || format!("writing {} bytes", transformed_data.len()));
-            s.writer.write(transformed_data, local_time, pts, pkt.is_key())?;
-            state = Some(s);
+            w.write(transformed_data, local_time, pts, pkt.is_key())?;
+            rotate = Some(r);
         }
-        if let Some(s) = state {
+        if rotate.is_some() {
             let _t = TimerGuard::new(self.clocks, || "closing writer");
-            s.writer.close(None)?;
+            w.close(None);
         }
         Ok(())
     }
