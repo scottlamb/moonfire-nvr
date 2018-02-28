@@ -99,7 +99,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
         while !self.shutdown.load(Ordering::SeqCst) {
             if let Err(e) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
-                warn!("{}: sleeping for {:?} after error: {}", self.short_name, sleep_time, e);
+                warn!("{}: sleeping for {:?} after error: {:?}", self.short_name, sleep_time, e);
                 self.clocks.sleep(sleep_time);
             }
         }
