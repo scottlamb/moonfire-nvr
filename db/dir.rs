@@ -295,7 +295,7 @@ impl SampleFileDir {
 
 /// A command sent to the syncer. These correspond to methods in the `SyncerChannel` struct.
 enum SyncerCommand {
-    AsyncSaveRecording(CompositeId, Arc<Mutex<db::UncommittedRecording>>, fs::File),
+    AsyncSaveRecording(CompositeId, fs::File),
     DatabaseFlushed,
     Flush(mpsc::SyncSender<()>),
 }
@@ -365,14 +365,15 @@ pub fn lower_retention(db: Arc<db::Database>, dir_id: i32, limits: &[NewLimit])
             {
                 let stream = db.streams_by_id().get(&l.stream_id)
                                .ok_or_else(|| format_err!("no such stream {}", l.stream_id))?;
-                bytes_before = stream.sample_file_bytes - stream.bytes_to_delete;
+                bytes_before = stream.sample_file_bytes + stream.bytes_to_add -
+                               stream.bytes_to_delete;
                 extra = stream.retain_bytes - l.limit;
             }
             if l.limit >= bytes_before { continue }
             delete_recordings(db, l.stream_id, extra)?;
             let stream = db.streams_by_id().get(&l.stream_id).unwrap();
             info!("stream {}, deleting: {}->{}", l.stream_id, bytes_before,
-                  stream.sample_file_bytes - stream.bytes_to_delete);
+                  stream.sample_file_bytes + stream.bytes_to_add - stream.bytes_to_delete);
         }
         Ok(())
     })
@@ -386,7 +387,7 @@ fn delete_recordings(db: &mut db::LockedDatabase, stream_id: i32,
             None => bail!("no stream {}", stream_id),
             Some(s) => s,
         };
-        stream.sample_file_bytes - stream.bytes_to_delete + extra_bytes_needed
+        stream.sample_file_bytes + stream.bytes_to_add - stream.bytes_to_delete + extra_bytes_needed
             - stream.retain_bytes
     };
     let mut bytes_to_delete = 0;
@@ -412,9 +413,8 @@ fn delete_recordings(db: &mut db::LockedDatabase, stream_id: i32,
 impl SyncerChannel {
     /// Asynchronously syncs the given writer, closes it, records it into the database, and
     /// starts rotation.
-    fn async_save_recording(&self, id: CompositeId, recording: Arc<Mutex<db::UncommittedRecording>>,
-                            f: fs::File) {
-        self.0.send(SyncerCommand::AsyncSaveRecording(id, recording, f)).unwrap();
+    fn async_save_recording(&self, id: CompositeId, f: fs::File) {
+        self.0.send(SyncerCommand::AsyncSaveRecording(id, f)).unwrap();
     }
 
     /// For testing: flushes the syncer, waiting for all currently-queued commands to complete.
@@ -495,7 +495,7 @@ impl Syncer {
         loop {
             match cmds.recv() {
                 Err(_) => return,  // all senders have closed the channel; shutdown
-                Ok(SyncerCommand::AsyncSaveRecording(id, r, f)) => self.save(id, r, f),
+                Ok(SyncerCommand::AsyncSaveRecording(id, f)) => self.save(id, f),
                 Ok(SyncerCommand::DatabaseFlushed) => {
                     retry_forever(&mut || self.collect_garbage(true))
                 },
@@ -577,16 +577,15 @@ impl Syncer {
     /// so that there can be only one dir sync and database transaction per save.
     /// Internal helper for `save`. This is separated out so that the question-mark operator
     /// can be used in the many error paths.
-    fn save(&mut self, id: CompositeId, recording: Arc<Mutex<db::UncommittedRecording>>,
-            f: fs::File) {
+    fn save(&mut self, id: CompositeId, f: fs::File) {
         let stream_id = id.stream();
 
         // Free up a like number of bytes.
         retry_forever(&mut || delete_recordings(&mut self.db.lock(), stream_id, 0));
         retry_forever(&mut || f.sync_all());
         retry_forever(&mut || self.dir.sync());
-        recording.lock().synced = true;
         let mut db = self.db.lock();
+        db.mark_synced(id).unwrap();
         let reason = {
             let s = db.streams_by_id().get(&stream_id).unwrap();
             let c = db.cameras_by_id().get(&s.camera_id).unwrap();
@@ -880,7 +879,7 @@ impl InnerWriter {
             flags: flags,
         };
         self.r.lock().recording = Some(recording);
-        channel.async_save_recording(self.id, self.r, self.f);
+        channel.async_save_recording(self.id, self.f);
         PreviousWriter {
             end_time: end,
             local_time_delta: local_start_delta,

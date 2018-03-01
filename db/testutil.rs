@@ -145,7 +145,7 @@ impl TestDb {
             run_offset: 0,
             flags: db::RecordingFlags::TrailingZero as i32,
         });
-        u.lock().synced = true;
+        db.mark_synced(id).unwrap();
         db.flush("create_recording_from_encoder").unwrap();
         let mut row = None;
         db.list_recordings_by_id(TEST_STREAM_ID, id.recording() .. id.recording()+1,
@@ -177,12 +177,12 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
         run_offset: 0,
     };
     for _ in 0..num {
-        let (_, u) = db.add_recording(TEST_STREAM_ID).unwrap();
+        let (id, u) = db.add_recording(TEST_STREAM_ID).unwrap();
         u.lock().recording = Some(recording.clone());
-        u.lock().synced = true;
         recording.time.start += DURATION;
         recording.time.end += DURATION;
         recording.run_offset += 1;
+        db.mark_synced(id).unwrap();
     }
     db.flush("add_dummy_recordings_to_db").unwrap();
 }
