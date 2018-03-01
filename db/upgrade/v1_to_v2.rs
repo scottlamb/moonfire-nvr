@@ -30,11 +30,11 @@
 
 /// Upgrades a version 1 schema to a version 2 schema.
 
-use db::schema::DirMeta;
-use db::dir;
+use dir;
 use failure::Error;
-use std::fs;
 use rusqlite;
+use schema::DirMeta;
+use std::fs;
 use uuid::Uuid;
 
 pub struct U<'a> {
@@ -45,7 +45,6 @@ pub struct U<'a> {
 pub fn new<'a>(args: &'a super::Args) -> Result<Box<super::Upgrader + 'a>, Error> {
     let sample_file_path =
         args.flag_sample_file_dir
-            .as_ref()
             .ok_or_else(|| format_err!("--sample-file-dir required when upgrading from \
                                         schema version 1 to 2."))?;
     Ok(Box::new(U { sample_file_path, dir_meta: None }))

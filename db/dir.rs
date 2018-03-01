@@ -226,8 +226,7 @@ impl SampleFileDir {
         Ok(meta)
     }
 
-    // TODO: this should be exposed only to the db layer.
-    pub fn write_meta(&self, meta: &schema::DirMeta) -> Result<(), Error> {
+    pub(crate) fn write_meta(&self, meta: &schema::DirMeta) -> Result<(), Error> {
         let (tmp_path, final_path) = unsafe {
             (ffi::CStr::from_ptr("meta.tmp\0".as_ptr() as *const c_char),
              ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char))

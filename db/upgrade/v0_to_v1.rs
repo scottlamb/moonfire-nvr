@@ -30,11 +30,11 @@
 
 /// Upgrades a version 0 schema to a version 1 schema.
 
-use db::{self, recording};
+use db;
 use failure::Error;
+use recording;
 use rusqlite;
 use std::collections::HashMap;
-use strutil;
 
 pub struct U;
 
@@ -169,14 +169,14 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
         let video_samples: i32 = row.get_checked(5)?;
         let video_sync_samples: i32 = row.get_checked(6)?;
         let video_sample_entry_id: i32 = row.get_checked(7)?;
-        let sample_file_uuid: Vec<u8> = row.get_checked(8)?;
+        let sample_file_uuid: db::FromSqlUuid = row.get_checked(8)?;
         let sample_file_sha1: Vec<u8> = row.get_checked(9)?;
         let video_index: Vec<u8> = row.get_checked(10)?;
         let old_id: i32 = row.get_checked(11)?;
         let trailing_zero = has_trailing_zero(&video_index).unwrap_or_else(|e| {
             warn!("recording {}/{} (sample file {}, formerly recording {}) has corrupt \
                   video_index: {}",
-                  camera_id, composite_id & 0xFFFF, strutil::hex(&sample_file_uuid), old_id, e);
+                  camera_id, composite_id & 0xFFFF, sample_file_uuid.0, old_id, e);
             false
         });
         let run_id = match camera_state.current_run {
@@ -198,7 +198,7 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
         ])?;
         insert2.execute_named(&[
             (":composite_id", &composite_id),
-            (":sample_file_uuid", &sample_file_uuid),
+            (":sample_file_uuid", &&sample_file_uuid.0.as_bytes()[..]),
             (":sample_file_sha1", &sample_file_sha1),
             (":video_index", &video_index),
         ])?;

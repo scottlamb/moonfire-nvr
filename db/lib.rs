@@ -50,7 +50,8 @@ pub mod db;
 pub mod dir;
 mod raw;
 pub mod recording;
-pub mod schema;
+mod schema;
+pub mod upgrade;
 
 // This is only for #[cfg(test)], but it's also used by the dependent crate, and it appears that
 // #[cfg(test)] is not passed on to dependencies.

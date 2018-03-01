@@ -30,12 +30,12 @@
 
 /// Upgrades a version 2 schema to a version 3 schema.
 
-use db::{self, dir, FromSqlUuid};
+use db::{self, FromSqlUuid};
+use dir;
 use failure::Error;
 use libc;
 use std::io::{self, Write};
 use std::mem;
-//use std::rc::Rc;
 use rusqlite;
 use uuid::Uuid;
 
@@ -44,31 +44,6 @@ pub struct U;
 pub fn new<'a>(_args: &'a super::Args) -> Result<Box<super::Upgrader + 'a>, Error> {
     Ok(Box::new(U))
 }
-
-/*fn build_stream_to_dir(dir: &dir::Fd, tx: &rusqlite::Transaction)
-                           -> Result<Vec<Option<Rc<dir::Fd>>>, Error> {
-    let mut v = Vec::new();
-    let max_id: u32 = tx.query_row("select max(id) from stream", &[], |r| r.get_checked(0))??;
-    v.resize((max_id + 1) as usize, None);
-    let mut stmt = tx.prepare(r#"
-        select
-          stream.id,
-          camera.uuid,
-          stream.type
-        from
-          camera join stream on (camera.id = stream.camera_id)
-    "#)?;
-    let mut rows = stmt.query(&[])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let id: i32 = row.get_checked(0)?;
-        let uuid: FromSqlUuid = row.get_checked(1)?;
-        let type_: String = row.get_checked(2)?;
-        v[id as usize] =
-            Some(Rc::new(dir::Fd::open(Some(dir), &format!("{}-{}", uuid.0, type_), true)?));
-    }
-    Ok(v)
-}*/
 
 /// Gets a pathname for a sample file suitable for passing to open or unlink.
 fn get_uuid_pathname(uuid: Uuid) -> [libc::c_char; 37] {
@@ -87,30 +62,6 @@ fn get_id_pathname(id: db::CompositeId) -> [libc::c_char; 17] {
 
 impl super::Upgrader for U {
     fn in_tx(&mut self, tx: &rusqlite::Transaction) -> Result<(), Error> {
-        /*let (meta, path) = tx.query_row(r#"
-            select
-              meta.uuid,
-              dir.path,
-              dir.uuid,
-              dir.last_complete_open_id,
-              open.uuid
-            from
-              meta cross join sample_file_dir dir
-              join open on (dir.last_complete_open_id = open.id)
-        "#, |row| -> Result<_, Error> {
-            let mut meta = DirMeta::new();
-            let db_uuid: FromSqlUuid = row.get_checked(0)?;
-            let path: String = row.get_checked(1)?;
-            let dir_uuid: FromSqlUuid = row.get_checked(2)?;
-            let open_uuid: FromSqlUuid = row.get_checked(4)?;
-            meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
-            meta.dir_uuid.extend_from_slice(&dir_uuid.0.as_bytes()[..]);
-            let open = meta.mut_last_complete_open();
-            open.id = row.get_checked(3)?;
-            open.uuid.extend_from_slice(&open_uuid.0.as_bytes()[..]);
-            Ok((meta, path))
-        })??;*/
-
         let path: String = tx.query_row(r#"
             select path from sample_file_dir
         "#, &[], |row| { row.get_checked(0) })??;
