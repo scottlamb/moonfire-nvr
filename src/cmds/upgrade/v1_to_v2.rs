@@ -167,6 +167,7 @@ impl<'a> super::Upgrader for U<'a> {
             create table recording (
               composite_id integer primary key,
               stream_id integer not null references stream (id),
+              open_id integer not null,
               run_offset integer not null,
               flags integer not null,
               sample_file_bytes integer not null check (sample_file_bytes > 0),
@@ -183,6 +184,7 @@ impl<'a> super::Upgrader for U<'a> {
             create index recording_cover on recording (
               stream_id,
               start_time_90k,
+              open_id,
               duration_90k,
               video_samples,
               video_sync_samples,
@@ -252,19 +254,20 @@ impl<'a> super::Upgrader for U<'a> {
 
             insert into recording
             select
-              composite_id,
-              camera_id,
-              run_offset,
-              flags,
-              sample_file_bytes,
-              start_time_90k,
-              duration_90k,
-              local_time_delta_90k,
-              video_samples,
-              video_sync_samples,
-              video_sample_entry_id
+              r.composite_id,
+              r.camera_id,
+              o.open_id,
+              r.run_offset,
+              r.flags,
+              r.sample_file_bytes,
+              r.start_time_90k,
+              r.duration_90k,
+              r.local_time_delta_90k,
+              r.video_samples,
+              r.video_sync_samples,
+              r.video_sample_entry_id
             from
-              old_recording;
+              old_recording r cross join open o;
         "#)?;
 
         fix_video_sample_entry(tx)?;

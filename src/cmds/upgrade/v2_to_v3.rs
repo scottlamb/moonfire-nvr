@@ -148,18 +148,16 @@ impl super::Upgrader for U {
             alter table recording_playback rename to old_recording_playback;
             create table recording_playback (
               composite_id integer primary key references recording (composite_id),
-              open_id integer not null references open (id),
               sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
               video_index blob not null check (length(video_index) > 0)
             );
             insert into recording_playback
             select
-              p.composite_id,
-              o.id,
-              p.sample_file_sha1,
-              p.video_index
+              composite_id,
+              sample_file_sha1,
+              video_index
             from
-              old_recording_playback p cross join open o;
+              old_recording_playback;
             drop table old_recording_playback;
         "#)?;
         Ok(())

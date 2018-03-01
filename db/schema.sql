@@ -134,6 +134,12 @@ create table recording (
   -- recording_cover rows (which match this id format) are typically 1--5 KiB.
   composite_id integer primary key,
 
+  -- The open in which this was committed to the database. For a given
+  -- composite_id, only one recording will ever be committed to the database,
+  -- but in-memory state may reflect a recording which never gets committed.
+  -- This field allows disambiguation in etags and such.
+  open_id integer not null references open (id),
+
   -- This field is redundant with id above, but used to enforce the reference
   -- constraint and to structure the recording_start_time index.
   stream_id integer not null references stream (id),
@@ -184,6 +190,7 @@ create index recording_cover on recording (
   -- These fields are not used for ordering; they cover most queries so
   -- that only database verification and actual viewing of recordings need
   -- to consult the underlying row.
+  open_id,
   duration_90k,
   video_samples,
   video_sync_samples,
@@ -201,12 +208,6 @@ create index recording_cover on recording (
 create table recording_playback (
   -- See description on recording table.
   composite_id integer primary key references recording (composite_id),
-
-  -- The open in which this was committed to the database. For a given
-  -- composite_id, only one recording will ever be committed to the database,
-  -- but in-memory state may reflect a recording which never gets committed.
-  -- This field allows disambiguation in etags and such.
-  open_id integer not null references open (id),
 
   -- The sha1 hash of the contents of the sample file.
   sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),

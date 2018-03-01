@@ -38,17 +38,19 @@ use rusqlite;
 use std::ops::Range;
 
 const INSERT_RECORDING_SQL: &'static str = r#"
-    insert into recording (composite_id, stream_id, run_offset, flags, sample_file_bytes,
-                           start_time_90k, duration_90k, local_time_delta_90k, video_samples,
-                           video_sync_samples, video_sample_entry_id)
-                   values (:composite_id, :stream_id, :run_offset, :flags, :sample_file_bytes,
-                           :start_time_90k, :duration_90k, :local_time_delta_90k,
-                           :video_samples, :video_sync_samples, :video_sample_entry_id)
+    insert into recording (composite_id, stream_id, open_id, run_offset, flags,
+                           sample_file_bytes, start_time_90k, duration_90k,
+                           local_time_delta_90k, video_samples, video_sync_samples,
+                           video_sample_entry_id)
+                   values (:composite_id, :stream_id, :open_id, :run_offset, :flags,
+                           :sample_file_bytes, :start_time_90k, :duration_90k,
+                           :local_time_delta_90k, :video_samples, :video_sync_samples,
+                           :video_sample_entry_id)
 "#;
 
 const INSERT_RECORDING_PLAYBACK_SQL: &'static str = r#"
-    insert into recording_playback (composite_id,  open_id,  sample_file_sha1,  video_index)
-                            values (:composite_id, :open_id, :sample_file_sha1, :video_index)
+    insert into recording_playback (composite_id,  sample_file_sha1,  video_index)
+                            values (:composite_id, :sample_file_sha1, :video_index)
 "#;
 
 const STREAM_MIN_START_SQL: &'static str = r#"
@@ -98,6 +100,7 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
     stmt.execute_named(&[
         (":composite_id", &id.0),
         (":stream_id", &(id.stream() as i64)),
+        (":open_id", &o.id),
         (":run_offset", &r.run_offset),
         (":flags", &r.flags),
         (":sample_file_bytes", &r.sample_file_bytes),
@@ -113,7 +116,6 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
     let sha1 = &r.sample_file_sha1[..];
     stmt.execute_named(&[
         (":composite_id", &id.0),
-        (":open_id", &o.id),
         (":sample_file_sha1", &sha1),
         (":video_index", &r.video_index),
     ])?;
