@@ -75,7 +75,7 @@ enum OpenMode {
 /// Locks and opens the database.
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
 fn open_conn(db_dir: &str, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connection), Error> {
-    let dir = dir::Fd::open(None, db_dir, mode == OpenMode::Create)?;
+    let dir = dir::Fd::open(db_dir, mode == OpenMode::Create)?;
     let ro = mode == OpenMode::ReadOnly;
     dir.lock(if ro { libc::LOCK_SH } else { libc::LOCK_EX } | libc::LOCK_NB)
        .map_err(|e| e.context(format!("db dir {:?} already in use; can't get {} lock",

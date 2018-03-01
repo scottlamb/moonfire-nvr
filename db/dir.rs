@@ -62,7 +62,7 @@ use std::thread;
 pub struct SampleFileDir {
     /// The open file descriptor for the directory. The worker uses it to create files and sync the
     /// directory. Other threads use it to open sample files for reading during video serving.
-    fd: Fd,
+    pub(crate) fd: Fd,
 }
 
 /// A file descriptor associated with a directory (not necessarily the sample file dir).
@@ -80,22 +80,28 @@ impl Drop for Fd {
 
 impl Fd {
     /// Opens the given path as a directory.
-    pub fn open(fd: Option<&Fd>, path: &str, mkdir: bool) -> Result<Fd, io::Error> {
-        let fd = fd.map(|fd| fd.0).unwrap_or(libc::AT_FDCWD);
+    pub fn open(path: &str, mkdir: bool) -> Result<Fd, io::Error> {
         let cstring = ffi::CString::new(path)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if mkdir && unsafe { libc::mkdirat(fd, cstring.as_ptr(), 0o700) } != 0 {
+        if mkdir && unsafe { libc::mkdir(cstring.as_ptr(), 0o700) } != 0 {
             let e = io::Error::last_os_error();
             if e.kind() != io::ErrorKind::AlreadyExists {
                 return Err(e.into());
             }
         }
-        let fd = unsafe { libc::openat(fd, cstring.as_ptr(), libc::O_DIRECTORY | libc::O_RDONLY,
-                                       0) };
+        let fd = unsafe { libc::open(cstring.as_ptr(), libc::O_DIRECTORY | libc::O_RDONLY, 0) };
         if fd < 0 {
             return Err(io::Error::last_os_error().into());
         }
         Ok(Fd(fd))
+    }
+
+    pub(crate) fn sync(&self) -> Result<(), io::Error> {
+        let res = unsafe { libc::fsync(self.0) };
+        if res < 0 {
+            return Err(io::Error::last_os_error())
+        }
+        Ok(())
     }
 
     /// Opens a sample file within this directory with the given flags and (if creating) mode.
@@ -128,12 +134,47 @@ impl Fd {
     }
 }
 
-pub unsafe fn renameat(from_fd: &Fd, from_path: *const c_char,
+pub(crate) unsafe fn renameat(from_fd: &Fd, from_path: *const c_char,
                    to_fd: &Fd, to_path: *const c_char) -> Result<(), io::Error> {
     let result = libc::renameat(from_fd.0, from_path, to_fd.0, to_path);
     if result < 0 {
         return Err(io::Error::last_os_error())
     }
+    Ok(())
+}
+
+/// Reads `dir`'s metadata. If none is found, returns an empty proto.
+pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
+    let mut meta = schema::DirMeta::default();
+    let p = unsafe { ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char) };
+    let mut f = match unsafe { dir.openat(p.as_ptr(), libc::O_RDONLY, 0) } {
+        Err(e) => {
+            if e.kind() == ::std::io::ErrorKind::NotFound {
+                return Ok(meta);
+            }
+            return Err(e.into());
+        },
+        Ok(f) => f,
+    };
+    let mut data = Vec::new();
+    f.read_to_end(&mut data)?;
+    let mut s = protobuf::CodedInputStream::from_bytes(&data);
+    meta.merge_from(&mut s).map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
+    Ok(meta)
+}
+
+/// Write `dir`'s metadata, clobbering existing data.
+pub(crate) fn write_meta(dir: &Fd, meta: &schema::DirMeta) -> Result<(), Error> {
+    let (tmp_path, final_path) = unsafe {
+        (ffi::CStr::from_ptr("meta.tmp\0".as_ptr() as *const c_char),
+         ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char))
+    };
+    let mut f = unsafe { dir.openat(tmp_path.as_ptr(),
+                                    libc::O_CREAT | libc::O_TRUNC | libc::O_WRONLY, 0o600)? };
+    meta.write_to_writer(&mut f)?;
+    f.sync_all()?;
+    unsafe { renameat(&dir, tmp_path.as_ptr(), &dir, final_path.as_ptr())? };
+    dir.sync()?;
     Ok(())
 }
 
@@ -147,7 +188,7 @@ impl SampleFileDir {
         let read_write = db_meta.in_progress_open.is_some();
         let s = SampleFileDir::open_self(path, false)?;
         s.fd.lock(if read_write { libc::LOCK_EX } else { libc::LOCK_SH } | libc::LOCK_NB)?;
-        let dir_meta = s.read_meta()?;
+        let dir_meta = read_meta(&s.fd)?;
         if !SampleFileDir::consistent(db_meta, &dir_meta) {
             bail!("metadata mismatch.\ndb: {:#?}\ndir: {:#?}", db_meta, &dir_meta);
         }
@@ -176,14 +217,14 @@ impl SampleFileDir {
         true
     }
 
-    pub fn create(path: &str, db_meta: &schema::DirMeta) -> Result<Arc<SampleFileDir>, Error> {
+    pub(crate) fn create(path: &str, db_meta: &schema::DirMeta)
+                         -> Result<Arc<SampleFileDir>, Error> {
         let s = SampleFileDir::open_self(path, true)?;
         s.fd.lock(libc::LOCK_EX | libc::LOCK_NB)?;
-        let old_meta = s.read_meta()?;
+        let old_meta = read_meta(&s.fd)?;
 
         // Verify metadata. We only care that it hasn't been completely opened.
         // Partial opening by this or another database is fine; we won't overwrite anything.
-        // TODO: consider one exception: if the version 2 upgrade fails at the post_tx step.
         if old_meta.last_complete_open.is_some() {
             bail!("Can't create dir at path {}: is already in use:\n{:?}", path, old_meta);
         }
@@ -193,7 +234,7 @@ impl SampleFileDir {
     }
 
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
-        let fd = Fd::open(None, path, create)
+        let fd = Fd::open(path, create)
             .map_err(|e| format_err!("unable to open sample file dir {}: {}", path, e))?;
         Ok(Arc::new(SampleFileDir {
             fd,
@@ -206,39 +247,8 @@ impl SampleFileDir {
         unsafe { self.fd.openat(p.as_ptr(), libc::O_RDONLY, 0) }
     }
 
-    /// Reads the directory metadata. If none is found, returns an empty proto.
-    fn read_meta(&self) -> Result<schema::DirMeta, Error> {
-        let mut meta = schema::DirMeta::default();
-        let p = unsafe { ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char) };
-        let mut f = match unsafe { self.fd.openat(p.as_ptr(), libc::O_RDONLY, 0) } {
-            Err(e) => {
-                if e.kind() == ::std::io::ErrorKind::NotFound {
-                    return Ok(meta);
-                }
-                return Err(e.into());
-            },
-            Ok(f) => f,
-        };
-        let mut data = Vec::new();
-        f.read_to_end(&mut data)?;
-        let mut s = protobuf::CodedInputStream::from_bytes(&data);
-        meta.merge_from(&mut s).map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
-        Ok(meta)
-    }
-
     pub(crate) fn write_meta(&self, meta: &schema::DirMeta) -> Result<(), Error> {
-        let (tmp_path, final_path) = unsafe {
-            (ffi::CStr::from_ptr("meta.tmp\0".as_ptr() as *const c_char),
-             ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char))
-        };
-        let mut f = unsafe { self.fd.openat(tmp_path.as_ptr(),
-                                            libc::O_CREAT | libc::O_TRUNC | libc::O_WRONLY,
-                                            0o600)? };
-        meta.write_to_writer(&mut f)?;
-        f.sync_all()?;
-        unsafe { renameat(&self.fd, tmp_path.as_ptr(), &self.fd, final_path.as_ptr())? };
-        self.sync()?;
-        Ok(())
+        write_meta(&self.fd, meta)
     }
 
     pub fn statfs(&self) -> Result<libc::statvfs, io::Error> { self.fd.statfs() }
@@ -264,11 +274,7 @@ impl SampleFileDir {
 
     /// Syncs the directory itself.
     fn sync(&self) -> Result<(), io::Error> {
-        let res = unsafe { libc::fsync(self.fd.0) };
-        if res < 0 {
-            return Err(io::Error::last_os_error())
-        }
-        Ok(())
+        self.fd.sync()
     }
 }
 

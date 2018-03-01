@@ -43,11 +43,6 @@ mod v2_to_v3;
 const UPGRADE_NOTES: &'static str =
     concat!("upgraded using moonfire-db ", env!("CARGO_PKG_VERSION"));
 
-pub trait Upgrader {
-    fn in_tx(&mut self, &rusqlite::Transaction) -> Result<(), Error> { Ok(()) }
-    fn post_tx(&mut self) -> Result<(), Error> { Ok(()) }
-}
-
 #[derive(Debug)]
 pub struct Args<'a> {
     pub flag_sample_file_dir: Option<&'a str>,
@@ -65,9 +60,9 @@ fn set_journal_mode(conn: &rusqlite::Connection, requested: &str) -> Result<(), 
 
 pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     let upgraders = [
-        v0_to_v1::new,
-        v1_to_v2::new,
-        v2_to_v3::new,
+        v0_to_v1::run,
+        v1_to_v2::run,
+        v2_to_v3::run,
     ];
 
     {
@@ -84,15 +79,13 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
         set_journal_mode(&conn, args.flag_preset_journal).unwrap();
         for ver in old_ver .. db::EXPECTED_VERSION {
             info!("...from version {} to version {}", ver, ver + 1);
-            let mut u = upgraders[ver as usize](&args)?;
             let tx = conn.transaction()?;
-            u.in_tx(&tx)?;
+            upgraders[ver as usize](&args, &tx)?;
             tx.execute(r#"
                 insert into version (id, unix_time, notes)
                              values (?, cast(strftime('%s', 'now') as int32), ?)
             "#, &[&(ver + 1), &UPGRADE_NOTES])?;
             tx.commit()?;
-            u.post_tx()?;
         }
     }
 
