@@ -63,7 +63,9 @@ message DirMeta {
   }
 
   // The last open that was known to be recorded in the database as completed.
-  // Absent if this has never happened.
+  // Absent if this has never happened. Note this can backtrack in exactly one
+  // scenario: when deleting the directory, after all associated files have
+  // been deleted, last_complete_open can be moved to in_progress_open.
   Open last_complete_open = 3;
 
   // The last run which is in progress, if different from last_complete_open.

@@ -228,9 +228,24 @@ impl SampleFileDir {
         if old_meta.last_complete_open.is_some() {
             bail!("Can't create dir at path {}: is already in use:\n{:?}", path, old_meta);
         }
-
+        if !SampleFileDir::is_empty(path)? {
+            bail!("Can't create dir at path {} with existing files", path);
+        }
         s.write_meta(db_meta)?;
         Ok(s)
+    }
+
+    /// Determines if the directory is empty, aside form metadata.
+    pub(crate) fn is_empty(path: &str) -> Result<bool, Error> {
+        for e in fs::read_dir(path)? {
+            let e = e?;
+            match e.file_name().as_bytes() {
+                b"." | b".." => continue,
+                b"meta" | b"meta-tmp" => continue,  // existing metadata is fine.
+                _ => return Ok(false),
+            }
+        }
+        Ok(true)
     }
 
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {

@@ -280,6 +280,19 @@ impl SampleFileDir {
                .ok_or_else(|| format_err!("sample file dir {} is closed", self.id))?
                .clone())
     }
+
+    /// Returns expected existing metadata when opening this directory.
+    fn meta(&self, db_uuid: &Uuid) -> schema::DirMeta {
+        let mut meta = schema::DirMeta::default();
+        meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
+        meta.dir_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
+        if let Some(o) = self.last_complete_open {
+            let open = meta.mut_last_complete_open();
+            open.id = o.id;
+            open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
+        }
+        meta
+    }
 }
 
 /// In-memory state about a camera.
@@ -920,7 +933,6 @@ impl LockedDatabase {
     /// in practice.
     pub fn open_sample_file_dirs(&mut self, ids: &[i32]) -> Result<(), Error> {
         let mut in_progress = FnvHashMap::with_capacity_and_hasher(ids.len(), Default::default());
-        let o = self.open.as_ref();
         for &id in ids {
             let e = in_progress.entry(id);
             use ::std::collections::hash_map::Entry;
@@ -928,33 +940,25 @@ impl LockedDatabase {
                 Entry::Occupied(_) => continue,  // suppress duplicate.
                 Entry::Vacant(e) => e,
             };
-            let dir = self
-                          .sample_file_dirs_by_id
+            let dir = self.sample_file_dirs_by_id
                           .get_mut(&id)
                           .ok_or_else(|| format_err!("no such dir {}", id))?;
             if dir.dir.is_some() { continue }
-            let mut meta = schema::DirMeta::default();
-            meta.db_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
-            meta.dir_uuid.extend_from_slice(&dir.uuid.as_bytes()[..]);
-            if let Some(o) = dir.last_complete_open {
-                let open = meta.mut_last_complete_open();
-                open.id = o.id;
-                open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
-            }
-            if let Some(o) = o {
+            let mut meta = dir.meta(&self.uuid);
+            if let Some(o) = self.open.as_ref() {
                 let open = meta.mut_in_progress_open();
                 open.id = o.id;
                 open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
             }
             let d = dir::SampleFileDir::open(&dir.path, &meta)?;
-            if o.is_none() {  // read-only mode; it's already fully opened.
+            if self.open.is_none() {  // read-only mode; it's already fully opened.
                 dir.dir = Some(d);
             } else {  // read-write mode; there are more steps to do.
                 e.insert((meta, d));
             }
         }
 
-        let o = match o {
+        let o = match self.open.as_ref() {
             None => return Ok(()),  // read-only mode; all done.
             Some(o) => o,
         };
@@ -1391,8 +1395,7 @@ impl LockedDatabase {
         let mut meta = schema::DirMeta::default();
         let uuid = Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
-        let o = self
-                    .open
+        let o = self.open
                     .as_ref()
                     .ok_or_else(|| format_err!("database is read-only"))?;
 
@@ -1406,8 +1409,6 @@ impl LockedDatabase {
         }
 
         let dir = dir::SampleFileDir::create(&path, &meta)?;
-        // TODO: ensure the dir is empty?
-        let uuid = Uuid::new_v4();
         self.conn.execute(r#"
             insert into sample_file_dir (path, uuid, last_complete_open_id)
                                  values (?,    ?,    ?)
@@ -1439,12 +1440,34 @@ impl LockedDatabase {
                 bail!("can't delete dir referenced by stream {}", id);
             }
         }
-        // TODO: remove/update metadata stored in the directory? at present this will have to
-        // be manually deleted before the dir can be reused.
-        if self.conn.execute("delete from sample_file_dir where id = ?", &[&dir_id])? != 1 {
-            bail!("no such dir {} to remove", dir_id);
+        let mut d = match self.sample_file_dirs_by_id.entry(dir_id) {
+            ::std::collections::btree_map::Entry::Occupied(e) => e,
+            _ => bail!("no such dir {} to remove", dir_id),
+        };
+        if !d.get().garbage.is_empty() {
+            bail!("must collect garbage before deleting directory {}", d.get().path);
         }
-        self.sample_file_dirs_by_id.remove(&dir_id).expect("sample file dir should exist!");
+        let dir = match d.get_mut().dir.take() {
+            None => dir::SampleFileDir::open(&d.get().path, &d.get().meta(&self.uuid))?,
+            Some(arc) => match Arc::strong_count(&arc) {
+                1 => {
+                    d.get_mut().dir = Some(arc);  // put it back.
+                    bail!("can't delete in-use directory {}", dir_id);
+                },
+                _ => arc,
+            },
+        };
+        if !dir::SampleFileDir::is_empty(&d.get().path)? {
+            bail!("Can't delete sample file directory {} which still has files", &d.get().path);
+        }
+        let mut meta = d.get().meta(&self.uuid);
+        meta.in_progress_open = mem::replace(&mut meta.last_complete_open,
+                                             ::protobuf::singular::SingularPtrField::none());
+        dir.write_meta(&meta)?;
+        if self.conn.execute("delete from sample_file_dir where id = ?", &[&dir_id])? != 1 {
+            bail!("missing database row for dir {}", dir_id);
+        }
+        d.remove_entry();
         Ok(())
     }
 
