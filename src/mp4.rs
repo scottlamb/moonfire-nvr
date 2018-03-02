@@ -762,8 +762,9 @@ impl FileBuilder {
 
         self.next_frame_num += s.s.frames as u32;
         self.segments.push(s);
-        if !self.video_sample_entries.iter().any(|e| e.id == row.video_sample_entry.id) {
-            self.video_sample_entries.push(row.video_sample_entry);
+        if !self.video_sample_entries.iter().any(|e| e.id == row.video_sample_entry_id) {
+            let vse = db.video_sample_entries_by_id().get(&row.video_sample_entry_id).unwrap();
+            self.video_sample_entries.push(vse.clone());
         }
         Ok(())
     }

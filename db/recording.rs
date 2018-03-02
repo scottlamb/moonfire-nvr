@@ -380,7 +380,7 @@ impl Segment {
             frames: recording.video_samples as u16,
             key_frames: recording.video_sync_samples as u16,
             video_sample_entry_id_and_trailing_zero:
-                recording.video_sample_entry.id |
+                recording.video_sample_entry_id |
                 ((((recording.flags & db::RecordingFlags::TrailingZero as i32) != 0) as i32) << 31),
         };
 
@@ -442,7 +442,7 @@ impl Segment {
             self_.begin = Some(begin);
             self_.file_end = it.pos;
             self_.video_sample_entry_id_and_trailing_zero =
-                recording.video_sample_entry.id |
+                recording.video_sample_entry_id |
                 (((it.duration_90k == 0) as i32) << 31);
             Ok(self_)
         })

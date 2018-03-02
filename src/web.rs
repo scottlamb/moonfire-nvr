@@ -259,6 +259,7 @@ impl ServiceInner {
                                   .ok_or_else(|| format_err!("no such stream {}/{}", uuid, type_))?;
             db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
                 let end = row.ids.end - 1;  // in api, ids are inclusive.
+                let vse = db.video_sample_entries_by_id().get(&row.video_sample_entry_id).unwrap();
                 out.recordings.push(json::Recording {
                     start_id: row.ids.start,
                     end_id: if end == row.ids.start + 1 { None } else { Some(end) },
@@ -266,9 +267,9 @@ impl ServiceInner {
                     end_time_90k: row.time.end.0,
                     sample_file_bytes: row.sample_file_bytes,
                     video_samples: row.video_samples,
-                    video_sample_entry_width: row.video_sample_entry.width,
-                    video_sample_entry_height: row.video_sample_entry.height,
-                    video_sample_entry_sha1: strutil::hex(&row.video_sample_entry.sha1),
+                    video_sample_entry_width: vse.width,
+                    video_sample_entry_height: vse.height,
+                    video_sample_entry_sha1: strutil::hex(&vse.sha1),
                 });
                 Ok(())
             })?;
@@ -283,7 +284,7 @@ impl ServiceInner {
     fn init_segment(&self, sha1: [u8; 20], req: &Request) -> Result<Response<slices::Body>, Error> {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
         let db = self.db.lock();
-        for ent in db.video_sample_entries() {
+        for ent in db.video_sample_entries_by_id().values() {
             if ent.sha1 == sha1 {
                 builder.append_video_sample_entry(ent.clone());
                 let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;

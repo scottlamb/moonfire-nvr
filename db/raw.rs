@@ -38,6 +38,49 @@ use rusqlite;
 use std::ops::Range;
 use uuid::Uuid;
 
+// Note: the magic number "27000000" below is recording::MAX_RECORDING_DURATION.
+const LIST_RECORDINGS_BY_TIME_SQL: &'static str = r#"
+    select
+        recording.composite_id,
+        recording.run_offset,
+        recording.flags,
+        recording.start_time_90k,
+        recording.duration_90k,
+        recording.sample_file_bytes,
+        recording.video_samples,
+        recording.video_sync_samples,
+        recording.video_sample_entry_id
+    from
+        recording
+    where
+        stream_id = :stream_id and
+        recording.start_time_90k > :start_time_90k - 27000000 and
+        recording.start_time_90k < :end_time_90k and
+        recording.start_time_90k + recording.duration_90k > :start_time_90k
+    order by
+        recording.start_time_90k
+"#;
+
+const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
+    select
+        recording.composite_id,
+        recording.run_offset,
+        recording.flags,
+        recording.start_time_90k,
+        recording.duration_90k,
+        recording.sample_file_bytes,
+        recording.video_samples,
+        recording.video_sync_samples,
+        recording.video_sample_entry_id
+    from
+        recording
+    where
+        :start <= composite_id and
+        composite_id < :end
+    order by
+        recording.composite_id
+"#;
+
 const INSERT_RECORDING_SQL: &'static str = r#"
     insert into recording (composite_id, stream_id, open_id, run_offset, flags,
                            sample_file_bytes, start_time_90k, duration_90k,
@@ -89,6 +132,51 @@ const LIST_OLDEST_RECORDINGS_SQL: &'static str = r#"
     order by
       composite_id
 "#;
+
+/// Lists the specified recordings in ascending order by start time, passing them to a supplied
+/// function. Given that the function is called with the database lock held, it should be quick.
+pub(crate) fn list_recordings_by_time(
+    conn: &rusqlite::Connection, stream_id: i32, desired_time: Range<recording::Time>,
+    f: &mut FnMut(db::ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
+    let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_TIME_SQL)?;
+    let rows = stmt.query_named(&[
+        (":stream_id", &stream_id),
+        (":start_time_90k", &desired_time.start.0),
+        (":end_time_90k", &desired_time.end.0)])?;
+    list_recordings_inner(rows, f)
+}
+
+/// Lists the specified recordings in ascending order by id.
+pub(crate) fn list_recordings_by_id(
+    conn: &rusqlite::Connection, stream_id: i32, desired_ids: Range<i32>,
+    f: &mut FnMut(db::ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
+    let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_ID_SQL)?;
+    let rows = stmt.query_named(&[
+        (":start", &CompositeId::new(stream_id, desired_ids.start).0),
+        (":end", &CompositeId::new(stream_id, desired_ids.end).0),
+    ])?;
+    list_recordings_inner(rows, f)
+}
+
+fn list_recordings_inner(mut rows: rusqlite::Rows,
+                         f: &mut FnMut(db::ListRecordingsRow) -> Result<(), Error>)
+                         -> Result<(), Error> {
+    while let Some(row) = rows.next() {
+        let row = row?;
+        f(db::ListRecordingsRow {
+            id: CompositeId(row.get_checked(0)?),
+            run_offset: row.get_checked(1)?,
+            flags: row.get_checked(2)?,
+            start: recording::Time(row.get_checked(3)?),
+            duration_90k: row.get_checked(4)?,
+            sample_file_bytes: row.get_checked(5)?,
+            video_samples: row.get_checked(6)?,
+            video_sync_samples: row.get_checked(7)?,
+            video_sample_entry_id: row.get_checked(8)?,
+        })?;
+    }
+    Ok(())
+}
 
 pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
     conn.query_row("select uuid from meta", &[], |row| -> Result<Uuid, Error> {
