@@ -1,8 +1,3 @@
-#!/bin/sh
+#!/bin/sh -e
 #
-webpack
-RESULT=$?
-if [ ! -f ui-dist/index.html ]; then
-	ln ui-src/index.html ui-dist/
-fi
-exit $RESULT
+webpack && test ! -f ui-dist/index.html && ln ui-src/index.html ui-dist/

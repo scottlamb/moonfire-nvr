@@ -26,7 +26,7 @@ You will need the following C libraries installed:
   servers and write `.mp4` files).
 
   Note ffmpeg library versions older than 55.1.101, along with all versions of
-  the competing project [libav](http://libav.org), don't not support socket
+  the competing project [libav](http://libav.org), don't support socket
   timeouts for RTSP. For reliable reconnections on error, it's strongly
   recommended to use ffmpeg library versions >= 55.1.101.
 

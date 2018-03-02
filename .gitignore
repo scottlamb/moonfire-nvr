@@ -1,10 +1,9 @@
-prep.config
 cameras.sql
 .project
 .settings
 *.swp
 node_modules
+prep.config
 target
 ui-dist
-yarn.lock
 yarn-error.log

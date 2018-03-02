@@ -18,11 +18,11 @@ from source. To do so, you can follow two paths:
 * Scripted install: You will run some shell scripts (after preparing one or
   two files, and will be completely done. This is by far the easiest option,
   in particular for first time builders/installers. This process is fully
-  described. Read more in [Easy Installation](easy_install.md)
+  described. Read more in [Easy Installation](easy-install.md)
 * Manual build and install. This is explained in detail in these
   [instructions](install-manual)
 
-Regardless of the approach for setup and installation above that you choice,
+Regardless of the approach for setup and installation above that you choose,
 please read the further configuration instructions below.
 
 ## Further configuration
@@ -32,27 +32,26 @@ state:
 
    * a SQLite database, typically <1 GiB. It should be stored on flash if
      available.
-   * the "sample file directory", which holds the actual samples/frames of
+   * the "sample files directory", which holds the actual samples/frames of
      H.264 video. This should be quite large and typically is stored on a hard
      drive.
 
+Both states are intended to be accessed by moonfire-nvr only, but can be
+changed after building. See below.
 (See [schema.md](schema.md) for more information.)
 
-Both kinds of state are intended to be accessed only by Moonfire NVR itself.
-However, the interface for adding new cameras is not yet written, so you will
-have to manually insert cameras with the `sqlite3` command line tool prior to
-starting Moonfire NVR (unless you used the easy scripted install and prepared
-a cameras.sql file).
-
+The database changes and sample files directory changes require the moonfire-nvr
+binary to be built, so can only be done after completing the build. The other
+settings and preparations should be done before building.
 Manual commands would look something like this:
 
     $ sudo addgroup --system moonfire-nvr
     $ sudo adduser --system moonfire-nvr --home /var/lib/moonfire-nvr
     $ sudo mkdir /var/lib/moonfire-nvr
-    $ sudo -u moonfire-nvr -H mkdir db sample
+    $ sudo -u moonfire-nvr -H mkdir db samples
     $ sudo -u moonfire-nvr moonfire-nvr init
 
-### <a name="cameras"></a>Camera configuration and hard drive mounting
+### <a name="drive mounting"></a>Camera configuration and hard drive mounting
 
 If a dedicated hard drive is available, set up the mount point:
 
@@ -64,7 +63,7 @@ database. If the daemon is running, you will need to stop it temporarily:
 
     $ sudo systemctl stop moonfire-nvr
 
-You can configure the system through a text-based user interface:
+You can configure the system's database through a text-based user interface:
 
     $ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
 
@@ -85,6 +84,10 @@ There are several reasons this is needed:
    * If a file is open when it is deleted (such as if a HTTP client is
      downloading it), it stays around until the file is closed. Moonfire NVR
      currently doesn't account for this.
+
+The sample files directory can be set or changed using:
+
+    $ moonfire-nvr config --samples-dir=/path/to/samples/dir
 
 When finished, start the daemon:
 

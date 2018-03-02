@@ -19,19 +19,10 @@ edge version from the command line via git:
 There are a few things to prepare if you want a truly turnkey install, but
 they are both optional.
 
-### Cameras.sql preparation
-
-The first (optional) step is to prepare a file with information about your
-camera setup. If you create this file with the name `cameras.sql` and place
-it in the top of the moonfire-nvr directory, or one level above, it will be
-used in the next step to initialize the database. If you do *not* create the
-file, the database will still be created, but no cameras will be configured
-and you'll have to follow up with a separate configuration step.
-
 ### Dedicated media directory
 
-Teh second (optional) step is to setup a dedicated hard disk for recording
-video.
+An optional, but strongly suggested, step is to setup a dedicated hard disk
+for recording video.
 Moonfire works best if the video samples are collected on a hard drive of
 sufficient capacity and separate from the root and main file systems. This
 is particularly important on Raspberry Pi based systems as the flash based
@@ -50,11 +41,10 @@ In the fstab you would add a line similar to this:
 You'll have to lookup the correct uuid for your disk. One way to do that is
 to issue the following commands:
 
-    $ cd /dev/disk/by-uuid
-    $ ls -l
+    $ ls -l /dev/disk/by-uuid
 
 Locate the device where your disk will be mounted (or is mounted), for example
-`/dev/sda1`. Net lookup the filename linked to that from the output of the
+`/dev/sda1`. Now lookup the filename linked to that from the output of the
 `ls` command. This is the uuid you need.
 
 The setup script (see below) will create the necessary samples dir on the mounted
@@ -72,7 +62,7 @@ If this is the very first time you run this script, a file named `prep.config`
 will be created and the script will stop. This file is where you will set
 or change variables that describe the moonfire installation you want. The
 initial execution will put default values in this value, but only for the
-most commonly changed variabled. For a full list of variables, see below.
+most commonly changed variables. For a full list of variables, see below.
 
 Once you modify this file (if desired), you run the setup script again. This
 time it will use the values in the file and proceed with the setup.
@@ -115,9 +105,9 @@ invoke the install script (see below).
 
 There are two options you may pass to this script. The first is "-B" which
 means "build only". In other words, this will stop the automatic invocation
-of the instal script. The other option available is "-t" and it causes the
+of the install script. The other option available is "-t" and causes the
 script to ignore the results of any tests. In other words, even if tests
-fail, the build phase will be considered succesful. This can occasionally
+fail, the build phase will be considered successful. This can occasionally
 be useful if you are doing development, and have temporarily broken one
 or more test, but want to proceed anyway.
 
@@ -130,7 +120,7 @@ like this:
 
 This script will copy various files resulting from the build to the correct
 locations. It will also create a "service configuration" for systemctl that
-can be used to control moonfire. This service confuration can be prevented
+can be used to control moonfire. This service configuration can be prevented
 by using the "-s" option to this script. It will also prevent the automatic
 start of this configuration.
 
