@@ -45,6 +45,7 @@ extern crate rusqlite;
 extern crate time;
 extern crate uuid;
 
+pub mod check;
 mod coding;
 pub mod db;
 pub mod dir;

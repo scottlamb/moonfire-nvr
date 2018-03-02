@@ -902,7 +902,7 @@ impl<'a> Drop for Writer<'a> {
 /// Parse a composite id filename.
 ///
 /// These are exactly 16 bytes, lowercase hex.
-fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
+pub(crate) fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
     if id.len() != 16 {
         return Err(());
     }

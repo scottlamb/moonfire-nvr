@@ -1706,10 +1706,7 @@ impl Database {
 
         // Note: the meta check comes after the version check to improve the error message when
         // trying to open a version 0 or version 1 database (which lacked the meta table).
-        let uuid = conn.query_row("select uuid from meta", &[], |row| -> Result<Uuid, Error> {
-            let uuid: FromSqlUuid = row.get_checked(0)?;
-            Ok(uuid.0)
-        })??;
+        let uuid = raw::get_db_uuid(&conn)?;
         let list_recordings_by_time_sql = format!(r#"
             select
                 recording.composite_id,

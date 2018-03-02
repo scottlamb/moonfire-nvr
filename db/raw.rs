@@ -30,12 +30,13 @@
 
 //! Raw database access: SQLite statements which do not touch any cached state.
 
-use db::{self, CompositeId};
+use db::{self, CompositeId, FromSqlUuid};
 use failure::Error;
 use fnv::FnvHashSet;
 use recording;
 use rusqlite;
 use std::ops::Range;
+use uuid::Uuid;
 
 const INSERT_RECORDING_SQL: &'static str = r#"
     insert into recording (composite_id, stream_id, open_id, run_offset, flags,
@@ -88,6 +89,13 @@ const LIST_OLDEST_RECORDINGS_SQL: &'static str = r#"
     order by
       composite_id
 "#;
+
+pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
+    conn.query_row("select uuid from meta", &[], |row| -> Result<Uuid, Error> {
+        let uuid: FromSqlUuid = row.get_checked(0)?;
+        Ok(uuid.0)
+    })?
+}
 
 /// Inserts the specified recording (for from `try_flush` only).
 pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: CompositeId,
