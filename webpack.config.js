@@ -9,7 +9,7 @@ module.exports = {
     path: path.resolve(__dirname, 'ui-dist')
   },
   module: {
-    loaders: [
+    rules: [
       { test: /\.png$/, loader: "file-loader" },
       { test: /\.css$/, loader: "style-loader!css-loader" },
     ]
