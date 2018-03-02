@@ -346,6 +346,7 @@ impl SampleIndexEncoder {
 #[derive(Debug)]
 pub struct Segment {
     pub id: db::CompositeId,
+    pub open_id: u32,
     pub start: Time,
 
     /// An iterator positioned at the beginning of the segment, or `None`. Most segments are
@@ -373,6 +374,7 @@ impl Segment {
                desired_range_90k: Range<i32>) -> Result<Segment, Error> {
         let mut self_ = Segment {
             id: recording.id,
+            open_id: recording.open_id,
             start: recording.start,
             begin: None,
             file_end: recording.sample_file_bytes,

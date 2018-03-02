@@ -61,8 +61,9 @@ use uuid::Uuid;
 lazy_static! {
     /// Regex used to parse the `s` query parameter to `view.mp4`.
     /// As described in `design/api.md`, this is of the form
-    /// `START_ID[-END_ID][.[REL_START_TIME]-[REL_END_TIME]]`.
-    static ref SEGMENTS_RE: Regex = Regex::new(r"^(\d+)(-\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
+    /// `START_ID[-END_ID][@OPEN_ID][.[REL_START_TIME]-[REL_END_TIME]]`.
+    static ref SEGMENTS_RE: Regex =
+        Regex::new(r"^(\d+)(-\d+)?(@\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
 }
 
 enum Path {
@@ -135,6 +136,7 @@ fn decode_path(path: &str) -> Path {
 #[derive(Debug, Eq, PartialEq)]
 struct Segments {
     ids: Range<i32>,
+    open_id: Option<u32>,
     start_time: i64,
     end_time: Option<i64>,
 }
@@ -144,17 +146,21 @@ impl Segments {
         let caps = SEGMENTS_RE.captures(input).ok_or(())?;
         let ids_start = i32::from_str(caps.get(1).unwrap().as_str()).map_err(|_| ())?;
         let ids_end = match caps.get(2) {
-            Some(e) => i32::from_str(&e.as_str()[1..]).map_err(|_| ())?,
+            Some(m) => i32::from_str(&m.as_str()[1..]).map_err(|_| ())?,
             None => ids_start,
         } + 1;
+        let open_id = match caps.get(3) {
+            Some(m) => Some(u32::from_str(&m.as_str()[1..]).map_err(|_| ())?),
+            None => None,
+        };
         if ids_start < 0 || ids_end <= ids_start {
             return Err(());
         }
-        let start_time = caps.get(3).map_or(Ok(0), |m| i64::from_str(m.as_str())).map_err(|_| ())?;
+        let start_time = caps.get(4).map_or(Ok(0), |m| i64::from_str(m.as_str())).map_err(|_| ())?;
         if start_time < 0 {
             return Err(());
         }
-        let end_time = match caps.get(4) {
+        let end_time = match caps.get(5) {
             Some(v) => {
                 let e = i64::from_str(v.as_str()).map_err(|_| ())?;
                 if e <= start_time {
@@ -164,10 +170,11 @@ impl Segments {
             },
             None => None
         };
-        Ok(Segments{
+        Ok(Segments {
             ids: ids_start .. ids_end,
-            start_time: start_time,
-            end_time: end_time,
+            open_id,
+            start_time,
+            end_time,
         })
     }
 }
@@ -262,10 +269,12 @@ impl ServiceInner {
                 let vse = db.video_sample_entries_by_id().get(&row.video_sample_entry_id).unwrap();
                 out.recordings.push(json::Recording {
                     start_id: row.ids.start,
-                    end_id: if end == row.ids.start + 1 { None } else { Some(end) },
+                    end_id: if end == row.ids.start { None } else { Some(end) },
                     start_time_90k: row.time.start.0,
                     end_time_90k: row.time.end.0,
                     sample_file_bytes: row.sample_file_bytes,
+                    open_id: row.open_id,
+                    first_uncommitted: row.first_uncommitted,
                     video_samples: row.video_samples,
                     video_sample_entry_width: vse.width,
                     video_sample_entry_height: vse.height,
@@ -330,6 +339,13 @@ impl ServiceInner {
                         let mut cur_off = 0;
                         db.list_recordings_by_id(stream_id, s.ids.clone(), &mut |r| {
                             let recording_id = r.id.recording();
+
+                            if let Some(o) = s.open_id {
+                                if r.open_id != o {
+                                    bail!("recording {} has open id {}, requested {}",
+                                          r.id, r.open_id, o);
+                                }
+                            }
 
                             // Check for missing recordings.
                             match prev {
@@ -507,21 +523,25 @@ mod tests {
     #[test]
     fn test_segments() {
         testutil::init();
-        assert_eq!(Segments{ids: 1..2, start_time: 0, end_time: None},
+        assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 0, end_time: None},
                    Segments::parse("1").unwrap());
-        assert_eq!(Segments{ids: 1..2, start_time: 26, end_time: None},
+        assert_eq!(Segments{ids: 1..2, open_id: Some(42), start_time: 0, end_time: None},
+                   Segments::parse("1@42").unwrap());
+        assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 26, end_time: None},
                    Segments::parse("1.26-").unwrap());
-        assert_eq!(Segments{ids: 1..2, start_time: 0, end_time: Some(42)},
+        assert_eq!(Segments{ids: 1..2, open_id: Some(42), start_time: 26, end_time: None},
+                   Segments::parse("1@42.26-").unwrap());
+        assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 0, end_time: Some(42)},
                    Segments::parse("1.-42").unwrap());
-        assert_eq!(Segments{ids: 1..2, start_time: 26, end_time: Some(42)},
+        assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 26, end_time: Some(42)},
                    Segments::parse("1.26-42").unwrap());
-        assert_eq!(Segments{ids: 1..6, start_time: 0, end_time: None},
+        assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 0, end_time: None},
                    Segments::parse("1-5").unwrap());
-        assert_eq!(Segments{ids: 1..6, start_time: 26, end_time: None},
+        assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 26, end_time: None},
                    Segments::parse("1-5.26-").unwrap());
-        assert_eq!(Segments{ids: 1..6, start_time: 0, end_time: Some(42)},
+        assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 0, end_time: Some(42)},
                    Segments::parse("1-5.-42").unwrap());
-        assert_eq!(Segments{ids: 1..6, start_time: 26, end_time: Some(42)},
+        assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 26, end_time: Some(42)},
                    Segments::parse("1-5.26-42").unwrap());
     }
 }

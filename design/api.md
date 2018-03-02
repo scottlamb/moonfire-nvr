@@ -170,6 +170,15 @@ Each recording object has the following properties:
     together are as described. Adjacent recordings from the same RTSP session
     may be coalesced in this fashion to reduce the amount of redundant data
     transferred.
+*   `firstUncommitted` (optional). If this range is not fully committed to the
+    database, the first id that is uncommitted. This is significant because
+    it's possible that after a crash and restart, this id will refer to a
+    completely different recording. That recording will have a different
+    `openId`.
+*   `openId`. Each time Moonfire NVR starts in read-write mode, it is assigned
+    an increasing "open id". This field is the open id as of when these
+    recordings were written. This can be used to disambiguate ids referring to
+    uncommitted recordings.
 *   `startTime90k`: the start time of the given recording. Note this may be
     less than the requested `startTime90k` if this recording was ongoing
     at the requested time.
@@ -224,10 +233,12 @@ MIME type will be `video/mp4`, with a `codecs` parameter as specified in [RFC
 Expected query parameters:
 
 *   `s` (one or more): a string of the form
-    `START_ID[-END_ID][.[REL_START_TIME]-[REL_END_TIME]]`. This specifies
-    recording segments to include. The produced `.mp4` file will be a
+    `START_ID[-END_ID][@OPEN_ID][.[REL_START_TIME]-[REL_END_TIME]]`. This
+    specifies recording segments to include. The produced `.mp4` file will be a
     concatenation of the segments indicated by all `s` parameters.  The ids to
-    retrieve are as returned by the `/recordings` URL. The optional start and
+    retrieve are as returned by the `/recordings` URL. The open id is optional
+    and will be enforced if present; it's recommended for disambiguation when
+    the requested range includes uncommitted recordings. The optional start and
     end times are in 90k units and relative to the start of the first specified
     id. These can be used to clip the returned segments. Note they can be used
     to skip over some ids entirely; this is allowed so that the caller doesn't

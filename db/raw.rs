@@ -49,7 +49,8 @@ const LIST_RECORDINGS_BY_TIME_SQL: &'static str = r#"
         recording.sample_file_bytes,
         recording.video_samples,
         recording.video_sync_samples,
-        recording.video_sample_entry_id
+        recording.video_sample_entry_id,
+        recording.open_id
     from
         recording
     where
@@ -71,7 +72,8 @@ const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
         recording.sample_file_bytes,
         recording.video_samples,
         recording.video_sync_samples,
-        recording.video_sample_entry_id
+        recording.video_sample_entry_id,
+        recording.open_id
     from
         recording
     where
@@ -173,6 +175,7 @@ fn list_recordings_inner(mut rows: rusqlite::Rows,
             video_samples: row.get_checked(6)?,
             video_sync_samples: row.get_checked(7)?,
             video_sample_entry_id: row.get_checked(8)?,
+            open_id: row.get_checked(9)?,
         })?;
     }
     Ok(())

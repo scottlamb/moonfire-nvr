@@ -70,6 +70,9 @@ function onSelectVideo(camera, streamType, range, recording) {
   if (recording.endId !== undefined) {
     url += '-' + recording.endId;
   }
+  if (recording.firstUncommitted !== undefined) {
+    url += '@' + recording.openId;  // disambiguate.
+  }
   const trim = $("#trim").prop("checked");
   let rel = '';
   let startTime90k = recording.startTime90k;

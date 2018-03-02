@@ -804,10 +804,11 @@ impl FileBuilder {
             }
 
             // Update the etag to reflect this segment.
-            let mut data = [0_u8; 24];
+            let mut data = [0_u8; 28];
             let mut cursor = io::Cursor::new(&mut data[..]);
             cursor.write_i64::<BigEndian>(s.s.id.0)?;
             cursor.write_i64::<BigEndian>(s.s.start.0)?;
+            cursor.write_u32::<BigEndian>(s.s.open_id)?;
             cursor.write_i32::<BigEndian>(d.start)?;
             cursor.write_i32::<BigEndian>(d.end)?;
             etag.update(cursor.into_inner())?;
@@ -2103,7 +2104,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "c56ef7eb3b4a713ceafebc3dc7958bd9e62a2fae";
+        const EXPECTED_ETAG: &'static str = "04298efb2df0cc45a6cea65dfdf2e817a3b42ca8";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2124,7 +2125,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "3bdc2c8ce521df50155d0ca4d7497ada448fa7c3";
+        const EXPECTED_ETAG: &'static str = "16a4f6348560c3de0d149675dccba21ef7906be3";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2145,7 +2146,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("d655945f94e18e6ed88a2322d27522aff6f76403", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "3986d3bd9b866c3455fb7359fb134aa2d9107af7";
+        const EXPECTED_ETAG: &'static str = "80e418b029e81aa195f90aa6b806015a5030e5be";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2166,7 +2167,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "9e789398c9a71ca834fec8fbc55b389f99d12dda";
+        const EXPECTED_ETAG: &'static str = "5bfea0f20108a7c5b77ef1e21d82ef2abc29540f";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();

@@ -144,6 +144,7 @@ pub struct ListRecordingsRow {
     pub video_sync_samples: i32,
     pub sample_file_bytes: i32,
     pub run_offset: i32,
+    pub open_id: u32,
     pub flags: i32,
 }
 
@@ -157,8 +158,9 @@ pub struct ListAggregatedRecordingsRow {
     pub sample_file_bytes: i64,
     pub video_sample_entry_id: i32,
     pub stream_id: i32,
-    pub flags: i32,
     pub run_start_id: i32,
+    pub open_id: u32,
+    pub first_uncommitted: Option<i32>,
 }
 
 /// Select fields from the `recordings_playback` table. Retrieve with `with_recording_playback`.
@@ -170,6 +172,9 @@ pub struct RecordingPlayback<'a> {
 /// Bitmask in the `flags` field in the `recordings` table; see `schema.sql`.
 pub enum RecordingFlags {
     TrailingZero = 1,
+
+    // These values (starting from high bit on down) are never written to the database.
+    Uncommitted = 2147483648,
 }
 
 /// A recording to pass to `insert_recording`.
@@ -186,6 +191,24 @@ pub(crate) struct RecordingToInsert {
     pub video_index: Vec<u8>,
     pub sample_file_sha1: [u8; 20],
 }
+
+impl RecordingToInsert {
+    fn to_list_row(&self, id: CompositeId, open_id: u32) -> ListRecordingsRow {
+        ListRecordingsRow {
+            start: self.time.start,
+            video_sample_entry_id: self.video_sample_entry_id,
+            id,
+            duration_90k: (self.time.end - self.time.start).0 as i32,
+            video_samples: self.video_samples,
+            video_sync_samples: self.video_sync_samples,
+            sample_file_bytes: self.sample_file_bytes,
+            run_offset: self.run_offset,
+            open_id,
+            flags: self.flags | RecordingFlags::Uncommitted as i32,
+        }
+    }
+}
+
 
 /// A row used in `raw::list_oldest_recordings` and `db::delete_oldest_recordings`.
 #[derive(Copy, Clone, Debug)]
@@ -1000,19 +1023,64 @@ impl LockedDatabase {
         }
     }
 
-    /// Lists the specified recordings in ascending order by start time, passing them to a supplied
-    /// function. Given that the function is called with the database lock held, it should be quick.
+    /// Lists the specified recordings, passing them to a supplied function. Given that the
+    /// function is called with the database lock held, it should be quick.
+    ///
+    /// Note that at present, the returned recordings are _not_ completely ordered by start time.
+    /// Uncommitted recordings are returned id order after the others.
     pub fn list_recordings_by_time(
         &self, stream_id: i32, desired_time: Range<recording::Time>,
         f: &mut FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
-        raw::list_recordings_by_time(&self.conn, stream_id, desired_time, f)
+        let s = match self.streams_by_id.get(&stream_id) {
+            None => bail!("no such stream {}", stream_id),
+            Some(s) => s,
+        };
+        raw::list_recordings_by_time(&self.conn, stream_id, desired_time.clone(), f)?;
+        for i in 0 .. s.synced_recordings {
+            let row = {
+                let l = s.uncommitted[i].lock();
+                if let Some(ref r) = l.recording {
+                    if r.time.start > desired_time.end || r.time.end < r.time.start {
+                        continue;  // there's no overlap with the requested range.
+                    }
+                    r.to_list_row(CompositeId::new(stream_id, s.next_recording_id + i as i32),
+                                  self.open.unwrap().id)
+                } else {
+                    continue;
+                }
+            };
+            f(row)?;
+        }
+        Ok(())
     }
 
     /// Lists the specified recordings in ascending order by id.
     pub fn list_recordings_by_id(
         &self, stream_id: i32, desired_ids: Range<i32>,
         f: &mut FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
-        raw::list_recordings_by_id(&self.conn, stream_id, desired_ids, f)
+        let s = match self.streams_by_id.get(&stream_id) {
+            None => bail!("no such stream {}", stream_id),
+            Some(s) => s,
+        };
+        if desired_ids.start < s.next_recording_id {
+            raw::list_recordings_by_id(&self.conn, stream_id, desired_ids.clone(), f)?;
+        }
+        if desired_ids.end > s.next_recording_id {
+            let start = cmp::min(0, desired_ids.start - s.next_recording_id);
+            for i in start .. desired_ids.end - s.next_recording_id {
+                let row = {
+                    let l = s.uncommitted[i as usize].lock();
+                    if let Some(ref r) = l.recording {
+                        r.to_list_row(CompositeId::new(stream_id, s.next_recording_id + i as i32),
+                                      self.open.unwrap().id)
+                    } else {
+                        continue;
+                    }
+                };
+                f(row)?;
+            }
+        }
+        Ok(())
     }
 
     /// Calls `list_recordings_by_time` and aggregates consecutive recordings.
@@ -1035,7 +1103,8 @@ impl LockedDatabase {
         // is equal to the start_time of recording id r+1. Thus ascending times guarantees
         // ascending ids within a run. (Different runs, however, can be arbitrarily interleaved if
         // their timestamps overlap. Tracking all active runs prevents that interleaving from
-        // causing problems.)
+        // causing problems.) list_recordings_by_time also returns uncommitted recordings in
+        // ascending order by id, and after any committed recordings with lower ids.
         let mut aggs: BTreeMap<i32, ListAggregatedRecordingsRow> = BTreeMap::new();
         self.list_recordings_by_time(stream_id, desired_time, &mut |row| {
             let recording_id = row.id.recording();
@@ -1052,6 +1121,7 @@ impl LockedDatabase {
                 let a = aggs.remove(&run_start_id).expect("needs_flush when agg is None");
                 f(&a)?;
             }
+            let uncommitted = (row.flags & RecordingFlags::Uncommitted as i32) != 0;
             let need_insert = if let Some(ref mut a) = aggs.get_mut(&run_start_id) {
                 if a.time.end != row.start {
                     bail!("stream {} recording {} ends at {}; {} starts at {}; expected same",
@@ -1062,6 +1132,9 @@ impl LockedDatabase {
                 a.video_samples += row.video_samples as i64;
                 a.video_sync_samples += row.video_sync_samples as i64;
                 a.sample_file_bytes += row.sample_file_bytes as i64;
+                if uncommitted {
+                    a.first_uncommitted = a.first_uncommitted.or(Some(recording_id));
+                }
                 false
             } else {
                 true
@@ -1076,7 +1149,8 @@ impl LockedDatabase {
                         video_sample_entry_id: row.video_sample_entry_id,
                         stream_id,
                         run_start_id,
-                        flags: row.flags,
+                        open_id: row.open_id,
+                        first_uncommitted: if uncommitted { Some(recording_id) } else { None },
                 });
             };
             Ok(())
@@ -1092,6 +1166,25 @@ impl LockedDatabase {
     /// This uses a LRU cache to reduce the number of retrievals from the database.
     pub fn with_recording_playback<F, R>(&self, id: CompositeId, f: F) -> Result<R, Error>
     where F: FnOnce(&RecordingPlayback) -> Result<R, Error> {
+        // Check for uncommitted path.
+        let s = self.streams_by_id
+                    .get(&id.stream())
+                    .ok_or_else(|| format_err!("no stream for {}", id))?;
+        if s.next_recording_id <= id.recording() {
+            let i = id.recording() - s.next_recording_id;
+            if i as usize >= s.uncommitted.len() {
+                bail!("no such recording {}; latest committed is {}, latest is {}",
+                      id, s.next_recording_id, s.next_recording_id + s.uncommitted.len() as i32);
+            }
+            let l = s.uncommitted[i as usize].lock();
+            if let Some(ref r) = l.recording {
+                return f(&RecordingPlayback { video_index: &r.video_index });
+            } else {
+                bail!("recording {} is not ready", id);
+            }
+        }
+
+        // Committed path.
         let mut cache = self.video_index_cache.borrow_mut();
         if let Some(video_index) = cache.get_mut(&id.0) {
             trace!("cache hit for recording {}", id);

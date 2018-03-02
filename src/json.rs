@@ -173,6 +173,10 @@ pub struct Recording {
     pub video_samples: i64,
     pub video_sample_entry_sha1: String,
     pub start_id: i32,
+    pub open_id: u32,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_uncommitted: Option<i32>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_id: Option<i32>,
