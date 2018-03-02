@@ -85,6 +85,9 @@ function onSelectVideo(camera, streamType, range, recording) {
   if (trim && recording.endTime90k > range.endTime90k) {
     rel += range.endTime90k - recording.startTime90k;
     endTime90k = range.endTime90k;
+  } else if (recording.growing !== undefined) {
+    // View just the portion described here.
+    rel += recording.endTime90k - recording.startTime90k;
   }
   if (rel !== '-') {
     url += '.' + rel;

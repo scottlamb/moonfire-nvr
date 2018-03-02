@@ -279,6 +279,7 @@ impl ServiceInner {
                     video_sample_entry_width: vse.width,
                     video_sample_entry_height: vse.height,
                     video_sample_entry_sha1: strutil::hex(&vse.sha1),
+                    growing: row.growing,
                 });
                 Ok(())
             })?;

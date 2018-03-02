@@ -191,10 +191,6 @@ pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
 /// Inserts the specified recording (for from `try_flush` only).
 pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: CompositeId,
                     r: &db::RecordingToInsert) -> Result<(), Error> {
-    if r.time.end < r.time.start {
-        bail!("end time {} must be >= start time {}", r.time.end, r.time.start);
-    }
-
     let mut stmt = tx.prepare_cached(INSERT_RECORDING_SQL)?;
     stmt.execute_named(&[
         (":composite_id", &id.0),
@@ -203,8 +199,8 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
         (":run_offset", &r.run_offset),
         (":flags", &r.flags),
         (":sample_file_bytes", &r.sample_file_bytes),
-        (":start_time_90k", &r.time.start.0),
-        (":duration_90k", &(r.time.end.0 - r.time.start.0)),
+        (":start_time_90k", &r.start.0),
+        (":duration_90k", &r.duration_90k),
         (":local_time_delta_90k", &r.local_time_delta.0),
         (":video_samples", &r.video_samples),
         (":video_sync_samples", &r.video_sync_samples),

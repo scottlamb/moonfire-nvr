@@ -175,6 +175,11 @@ Each recording object has the following properties:
     it's possible that after a crash and restart, this id will refer to a
     completely different recording. That recording will have a different
     `openId`.
+*   `growing` (optional). If this boolean is true, the recording `endId` is
+    still being written to. Accesses to this id (such as `view.mp4`) may
+    retrieve more data than described here if not bounded by duration.
+    Additionally, if `startId` == `endId`, the start time of the recording is
+    "unanchored" and may change in subsequent accesses.
 *   `openId`. Each time Moonfire NVR starts in read-write mode, it is assigned
     an increasing "open id". This field is the open id as of when these
     recordings were written. This can be used to disambiguate ids referring to

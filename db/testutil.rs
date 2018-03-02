@@ -34,7 +34,6 @@ use db;
 use dir;
 use fnv::FnvHashMap;
 use mylog;
-use recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite;
 use std::env;
 use std::sync::{self, Arc};
@@ -125,26 +124,20 @@ impl TestDb {
         }
     }
 
-    pub fn create_recording_from_encoder(&self, encoder: recording::SampleIndexEncoder)
-                                         -> db::ListRecordingsRow {
+    /// Creates a recording with a fresh `RecordingToInsert` row which has been touched only by
+    /// a `SampleIndexEncoder`. Fills in a video sample entry id and such to make it valid.
+    /// There will no backing sample file, so it won't be possible to generate a full `.mp4`.
+    pub fn insert_recording_from_encoder(&self, r: db::RecordingToInsert)
+                                                -> db::ListRecordingsRow {
+        use recording::{self, TIME_UNITS_PER_SEC};
         let mut db = self.db.lock();
         let video_sample_entry_id = db.insert_video_sample_entry(
             1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
-        const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-        let (id, u) = db.add_recording(TEST_STREAM_ID).unwrap();
-        u.lock().recording = Some(db::RecordingToInsert {
-            sample_file_bytes: encoder.sample_file_bytes,
-            time: START_TIME ..
-                  START_TIME + recording::Duration(encoder.total_duration_90k as i64),
-            local_time_delta: recording::Duration(0),
-            video_samples: encoder.video_samples,
-            video_sync_samples: encoder.video_sync_samples,
-            video_sample_entry_id: video_sample_entry_id,
-            video_index: encoder.video_index,
-            sample_file_sha1: [0u8; 20],
-            run_offset: 0,
-            flags: db::RecordingFlags::TrailingZero as i32,
-        });
+        let (id, _) = db.add_recording(TEST_STREAM_ID, db::RecordingToInsert {
+            start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
+            video_sample_entry_id,
+            ..r
+        }).unwrap();
         db.mark_synced(id).unwrap();
         db.flush("create_recording_from_encoder").unwrap();
         let mut row = None;
@@ -157,30 +150,26 @@ impl TestDb {
 // For benchmarking
 #[cfg(feature="nightly")]
 pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
+    use recording::{self, TIME_UNITS_PER_SEC};
     let mut data = Vec::new();
     data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
     let mut db = db.lock();
     let video_sample_entry_id = db.insert_video_sample_entry(
         1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
-    const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-    const DURATION: recording::Duration = recording::Duration(5399985);
     let mut recording = db::RecordingToInsert {
         sample_file_bytes: 30104460,
-        flags: 0,
-        time: START_TIME .. (START_TIME + DURATION),
-        local_time_delta: recording::Duration(0),
+        start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
+        duration_90k: 5399985,
         video_samples: 1800,
         video_sync_samples: 60,
         video_sample_entry_id: video_sample_entry_id,
         video_index: data,
-        sample_file_sha1: [0; 20],
         run_offset: 0,
+        ..Default::default()
     };
     for _ in 0..num {
-        let (id, u) = db.add_recording(TEST_STREAM_ID).unwrap();
-        u.lock().recording = Some(recording.clone());
-        recording.time.start += DURATION;
-        recording.time.end += DURATION;
+        let (id, _) = db.add_recording(TEST_STREAM_ID, recording.clone()).unwrap();
+        recording.start += recording::Duration(recording.duration_90k as i64);
         recording.run_offset += 1;
         db.mark_synced(id).unwrap();
     }

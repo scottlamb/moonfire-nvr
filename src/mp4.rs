@@ -1857,12 +1857,12 @@ mod tests {
     /// Makes a `.mp4` file which is only good for exercising the `Slice` logic for producing
     /// sample tables that match the supplied encoder.
     fn make_mp4_from_encoders(type_: Type, db: &TestDb,
-                              mut encoders: Vec<recording::SampleIndexEncoder>,
+                              mut recordings: Vec<db::RecordingToInsert>,
                               desired_range_90k: Range<i32>) -> File {
         let mut builder = FileBuilder::new(type_);
         let mut duration_so_far = 0;
-        for e in encoders.drain(..) {
-            let row = db.create_recording_from_encoder(e);
+        for r in recordings.drain(..) {
+            let row = db.insert_recording_from_encoder(r);
             let d_start = if desired_range_90k.start < duration_so_far { 0 }
                           else { desired_range_90k.start - duration_so_far };
             let d_end = if desired_range_90k.end > duration_so_far + row.duration_90k
@@ -1878,15 +1878,16 @@ mod tests {
     fn test_all_sync_frames() {
         testutil::init();
         let db = TestDb::new();
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, true);
+            encoder.add_sample(duration_90k, bytes, true, &mut r);
         }
 
         // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![encoder], 2 .. 2+4+6+8);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2 .. 2+4+6+8);
         let track = find_track(mp4, 1);
         assert!(track.edts_cursor.is_none());
         let mut cursor = track.stbl_cursor;
@@ -1931,16 +1932,17 @@ mod tests {
     fn test_half_sync_frames() {
         testutil::init();
         let db = TestDb::new();
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, (i % 2) == 1);
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
 
         // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![encoder], 2+4+6 .. 2+4+6+8);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2+4+6 .. 2+4+6+8);
         let track = find_track(mp4, 1);
 
         // Examine edts. It should skip the 3rd frame.
@@ -1994,15 +1996,17 @@ mod tests {
         testutil::init();
         let db = TestDb::new();
         let mut encoders = Vec::new();
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(1, 1, true);
-        encoder.add_sample(2, 2, false);
-        encoder.add_sample(3, 3, true);
-        encoders.push(encoder);
+        encoder.add_sample(1, 1, true, &mut r);
+        encoder.add_sample(2, 2, false, &mut r);
+        encoder.add_sample(3, 3, true, &mut r);
+        encoders.push(r);
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(4, 4, true);
-        encoder.add_sample(5, 5, false);
-        encoders.push(encoder);
+        encoder.add_sample(4, 4, true, &mut r);
+        encoder.add_sample(5, 5, false, &mut r);
+        encoders.push(r);
 
         // This should include samples 3 and 4 only, both sync frames.
         let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1+2 .. 1+2+3+4);
@@ -2029,13 +2033,15 @@ mod tests {
         testutil::init();
         let db = TestDb::new();
         let mut encoders = Vec::new();
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(2, 1, true);
-        encoder.add_sample(3, 2, false);
-        encoders.push(encoder);
+        encoder.add_sample(2, 1, true, &mut r);
+        encoder.add_sample(3, 2, false, &mut r);
+        encoders.push(r);
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(0, 3, true);
-        encoders.push(encoder);
+        encoder.add_sample(0, 3, true, &mut r);
+        encoders.push(r);
 
         // Multi-segment recording with an edit list, encoding with a zero-duration recording.
         let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1 .. 2+3);
@@ -2052,16 +2058,17 @@ mod tests {
     fn test_media_segment() {
         testutil::init();
         let db = TestDb::new();
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, (i % 2) == 1);
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
 
         // Time range [2+4+6, 2+4+6+8+1) means the 4th sample and part of the 5th are included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
-        let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![encoder],
+        let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![r],
                                          2+4+6 .. 2+4+6+8+1);
         let mut cursor = BoxCursor::new(mp4);
         cursor.down();

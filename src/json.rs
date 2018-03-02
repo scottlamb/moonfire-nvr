@@ -32,6 +32,7 @@ use db;
 use failure::Error;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
+use std::ops::Not;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -182,4 +183,7 @@ pub struct Recording {
     pub end_id: Option<i32>,
     pub video_sample_entry_width: u16,
     pub video_sample_entry_height: u16,
+
+    #[serde(skip_serializing_if = "Not::not")]
+    pub growing: bool,
 }

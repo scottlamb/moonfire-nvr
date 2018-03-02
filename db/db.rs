@@ -161,6 +161,7 @@ pub struct ListAggregatedRecordingsRow {
     pub run_start_id: i32,
     pub open_id: u32,
     pub first_uncommitted: Option<i32>,
+    pub growing: bool,
 }
 
 /// Select fields from the `recordings_playback` table. Retrieve with `with_recording_playback`.
@@ -174,16 +175,18 @@ pub enum RecordingFlags {
     TrailingZero = 1,
 
     // These values (starting from high bit on down) are never written to the database.
-    Uncommitted = 2147483648,
+    Growing = 1 << 30,
+    Uncommitted = 1 << 31,
 }
 
 /// A recording to pass to `insert_recording`.
-#[derive(Clone, Debug)]
-pub(crate) struct RecordingToInsert {
+#[derive(Clone, Debug, Default)]
+pub struct RecordingToInsert {
     pub run_offset: i32,
     pub flags: i32,
     pub sample_file_bytes: i32,
-    pub time: Range<recording::Time>,
+    pub start: recording::Time,
+    pub duration_90k: i32,  // a recording::Duration, but guaranteed to fit in i32.
     pub local_time_delta: recording::Duration,
     pub video_samples: i32,
     pub video_sync_samples: i32,
@@ -195,10 +198,10 @@ pub(crate) struct RecordingToInsert {
 impl RecordingToInsert {
     fn to_list_row(&self, id: CompositeId, open_id: u32) -> ListRecordingsRow {
         ListRecordingsRow {
-            start: self.time.start,
+            start: self.start,
             video_sample_entry_id: self.video_sample_entry_id,
             id,
-            duration_90k: (self.time.end - self.time.start).0 as i32,
+            duration_90k: self.duration_90k,
             video_samples: self.video_samples,
             video_sync_samples: self.video_sync_samples,
             sample_file_bytes: self.sample_file_bytes,
@@ -399,7 +402,7 @@ pub struct Stream {
     /// `next_recording_id` should be advanced when one is committed to maintain this invariant.
     ///
     /// TODO: alter the serving path to show these just as if they were already committed.
-    uncommitted: VecDeque<Arc<Mutex<UncommittedRecording>>>,
+    uncommitted: VecDeque<Arc<Mutex<RecordingToInsert>>>,
 
     /// The number of recordings in `uncommitted` which are synced and ready to commit.
     synced_recordings: usize,
@@ -410,22 +413,12 @@ impl Stream {
     /// Note recordings must be flushed in order, so a recording is considered unsynced if any
     /// before it are unsynced.
     pub(crate) fn unflushed(&self) -> recording::Duration {
-        let mut dur = recording::Duration(0);
-        for i in 0 .. self.synced_recordings {
-            let l = self.uncommitted[i].lock();
-            if let Some(ref r) = l.recording {
-                dur += r.time.end - r.time.start;
-            }
+        let mut sum = 0;
+        for i in 0..self.synced_recordings {
+            sum += self.uncommitted[i].lock().duration_90k as i64;
         }
-        dur
+        recording::Duration(sum)
     }
-}
-
-#[derive(Debug)]
-pub(crate) struct UncommittedRecording {
-    /// The recording to add. Absent if not yet ready.
-    /// TODO: modify `SampleIndexEncoder` to update this record as it goes.
-    pub(crate) recording: Option<RecordingToInsert>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -764,21 +757,19 @@ impl LockedDatabase {
     }
 
     /// Adds a placeholder for an uncommitted recording.
-    /// The caller should write and sync the file and populate the returned `UncommittedRecording`
-    /// (noting that the database lock must not be acquired while holding the
-    /// `UncommittedRecording`'s lock) then call `mark_synced`. The data will be written to the
-    /// database on the next `flush`.
-    pub(crate) fn add_recording(&mut self, stream_id: i32)
-                             -> Result<(CompositeId, Arc<Mutex<UncommittedRecording>>), Error> {
+    /// The caller should write samples and fill the returned `RecordingToInsert` as it goes
+    /// (noting that while holding the lock, it should not perform I/O or acquire the database
+    /// lock). Then it should sync to permanent storage and call `mark_synced`. The data will
+    /// be written to the database on the next `flush`.
+    pub(crate) fn add_recording(&mut self, stream_id: i32, r: RecordingToInsert)
+                             -> Result<(CompositeId, Arc<Mutex<RecordingToInsert>>), Error> {
         let stream = match self.streams_by_id.get_mut(&stream_id) {
             None => bail!("no such stream {}", stream_id),
             Some(s) => s,
         };
         let id = CompositeId::new(stream_id,
                                   stream.next_recording_id + (stream.uncommitted.len() as i32));
-        let recording = Arc::new(Mutex::new(UncommittedRecording {
-            recording: None,
-        }));
+        let recording = Arc::new(Mutex::new(r));
         stream.uncommitted.push_back(Arc::clone(&recording));
         Ok((id, recording))
     }
@@ -799,11 +790,7 @@ impl LockedDatabase {
             bail!("can't sync un-added recording {}", id);
         }
         let l = stream.uncommitted[stream.synced_recordings].lock();
-        let r = match l.recording.as_ref() {
-            None => bail!("can't sync unfinished recording {}", id),
-            Some(r) => r,
-        };
-        stream.bytes_to_add += r.sample_file_bytes as i64;
+        stream.bytes_to_add += l.sample_file_bytes as i64;
         stream.synced_recordings += 1;
         Ok(())
     }
@@ -841,9 +828,8 @@ impl LockedDatabase {
                 // Process additions.
                 for i in 0..s.synced_recordings {
                     let l = s.uncommitted[i].lock();
-                    let r = l.recording.as_ref().unwrap();
                     raw::insert_recording(
-                        &tx, o, CompositeId::new(stream_id, s.next_recording_id + i as i32), &r)?;
+                        &tx, o, CompositeId::new(stream_id, s.next_recording_id + i as i32), &l)?;
                 }
                 if s.synced_recordings > 0 {
                     new_ranges.entry(stream_id).or_insert(None);
@@ -911,9 +897,8 @@ impl LockedDatabase {
             for _ in 0..s.synced_recordings {
                 let u = s.uncommitted.pop_front().unwrap();
                 let l = u.lock();
-                if let Some(ref r) = l.recording {
-                    s.add_recording(r.time.clone(), r.sample_file_bytes);
-                }
+                let end = l.start + recording::Duration(l.duration_90k as i64);
+                s.add_recording(l.start .. end, l.sample_file_bytes);
             }
             s.synced_recordings = 0;
 
@@ -1036,14 +1021,15 @@ impl LockedDatabase {
             Some(s) => s,
         };
         raw::list_recordings_by_time(&self.conn, stream_id, desired_time.clone(), f)?;
-        for i in 0 .. s.synced_recordings {
+        for (i, u) in s.uncommitted.iter().enumerate() {
             let row = {
-                let l = s.uncommitted[i].lock();
-                if let Some(ref r) = l.recording {
-                    if r.time.start > desired_time.end || r.time.end < r.time.start {
+                let l = u.lock();
+                if l.video_samples > 0 {
+                    let end = l.start + recording::Duration(l.duration_90k as i64);
+                    if l.start > desired_time.end || end < desired_time.start {
                         continue;  // there's no overlap with the requested range.
                     }
-                    r.to_list_row(CompositeId::new(stream_id, s.next_recording_id + i as i32),
+                    l.to_list_row(CompositeId::new(stream_id, s.next_recording_id + i as i32),
                                   self.open.unwrap().id)
                 } else {
                     continue;
@@ -1066,12 +1052,14 @@ impl LockedDatabase {
             raw::list_recordings_by_id(&self.conn, stream_id, desired_ids.clone(), f)?;
         }
         if desired_ids.end > s.next_recording_id {
-            let start = cmp::min(0, desired_ids.start - s.next_recording_id);
-            for i in start .. desired_ids.end - s.next_recording_id {
+            let start = cmp::max(0, desired_ids.start - s.next_recording_id) as usize;
+            let end = cmp::min((desired_ids.end - s.next_recording_id) as usize,
+                               s.uncommitted.len());
+            for i in start .. end {
                 let row = {
-                    let l = s.uncommitted[i as usize].lock();
-                    if let Some(ref r) = l.recording {
-                        r.to_list_row(CompositeId::new(stream_id, s.next_recording_id + i as i32),
+                    let l = s.uncommitted[i].lock();
+                    if l.video_samples > 0 {
+                        l.to_list_row(CompositeId::new(stream_id, s.next_recording_id + i as i32),
                                       self.open.unwrap().id)
                     } else {
                         continue;
@@ -1122,25 +1110,31 @@ impl LockedDatabase {
                 f(&a)?;
             }
             let uncommitted = (row.flags & RecordingFlags::Uncommitted as i32) != 0;
-            let need_insert = if let Some(ref mut a) = aggs.get_mut(&run_start_id) {
-                if a.time.end != row.start {
-                    bail!("stream {} recording {} ends at {}; {} starts at {}; expected same",
-                          stream_id, a.ids.end - 1, a.time.end, row.id, row.start);
-                }
-                a.time.end.0 += row.duration_90k as i64;
-                a.ids.end = recording_id + 1;
-                a.video_samples += row.video_samples as i64;
-                a.video_sync_samples += row.video_sync_samples as i64;
-                a.sample_file_bytes += row.sample_file_bytes as i64;
-                if uncommitted {
-                    a.first_uncommitted = a.first_uncommitted.or(Some(recording_id));
-                }
-                false
-            } else {
-                true
-            };
-            if need_insert {
-                aggs.insert(run_start_id, ListAggregatedRecordingsRow{
+            let growing = (row.flags & RecordingFlags::Growing as i32) != 0;
+            use std::collections::btree_map::Entry;
+            match aggs.entry(run_start_id) {
+                Entry::Occupied(mut e) => {
+                    let a = e.get_mut();
+                    if a.time.end != row.start {
+                        bail!("stream {} recording {} ends at {}; {} starts at {}; expected same",
+                              stream_id, a.ids.end - 1, a.time.end, row.id, row.start);
+                    }
+                    if a.open_id != row.open_id {
+                        bail!("stream {} recording {} has open id {}; {} has {}; expected same",
+                              stream_id, a.ids.end - 1, a.open_id, row.id, row.open_id);
+                    }
+                    a.time.end.0 += row.duration_90k as i64;
+                    a.ids.end = recording_id + 1;
+                    a.video_samples += row.video_samples as i64;
+                    a.video_sync_samples += row.video_sync_samples as i64;
+                    a.sample_file_bytes += row.sample_file_bytes as i64;
+                    if uncommitted {
+                        a.first_uncommitted = a.first_uncommitted.or(Some(recording_id));
+                    }
+                    a.growing = growing;
+                },
+                Entry::Vacant(e) => {
+                    e.insert(ListAggregatedRecordingsRow {
                         time: row.start ..  recording::Time(row.start.0 + row.duration_90k as i64),
                         ids: recording_id .. recording_id+1,
                         video_samples: row.video_samples as i64,
@@ -1151,7 +1145,9 @@ impl LockedDatabase {
                         run_start_id,
                         open_id: row.open_id,
                         first_uncommitted: if uncommitted { Some(recording_id) } else { None },
-                });
+                        growing,
+                    });
+                },
             };
             Ok(())
         })?;
@@ -1177,11 +1173,7 @@ impl LockedDatabase {
                       id, s.next_recording_id, s.next_recording_id + s.uncommitted.len() as i32);
             }
             let l = s.uncommitted[i as usize].lock();
-            if let Some(ref r) = l.recording {
-                return f(&RecordingPlayback { video_index: &r.video_index });
-            } else {
-                bail!("recording {} is not ready", id);
-            }
+            return f(&RecordingPlayback { video_index: &l.video_index });
         }
 
         // Committed path.
@@ -1861,9 +1853,10 @@ mod tests {
         {
             let db = db.lock();
             let stream = db.streams_by_id().get(&stream_id).unwrap();
-            assert_eq!(Some(r.time.clone()), stream.range);
+            let dur = recording::Duration(r.duration_90k as i64);
+            assert_eq!(Some(r.start .. r.start + dur), stream.range);
             assert_eq!(r.sample_file_bytes as i64, stream.sample_file_bytes);
-            assert_eq!(r.time.end - r.time.start, stream.duration);
+            assert_eq!(dur, stream.duration);
             db.cameras_by_id().get(&stream.camera_id).unwrap();
         }
 
@@ -1877,8 +1870,8 @@ mod tests {
             db.list_recordings_by_time(stream_id, all_time, &mut |row| {
                 rows += 1;
                 recording_id = Some(row.id);
-                assert_eq!(r.time,
-                           row.start .. row.start + recording::Duration(row.duration_90k as i64));
+                assert_eq!(r.start, row.start);
+                assert_eq!(r.duration_90k, row.duration_90k);
                 assert_eq!(r.video_samples, row.video_samples);
                 assert_eq!(r.video_sync_samples, row.video_sync_samples);
                 assert_eq!(r.sample_file_bytes, row.sample_file_bytes);
@@ -1893,8 +1886,8 @@ mod tests {
         raw::list_oldest_recordings(&db.lock().conn, CompositeId::new(stream_id, 0), &mut |row| {
             rows += 1;
             assert_eq!(recording_id, Some(row.id));
-            assert_eq!(r.time.start, row.start);
-            assert_eq!(r.time.end - r.time.start, recording::Duration(row.duration as i64));
+            assert_eq!(r.start, row.start);
+            assert_eq!(r.duration_90k, row.duration);
             assert_eq!(r.sample_file_bytes, row.sample_file_bytes);
             true
         }).unwrap();
@@ -2084,7 +2077,8 @@ mod tests {
             sample_file_bytes: 42,
             run_offset: 0,
             flags: 0,
-            time: start .. start + recording::Duration(TIME_UNITS_PER_SEC),
+            start,
+            duration_90k: TIME_UNITS_PER_SEC as i32,
             local_time_delta: recording::Duration(0),
             video_samples: 1,
             video_sync_samples: 1,
@@ -2094,8 +2088,7 @@ mod tests {
         };
         let id = {
             let mut db = db.lock();
-            let (id, u) = db.add_recording(main_stream_id).unwrap();
-            u.lock().recording = Some(recording.clone());
+            let (id, _) = db.add_recording(main_stream_id, recording.clone()).unwrap();
             db.mark_synced(id).unwrap();
             db.flush("add test").unwrap();
             id
