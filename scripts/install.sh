@@ -1,4 +1,4 @@
-#!/bin/bash +x
+#!/bin/bash
 #
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2016-17 Scott Lamb <slamb@slamb.org>
@@ -65,8 +65,9 @@ fi
 if [ ! -d "${LIB_DIR}" ]; then
 	sudo mkdir "${LIB_DIR}"
 fi
-sudo cp -R ui-dist "${LIB_DIR}/ui"
-if [ -d "ui-dist" ] && [ -d "${LIB_DIR/ui}" ]; then
+if [ -d "ui-dist" ]; then
+	sudo mkdir -p "${LIB_DIR}/ui"
+	sudo cp -R ui-dist/. "${LIB_DIR}/ui/"
 	echo "Server UI installed..."; echo
 else
 	echo "Server UI failed to build or install..."; echo
@@ -91,18 +92,8 @@ fi
 #
 SOCKET_SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.socket"
 if [ $NVR_PORT -lt 1024 ]; then
-	sudo sh -c "cat > \"${SOCKET_SERVICE_PATH}\"" <<NVR_SOCKET_EOF
-[Unit]
-Description=${SERVICE_NAME} web server socket
-
-[Socket]
-ListenStream=$NVR_PORT
-NoDelay=true
-NVR_SOCKET_EOF
-	PORT_REQ="Requires=${SERVICE_NAME}.socket"
-else
-	PORT_REQ=""
-	[ -f "${SOCKET_SERVICE_PATH}" ] && sudo rm -f "${SOCKET_SERVICE_PATH}"
+	echo_fatal "NVR_PORT ($NVR_PORT) < 1024: priviliged ports not supported"
+	exit 1
 fi
 
 # Prepare service files for moonfire
@@ -112,7 +103,6 @@ sudo sh -c "cat > ${SERVICE_PATH}" <<NVR_EOF
 [Unit]
 Description=${SERVICE_DESC}
 After=network-online.target
-$PORT_REQ
 
 [Service]
 ExecStart=${SERVICE_BIN} run \\

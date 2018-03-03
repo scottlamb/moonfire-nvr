@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 #
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2016-2017 Scott Lamb <slamb@slamb.org>
@@ -33,8 +33,8 @@
 
 . `dirname ${BASH_SOURCE[0]}`/script-functions.sh
 
-makePrepConfig
 initEnvironmentVars
+makePrepConfig
 
 
 # Process command line options
@@ -44,12 +44,10 @@ while getopts ":f" opt; do
 	  f)    DONT_BUILD_FFMPEG=1
 		;;
 	  :)
-		echo "Option -$OPTARG requires an argument." >&2
-		exit 1
+		echo_fatal "Option -$OPTARG requires an argument." >&2
 		;;
 	  \?)
-		echo "Invalid option: -$OPTARG" >&2
-		exit 1
+		echo_fatal "Invalid option: -$OPTARG" >&2
 		;;
 	esac
 done
@@ -155,8 +153,6 @@ fi
 
 # Now make sure we have dev environment and tools for the UI portion
 #
-echo "Adding yarn components we need..."; echo
-grep -qv \"webpack\" package.json && yarn add --dev webpack@${WEBPACK_MIN_VERSION}
 echo "Installing all dependencies with yarn..."
 yarn install
 
@@ -218,7 +214,7 @@ if [ ! -z "${CAMERAS_PATH}" ]; then
 	echo "Adding camera confguration to db..."; echo
 	addCameras
 else
-	echo "!!!!! No cameras auto configured. Use \"moonfire-nvr config\" to do it later..."; echo
+	echo_warn "No cameras auto configured. Use \"moonfire-nvr config\" to do it later..."
 fi
 
 
@@ -237,14 +233,12 @@ if [ "${SAMPLES_PATH##${NVR_HOME}}" != "${SAMPLES_PATH}" ]; then
 	fi
 else
 	if [ ! -d "${SAMPLES_PATH}" ]; then
-		cat <<-MSG1
-!!!!!
-Samples directory $SAMPLES_PATH does not exist.
-If a mounted file system, make sure /etc/fstab is properly configured,
+		read -r -d '' MSG <<-MSG1
+Samples directory $SAMPLES_PATH does not exist. 
+If a mounted file system, make sure /etc/fstab is properly configured, 
 and file system is mounted and directory created.
-!!!!!
 MSG1
-		exit 1
+		echo_fatal "$MSG"
 	fi
 fi
 # Make sure all sample directories and files owned by moonfire

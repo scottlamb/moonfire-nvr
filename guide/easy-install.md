@@ -47,7 +47,7 @@ Locate the device where your disk will be mounted (or is mounted), for example
 `/dev/sda1`. Now lookup the filename linked to that from the output of the
 `ls` command. This is the uuid you need.
 
-The setup script (see below) will create the necessary samples dir on the mounted
+The setup script (see below) will create the necessary sample file dir on the mounted
 hard disk.
 
 
@@ -129,8 +129,7 @@ start of this configuration.
 
 Although not all listed in the default prep.config file, these are the
 available configuration variable and their defaults. In the most frequent
-scenarios you will probably only change the port to 80 (assuming you
-have a dedicated server for moonfire), and SAMPLES_MEDIA_DIR to point
+scenarios you will probably only change SAMPLES_MEDIA_DIR to point
 to your mounted external disk (/media/nvr in the example above).
 
     NVR_USER=moonfire-nvr
@@ -139,7 +138,7 @@ to your mounted external disk (/media/nvr in the example above).
     NVR_HOME_BASE=/var/lib
     DB_NAME=db
     DB_DIR=$NVR_HOME/$DB_NAME
-    SAMPLES_DIR_NAME=samples
+    SAMPLES_DIR_NAME=sample
     SAMPLES_MEDIA_DIR=$NVR_HOME
     SERVICE_NAME=moonfire-nvr
     SERVICE_DESC="Moonfire NVR"

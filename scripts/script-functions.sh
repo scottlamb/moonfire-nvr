@@ -39,7 +39,6 @@ fi
 #
 NODE_MIN_VERSION="8"
 YARN_MIN_VERSION="1.0"
-WEBPACK_MIN_VERSION="3.8.1"
 CARGO_MIN_VERSION="0.2"
 RUSTC_MIN_VERSION="1.17"
 FFMPEG_MIN_VERSION="55.1.101"
@@ -92,7 +91,7 @@ initEnvironmentVars()
 	NVR_HOME="${NVR_HOME_BASE}/${NVR_USER}"
 	DB_NAME="${DB_NAME:-db}"
 	DB_DIR="${DB_DIR:-$NVR_HOME}/${DB_NAME}"
-	SAMPLES_DIR_NAME="${SAMPLES_DIR_NAME:-samples}"
+	SAMPLES_DIR_NAME="${SAMPLES_DIR_NAME:-sample}"
 	SAMPLES_MEDIA_DIR="${SAMPLES_MEDIA_DIR:-$NVR_HOME}"
 	SERVICE_NAME="${SERVICE_NAME:-moonfire-nvr}"
 	SERVICE_DESC="${SERVICE_DESC:-Moonfire NVR}"
@@ -110,12 +109,12 @@ makePrepConfig()
 	test -z "${MOONFIRE_DIR}" && functionsInit
 	if [ ! -f "${MOONFIRE_DIR}/prep.config" ]; then
 		cat >"${MOONFIRE_DIR}/prep.config" <<-EOF_CONFIG
-			NVR_USER=moonfire-nvr
-			NVR_PORT=8080
-			SAMPLES_DIR_NAME=samples
+			NVR_USER=$NVR_USER
+			NVR_PORT=$NVR_PORT
+			SAMPLES_DIR_NAME=$SAMPLES_DIR_NAME
 			#SAMPLES_MEDIA_DIR=/mount/media
-			SERVICE_NAME=moonfire-nvr
-			SERVICE_DESC="Moonfire NVR"
+			SERVICE_NAME=$SERVICE_NAME
+			SERVICE_DESC="$SERVICE_DESC"
 EOF_CONFIG
 		echo "File prep.config newly created. Inspect and change as necessary."
 		echo "When done, re-run this setup script. Currently it contains:"
@@ -216,4 +215,22 @@ addCameras()
 		sudo -u ${NVR_USER:-$3} -H sqlite3 "${DB_PATH:-$4}" < "${cpath}"
 		moonfire start "${SERVICE_NAME:-$2}" >/dev/null 2>&1
 	fi
+}
+
+echo_stderr()
+{
+	echo "$@" 1>&2
+}
+
+echo_warn()
+{
+	echo_stderr "WARNING: $@"
+	echo_stderr
+}
+
+echo_fatal()
+{
+	echo_stderr "ERROR: $@"
+	echo_stderr
+	exit 1;
 }
