@@ -67,6 +67,13 @@ You can configure the system's database through a text-based user interface:
 
     $ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
 
+If you have used a non-default path for your samples directory, as you most
+likely have, you must also supply that location, or the command will fail
+with an error message about not being able to open the default location for
+that directory:
+
+    $ sudo -u moonfire-nvr moonfire-nvr config --sample-files-dir=/path/to/my/media/samples 2>debug-log
+
 In the user interface, add your cameras under the "Edit cameras" dialog.
 There's a "Test" button to verify your settings directly from the dialog.
 
@@ -85,7 +92,8 @@ There are several reasons this is needed:
      downloading it), it stays around until the file is closed. Moonfire NVR
      currently doesn't account for this.
 
-The sample files directory can be set or changed using:
+The sample files directory is configured through the systemd service setup
+with the "--samples-dir=" option.
 
     $ moonfire-nvr config --samples-dir=/path/to/samples/dir
 

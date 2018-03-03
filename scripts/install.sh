@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash +x
 #
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2016-17 Scott Lamb <slamb@slamb.org>
@@ -87,13 +87,32 @@ if ! userExists "${NVR_USER}"; then
 fi
 
 
-# Prepare service files
+# Prepare service files for socket when using priviliged port
+#
+SOCKET_SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.socket"
+if [ $NVR_PORT -lt 1024 ]; then
+	sudo sh -c "cat > \"${SOCKET_SERVICE_PATH}\"" <<NVR_SOCKET_EOF
+[Unit]
+Description=${SERVICE_NAME} web server socket
+
+[Socket]
+ListenStream=$NVR_PORT
+NoDelay=true
+NVR_SOCKET_EOF
+	PORT_REQ="Requires=${SERVICE_NAME}.socket"
+else
+	PORT_REQ=""
+	[ -f "${SOCKET_SERVICE_PATH}" ] && sudo rm -f "${SOCKET_SERVICE_PATH}"
+fi
+
+# Prepare service files for moonfire
 #
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 sudo sh -c "cat > ${SERVICE_PATH}" <<NVR_EOF
 [Unit]
 Description=${SERVICE_DESC}
 After=network-online.target
+$PORT_REQ
 
 [Service]
 ExecStart=${SERVICE_BIN} run \\

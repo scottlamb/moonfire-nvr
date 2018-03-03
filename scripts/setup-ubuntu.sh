@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 #
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2016-2017 Scott Lamb <slamb@slamb.org>
@@ -156,8 +156,9 @@ fi
 # Now make sure we have dev environment and tools for the UI portion
 #
 echo "Adding yarn components we need..."; echo
-yarn add --dev webpack webpack-cli
-#yarn add babel-loader babel-core babel-preset-env 
+grep -qv \"webpack\" package.json && yarn add --dev webpack@${WEBPACK_MIN_VERSION}
+echo "Installing all dependencies with yarn..."
+yarn install
 
 finish()
 {
@@ -217,7 +218,7 @@ if [ ! -z "${CAMERAS_PATH}" ]; then
 	echo "Adding camera confguration to db..."; echo
 	addCameras
 else
-	echo "!!!!! No cameras auto configured. Please do so manually..."; echo
+	echo "!!!!! No cameras auto configured. Use \"moonfire-nvr config\" to do it later..."; echo
 fi
 
 
