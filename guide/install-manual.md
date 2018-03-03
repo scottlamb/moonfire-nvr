@@ -72,7 +72,7 @@ suggestion to separate database and samples between flash storage and a hard dis
 If you have the hard disk mounted on, lets say `/media/nvr`, and you want to
 store the video samples inside a directory named `samples` there, you would set:
 
-    SAMPLES_DIR=/media/nvr/samples
+    SAMPLE_FILE_DIR=/media/nvr/samples
 
 The script will perform all necessary steps to leave you with a fully built,
 installed moonfire-nvr binary. The only thing

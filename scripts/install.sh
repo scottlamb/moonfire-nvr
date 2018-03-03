@@ -68,6 +68,7 @@ fi
 if [ -d "ui-dist" ]; then
 	sudo mkdir -p "${LIB_DIR}/ui"
 	sudo cp -R ui-dist/. "${LIB_DIR}/ui/"
+	sudo chown -R ${NVR_USER}:${NVR_GROUP} "${LIB_DIR}/ui/"
 	echo "Server UI installed..."; echo
 else
 	echo "Server UI failed to build or install..."; echo
@@ -106,7 +107,7 @@ After=network-online.target
 
 [Service]
 ExecStart=${SERVICE_BIN} run \\
-    --sample-file-dir=${SAMPLES_MEDIA_DIR}/${SAMPLES_DIR_NAME} \\
+    --sample-file-dir=${SAMPLE_MEDIA_DIR}/${SAMPLE_FILE_DIR} \\
     --db-dir=${DB_DIR} \\
     --ui-dir=${LIB_DIR}/ui \\
     --http-addr=0.0.0.0:${NVR_PORT}

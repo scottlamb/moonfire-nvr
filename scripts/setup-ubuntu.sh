@@ -220,21 +220,21 @@ fi
 
 # Make sure samples directory is ready
 #
-if [ -z "${SAMPLES_MEDIA_DIR}" ]; then
-	echo "SAMPLES_MEDIA_DIR variable not configured. Check configuration."
+if [ -z "${SAMPLE_MEDIA_DIR}" ]; then
+	echo "SAMPLE_MEDIA_DIR variable not configured. Check configuration."
 	exit 1
 fi
-SAMPLES_PATH="${SAMPLES_MEDIA_DIR}/${SAMPLES_DIR_NAME}"
-if [ "${SAMPLES_PATH##${NVR_HOME}}" != "${SAMPLES_PATH}" ]; then
+SAMPLE_FILE_PATH="${SAMPLE_MEDIA_DIR}/${SAMPLE_FILE_DIR}"
+if [ "${SAMPLE_FILE_PATH##${NVR_HOME}}" != "${SAMPLE_FILE_PATH}" ]; then
 	# Under the home directory, create if not there
-	if [ ! -d "${SAMPLES_PATH}" ]; then
-		echo "Created samples directory: $SAMPLES_PATH"; echo
-		sudo -u ${NVR_USER} -H mkdir "${SAMPLES_PATH}"
+	if [ ! -d "${SAMPLE_FILE_PATH}" ]; then
+		echo "Created samples directory: $SAMPLE_FILE_PATH"; echo
+		sudo -u ${NVR_USER} -H mkdir "${SAMPLE_FILE_PATH}"
 	fi
 else
-	if [ ! -d "${SAMPLES_PATH}" ]; then
+	if [ ! -d "${SAMPLE_FILE_PATH}" ]; then
 		read -r -d '' MSG <<-MSG1
-Samples directory $SAMPLES_PATH does not exist. 
+Samples directory $SAMPLE_FILE_PATH does not exist. 
 If a mounted file system, make sure /etc/fstab is properly configured, 
 and file system is mounted and directory created.
 MSG1
@@ -243,7 +243,7 @@ MSG1
 fi
 # Make sure all sample directories and files owned by moonfire
 #
-sudo chown -R ${NVR_USER}.${NVR_USER} "${SAMPLES_PATH}"
+sudo chown -R ${NVR_USER}.${NVR_USER} "${SAMPLE_FILE_PATH}"
 echo "Fix ownership of sample files..."; echo
 
 

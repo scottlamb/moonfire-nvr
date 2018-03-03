@@ -129,7 +129,7 @@ start of this configuration.
 
 Although not all listed in the default prep.config file, these are the
 available configuration variable and their defaults. In the most frequent
-scenarios you will probably only change SAMPLES_MEDIA_DIR to point
+scenarios you will probably only change SAMPLE_MEDIA_DIR to point
 to your mounted external disk (/media/nvr in the example above).
 
     NVR_USER=moonfire-nvr
@@ -138,8 +138,8 @@ to your mounted external disk (/media/nvr in the example above).
     NVR_HOME_BASE=/var/lib
     DB_NAME=db
     DB_DIR=$NVR_HOME/$DB_NAME
-    SAMPLES_DIR_NAME=sample
-    SAMPLES_MEDIA_DIR=$NVR_HOME
+    SAMPLE_FILE_DIR=sample
+    SAMPLE_MEDIA_DIR=$NVR_HOME
     SERVICE_NAME=moonfire-nvr
     SERVICE_DESC="Moonfire NVR"
     SERVICE_BIN=/usr/local/bin/$SERVICE_NAME
