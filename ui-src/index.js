@@ -53,14 +53,50 @@ function req(url) {
   });
 }
 
-// Produces a human-readable but unambiguous format of the given timestamp:
-// ISO-8601 plus an extra colon component after the seconds indicating the
-// fractional time in 90,000ths of a second.
-function formatTime(ts90k) {
-  const m = moment.tz(ts90k / 90, zone);
-  const frac = ts90k % 90000;
-  return m.format('YYYY-MM-DDTHH:mm:ss:' + String(100000 + frac).substr(1) + 'Z');
+/**
+ * Produces a human-readable timestamp in 90k units.
+ *
+ * The format is ISO-8601 plus an extra colon component after the seconds
+ * indicating the fractional time in 90,000ths of a second.
+ *
+ * The timestamp in seconds would be ts90k / 90000, or in ms it would
+ * be ts90k / 90. We use "moment" for formatting, but since it takes only
+ * ms resolution (truncated) we have to be smarter than that to handle
+ * additional precision provided by the timestamp, if the format indicates such
+ * preision is requested.
+ *
+ * We accept a format string in every way compatible with those accepted
+ * by moment's format function, except that we treat the sub-second format
+ * special and extend the functionality to work correctly for precisions up
+ * to 6 decimals (micro-seconds). The default format uses 5 positions.
+ *
+ * @param {int} ts90k timestamp in 90,000ths of a second resolution
+ * @param {string} format Format string
+ * @return {string}
+ */
+function formatTime(ts90k, format = 'YYYY-MM-DDTHH:mm:ss.SSSSSZ') {
+  const ms = ts90k / 90.0;
+  let msRound = 0.5;
+  // Check if format string requires subsecond precision beyond ms
+  const matches = format.match(/(S+)/);
+  if (matches && (matches[1].length > 3)) {
+    // Determine portion not handled by moment, which uses ms
+    const fracms = ts90k % 90000; // Fractional ms, 90k units
+    console.log('fracms: ' + fracms);
+    if (fracms >= 0.001) { // Nothing extra needed if fraction is < 1 µs
+      const subFmt = matches[1];
+      const extraLen = Math.min(subFmt.length - 3, 3); // µs precision
+      const fracµs = fracms / 0.09 + // µs units
+        (0.0 * Math.pow(10, (3 - extraLen))); // and rounding
+      const newSubFmt = subFmt.substr(0, 3) +
+        String(1000000 + fracµs).substr(4, extraLen);
+      format = format.replace(subFmt, newSubFmt);
+      msRound = 0;
+    }
+  }
+  return moment.tz(ms + msRound, zone).format(format);
 }
+
 
 function onSelectVideo(camera, range, recording) {
   let url = apiUrl + 'cameras/' + camera.uuid + '/view.mp4?s=' + recording.startId;
