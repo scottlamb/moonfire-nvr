@@ -530,7 +530,8 @@ mod bench {
             ::std::thread::spawn(move || {
                 let addr = "127.0.0.1:0".parse().unwrap();
                 let (db, dir) = (db.db.clone(), db.dir.clone());
-                let service = super::Service::new(db.clone(), dir.clone(), None, "".to_owned()).unwrap();
+                let service = super::Service::new(db.clone(), dir.clone(), None, None,
+                                                  "".to_owned()).unwrap();
                 let server = hyper::server::Http::new()
                     .bind(&addr, move || Ok(service.clone()))
                     .unwrap();
