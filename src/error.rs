@@ -103,6 +103,12 @@ impl From<fmt::Error> for Error {
     }
 }
 
+impl From<::hyper::Error> for Error {
+    fn from(err: ::hyper::Error) -> Self {
+        Error{description: String::from(err.description()), cause: Some(Box::new(err))}
+    }
+}
+
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Error{description: String::from(err.description()), cause: Some(Box::new(err))}

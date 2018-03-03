@@ -39,7 +39,7 @@ use futures::{future, stream};
 use futures_cpupool;
 use json;
 use http_serve;
-use hyper::header;
+use hyper::header::{self, Header};
 use hyper::server::{self, Request, Response};
 use mime;
 use mp4;
@@ -170,6 +170,7 @@ struct ServiceInner {
     db: Arc<db::Database>,
     dir: Arc<SampleFileDir>,
     ui_files: HashMap<String, UiFile>,
+    allow_origin: Option<header::AccessControlAllowOrigin>,
     pool: futures_cpupool::CpuPool,
     time_zone_name: String,
 }
@@ -383,17 +384,22 @@ impl ServiceInner {
 pub struct Service(Arc<ServiceInner>);
 
 impl Service {
-    pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>, ui_dir: Option<&str>, zone: String)
-               -> Result<Self, Error> {
+    pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>, ui_dir: Option<&str>,
+               allow_origin: Option<String>, zone: String) -> Result<Self, Error> {
         let mut ui_files = HashMap::new();
         if let Some(d) = ui_dir {
             Service::fill_ui_files(d, &mut ui_files);
         }
         debug!("UI files: {:#?}", ui_files);
+        let allow_origin = match allow_origin {
+            None => None,
+            Some(o) => Some(header::AccessControlAllowOrigin::parse_header(&header::Raw::from(o))?),
+        };
         Ok(Service(Arc::new(ServiceInner {
             db,
             dir,
             ui_files,
+            allow_origin,
             pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
             time_zone_name: zone,
         })))
@@ -460,6 +466,11 @@ impl server::Service for Service {
             },
             Path::NotFound => self.0.not_found(),
             Path::Static => self.0.static_file(&req),
+        };
+        let res = if let Some(ref o) = self.0.allow_origin {
+            res.map(|resp| resp.with_header(o.clone()))
+        } else {
+            res
         };
         future::result(res.map_err(|e| {
             error!("error: {}", e);
