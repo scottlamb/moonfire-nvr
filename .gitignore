@@ -6,3 +6,4 @@ node_modules
 prep.config
 target
 ui-dist
+yarn-error.log

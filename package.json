@@ -4,7 +4,8 @@
     "url": "https://github.com/scottlamb/moonfire-nvr/issues"
   },
   "scripts": {
-    "build": "webpack && ln ui-src/index.html ui-dist/"
+    "clean": "scripts/clean.sh",
+    "build": "webpack && ln -f ui-src/index.html ui-dist/"
   },
   "dependencies": {
     "jquery": "^3.2.1",
@@ -24,6 +25,6 @@
     "css-loader": "^0.28.7",
     "file-loader": "^1.1.5",
     "style-loader": "^0.19.0",
-    "webpack": "^3.8.1"
+    "webpack": "3.8.1"
   }
 }
