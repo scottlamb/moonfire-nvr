@@ -20,7 +20,7 @@ from source. To do so, you can follow two paths:
   in particular for first time builders/installers. This process is fully
   described. Read more in [Easy Installation](easy-install.md)
 * Manual build and install. This is explained in detail in these
-  [instructions](install-manual)
+  [instructions](install-manual.md)
 
 Regardless of the approach for setup and installation above that you choose,
 please read the further configuration instructions below.
@@ -32,7 +32,7 @@ state:
 
    * a SQLite database, typically <1 GiB. It should be stored on flash if
      available.
-   * the "sample files directory", which holds the actual samples/frames of
+   * the "sample file directory", which holds the actual samples/frames of
      H.264 video. This should be quite large and typically is stored on a hard
      drive.
 
@@ -40,7 +40,7 @@ Both states are intended to be accessed by moonfire-nvr only, but can be
 changed after building. See below.
 (See [schema.md](schema.md) for more information.)
 
-The database changes and sample files directory changes require the moonfire-nvr
+The database changes and sample file directory changes require the moonfire-nvr
 binary to be built, so can only be done after completing the build. The other
 settings and preparations should be done before building.
 Manual commands would look something like this:
@@ -48,7 +48,7 @@ Manual commands would look something like this:
     $ sudo addgroup --system moonfire-nvr
     $ sudo adduser --system moonfire-nvr --home /var/lib/moonfire-nvr
     $ sudo mkdir /var/lib/moonfire-nvr
-    $ sudo -u moonfire-nvr -H mkdir db samples
+    $ sudo -u moonfire-nvr -H mkdir db sample
     $ sudo -u moonfire-nvr moonfire-nvr init
 
 ### <a name="drive mounting"></a>Camera configuration and hard drive mounting
@@ -91,11 +91,6 @@ There are several reasons this is needed:
    * If a file is open when it is deleted (such as if a HTTP client is
      downloading it), it stays around until the file is closed. Moonfire NVR
      currently doesn't account for this.
-
-The sample files directory is configured through the systemd service setup
-with the "--samples-dir=" option.
-
-    $ moonfire-nvr config --samples-dir=/path/to/samples/dir
 
 When finished, start the daemon:
 
