@@ -1448,7 +1448,7 @@ impl FileInner {
         let f = self.dirs_by_stream_id
                     .get(&s.s.id.stream())
                     .ok_or_else(|| format_err!("{}: stream not found", s.s.id))?
-                    .open_sample_file(s.s.id)?;
+                    .open_file(s.s.id)?;
         let start = s.s.sample_file_range().start + r.start;
         let mmap = Box::new(unsafe {
             memmap::MmapOptions::new()
@@ -1520,6 +1520,7 @@ mod tests {
     use byteorder::{BigEndian, ByteOrder};
     use db::recording::{self, TIME_UNITS_PER_SEC};
     use db::testutil::{self, TestDb, TEST_STREAM_ID};
+    use db::writer;
     use futures::Future;
     use futures::Stream as FuturesStream;
     use hyper::header;
@@ -1755,8 +1756,9 @@ mod tests {
             extra_data.width, extra_data.height, extra_data.sample_entry,
             extra_data.rfc6381_codec).unwrap();
         let dir = db.dirs_by_stream_id.get(&TEST_STREAM_ID).unwrap();
-        let mut output = dir::Writer::new(dir, &db.db, &db.syncer_channel, TEST_STREAM_ID,
-                                          video_sample_entry_id);
+        let mut output = writer::Writer::new(&::base::clock::RealClocks{}, dir, &db.db,
+                                             &db.syncer_channel, TEST_STREAM_ID,
+                                             video_sample_entry_id);
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
         // It's needed because dir::Writer calculates a packet's duration from its pts and the

@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use clock::{Clocks, TimerGuard};
-use db::{Camera, Database, Stream, dir, recording};
+use db::{Camera, Database, Stream, dir, recording, writer};
 use failure::Error;
 use h264;
 use std::result::Result;
@@ -48,7 +48,7 @@ pub struct Environment<'a, 'b, C, S> where C: 'a + Clocks, S: 'a + stream::Strea
     pub shutdown: &'b Arc<AtomicBool>,
 }
 
-pub struct Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
+pub struct Streamer<'a, C, S> where C: Clocks, S: 'a + stream::Stream {
     shutdown: Arc<AtomicBool>,
 
     // State below is only used by the thread in Run.
@@ -56,7 +56,7 @@ pub struct Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     rotate_interval_sec: i64,
     db: Arc<Database>,
     dir: Arc<dir::SampleFileDir>,
-    syncer_channel: dir::SyncerChannel,
+    syncer_channel: writer::SyncerChannel<::std::fs::File>,
     clocks: &'a C,
     opener: &'a stream::Opener<S>,
     stream_id: i32,
@@ -67,7 +67,7 @@ pub struct Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
 
 impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
     pub fn new<'b>(env: &Environment<'a, 'b, C, S>, dir: Arc<dir::SampleFileDir>,
-                   syncer_channel: dir::SyncerChannel,
+                   syncer_channel: writer::SyncerChannel<::std::fs::File>,
                    stream_id: i32, c: &Camera, s: &Stream, rotate_offset_sec: i64,
                    rotate_interval_sec: i64) -> Self {
         Streamer {
@@ -121,8 +121,8 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
         // Seconds since epoch at which to next rotate.
         let mut rotate: Option<i64> = None;
         let mut transformed = Vec::new();
-        let mut w = dir::Writer::new(&self.dir, &self.db, &self.syncer_channel, self.stream_id,
-                                     video_sample_entry_id);
+        let mut w = writer::Writer::new(self.clocks, &self.dir, &self.db, &self.syncer_channel,
+                                        self.stream_id, video_sample_entry_id);
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = {
                 let _t = TimerGuard::new(self.clocks, || "getting next packet");

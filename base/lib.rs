@@ -1,4 +1,4 @@
-// This file is part of Moonfire NVR, a security camera digital video recorder.
+// This file is part of Moonfire NVR, a security camera network video recorder.
 // Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
@@ -28,37 +28,10 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#![cfg_attr(all(feature="nightly", test), feature(test))]
-
-#[macro_use] extern crate failure;
-extern crate fnv;
-#[macro_use] extern crate lazy_static;
+extern crate failure;
 extern crate libc;
 #[macro_use] extern crate log;
-extern crate lru_cache;
-extern crate moonfire_base as base;
-extern crate mylog;
-extern crate openssl;
 extern crate parking_lot;
-extern crate protobuf;
-extern crate regex;
-extern crate rusqlite;
-extern crate tempdir;
 extern crate time;
-extern crate uuid;
 
-pub mod check;
-mod coding;
-pub mod db;
-pub mod dir;
-mod raw;
-pub mod recording;
-mod schema;
-pub mod upgrade;
-pub mod writer;
-
-// This is only for #[cfg(test)], but it's also used by the dependent crate, and it appears that
-// #[cfg(test)] is not passed on to dependencies.
-pub mod testutil;
-
-pub use db::*;
+pub mod clock;

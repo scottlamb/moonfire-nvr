@@ -28,8 +28,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate tempdir;
-
 use db;
 use dir;
 use fnv::FnvHashMap;
@@ -38,8 +36,10 @@ use rusqlite;
 use std::env;
 use std::sync::{self, Arc};
 use std::thread;
+use tempdir::TempDir;
 use time;
 use uuid::Uuid;
+use writer;
 
 static INIT: sync::Once = sync::ONCE_INIT;
 
@@ -66,16 +66,16 @@ pub fn init() {
 pub struct TestDb {
     pub db: Arc<db::Database>,
     pub dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
-    pub syncer_channel: dir::SyncerChannel,
+    pub syncer_channel: writer::SyncerChannel<::std::fs::File>,
     pub syncer_join: thread::JoinHandle<()>,
-    pub tmpdir: tempdir::TempDir,
+    pub tmpdir: TempDir,
     pub test_camera_uuid: Uuid,
 }
 
 impl TestDb {
     /// Creates a test database with one camera.
     pub fn new() -> TestDb {
-        let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
+        let tmpdir = TempDir::new("moonfire-nvr-test").unwrap();
 
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         db::Database::init(&mut conn).unwrap();
@@ -113,7 +113,7 @@ impl TestDb {
         let mut dirs_by_stream_id = FnvHashMap::default();
         dirs_by_stream_id.insert(TEST_STREAM_ID, dir.clone());
         let (syncer_channel, syncer_join) =
-            dir::start_syncer(db.clone(), sample_file_dir_id).unwrap();
+            writer::start_syncer(db.clone(), sample_file_dir_id).unwrap();
         TestDb {
             db,
             dirs_by_stream_id: Arc::new(dirs_by_stream_id),

@@ -14,7 +14,7 @@ nightly = ["moonfire-db/nightly", "parking_lot/nightly"]
 bundled = ["rusqlite/bundled"]
 
 [workspace]
-members = ["db", "ffmpeg"]
+members = ["base", "db", "ffmpeg"]
 
 [dependencies]
 byteorder = "1.0"
@@ -30,6 +30,7 @@ libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }
 memmap = "0.6"
 mime = "0.3"
+moonfire-base = { path = "base" }
 moonfire-db = { path = "db" }
 moonfire-ffmpeg = { path = "ffmpeg" }
 mylog = { git = "https://github.com/scottlamb/mylog" }

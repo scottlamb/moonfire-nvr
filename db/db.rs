@@ -1697,6 +1697,9 @@ pub struct Database(
 
 impl Drop for Database {
     fn drop(&mut self) {
+        if ::std::thread::panicking() {
+            return;  // don't flush while panicking.
+        }
         if let Some(m) = self.0.take() {
             if let Err(e) = m.into_inner().flush("drop") {
                 error!("Final database flush failed: {}", e);

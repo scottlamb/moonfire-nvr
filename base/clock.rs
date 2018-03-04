@@ -1,5 +1,5 @@
-// This file is part of Moonfire NVR, a security camera digital video recorder.
-// Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
+// This file is part of Moonfire NVR, a security camera network video recorder.
+// Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -30,14 +30,16 @@
 
 //! Clock interface and implementations for testability.
 
+use failure::Error;
 use libc;
-#[cfg(test)] use parking_lot::Mutex;
+use parking_lot::Mutex;
 use std::mem;
+use std::sync::Arc;
 use std::thread;
 use time::{Duration, Timespec};
 
 /// Abstract interface to the system clocks. This is for testability.
-pub trait Clocks : Sync {
+pub trait Clocks : Clone + Sync + 'static {
     /// Gets the current time from `CLOCK_REALTIME`.
     fn realtime(&self) -> Timespec;
 
@@ -46,12 +48,21 @@ pub trait Clocks : Sync {
 
     /// Causes the current thread to sleep for the specified time.
     fn sleep(&self, how_long: Duration);
+
+    fn retry_forever<T, E: Into<Error>>(&self, f: &mut FnMut() -> Result<T, E>) -> T {
+        loop {
+            let e = match f() {
+                Ok(t) => return t,
+                Err(e) => e.into(),
+            };
+            let sleep_time = Duration::seconds(1);
+            warn!("sleeping for {:?} after error: {:?}", sleep_time, e);
+            self.sleep(sleep_time);
+        }
+    }
 }
 
-/// Singleton "real" clocks.
-pub static REAL: RealClocks = RealClocks {};
-
-/// Real clocks; see static `REAL` instance.
+#[derive(Clone)]
 pub struct RealClocks {}
 
 impl RealClocks {
@@ -78,13 +89,13 @@ impl Clocks for RealClocks {
 
 /// Logs a warning if the TimerGuard lives "too long", using the label created by a supplied
 /// function.
-pub struct TimerGuard<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> {
+pub struct TimerGuard<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> {
     clocks: &'a C,
     label_f: Option<F>,
     start: Timespec,
 }
 
-impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
+impl<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
     pub fn new(clocks: &'a C, label_f: F) -> Self {
         TimerGuard {
             clocks,
@@ -94,7 +105,7 @@ impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C,
     }
 }
 
-impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> Drop for TimerGuard<'a, C, S, F> {
+impl<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> Drop for TimerGuard<'a, C, S, F> {
     fn drop(&mut self) {
         let elapsed = self.clocks.monotonic() - self.start;
         if elapsed.num_seconds() >= 1 {
@@ -105,30 +116,30 @@ impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> Drop for TimerGua
 }
 
 /// Simulated clock for testing.
-#[cfg(test)]
-pub struct SimulatedClocks {
+#[derive(Clone)]
+pub struct SimulatedClocks(Arc<SimulatedClocksInner>);
+
+struct SimulatedClocksInner {
     boot: Timespec,
     uptime: Mutex<Duration>,
 }
 
-#[cfg(test)]
 impl SimulatedClocks {
-    pub fn new(boot: Timespec) -> SimulatedClocks {
-        SimulatedClocks {
+    pub fn new(boot: Timespec) -> Self {
+        SimulatedClocks(Arc::new(SimulatedClocksInner {
             boot: boot,
             uptime: Mutex::new(Duration::seconds(0)),
-        }
+        }))
     }
 }
 
-#[cfg(test)]
 impl Clocks for SimulatedClocks {
-    fn realtime(&self) -> Timespec { self.boot + *self.uptime.lock() }
-    fn monotonic(&self) -> Timespec { Timespec::new(0, 0) + *self.uptime.lock() }
+    fn realtime(&self) -> Timespec { self.0.boot + *self.0.uptime.lock() }
+    fn monotonic(&self) -> Timespec { Timespec::new(0, 0) + *self.0.uptime.lock() }
 
     /// Advances the clock by the specified amount without actually sleeping.
     fn sleep(&self, how_long: Duration) {
-        let mut l = self.uptime.lock();
+        let mut l = self.0.uptime.lock();
         *l = *l + how_long;
     }
 }

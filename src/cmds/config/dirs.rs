@@ -33,7 +33,7 @@ extern crate cursive;
 use self::cursive::Cursive;
 use self::cursive::traits::{Boxable, Identifiable};
 use self::cursive::views;
-use db::{self, dir};
+use db::{self, writer};
 use failure::Error;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -142,7 +142,7 @@ fn actually_delete(model: &RefCell<Model>, siv: &mut Cursive) {
     let model = &*model.borrow();
     let new_limits: Vec<_> =
         model.streams.iter()
-             .map(|(&id, s)| dir::NewLimit {stream_id: id, limit: s.retain.unwrap()})
+             .map(|(&id, s)| writer::NewLimit {stream_id: id, limit: s.retain.unwrap()})
              .collect();
     siv.pop_layer();  // deletion confirmation
     siv.pop_layer();  // retention dialog
@@ -150,7 +150,7 @@ fn actually_delete(model: &RefCell<Model>, siv: &mut Cursive) {
         let mut l = model.db.lock();
         l.open_sample_file_dirs(&[model.dir_id]).unwrap();  // TODO: don't unwrap.
     }
-    if let Err(e) = dir::lower_retention(model.db.clone(), model.dir_id, &new_limits[..]) {
+    if let Err(e) = writer::lower_retention(model.db.clone(), model.dir_id, &new_limits[..]) {
         siv.add_layer(views::Dialog::text(format!("Unable to delete excess video: {}", e))
                       .title("Error")
                       .dismiss_button("Abort"));

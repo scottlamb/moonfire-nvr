@@ -33,7 +33,7 @@ extern crate cursive;
 use self::cursive::Cursive;
 use self::cursive::traits::{Boxable, Identifiable, Finder};
 use self::cursive::views;
-use db::{self, dir};
+use db::{self, writer};
 use failure::Error;
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -188,7 +188,7 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
                         None => continue,
                     };
                     let l = zero_limits.entry(dir_id).or_insert_with(|| Vec::with_capacity(2));
-                    l.push(dir::NewLimit {
+                    l.push(writer::NewLimit {
                         stream_id,
                         limit: 0,
                     });
@@ -209,12 +209,12 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
     }
 }
 
-fn lower_retention(db: &Arc<db::Database>, zero_limits: BTreeMap<i32, Vec<dir::NewLimit>>)
+fn lower_retention(db: &Arc<db::Database>, zero_limits: BTreeMap<i32, Vec<writer::NewLimit>>)
                    -> Result<(), Error> {
     let dirs_to_open: Vec<_> = zero_limits.keys().map(|id| *id).collect();
     db.lock().open_sample_file_dirs(&dirs_to_open[..])?;
     for (&dir_id, l) in &zero_limits {
-        dir::lower_retention(db.clone(), dir_id, &l)?;
+        writer::lower_retention(db.clone(), dir_id, &l)?;
     }
     Ok(())
 }

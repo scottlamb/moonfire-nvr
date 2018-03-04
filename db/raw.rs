@@ -31,7 +31,7 @@
 //! Raw database access: SQLite statements which do not touch any cached state.
 
 use db::{self, CompositeId, FromSqlUuid};
-use failure::Error;
+use failure::{Error, ResultExt};
 use fnv::FnvHashSet;
 use recording;
 use rusqlite;
@@ -191,7 +191,8 @@ pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
 /// Inserts the specified recording (for from `try_flush` only).
 pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: CompositeId,
                     r: &db::RecordingToInsert) -> Result<(), Error> {
-    let mut stmt = tx.prepare_cached(INSERT_RECORDING_SQL)?;
+    let mut stmt = tx.prepare_cached(INSERT_RECORDING_SQL)
+                     .with_context(|e| format!("can't prepare recording insert: {}", e))?;
     stmt.execute_named(&[
         (":composite_id", &id.0),
         (":stream_id", &(id.stream() as i64)),
@@ -205,15 +206,16 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
         (":video_samples", &r.video_samples),
         (":video_sync_samples", &r.video_sync_samples),
         (":video_sample_entry_id", &r.video_sample_entry_id),
-    ])?;
+    ]).with_context(|e| format!("unable to insert recording for {:#?}: {}", r, e))?;
 
-    let mut stmt = tx.prepare_cached(INSERT_RECORDING_PLAYBACK_SQL)?;
+    let mut stmt = tx.prepare_cached(INSERT_RECORDING_PLAYBACK_SQL)
+                     .with_context(|e| format!("can't prepare recording_playback insert: {}", e))?;
     let sha1 = &r.sample_file_sha1[..];
     stmt.execute_named(&[
         (":composite_id", &id.0),
         (":sample_file_sha1", &sha1),
         (":video_index", &r.video_index),
-    ])?;
+    ]).with_context(|e| format!("unable to insert recording_playback for {:#?}: {}", r, e))?;
     Ok(())
 }
 

@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use clock;
-use db::{self, dir};
+use db::{self, dir, writer};
 use failure::Error;
 use fnv::FnvHashMap;
 use futures::{Future, Stream};
@@ -90,7 +90,7 @@ fn resolve_zone() -> String {
 
 struct Syncer {
     dir: Arc<dir::SampleFileDir>,
-    channel: dir::SyncerChannel,
+    channel: writer::SyncerChannel<::std::fs::File>,
     join: thread::JoinHandle<()>,
 }
 
@@ -122,7 +122,7 @@ pub fn run() -> Result<(), Error> {
         let streams = l.streams_by_id().len();
         let env = streamer::Environment {
             db: &db,
-            clocks: &clock::REAL,
+            clocks: &clock::RealClocks{},
             opener: &*stream::FFMPEG,
             shutdown: &shutdown_streamers,
         };
@@ -142,7 +142,7 @@ pub fn run() -> Result<(), Error> {
         drop(l);
         let mut syncers = FnvHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
         for (id, dir) in dirs.drain() {
-            let (channel, join) = dir::start_syncer(db.clone(), id)?;
+            let (channel, join) = writer::start_syncer(db.clone(), id)?;
             syncers.insert(id, Syncer {
                 dir,
                 channel,

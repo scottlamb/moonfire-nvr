@@ -46,6 +46,7 @@ extern crate reffers;
 extern crate rusqlite;
 extern crate memmap;
 extern crate mime;
+extern crate moonfire_base as base;
 extern crate moonfire_db as db;
 extern crate moonfire_ffmpeg;
 extern crate mylog;
@@ -62,7 +63,8 @@ extern crate tokio_signal;
 extern crate url;
 extern crate uuid;
 
-mod clock;
+use base::clock as clock;
+
 mod cmds;
 mod h264;
 mod json;
