@@ -44,12 +44,10 @@ while getopts ":Bt" opt; do
 	  t)    IGNORE_TESTS=1
 		;;
 	  :)
-		echo "Option -$OPTARG requires an argument." >&2
-		exit 1
+		echo_fatal -x "Option -$OPTARG requires an argument."
 		;;
 	  \?)
-		echo "Invalid option: -$OPTARG" >&2
-		exit 1
+		echo_fatal "Invalid option: -$OPTARG"
 		;;
 	esac
 done
@@ -63,61 +61,51 @@ initCargo
 
 rv=$(getVersion rustc 0.0)
 if ! versionAtLeast "$rv" "$RUSTC_MIN_VERSION"; then
-	echo "rustc not present or version less than $RUSTC_MIN_VERSION"
-	exit 1
+	echo_fatal -x "rustc not present or version less than $RUSTC_MIN_VERSION"
 fi
 
 cv=$(getVersion cargo 0.0)
 if ! versionAtLeast "$cv" "$CARGO_MIN_VERSION"; then
-	echo "cargo not present or version less than $CARGO_MIN_VERSION"
-	exit 1
+	echo_fatal -x "cargo not present or version less than $CARGO_MIN_VERSION"
 fi
 
 yv=$(getVersion yarn 0.0)
 if ! versionAtLeast "$yv" "$YARN_MIN_VERSION"; then
-	echo "yarn not present or version less than $YARN_MIN_VERSION"
-	exit 1
+	echo_fatal -x "yarn not present or version less than $YARN_MIN_VERSION"
 fi
 
 # Building main server component
 #
 if [ "${FORCE_CLEAN:-0}" -eq 1 ]; then
-	echo "Forcing clean server build..."; echo
+	echo_info -x "Forcing clean server build..."
 	cargo clean
 fi
 
-echo "Building test version..."; echo
+echo_info -x "Building test version..."
 if ! cargo test; then
-	echo "test failed."
-	echo "Try to run the following manually for more info"
-	echo "RUST_TEST_THREADS=1 cargo test --verbose"
-	echo
+	echo_error -x "test failed." "Try to run the following manually for more info" \
+			 "RUST_TEST_THREADS=1 cargo test --verbose" ''
 	if [ "${IGNORE_TESTS:-0}" -ne 1 ]; then
 		exit 1
 	fi
 fi
 if ! cargo build --release; then
-	echo "Server/release build failed."
-	echo "Try to run the following manually for more info"
-	echo "RUST_TEST_THREADS=1 cargo build --release --verbose"
-	echo
+	echo_error -x "Server/release build failed." "Try to run the following manually for more info" \
+			 "RUST_TEST_THREADS=1 cargo build --release --verbose" ''
 	exit 1
 fi
 
 # Building UI components
 #
-echo "Building UI components..."; echo
+echo_info -x "Building UI components..."
 if ! yarn build; then
-	echo "UI build failed."
-	echo "yarn build"
-	echo
-	exit 1
+	echo_fatal -x "UI build failed." "yarn build" 
 fi
 
 # Stop if build only is desired
 #
 if [ "${BUILD_ONLY:-0}" != 0 ]; then
-        echo "Build (only) complete, exiting"; echo
+        echo_info -x "Build (only) complete, exiting"
         exit 0
 fi
 . `dirname ${BASH_SOURCE[0]}`/install.sh

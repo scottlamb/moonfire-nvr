@@ -44,22 +44,21 @@ while getopts ":s" opt; do
 	  s)    NO_SERVICE=1
 		;;
 	  :)
-		echo "Option -$OPTARG requires an argument." >&2
-		exit 1
+		echo_fatal "Option -$OPTARG requires an argument."
 		;;
 	  \?)
-		echo "Invalid option: -$OPTARG" >&2
-		exit 1
+		echo_fatal "Invalid option: -$OPTARG"
 		;;
 	esac
 done
 
+sudo_warn
 
 sudo install -m 755 target/release/moonfire-nvr ${SERVICE_BIN}
 if [ -x "${SERVICE_BIN}" ]; then
-	echo "Server Binary installed..."; echo
+	echo_info -x "Server Binary installed..."
 else
-	echo "Server build failed to install..."; echo
+	echo_info -x "Server build failed to install..."
 	exit 1
 fi
 if [ ! -d "${LIB_DIR}" ]; then
@@ -69,32 +68,30 @@ if [ -d "ui-dist" ]; then
 	sudo mkdir -p "${LIB_DIR}/ui"
 	sudo cp -R ui-dist/. "${LIB_DIR}/ui/"
 	sudo chown -R ${NVR_USER}:${NVR_GROUP} "${LIB_DIR}/ui/"
-	echo "Server UI installed..."; echo
+	echo_info -x "Server UI installed..."
 else
-	echo "Server UI failed to build or install..."; echo
-	exit 1
+	echo_fatal -x "Server UI failed to build or install..."
 fi
 
 if [ "${NO_SERVICE:-0}" != 0 ]; then
-	echo "Not configuring systemctl service. Done"; echo
+	echo_info -x "Not configuring systemctl service. Done"
 	exit 0
 fi
 
 # Make sure user was created
 #
 if ! userExists "${NVR_USER}"; then
-	echo "NVR_USER=${NVR_USER} was not created. Do so manually"
-	echo "or run the setup script."
-	exit 1
+	echo_fatal -x "NVR_USER=${NVR_USER} was not created. Do so manually or run the setup script."
 fi
+
+pre_install_prep
 
 
 # Prepare service files for socket when using priviliged port
 #
 SOCKET_SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.socket"
 if [ $NVR_PORT -lt 1024 ]; then
-	echo_fatal "NVR_PORT ($NVR_PORT) < 1024: priviliged ports not supported"
-	exit 1
+	echo_fatal -x "NVR_PORT ($NVR_PORT) < 1024: priviliged ports not supported"
 fi
 
 # Prepare service files for moonfire
@@ -130,10 +127,10 @@ NVR_EOF
 # Configure and start service
 #
 if [ -f "${SERVICE_PATH}" ]; then
-	echo 'Configuring system daemon...'; echo
+	echo_info -x 'Configuring system daemon...'
 	sudo systemctl daemon-reload
 	sudo systemctl enable ${SERVICE_NAME}
 	sudo systemctl restart ${SERVICE_NAME}
-	echo 'Getting system daemon status...'; echo
+	echo_info -x 'Getting system daemon status...'
 	sudo systemctl status ${SERVICE_NAME}
 fi

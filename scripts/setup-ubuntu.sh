@@ -44,17 +44,19 @@ while getopts ":f" opt; do
 	  f)    DONT_BUILD_FFMPEG=1
 		;;
 	  :)
-		echo_fatal "Option -$OPTARG requires an argument." >&2
+		echo_fatal "Option -$OPTARG requires an argument."
 		;;
 	  \?)
-		echo_fatal "Invalid option: -$OPTARG" >&2
+		echo_fatal -x "Invalid option: -$OPTARG"
 		;;
 	esac
 done
 
+sudo_warn
+
 # Setup all apt packages we need
 #
-echo 'Preparing and downloading packages we need...'; echo
+echo_info -x 'Preparing and downloading packages we need...'
 PKGS="build-essential pkg-config sqlite3"
 #PKGS="$PKGS libavcodec-dev libavformat-dev libavutil-dev"
 PKGS="$PKGS libncurses5-dev libncursesw5-dev"
@@ -94,6 +96,7 @@ if [ ${DO_UPDATE:-1} ]; then sudo apt-get update -y; fi
 #
 sudo apt-get install -y $PKGS
 sudo apt-get autoremove -y
+echo_info -x
 
 # Check for ffmpeg and install by building if necessary
 # This needs to be done before building moonfire so it can
@@ -103,17 +106,17 @@ ffv=`ffmpeg -version 2>/dev/null | extractVersion libavutil`
 ffv=${ffv:-0}
 if ! versionAtLeast "$ffv" "$FFMPEG_MIN_VERSION"; then
 	if [ "${DONT_BUILD_FFMPEG:-0}" -ne 0 ]; then
-		echo "ffmpeg version (${ffv}) installed is too old for moonfire."
-		echo "Suggest you manually install at least version $FFMPEG_MIN_VERSION of libavutil."
-		echo "ffmpeg versions 2.x and 3.x all should work."
+		echo_warn -x "ffmpeg version (${ffv}) installed is too old for moonfire." \
+			"Suggest you manually install at least version $FFMPEG_MIN_VERSION of libavutil." \
+			"ffmpeg versions 2.x and 3.x all should work."
 	else
 		OLDDIR=`pwd`
 		cd ..
 		if [ -d FFmpeg ]; then
-			echo "Removing older FFmpeg directory..."; echo
+			echo_info -x "Removing older FFmpeg directory..."
 			rm -fr FFmpeg
 		fi
-		echo "Fetching FFmpeg source..."; echo
+		echo_info -x "Fetching FFmpeg source..."
 		git clone --depth 1 -b "release/${FFMPEG_RELEASE_VERSION}" https://github.com/FFmpeg/FFmpeg.git
 		cd FFmpeg
 		pt=`uname -p 2>& /dev/null`
@@ -128,7 +131,7 @@ if ! versionAtLeast "$ffv" "$FFMPEG_MIN_VERSION"; then
 		OLDDIR=
 	fi
 else
-	echo "FFmpeg is already usable..."; echo
+	echo_info -x "FFmpeg is already usable..."
 fi
 
 # If cargo appears installed, initialize for using it so rustc can be found
@@ -138,23 +141,23 @@ initCargo
 # Make sure we have rust and cargo
 rv=$(getVersion rustc 0.0)
 if ! versionAtLeast "$rv" "$RUSTC_MIN_VERSION"; then
-	echo "Installing latest rust and cargo..."; echo
+	echo_info -x "Installing latest rust and cargo..."
 	curl https://sh.rustup.rs -sSf | sh -s - -y
 	initCargo
 fi
 
 cv=$(getVersion cargo "NA")
 if [ ${cv} = "NA" ]; then
-	echo "Cargo is not (properly) installed, but rust is."
-	echo "Suggest you install the latest rustup, or manually install cargo."
-	echo "Install using: curl https://sh.rustup.rs -sSf | sh -s -y"
-	exit 1
+	echo_fatal -x "Cargo is not (properly) installed, but rust is." \
+		"Suggest you install the latest rustup, or manually install cargo."
+		"Install using: curl https://sh.rustup.rs -sSf | sh -s -y"
 fi
 
 # Now make sure we have dev environment and tools for the UI portion
 #
-echo "Installing all dependencies with yarn..."
+echo_info -x "Installing all dependencies with yarn..."
 yarn install
+echo_info -x
 
 finish()
 {
@@ -164,45 +167,14 @@ finish()
 }
 trap finish EXIT
 
-# Create user and groups if not there
+# Rest of prep
 #
-echo
-echo "Create user/group and directories we need..."; echo
-if ! groupExists "${NVR_GROUP}"; then
-	sudo addgroup --quiet --system ${NVR_GROUP}
-fi
-if ! userExists "${NVR_USER}"; then
-	sudo adduser --quiet --system ${NVR_USER} \
-		--ingroup "${NVR_GROUP}" --home "${NVR_HOME}"
-fi
-if [ ! -d "${NVR_HOME}" ]; then
-        sudo mkdir "${NVR_HOME}"
-fi
-sudo chown ${NVR_USER}:${NVR_GROUP} "${NVR_HOME}"
+pre_install_prep
 
 
-# Correct possible timezone issues
+# Initialize camera from sql file if present
+# (DEPRECATED: Will be removed in future version
 #
-echo "Correcting possible /etc/localtime setup issue..."; echo
-if [ ! -L /etc/localtime ] && [ -f /etc/timezone ] &&
-                [ -f "/usr/share/zoneinfo/`cat /etc/timezone`" ]; then
-        sudo rm /etc/localtime
-        sudo ln -s /usr/share/zoneinfo/`cat /etc/timezone` /etc/localtime
-fi
-
-
-# Prepare for sqlite directory and set schema into db
-#
-DB_NAME=db
-DB_PATH="${DB_DIR}/${DB_NAME}"
-if [ ! -d "${DB_DIR}" ]; then
-        echo 'Create database...'; echo
-        sudo -u "${NVR_USER}" -H mkdir "${DB_DIR}"
-fi
-if [ ! -f "${DB_PATH}" ]; then
-        sudo -u "${NVR_USER}" -H sqlite3 "${DB_PATH}" < "${SRC_DIR}/schema.sql"
-fi
-
 CAMERAS_PATH="${MOONFIRE_DIR}/cameras.sql"
 if [ ! -r "${CAMERAS_PATH}" ]; then
 	CAMERAS_PATH="${MOONFIRE_DIR}/../cameras.sql"
@@ -211,43 +183,15 @@ if [ ! -r "${CAMERAS_PATH}" ]; then
 	fi
 fi
 if [ ! -z "${CAMERAS_PATH}" ]; then
-	echo "Adding camera confguration to db..."; echo
+	echo_warn "Camera configuration through sql file is deprecated and will not be supported in the future." \
+		"Use \"moonfire-nvr config\" instead." 
+	echo_info -x "Adding camera confguration to db..."
 	addCameras
 else
-	echo_warn "No cameras auto configured. Use \"moonfire-nvr config\" to do it later..."
+	echo_warn -x "No cameras auto configured. Use \"moonfire-nvr config\" to do it later..."
 fi
 
-
-# Make sure samples directory is ready
-#
-if [ -z "${SAMPLE_MEDIA_DIR}" ]; then
-	echo "SAMPLE_MEDIA_DIR variable not configured. Check configuration."
-	exit 1
-fi
-SAMPLE_FILE_PATH="${SAMPLE_MEDIA_DIR}/${SAMPLE_FILE_DIR}"
-if [ "${SAMPLE_FILE_PATH##${NVR_HOME}}" != "${SAMPLE_FILE_PATH}" ]; then
-	# Under the home directory, create if not there
-	if [ ! -d "${SAMPLE_FILE_PATH}" ]; then
-		echo "Created samples directory: $SAMPLE_FILE_PATH"; echo
-		sudo -u ${NVR_USER} -H mkdir "${SAMPLE_FILE_PATH}"
-	fi
-else
-	if [ ! -d "${SAMPLE_FILE_PATH}" ]; then
-		read -r -d '' MSG <<-MSG1
-Samples directory $SAMPLE_FILE_PATH does not exist. 
-If a mounted file system, make sure /etc/fstab is properly configured, 
-and file system is mounted and directory created.
-MSG1
-		echo_fatal "$MSG"
-	fi
-fi
-# Make sure all sample directories and files owned by moonfire
-#
-sudo chown -R ${NVR_USER}.${NVR_USER} "${SAMPLE_FILE_PATH}"
-echo "Fix ownership of sample files..."; echo
-
-
-cat <<-'INSTRUCTIONS'
+read_lines <<-'INSTRUCTIONS'
 Unless there are errors above, everything you need should have been installed
 and you are now ready to build, install, and then use moonfire.
 
@@ -255,3 +199,5 @@ Build by executing the script: scripts/build.sh
 Install by executing the script: scripts/install.sh (run automatically by build
 step).
 INSTRUCTIONS
+echo_info -x -p '    ' -L
+
