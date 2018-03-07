@@ -42,34 +42,34 @@ const merge = require('webpack-merge');
  * found), we throw an exception.
  *
  * If the module that is require-d is a function, it will be executed,
- * passing the "env" and "args" parameters from the settingsConfig to it.
+ * passing the "env" and "args" parameters to it.
  * The function should return a map.
  *
- * @param  {String} path            Path to be passed to require()
- * @param  {object} settingsConfig  Settings passed to new Settings()
+ * @param  {String} requiredPath    Path to be passed to require()
+ * @param  {object} env             webpack's "env" on invocation
+ * @param  {object} args            webpack's "args" on invocation (options)
  * @param  {Boolean} optional       True file not to exist
  * @return {object}                 The module, or {} if not found (optional)
  */
-function requireHelper(path, settingsConfig, optional) {
+function requireHelper(requiredPath, env, args, optional) {
   let module = {};
   try {
-    require.resolve(path); // Throws if not found
+    require.resolve(requiredPath); // Throws if not found
     try {
-      module = require(path);
-      if (typeof(module) === 'function') {
-        module = module(settingsConfig.env, settingsConfig.args);
+      module = require(requiredPath);
+      if (typeof module === 'function') {
+        module = module(env, args);
       }
       // Get owned properties only: now a literal map
-      module = Object.assign({}, require(path).settings);
+      module = Object.assign({}, require(requiredPath).settings);
     } catch (e) {
-      throw new Error('Settings file (' + path + ') has errors.');
+      throw new Error('Settings file (' + requiredPath + ') has errors.');
     }
   } catch (e) {
     if (!optional) {
-      throw new Error('Settings file (' + path + ') not found.');
+      throw new Error('Settings file (' + requiredPath + ') not found.');
     }
   }
-  const args = settingsConfig.args;
   const webpackMode = (args ? args.mode : null) || 'none';
   const modes = module.webpack_mode || {};
   delete module.webpack_mode; // Not modifying original module. We have a copy!
@@ -188,13 +188,14 @@ class Settings {
     const secondaryPath = path.resolve(projectRoot, secondaryFile);
 
     // Check if we can resolve the primary file and if we can, require it.
-    const _settings =
-      requireHelper(primaryPath, this.settings_config, optional);
+    const _settings = requireHelper(primaryPath, env, args, optional);
 
     // Merge secondary override file, if it exists
-    this.settings = merge(_settings,
-      requireHelper(secondaryPath, this.settings_config, true));
-  };
+    this.settings = merge(
+      _settings,
+      requireHelper(secondaryPath, env, args, true)
+    );
+  }
 
   /**
    * Take one or more webpack configurations and merge them.
@@ -212,12 +213,14 @@ class Settings {
    */
   webpackMerge(...packs) {
     const unpack = (webpackConfig) => {
-      if ((typeof(webpackConfig) === 'string') ||
-        (webpackConfig instanceof String)) {
+      if (
+        typeof webpackConfig === 'string' ||
+        webpackConfig instanceof String
+      ) {
         webpackConfig = require(webpackConfig);
       }
       const config = this.settings_config;
-      if (typeof(webpackConfig) === 'function') {
+      if (typeof webpackConfig === 'function') {
         return webpackConfig(config.env, config.args);
       }
       return webpackConfig;

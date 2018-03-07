@@ -31,7 +31,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import Time90kParser from '../support/Time90kParser';
-import {TimeStamp90kFormatter} from '../support/TimeFormatter';
+import TimeStamp90kFormatter from '../support/TimeStamp90kFormatter';
 import Range90k from './Range90k';
 
 /**

@@ -42,34 +42,76 @@ module.exports = (env, args) => {
   const nvrSettings = settingsObject.settings;
 
   return settingsObject.webpackMerge(baseConfig, {
-    //devtool: 'cheap-module-source-map',
+    devtool: 'cheap-module-source-map',
     module: {
-      rules: [{
-        test: /\.html$/,
-        loader: 'html-loader',
-        query: {
-          minimize: true,
+      rules: [
+        {
+          test: /\.html$/,
+          loader: 'html-loader',
+          query: {
+            minimize: true,
+          },
         },
-      }],
+      ],
     },
     optimization: {
       minimize: true,
+      minimizer: [
+        {
+          apply: (compiler) => {
+            /**
+             * Setup the UglifyJsPlugin as webpack4 does, plus options
+             * we decide to override.
+             */
+            // Lazy load the uglifyjs plugin
+            const UglifyJsPlugin = require('uglifyjs-webpack-plugin');
+            new UglifyJsPlugin({
+              cache: true, // webpack4: default
+              parallel: true, // webpack4: default
+              sourceMap:
+                (args.devtool && /source-?map/.test(args.devtool)) ||
+                (args.plugins &&
+                  args.plugins.some(
+                    (p) => p instanceof webpack.SourceMapDevToolPlugin
+                  )),
+              uglifyOptions: {
+                compress: {
+                  drop_console: true, // Remove all console.log etc.
+                  keep_infinity: true, // Do not change to 1/0
+                  warnings: false, // Do not warn when dropping
+                },
+                output: {
+                  // Eliminate most comments, but not marked ones
+                  comments: 'some',
+                },
+              },
+            }).apply(compiler);
+          },
+        },
+      ],
       splitChunks: {
         minSize: 30000,
         minChunks: 1,
         maxAsyncRequests: 5,
-        maxInitialRequests: 3,
+        maxInitialRequests: 4,
         cacheGroups: {
-          default: {
+          'default': {
             minChunks: 2,
             priority: -20,
           },
-          commons: {
-            name: 'commons',
+          'jquery-ui': {
+            test: /[\\/]node_modules[\\/]jquery-ui[\\/]/,
+            name: 'jquery-ui',
             chunks: 'all',
-            minChunks: 2,
+            priority: -5,
           },
-          vendors: {
+          'jquery': {
+            test: /[\\/]node_modules[\\/]jquery[\\/]/,
+            name: 'jquery',
+            chunks: 'all',
+            priority: -5,
+          },
+          'vendors': {
             test: /[\\/]node_modules[\\/]/,
             name: 'vendor',
             chunks: 'all',
@@ -89,9 +131,6 @@ module.exports = (env, args) => {
         threshold: 10240,
         minRatio: 0.8,
       }),
-      new webpack.NormalModuleReplacementPlugin(
-        /node_modules\/jquery\/dist\/jquery\.js$/,
-        './jquery.min.js'),
     ],
   });
 };

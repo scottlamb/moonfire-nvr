@@ -30,81 +30,54 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import Range from './Range';
+import TimeFormatter from './TimeFormatter';
+
+
+export const internalTimeFormat = 'YYYY-MM-DDTHH:mm:ss:FFFFFZ';
 
 /**
- * WeakMap that keeps our private data.
- *
- * @type {WeakMap}
+ * Specialized class similar to TimeFormatter but forcing a specific time format
+ * for internal usage purposes.
  */
-let _range = new WeakMap();
-
-/**
- * Class like Range to represent ranges over timestamps in 90k format.
- *
- * A composed member of the Range class is use for the heavy lifting, while
- * this class provides a different interface.
- */
-export default class Range90k {
+export default class TimeStamp90kFormatter {
   /**
-   * Create a range.
+   * Construct from just a timezone specification.
    *
-   * @param  {Number} low  Low value (inclusive) in range.
-   * @param  {Number} high High value (inclusive) in range.
+   * @param  {String} tz Timezone
    */
-  constructor(low, high) {
-    _range.set(this, new Range(low, high));
+  constructor(tz) {
+    this._formatter = new TimeFormatter(internalTimeFormat, tz);
   }
 
   /**
-   * Return the range's start time.
+   * Format a timestamp in 90k units using internal format.
    *
-   * @return {Number} Number in 90k units
+   * @param {Number} ts90k timestamp in 90,000ths of a second resolution
+   * @return {String}        Formatted timestamp
    */
-  get startTime90k() {
-    return _range.get(this).low;
+  formatTimeStamp90k(ts90k) {
+    return this._formatter.formatTimeStamp90k(ts90k);
   }
 
   /**
-   * Return the range's end time.
+   * Given two timestamp return formatted versions of both, where the second
+   * one may have been shortened if it falls on the same date as the first one.
    *
-   * @return {Number} Number in 90k units
+   * @param  {Number} ts1 First timestamp in 90k units
+   * @param  {Number} ts2 Secodn timestamp in 90k units
+   * @return {Array}     Array with two elements: [ ts1Formatted, ts2Formatted ]
    */
-  get endTime90k() {
-    return _range.get(this).high;
-  }
-
-  /**
-   * Return the range's duration.
-   *
-   * @return {Number} Number in 90k units
-   */
-  get duration90k() {
-    return _range.get(this).size;
-  }
-
-  /**
-   * Create a new range by trimming the current range against
-   * another.
-   *
-   * The returned range will lie completely within the provided range.
-   *
-   * @param  {Range90k} against Range the be used for limits
-   * @return {Range90k}         The trimmed range (always a new object)
-   */
-  trimmed(against) {
-    return new Range90k(
-      Math.max(this.startTime90k, against.startTime90k),
-      Math.min(this.endTime90k, against.endTime90k)
-    );
-  }
-
-  /**
-   * Return a copy of this range.
-   *
-   * @return {Range90k} A copy of this range object.
-   */
-  clone() {
-    return new Range90k(this.startTime90k, this.endTime90k);
+  formatSameDayShortened(ts1, ts2) {
+    let ts1Formatted = this.formatTimeStamp90k(ts1);
+    let ts2Formatted = this.formatTimeStamp90k(ts2);
+    let timePos = this._formatter.formatStr.indexOf('T');
+    if (timePos != -1) {
+      const datePortion = ts1Formatted.substr(0, timePos);
+      ts1Formatted = datePortion + ' ' + ts1Formatted.substr(timePos + 1);
+      if (ts2Formatted.startsWith(datePortion)) {
+        ts2Formatted = ts2Formatted.substr(timePos + 1);
+      }
+    }
+    return [ts1Formatted, ts2Formatted];
   }
 }

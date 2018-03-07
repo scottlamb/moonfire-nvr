@@ -48,32 +48,41 @@ module.exports = (env, args) => {
       publicPath: '/',
     },
     module: {
-      rules: [{
-        test: /\.js$/,
-        loader: 'babel-loader',
-        query: {
-          'presets': ['env'],
+      rules: [
+        {
+          test: /\.js$/,
+          loader: 'babel-loader',
+          query: {
+            presets: ['env', {modules: false}],
+          },
+          exclude: /(node_modules|bower_components)/,
+          include: ['./ui-src'],
         },
-        exclude: /(node_modules|bower_components)/,
-        include: ['./ui-src'],
-      }, {
-        test: /\.png$/,
-        use: ['file-loader'],
-      }, {
-        test: /\.ico$/,
-        use: [
-          {
-            loader: 'file-loader',
-            options: {
-              name: '[name].[ext]'
-            }
-          }
-        ]
-      }, {
-        // Load css and then in-line in head
-        test: /\.css$/,
-        loader: 'style-loader!css-loader',
-      }],
+        {
+          test: /\.png$/,
+          use: ['file-loader'],
+        },
+        {
+          test: /\.ico$/,
+          use: [
+            {
+              loader: 'file-loader',
+              options: {
+                name: '[name].[ext]',
+              },
+            },
+          ],
+        },
+        {
+          test: /\.png$/,
+          use: ['file-loader'],
+        },
+        {
+          // Load css and then in-line in head
+          test: /\.css$/,
+          use: ['style-loader', 'css-loader'],
+        },
+      ],
     },
     plugins: [
       new webpack.DefinePlugin({
@@ -83,14 +92,20 @@ module.exports = (env, args) => {
       new HtmlWebpackPlugin({
         title: nvrSettings.app_title,
         filename: 'index.html',
-        template: path.join(nvrSettings._paths.app_src_dir, 'assets', 'index.html'),
+        template: path.join(
+          nvrSettings._paths.app_src_dir,
+          'assets',
+          'index.html'
+        ),
       }),
       new webpack.NormalModuleReplacementPlugin(
         /node_modules\/moment\/moment\.js$/,
-        './min/moment.min.js'),
+        './min/moment.min.js'
+      ),
       new webpack.NormalModuleReplacementPlugin(
         /node_modules\/moment-timezone\/index\.js$/,
-        './builds/moment-timezone-with-data-2012-2022.min.js'),
+        './builds/moment-timezone-with-data-2012-2022.min.js'
+      ),
     ],
   };
 };
