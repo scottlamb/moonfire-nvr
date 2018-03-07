@@ -10,12 +10,8 @@ module.exports = merge(baseConfig, {
     contentBase: './ui-src',
     historyApiFallback: true,
     inline: true,
-    host: '0.0.0.0',
     port: 3000,
     hot: true,
-    proxy: {
-      '/api': 'http://192.168.10.232:8080',
-    },
     clientLogLevel: 'info',
   },
   plugins: [
