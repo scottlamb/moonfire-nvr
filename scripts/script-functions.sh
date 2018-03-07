@@ -67,11 +67,78 @@ functionsInit()
 	MOONFIRE_DIR="$(normalizeDirPath "`dirname "${p}"`/..")"
 }
 
+read_lines()
+{
+	LINES_READ=()
+	while read -r line; do
+		LINES_READ+=("$line")
+	done
+}
+
 catPrefix()
 {
 	sed -e "s/^/$2/" < "$1"
 }
 
+mkdir_moonfire()
+{
+	sudo -u ${NVR_USER} -H mkdir "$@"
+}
+
+echo_multi()
+{
+	local prefix=''
+	local plus=''
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			# Define a prefix for each line
+			-p) shift; prefix="$1"; shift ;;
+			# Provide extra empty line at end
+			-x) shift; plus=1 ;;
+			# Insert contents of LINES_READ here
+			# Only works as leading option
+			-L) shift; set -- "${LINES_READ[@]}" "$@" ;;
+			# Stop processing options
+			-) shift; break ;;
+			# Non option break out
+			*) break ;;
+		esac
+	done
+
+	local A=("$@")
+	for l in "${A[@]/#/$prefix}"; do
+		echo "$l"
+	done
+	[ -n "$plus" ] && echo
+}
+
+echo_stderr()
+{
+	echo_multi "$@" 1>&2
+}
+
+echo_info()
+{
+	echo_multi -x -p '>>> ' "$@"
+}
+
+
+echo_warn()
+{
+	echo_multi -p 'WARNING: ' "$@" 1>&2
+}
+
+echo_error()
+{
+	echo_multi -p 'ERROR: ' "$@" 1>&2
+}
+
+echo_fatal()
+{
+	echo_error "$@"
+	exit 1;
+}
 
 
 # Read possible user config and then compute all derived environment
@@ -90,7 +157,7 @@ initEnvironmentVars()
 	NVR_HOME_BASE="${NVR_HOME_BASE:-/var/lib}"
 	NVR_HOME="${NVR_HOME_BASE}/${NVR_USER}"
 	DB_NAME="${DB_NAME:-db}"
-	DB_DIR="${DB_DIR:-$NVR_HOME}/${DB_NAME}"
+	DB_DIR="${DB_DIR:-$NVR_HOME/${DB_NAME}}"
 	SAMPLE_FILE_DIR="${SAMPLE_FILE_DIR:-sample}"
 	SAMPLE_MEDIA_DIR="${SAMPLE_MEDIA_DIR:-$NVR_HOME}"
 	SERVICE_NAME="${SERVICE_NAME:-moonfire-nvr}"
@@ -116,14 +183,15 @@ makePrepConfig()
 			SERVICE_NAME=$SERVICE_NAME
 			SERVICE_DESC="$SERVICE_DESC"
 EOF_CONFIG
-		echo "File prep.config newly created. Inspect and change as necessary."
-		echo "When done, re-run this setup script. Currently it contains:"
+		echo_info -x "File prep.config newly created. Inspect and change as necessary." \
+				"When done, re-run this setup script. Currently it contains:"
 		catPrefix "${MOONFIRE_DIR}/prep.config" "    "
+		echo_info -x
 		exit 0
 	else
-		echo "Setting up with variables:"
+		echo_info -x "Setting up with variables:"
 		catPrefix "${MOONFIRE_DIR}/prep.config" "    "
-		echo ""
+		echo_info -x
 	fi
 }
 
@@ -198,6 +266,98 @@ moonfire()
 	esac
 }
 
+sudo_warn()
+{
+	echo_warn -x -p '!!!!!     ' \
+		'------------------------------------------------------------------------------' \
+		'During this script you may be asked to input your root password' \
+		'This is for the purpose of using the sudo command and is necessary to complete' \
+		'the script successfully.' \
+		'------------------------------------------------------------------------------'
+}
+
+
+# Prepare for sqlite directory and set schema into db
+#
+setup_db()
+{
+	DB_NAME=${1:-db}
+	if [ ! -d "${DB_DIR}" ]; then
+		echo_info -x 'Create database directory...'
+		mkdir_moonfire -p "${DB_DIR}"
+	fi
+	DB_PATH="${DB_DIR}/${DB_NAME}"
+	if [ ! -f "${DB_PATH}" ]; then
+		echo_info -x 'Create database and initialize...'
+		sudo -u "${NVR_USER}" -H sqlite3 "${DB_PATH}" < "${SRC_DIR}/schema.sql"
+	fi
+}
+
+# Make sure all sample directories and files owned by moonfire
+#
+fix_ownership()
+{
+	sudo chown -R ${NVR_USER}.${NVR_USER} "$1"
+	echo_info -x "Fix ownership of files in \"$1\"..."
+}
+
+# Make sure samples directory is ready
+#
+prep_sample_file_dir()
+{
+	if [ -z "${SAMPLE_MEDIA_DIR}" ]; then
+		echo_fatal -x "SAMPLE_MEDIA_DIR variable not configured. Check configuration."
+		exit 1
+	fi
+	SAMPLE_FILE_PATH="${SAMPLE_MEDIA_DIR}/${SAMPLE_FILE_DIR}"
+	if [ "${SAMPLE_FILE_PATH##${NVR_HOME}}" != "${SAMPLE_FILE_PATH}" ]; then
+		# Under the home directory, create if not there
+		if [ ! -d "${SAMPLE_FILE_PATH}" ]; then
+			echo_info -x "Created sample file directory: \"$SAMPLE_FILE_PATH\"..."
+			mkdir_moonfire -p "${SAMPLE_FILE_PATH}"
+		fi
+	else
+		if [ ! -d "${SAMPLE_FILE_PATH}" ]; then
+			read_lines <<-MSG1
+	Samples directory $SAMPLE_FILE_PATH does not exist. 
+	If a mounted file system, make sure /etc/fstab is properly configured, 
+	and file system is mounted and directory created.
+	MSG1
+			echo_fatal -L
+		fi
+	fi
+	fix_ownership "${SAMPLE_FILE_PATH}"
+}
+
+# Create user and groups if not there
+#
+prep_moonfire_user()
+{
+	echo_info -x "Create user/group and directories we need..."
+	if ! groupExists "${NVR_GROUP}"; then
+		sudo addgroup --quiet --system ${NVR_GROUP}
+	fi
+	if ! userExists "${NVR_USER}"; then
+		sudo adduser --quiet --system ${NVR_USER} \
+			--ingroup "${NVR_GROUP}" --home "${NVR_HOME}"
+	fi
+	if [ ! -d "${NVR_HOME}" ]; then
+		mkdir_moonfire "${NVR_HOME}"
+	fi
+	sudo chown ${NVR_USER}:${NVR_GROUP} "${NVR_HOME}"
+}
+
+# Correct possible timezone issues
+#
+fix_localtime()
+{
+	if [ ! -L /etc/localtime ] && [ -f /etc/timezone ] &&
+			[ -f "/usr/share/zoneinfo/`cat /etc/timezone`" ]; then
+		echo_info -x "Correcting /etc/localtime setup issue..."
+		sudo ln -sf /usr/share/zoneinfo/`cat /etc/timezone` /etc/localtime
+	fi
+}
+
 # Add/update cameras in the database
 #
 # $1: path to cameras.sql file
@@ -209,7 +369,7 @@ addCameras()
 {
 	local cpath="${CAMERAS_PATH:-$1}"
 	if [ -r "${cpath}" ]; then
-		echo 'Add cameras...'; echo
+		echo_info -x 'Add cameras...'
 		# Before adding cameras, must stop service
 		moonfire stop "${SERVICE_NAME:-$2}" >/dev/null 2>&1
 		sudo -u ${NVR_USER:-$3} -H sqlite3 "${DB_PATH:-$4}" < "${cpath}"
@@ -217,20 +377,11 @@ addCameras()
 	fi
 }
 
-echo_stderr()
+pre_install_prep()
 {
-	echo "$@" 1>&2
+	prep_moonfire_user
+	setup_db db
+	prep_sample_file_dir
+	fix_localtime
 }
 
-echo_warn()
-{
-	echo_stderr "WARNING: $@"
-	echo_stderr
-}
-
-echo_fatal()
-{
-	echo_stderr "ERROR: $@"
-	echo_stderr
-	exit 1;
-}
