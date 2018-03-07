@@ -16,6 +16,7 @@ module.exports = (env, args) => {
     output: {
       filename: '[name].bundle.js',
       path: nvrSettings._paths.dist_dir,
+      publicPath: '/',
     },
     module: {
       rules: [{
@@ -25,7 +26,7 @@ module.exports = (env, args) => {
           'presets': ['env'],
         },
         exclude: /(node_modules|bower_components)/,
-        include: [ './ui-src'],
+        include: ['./ui-src'],
       }, {
         test: /\.png$/,
         use: ['file-loader'],
@@ -36,10 +37,14 @@ module.exports = (env, args) => {
       }],
     },
     plugins: [
+      new webpack.DefinePlugin({
+        'process.env.NODE_ENV': JSON.stringify(args.mode),
+      }),
       new webpack.IgnorePlugin(/\.\/locale$/),
       new HtmlWebpackPlugin({
         title: nvrSettings.app_title,
-        template: path.join(nvrSettings._paths.app_src_dir, 'index.html'),
+        filename: 'index.html',
+        template: path.join(nvrSettings._paths.app_src_dir, 'assets', 'index.html'),
       }),
       new webpack.NormalModuleReplacementPlugin(
         /node_modules\/moment\/moment\.js$/,

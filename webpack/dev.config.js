@@ -14,6 +14,9 @@ module.exports = (env, args) => {
       warnings: true,
     },
     devtool: 'inline-source-map',
+    optimization: {
+      namedChunks: true,
+    },
     devServer: {
       contentBase: nvrSettings.app_src_dir,
       historyApiFallback: true,
@@ -26,9 +29,6 @@ module.exports = (env, args) => {
       },
     },
     plugins: [
-      new webpack.DefinePlugin({
-        'process.env.NODE_ENV': JSON.stringify('development'),
-      }),
       new webpack.HotModuleReplacementPlugin(),
     ],
   });
