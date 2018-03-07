@@ -271,8 +271,8 @@ sudo_warn()
 	echo_warn -x -p '!!!!!     ' \
 		'------------------------------------------------------------------------------' \
 		'During this script you may be asked to input your root password' \
-		'This is for the purpose of using the sudo command and is necessary to copmlete' \
-		'the script succesfully.' \
+		'This is for the purpose of using the sudo command and is necessary to complete' \
+		'the script successfully.' \
 		'------------------------------------------------------------------------------'
 }
 
@@ -354,8 +354,7 @@ fix_localtime()
 	if [ ! -L /etc/localtime ] && [ -f /etc/timezone ] &&
 			[ -f "/usr/share/zoneinfo/`cat /etc/timezone`" ]; then
 		echo_info -x "Correcting /etc/localtime setup issue..."
-		sudo rm /etc/localtime
-		sudo ln -s /usr/share/zoneinfo/`cat /etc/timezone` /etc/localtime
+		sudo ln -sf /usr/share/zoneinfo/`cat /etc/timezone` /etc/localtime
 	fi
 }
 
