@@ -13,6 +13,9 @@ module.exports = merge(baseConfig, {
     port: 3000,
     hot: true,
     clientLogLevel: 'info',
+    proxy: {
+	    '/api': 'http://localhost:8080'
+    }
   },
   plugins: [
     new webpack.DefinePlugin({
