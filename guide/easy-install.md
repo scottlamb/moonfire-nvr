@@ -4,7 +4,7 @@ There are no binary packages of Moonfire NVR available yet, so it must be built
 from source. This is made easy using a few scripts that will do the job for you
 unless you have very a different operating system. The scripts are written and
 tested under ubuntu and raspbian but should not be hard to modify if necessary.
-You'll start by downloading moonfire if you have not already done so.
+You'll start by downloading Moonfire if you have not already done so.
 
 ## Downloading
 
@@ -55,12 +55,12 @@ hard disk.
 
 Start by executing the setup script:
 
-    $ cd moonfire-nr
+    $ cd moonfire-nvr
     $ scripts/setup-ubuntu.sh
 
 If this is the very first time you run this script, a file named `prep.config`
 will be created and the script will stop. This file is where you will set
-or change variables that describe the moonfire installation you want. The
+or change variables that describe the Moonfire installation you want. The
 initial execution will put default values in this value, but only for the
 most commonly changed variables. For a full list of variables, see below.
 
@@ -73,12 +73,12 @@ case you must either resolve those first, or go the manual route.
 The script may be given the "-f" option. If you do, you are telling the script
 that you do not want any existing installation of ffmpeg to be overwritten with
 a newer one. This could be important to you. If you do use it, and the version
-you have installed is not compatible with moonfire, you will be told through
+you have installed is not compatible with Moonfire, you will be told through
 a message. If you have no ffmpeg installed, the option is effectively ignored
 and the necessary version of ffmpeg will be installed.
 
 The setup script should only need to be run once (after `prep.config` has been
-created), although if you do a re-install of moonfire, in particular a much
+created), although if you do a re-install of Moonfire, in particular a much
 newer version, it is a good idea to run it again as requirements and pre-requisites
 may have changed. Running the script multiple times should not have any negative effects.
 
@@ -86,7 +86,7 @@ may have changed. Running the script multiple times should not have any negative
 in particular during the building of libavutil you will see several compiler
 warnings. This, while undesirable, is a direct result of the original
 developers not cleaning up the cause(s) of these warnings. They are, however,
-just warnings and will not affect correct functioning of moonfire.
+just warnings and will not affect correct functioning of Moonfire.
 
 Once the setup is complete, two steps remain: building and then installing.
 There is a script for each of these scenarios, but since generally you would
@@ -99,7 +99,7 @@ The build script is involved like this:
 
     $ scripts/build.sh
 
-This script will perform all steps necessary to build a complete moonfire
+This script will perform all steps necessary to build a complete Moonfire
 setup. If there are no build errors, this script will then automatically
 invoke the install script (see below).
 
@@ -120,7 +120,7 @@ like this:
 
 This script will copy various files resulting from the build to the correct
 locations. It will also create a "service configuration" for systemctl that
-can be used to control moonfire. This service configuration can be prevented
+can be used to control Moonfire. This service configuration can be prevented
 by using the "-s" option to this script. It will also prevent the automatic
 start of this configuration.
 
