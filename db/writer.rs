@@ -179,9 +179,6 @@ fn delete_recordings(db: &mut db::LockedDatabase, stream_id: i32,
             None => bail!("no stream {}", stream_id),
             Some(s) => s,
         };
-        error!("sample_file_bytes={} to_add={} to_delete={} extra_needed={} retain={}",
-               stream.sample_file_bytes, stream.bytes_to_add, stream.bytes_to_delete,
-               extra_bytes_needed, stream.retain_bytes);
         stream.sample_file_bytes + stream.bytes_to_add - stream.bytes_to_delete + extra_bytes_needed
             - stream.retain_bytes
     };
