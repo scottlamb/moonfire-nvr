@@ -151,6 +151,12 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           flags
         );
 
+        create table recording_integrity (
+          composite_id integer primary key references recording (composite_id),
+          local_time_delta_90k integer,
+          sample_file_sha1 blob check (length(sample_file_sha1) <= 20)
+        );
+
         create table video_sample_entry (
           id integer primary key,
           sha1 blob unique not null check (length(sha1) = 20),
@@ -225,6 +231,14 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           r.video_sample_entry_id
         from
           old_recording r cross join open o;
+
+        insert into recording_integrity
+        select
+          r.composite_id,
+          case when r.run_offset > 0 then local_time_delta_90k else null end,
+          p.sample_file_sha1
+        from
+          old_recording r join recording_playback p on (r.composite_id = p.composite_id);
     "#)?;
 
     fix_video_sample_entry(tx)?;

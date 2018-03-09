@@ -83,22 +83,6 @@ const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
         recording.composite_id
 "#;
 
-const INSERT_RECORDING_SQL: &'static str = r#"
-    insert into recording (composite_id, stream_id, open_id, run_offset, flags,
-                           sample_file_bytes, start_time_90k, duration_90k,
-                           local_time_delta_90k, video_samples, video_sync_samples,
-                           video_sample_entry_id)
-                   values (:composite_id, :stream_id, :open_id, :run_offset, :flags,
-                           :sample_file_bytes, :start_time_90k, :duration_90k,
-                           :local_time_delta_90k, :video_samples, :video_sync_samples,
-                           :video_sample_entry_id)
-"#;
-
-const INSERT_RECORDING_PLAYBACK_SQL: &'static str = r#"
-    insert into recording_playback (composite_id,  sample_file_sha1,  video_index)
-                            values (:composite_id, :sample_file_sha1, :video_index)
-"#;
-
 const STREAM_MIN_START_SQL: &'static str = r#"
     select
       start_time_90k
@@ -191,8 +175,15 @@ pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
 /// Inserts the specified recording (for from `try_flush` only).
 pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: CompositeId,
                     r: &db::RecordingToInsert) -> Result<(), Error> {
-    let mut stmt = tx.prepare_cached(INSERT_RECORDING_SQL)
-                     .with_context(|e| format!("can't prepare recording insert: {}", e))?;
+    let mut stmt = tx.prepare_cached(r#"
+        insert into recording (composite_id, stream_id, open_id, run_offset, flags,
+                               sample_file_bytes, start_time_90k, duration_90k,
+                               video_samples, video_sync_samples, video_sample_entry_id)
+                       values (:composite_id, :stream_id, :open_id, :run_offset, :flags,
+                               :sample_file_bytes, :start_time_90k, :duration_90k,
+                               :video_samples, :video_sync_samples,
+                               :video_sample_entry_id)
+    "#).with_context(|e| format!("can't prepare recording insert: {}", e))?;
     stmt.execute_named(&[
         (":composite_id", &id.0),
         (":stream_id", &(id.stream() as i64)),
@@ -202,20 +193,35 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
         (":sample_file_bytes", &r.sample_file_bytes),
         (":start_time_90k", &r.start.0),
         (":duration_90k", &r.duration_90k),
-        (":local_time_delta_90k", &r.local_time_delta.0),
         (":video_samples", &r.video_samples),
         (":video_sync_samples", &r.video_sync_samples),
         (":video_sample_entry_id", &r.video_sample_entry_id),
     ]).with_context(|e| format!("unable to insert recording for {:#?}: {}", r, e))?;
 
-    let mut stmt = tx.prepare_cached(INSERT_RECORDING_PLAYBACK_SQL)
-                     .with_context(|e| format!("can't prepare recording_playback insert: {}", e))?;
+    let mut stmt = tx.prepare_cached(r#"
+        insert into recording_integrity (composite_id,  local_time_delta_90k,  sample_file_sha1)
+                                 values (:composite_id, :local_time_delta_90k, :sample_file_sha1)
+    "#).with_context(|e| format!("can't prepare recording_integrity insert: {}", e))?;
     let sha1 = &r.sample_file_sha1[..];
+    let delta = match r.run_offset {
+        0 => None,
+        _ => Some(r.local_time_delta.0),
+    };
     stmt.execute_named(&[
         (":composite_id", &id.0),
+        (":local_time_delta_90k", &delta),
         (":sample_file_sha1", &sha1),
+    ]).with_context(|e| format!("unable to insert recording_integrity for {:#?}: {}", r, e))?;
+
+    let mut stmt = tx.prepare_cached(r#"
+        insert into recording_playback (composite_id,  video_index)
+                                values (:composite_id, :video_index)
+    "#).with_context(|e| format!("can't prepare recording_playback insert: {}", e))?;
+    stmt.execute_named(&[
+        (":composite_id", &id.0),
         (":video_index", &r.video_index),
     ]).with_context(|e| format!("unable to insert recording_playback for {:#?}: {}", r, e))?;
+
     Ok(())
 }
 
@@ -244,6 +250,12 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
           composite_id < :end
     "#)?;
     let mut del2 = tx.prepare_cached(r#"
+        delete from recording_integrity
+        where
+          :start <= composite_id and
+          composite_id < :end
+    "#)?;
+    let mut del3 = tx.prepare_cached(r#"
         delete from recording
         where
           :start <= composite_id and
@@ -260,11 +272,15 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
     ];
     let n1 = del1.execute_named(p)?;
     if n1 != n {
-        bail!("inserted {} rows but deleted {} recording rows!", n, n1);
+        bail!("inserted {} garbage rows but deleted {} recording_playback rows!", n, n1);
     }
     let n2 = del2.execute_named(p)?;
-    if n2 != n {
-        bail!("deleted {} recording rows but {} recording_playback rows!", n, n2);
+    if n2 > n {  // fewer is okay; recording_integrity is optional.
+        bail!("inserted {} garbage rows but deleted {} recording_integrity rows!", n, n2);
+    }
+    let n3 = del3.execute_named(p)?;
+    if n3 != n {
+        bail!("deleted {} recording rows but {} recording_playback rows!", n3, n);
     }
     Ok(n)
 }

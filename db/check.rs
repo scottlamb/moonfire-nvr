@@ -49,17 +49,19 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
     let db_uuid = raw::get_db_uuid(&conn)?;
 
     // Scan directories.
-    let mut files_by_dir = FnvHashMap::default();
+    let mut streams_by_dir: FnvHashMap<i32, Dir> = FnvHashMap::default();
     {
-        let mut stmt = conn.prepare(r#"
+        let mut dir_stmt = conn.prepare(r#"
             select d.id, d.path, d.uuid, d.last_complete_open_id, o.uuid
             from sample_file_dir d left join open o on (d.last_complete_open_id = o.id)
         "#)?;
-        let mut rows = stmt.query(&[])?;
+        let mut garbage_stmt = conn.prepare_cached(
+            "select composite_id from garbage where sample_file_dir_id = ?")?;
+        let mut rows = dir_stmt.query(&[])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let mut meta = schema::DirMeta::default();
-            let dir_id = row.get_checked(0)?;
+            let dir_id: i32 = row.get_checked(0)?;
             let dir_path: String = row.get_checked(1)?;
             let dir_uuid: FromSqlUuid = row.get_checked(2)?;
             let open_id = row.get_checked(3)?;
@@ -74,32 +76,47 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
 
             // Open the directory (checking its metadata) and hold it open (for the lock).
             let _dir = dir::SampleFileDir::open(&dir_path, &meta)?;
-            let files = read_dir(&dir_path, opts)?;
-            files_by_dir.insert(dir_id, files);
+            let mut streams = read_dir(&dir_path, opts)?;
+            let mut rows = garbage_stmt.query(&[&dir_id])?;
+            while let Some(row) = rows.next() {
+                let row = row?;
+                let id = CompositeId(row.get_checked(0)?);
+                let s = streams.entry(id.stream()).or_insert_with(Stream::default);
+                s.entry(id.recording()).or_insert_with(Recording::default).garbage_row = true;
+            }
+            streams_by_dir.insert(dir_id, streams);
         }
     }
 
-    // Scan streams.
+    // Scan known streams.
     {
         let mut stmt = conn.prepare(r#"
-            select id, sample_file_dir_id from stream
+            select id, sample_file_dir_id from stream where sample_file_dir_id is not null
         "#)?;
         let mut rows = stmt.query(&[])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let stream_id = row.get_checked(0)?;
             let dir_id = row.get_checked(1)?;
-            let mut empty = FnvHashMap::default();
-            let files = match dir_id {
-                None => &mut empty,
-                Some(id) => files_by_dir.get_mut(&id).unwrap(),
+            let stream = match streams_by_dir.get_mut(&dir_id) {
+                None => Stream::default(),
+                Some(d) => d.remove(&stream_id).unwrap_or_else(Stream::default),
             };
-            compare_stream(conn, stream_id, opts, files)?;
+            compare_stream(conn, stream_id, opts, stream)?;
         }
     }
 
-    for (&dir_id, files) in &mut files_by_dir {
-        compare_dir(conn, dir_id, files)?;
+    // Expect the rest to have only garbage.
+    for (&dir_id, streams) in &streams_by_dir {
+        for (&stream_id, stream) in streams {
+            for (&recording_id, r) in stream {
+                let id = CompositeId::new(stream_id, recording_id);
+                if r.recording_row.is_some() || r.playback_row.is_some() ||
+                   r.integrity_row || !r.garbage_row {
+                    error!("dir {} recording {} for unknown stream: {:#?}", dir_id, id, r);
+                }
+            }
+        }
     }
 
     Ok(())
@@ -114,6 +131,28 @@ struct RecordingSummary {
     flags: i32,
 }
 
+#[derive(Debug, Default)]
+struct Recording {
+    /// Present iff there is a file. When `args.compare_lens` is true, the length; otherwise 0.
+    file: Option<u64>,
+
+    /// Iff a `recording` row is present, a `RecordingSummary` from those fields.
+    recording_row: Option<RecordingSummary>,
+
+    /// Iff a `recording_playback` row is present, a `RecordingSummary` computed from the index.
+    /// This should match the recording row.
+    playback_row: Option<RecordingSummary>,
+
+    /// True iff a `recording_integrity` row is present.
+    integrity_row: bool,
+
+    /// True iff a `garbage` row is present.
+    garbage_row: bool,
+}
+
+type Stream = FnvHashMap<i32, Recording>;
+type Dir = FnvHashMap<i32, Stream>;
+
 fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
     let mut it = recording::SampleIndexIterator::new();
     let mut duration = 0;
@@ -127,10 +166,10 @@ fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
         video_sync_samples += it.is_key() as i32;
     }
     Ok(RecordingSummary {
-        bytes: bytes,
-        video_samples: video_samples,
-        video_sync_samples: video_sync_samples,
-        duration: duration,
+        bytes,
+        video_samples,
+        video_sync_samples,
+        duration,
         flags: if it.duration_90k == 0 { db::RecordingFlags::TrailingZero as i32 } else { 0 },
     })
 }
@@ -138,14 +177,13 @@ fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
 /// Reads through the given sample file directory.
 /// Logs unexpected files and creates a hash map of the files found there.
 /// If `opts.compare_lens` is set, the values are lengths; otherwise they're insignificant.
-fn read_dir(path: &str, opts: &Options) -> Result<FnvHashMap<CompositeId, u64>, Error> {
-    let mut files = FnvHashMap::default();
+fn read_dir(path: &str, opts: &Options) -> Result<Dir, Error> {
+    let mut dir = Dir::default();
     for e in fs::read_dir(path)? {
         let e = e?;
         let f = e.file_name();
         let f = f.as_bytes();
         match f {
-            //"." | ".." => continue,
             b"meta" | b"meta-tmp" => continue,
             _ => {},
         };
@@ -157,106 +195,126 @@ fn read_dir(path: &str, opts: &Options) -> Result<FnvHashMap<CompositeId, u64>, 
             }
         };
         let len = if opts.compare_lens { e.metadata()?.len() } else { 0 };
-        files.insert(id, len);
+        let stream = dir.entry(id.stream()).or_insert_with(Stream::default);
+        stream.entry(id.recording()).or_insert_with(Recording::default).file = Some(len);
     }
-    Ok(files)
+    Ok(dir)
 }
 
-/// Looks through the stream for errors.
-/// Removes found recordings from the given file map.
+/// Looks through a known stream for errors.
 fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
-                  files: &mut FnvHashMap<CompositeId, u64>)
-                  -> Result<(), Error> {
-    // This statement should be a full outer join over the recording and recording_playback tables.
-    // SQLite3 doesn't support that, though, so emulate it with a couple left joins and a union.
-    const FIELDS: &'static str = r#"
-            recording.composite_id,
-            recording.flags,
-            recording.sample_file_bytes,
-            recording.duration_90k,
-            recording.video_samples,
-            recording.video_sync_samples,
-            recording_playback.composite_id,
-            recording_playback.video_index
-    "#;
-    let mut stmt = conn.prepare_cached(&format!(r#"
-        select {}
-        from recording left join recording_playback on
-            (recording.composite_id = recording_playback.composite_id)
-        where :start <= recording.composite_id and recording.composite_id < :end
-        union all
-        select {}
-        from recording_playback left join recording on
-            (recording_playback.composite_id = recording.composite_id)
-        where recording.composite_id is null and
-              :start <= recording_playback.composite_id and recording_playback.composite_id < :end
-    "#, FIELDS, FIELDS))?;
-    let mut rows = stmt.query_named(&[
-        (":start", &CompositeId::new(stream_id, 0).0),
-        (":end", &CompositeId::new(stream_id + 1, 0).0),
-    ])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let id = row.get_checked::<_, Option<i64>>(0)?.map(|id| CompositeId(id));
-        let playback_id = row.get_checked::<_, Option<i64>>(6)?.map(|id| CompositeId(id));
-        let id = match (id, playback_id) {
-            (Some(id1), Some(_)) => id1,
-            (Some(id1), None) => {
-                error!("id {} has recording row but no recording_playback row", id1);
-                continue;
-            },
-            (None, Some(id2)) => {
-                error!("id {} has recording_playback row but no recording row", id2);
-                continue;
-            },
-            (None, None) => bail!("outer join returned fully empty row"),
-        };
-        let row_summary = RecordingSummary {
-            flags: row.get_checked(1)?,
-            bytes: row.get_checked::<_, i64>(2)? as u64,
-            duration: row.get_checked(3)?,
-            video_samples: row.get_checked(4)?,
-            video_sync_samples: row.get_checked(5)?,
-        };
-        let video_index: Vec<u8> = row.get_checked(7)?;
-        let index_summary = match summarize_index(&video_index) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("id {} has bad video_index: {}", id, e);
-                continue;
-            },
-        };
-        if row_summary != index_summary {
-            error!("id {} row summary {:#?} inconsistent with index {:#?}",
-                   id, row_summary, index_summary);
+                  mut stream: Stream) -> Result<(), Error> {
+    let start = CompositeId::new(stream_id, 0);
+    let end = CompositeId::new(stream_id, i32::max_value());
+
+    // recording row.
+    {
+        let mut stmt = conn.prepare_cached(r#"
+            select
+              composite_id,
+              flags,
+              sample_file_bytes,
+              duration_90k,
+              video_samples,
+              video_sync_samples
+            from
+              recording
+            where
+              composite_id between ? and ?
+        "#)?;
+        let mut rows = stmt.query(&[&start.0, &end.0])?;
+        while let Some(row) = rows.next() {
+            let row = row?;
+            let id = CompositeId(row.get_checked(0)?);
+            let s = RecordingSummary {
+                flags: row.get_checked(1)?,
+                bytes: row.get_checked::<_, i64>(2)? as u64,
+                duration: row.get_checked(3)?,
+                video_samples: row.get_checked(4)?,
+                video_sync_samples: row.get_checked(5)?,
+            };
+            stream.entry(id.recording())
+                  .or_insert_with(Recording::default)
+                  .recording_row = Some(s);
         }
-        let len = match files.remove(&id) {
-            Some(l) => l,
+    }
+
+    // recording_playback row.
+    {
+        let mut stmt = conn.prepare_cached(r#"
+            select
+              composite_id,
+              video_index
+            from
+              recording_playback
+            where
+              composite_id between ? and ?
+        "#)?;
+        let mut rows = stmt.query(&[&start.0, &end.0])?;
+        while let Some(row) = rows.next() {
+            let row = row?;
+            let id = CompositeId(row.get_checked(0)?);
+            let video_index: Vec<u8> = row.get_checked(1)?;
+            let s = match summarize_index(&video_index) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("id {} has bad video_index: {}", id, e);
+                    continue;
+                },
+            };
+            stream.entry(id.recording())
+                  .or_insert_with(Recording::default)
+                  .playback_row = Some(s);
+        }
+    }
+
+    // recording_integrity row.
+    {
+        let mut stmt = conn.prepare_cached(r#"
+            select
+              composite_id
+            from
+              recording_integrity
+            where
+              composite_id between ? and ?
+        "#)?;
+        let mut rows = stmt.query(&[&start.0, &end.0])?;
+        while let Some(row) = rows.next() {
+            let row = row?;
+            let id = CompositeId(row.get_checked(0)?);
+            stream.entry(id.recording())
+                  .or_insert_with(Recording::default)
+                  .integrity_row = true;
+        }
+    }
+
+    for (&id, recording) in &stream {
+        let id = CompositeId::new(stream_id, id);
+        let r = match recording.recording_row {
+            Some(ref r) => r,
             None => {
-                error!("id {} missing", id);
+                if !recording.garbage_row || recording.playback_row.is_some() ||
+                   recording.integrity_row {
+                    error!("Missing recording row for {}: {:#?}", id, recording);
+                }
                 continue;
-            }
+            },
         };
-        if opts.compare_lens && row_summary.bytes != len {
-            error!("id {} declares length {}, but its sample file has length {}",
-                   id, row_summary.bytes, len);
+        match recording.playback_row {
+            Some(ref p) => {
+                if r != p {
+                    error!("Recording {} summary doesn't match video_index: {:#?}", id, recording);
+                }
+            },
+            None => error!("Recording {} missing playback row: {:#?}", id, recording),
+        }
+        match recording.file {
+            Some(len) => if opts.compare_lens && r.bytes != len {
+                error!("Recording {} length mismatch: {:#?}", id, recording);
+            },
+            None => error!("Recording {} missing file: {:#?}", id, recording),
         }
     }
-    Ok(())
-}
 
-fn compare_dir(conn: &rusqlite::Connection, dir_id: i32,
-               files: &mut FnvHashMap<CompositeId, u64>) -> Result<(), Error> {
-    let mut stmt = conn.prepare_cached(
-        "select composite_id from garbage where sample_file_dir_id = ?")?;
-    let mut rows = stmt.query(&[&dir_id])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        files.remove(&CompositeId(row.get_checked(0)?));
-    }
-
-    for (k, _) in files {
-        error!("dir {}: Unexpected file {}", dir_id, k);
-    }
     Ok(())
 }

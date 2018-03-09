@@ -168,13 +168,6 @@ create table recording (
   duration_90k integer not null
       check (duration_90k >= 0 and duration_90k < 5*60*90000),
 
-  -- The number of 90 kHz units the local system time is ahead of the
-  -- recording; negative numbers indicate the local system time is behind
-  -- the recording. Large absolute values would indicate that the local time
-  -- has jumped during recording or that the local time and camera time
-  -- frequencies do not match.
-  local_time_delta_90k integer not null,
-
   video_samples integer not null check (video_samples > 0),
   video_sync_samples integer not null check (video_sync_samples > 0),
   video_sample_entry_id integer references video_sample_entry (id),
@@ -200,20 +193,43 @@ create index recording_cover on recording (
   flags
 );
 
--- Large fields for a recording which are not needed when simply listing all
--- of the recordings in a given range. In particular, when serving a byte
--- range within a .mp4 file, the recording_playback row is needed for the
--- recording(s) corresponding to that particular byte range, needed, but the
--- recording rows suffice for all other recordings in the .mp4.
+-- Fields which are only needed to check/correct database integrity problems
+-- (such as incorrect timestamps).
+create table recording_integrity (
+  -- See description on recording table.
+  composite_id integer primary key references recording (composite_id),
+
+  -- The number of 90 kHz units the local system's monotonic clock has
+  -- advanced more than the stated duration of recordings in a run since the
+  -- first recording ended. Negative numbers indicate the local system time is
+  -- behind the recording.
+  --
+  -- The first recording of a run (that is, one with run_offset=0) has null
+  -- local_time_delta_90k because errors are assumed to
+  -- be the result of initial buffering rather than frequency mismatch.
+  --
+  -- This value should be near 0 even on long runs in which the camera's clock
+  -- and local system's clock frequency differ because each recording's delta
+  -- is used to correct the durations of the next (up to 500 ppm error).
+  local_time_delta_90k integer,
+
+  -- The sha1 hash of the contents of the sample file.
+  sample_file_sha1 blob check (length(sample_file_sha1) <= 20)
+);
+
+-- Large fields for a recording which are needed ony for playback.
+-- In particular, when serving a byte range within a .mp4 file, the
+-- recording_playback row is needed for the recording(s) corresponding to that
+-- particular byte range, needed, but the recording rows suffice for all other
+-- recordings in the .mp4.
 create table recording_playback (
   -- See description on recording table.
   composite_id integer primary key references recording (composite_id),
 
-  -- The sha1 hash of the contents of the sample file.
-  sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
-
   -- See design/schema.md#video_index for a description of this field.
   video_index blob not null check (length(video_index) > 0)
+
+  -- audio_index could be added here in the future.
 );
 
 -- Files which are to be deleted (may or may not still exist).
