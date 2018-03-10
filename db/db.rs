@@ -52,6 +52,7 @@
 //!     A list of mutations is built up in-memory and occasionally flushed to reduce SSD write
 //!     cycles.
 
+use base::clock::Clocks;
 use dir;
 use failure::Error;
 use fnv::{self, FnvHashMap, FnvHashSet};
@@ -564,11 +565,17 @@ fn init_recordings(conn: &mut rusqlite::Connection, stream_id: i32, camera: &Cam
 }
 
 pub struct LockedDatabase {
+    clocks: Arc<Clocks>,
     conn: rusqlite::Connection,
     uuid: Uuid,
 
     /// If the database is open in read-write mode, the information about the current Open row.
     open: Option<Open>,
+
+    /// The monotonic time when the database was opened (whether in read-write mode or read-only
+    /// mode).
+    open_monotonic: recording::Time,
+
     sample_file_dirs_by_id: BTreeMap<i32, SampleFileDir>,
     cameras_by_id: BTreeMap<i32, Camera>,
     streams_by_id: BTreeMap<i32, Stream>,
@@ -861,6 +868,18 @@ impl LockedDatabase {
         }
         for (&stream_id, mut r) in &mut new_ranges {
             *r = raw::get_range(&tx, stream_id)?;
+        }
+        {
+            let mut stmt = tx.prepare_cached(
+                r"update open set duration_90k = ?, end_time_90k = ? where id = ?")?;
+            let rows = stmt.execute(&[
+                &(recording::Time::new(self.clocks.monotonic()) - self.open_monotonic).0,
+                &recording::Time::new(self.clocks.realtime()).0,
+                &o.id,
+            ])?;
+            if rows != 1 {
+                bail!("unable to find current open {}", o.id);
+            }
         }
         tx.commit()?;
 
@@ -1710,7 +1729,8 @@ impl Drop for Database {
 
 impl Database {
     /// Creates the database from a caller-supplied SQLite connection.
-    pub fn new(conn: rusqlite::Connection, read_write: bool) -> Result<Database, Error> {
+    pub fn new(clocks: Arc<Clocks>, conn: rusqlite::Connection,
+               read_write: bool) -> Result<Database, Error> {
         conn.execute("pragma foreign_keys = on", &[])?;
         {
             let ver = get_schema_version(&conn)?.ok_or_else(|| format_err!(
@@ -1735,20 +1755,24 @@ impl Database {
         // Note: the meta check comes after the version check to improve the error message when
         // trying to open a version 0 or version 1 database (which lacked the meta table).
         let uuid = raw::get_db_uuid(&conn)?;
+        let open_monotonic = recording::Time::new(clocks.monotonic());
         let open = if read_write {
-            let mut stmt = conn.prepare(" insert into open (uuid) values (?)")?;
+            let real = recording::Time::new(clocks.realtime());
+            let mut stmt = conn.prepare(" insert into open (uuid, start_time_90k) values (?, ?)")?;
             let uuid = Uuid::new_v4();
             let uuid_bytes = &uuid.as_bytes()[..];
-            stmt.execute(&[&uuid_bytes])?;
+            stmt.execute(&[&uuid_bytes, &real.0])?;
             Some(Open {
                 id: conn.last_insert_rowid() as u32,
                 uuid,
             })
         } else { None };
         let db = Database(Some(Mutex::new(LockedDatabase {
-            conn: conn,
+            clocks,
+            conn,
             uuid,
             open,
+            open_monotonic,
             sample_file_dirs_by_id: BTreeMap::new(),
             cameras_by_id: BTreeMap::new(),
             cameras_by_uuid: BTreeMap::new(),
@@ -1789,7 +1813,9 @@ impl Database {
 
     /// Locks the database; the returned reference is the only way to perform (read or write)
     /// operations.
-    pub fn lock(&self) -> MutexGuard<LockedDatabase> { self.0.as_ref().unwrap().lock() }
+    pub fn lock(&self) -> MutexGuard<LockedDatabase> {
+        self.0.as_ref().unwrap().lock()
+    }
 
     /// For testing: closes the database (without flushing) and returns the connection.
     /// This allows verification that a newly opened database is in an acceptable state.
@@ -1803,6 +1829,7 @@ impl Database {
 mod tests {
     extern crate tempdir;
 
+    use base::clock;
     use recording::{self, TIME_UNITS_PER_SEC};
     use rusqlite::Connection;
     use std::collections::BTreeMap;
@@ -1968,7 +1995,8 @@ mod tests {
     #[test]
     fn test_no_meta_or_version() {
         testutil::init();
-        let e = Database::new(Connection::open_in_memory().unwrap(), false).err().unwrap();
+        let e = Database::new(Arc::new(clock::RealClocks{}), Connection::open_in_memory().unwrap(),
+                              false).err().unwrap();
         assert!(e.to_string().starts_with("no such table"), "{}", e);
     }
 
@@ -1977,7 +2005,7 @@ mod tests {
         testutil::init();
         let c = setup_conn();
         c.execute_batch("delete from version; insert into version values (2, 0, '');").unwrap();
-        let e = Database::new(c, false).err().unwrap();
+        let e = Database::new(Arc::new(clock::RealClocks{}), c, false).err().unwrap();
         assert!(e.to_string().starts_with(
                 "Database schema version 2 is too old (expected 3)"), "got: {:?}", e);
     }
@@ -1987,7 +2015,7 @@ mod tests {
         testutil::init();
         let c = setup_conn();
         c.execute_batch("delete from version; insert into version values (4, 0, '');").unwrap();
-        let e = Database::new(c, false).err().unwrap();
+        let e = Database::new(Arc::new(clock::RealClocks{}), c, false).err().unwrap();
         assert!(e.to_string().starts_with(
                 "Database schema version 4 is too new (expected 3)"), "got: {:?}", e);
     }
@@ -1997,7 +2025,7 @@ mod tests {
     fn test_fresh_db() {
         testutil::init();
         let conn = setup_conn();
-        let db = Database::new(conn, true).unwrap();
+        let db = Database::new(Arc::new(clock::RealClocks{}), conn, true).unwrap();
         let db = db.lock();
         assert_eq!(0, db.cameras_by_id().values().count());
     }
@@ -2007,7 +2035,7 @@ mod tests {
     fn test_full_lifecycle() {
         testutil::init();
         let conn = setup_conn();
-        let db = Database::new(conn, true).unwrap();
+        let db = Database::new(Arc::new(clock::RealClocks{}), conn, true).unwrap();
         let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
         let path = tmpdir.path().to_str().unwrap().to_owned();
         let sample_file_dir_id = { db.lock() }.add_sample_file_dir(path).unwrap();
@@ -2063,7 +2091,7 @@ mod tests {
 
         // Closing and reopening the database should present the same contents.
         let conn = db.close();
-        let db = Database::new(conn, true).unwrap();
+        let db = Database::new(Arc::new(clock::RealClocks{}), conn, true).unwrap();
         assert_eq!(db.lock().streams_by_id().get(&sub_stream_id).unwrap().flush_if_sec, 2);
         assert_no_recordings(&db, camera_uuid);
 
@@ -2104,7 +2132,7 @@ mod tests {
         // Queries on a fresh database should return the correct result (with caches populated from
         // existing database contents rather than built on insert).
         let conn = db.close();
-        let db = Database::new(conn, true).unwrap();
+        let db = Database::new(Arc::new(clock::RealClocks{}), conn, true).unwrap();
         assert_single_recording(&db, main_stream_id, &recording);
 
         // Deleting a recording should succeed, update the min/max times, and mark it as garbage.

@@ -39,7 +39,7 @@ use std::thread;
 use time::{Duration, Timespec};
 
 /// Abstract interface to the system clocks. This is for testability.
-pub trait Clocks : Clone + Sync + 'static {
+pub trait Clocks : Send + Sync + 'static {
     /// Gets the current time from `CLOCK_REALTIME`.
     fn realtime(&self) -> Timespec;
 
@@ -48,17 +48,17 @@ pub trait Clocks : Clone + Sync + 'static {
 
     /// Causes the current thread to sleep for the specified time.
     fn sleep(&self, how_long: Duration);
+}
 
-    fn retry_forever<T, E: Into<Error>>(&self, f: &mut FnMut() -> Result<T, E>) -> T {
-        loop {
-            let e = match f() {
-                Ok(t) => return t,
-                Err(e) => e.into(),
-            };
-            let sleep_time = Duration::seconds(1);
-            warn!("sleeping for {:?} after error: {:?}", sleep_time, e);
-            self.sleep(sleep_time);
-        }
+pub fn retry_forever<T, E: Into<Error>>(clocks: &Clocks, f: &mut FnMut() -> Result<T, E>) -> T {
+    loop {
+        let e = match f() {
+            Ok(t) => return t,
+            Err(e) => e.into(),
+        };
+        let sleep_time = Duration::seconds(1);
+        warn!("sleeping for {:?} after error: {:?}", sleep_time, e);
+        clocks.sleep(sleep_time);
     }
 }
 
@@ -89,13 +89,13 @@ impl Clocks for RealClocks {
 
 /// Logs a warning if the TimerGuard lives "too long", using the label created by a supplied
 /// function.
-pub struct TimerGuard<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> {
+pub struct TimerGuard<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> {
     clocks: &'a C,
     label_f: Option<F>,
     start: Timespec,
 }
 
-impl<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
+impl<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
     pub fn new(clocks: &'a C, label_f: F) -> Self {
         TimerGuard {
             clocks,
@@ -105,7 +105,8 @@ impl<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F
     }
 }
 
-impl<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> Drop for TimerGuard<'a, C, S, F> {
+impl<'a, C, S, F> Drop for TimerGuard<'a, C, S, F>
+where C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a {
     fn drop(&mut self) {
         let elapsed = self.clocks.monotonic() - self.start;
         if elapsed.num_seconds() >= 1 {

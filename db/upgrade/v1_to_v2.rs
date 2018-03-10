@@ -56,7 +56,10 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         );
         create table open (
           id integer primary key,
-          uuid blob unique not null check (length(uuid) = 16)
+          uuid blob unique not null check (length(uuid) = 16),
+          start_time_90k integer,
+          end_time_90k integer,
+          duration_90k integer
         );
         create table sample_file_dir (
           id integer primary key,

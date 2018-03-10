@@ -37,6 +37,7 @@ extern crate cursive;
 
 use self::cursive::Cursive;
 use self::cursive::views;
+use clock;
 use db;
 use failure::Error;
 use regex::Regex;
@@ -124,7 +125,8 @@ struct Args {
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
     let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
-    let db = Arc::new(db::Database::new(conn, true)?);
+    let clocks = Arc::new(clock::RealClocks{});
+    let db = Arc::new(db::Database::new(clocks, conn, true)?);
 
     let mut siv = Cursive::new();
     //siv.add_global_callback('q', |s| s.quit());

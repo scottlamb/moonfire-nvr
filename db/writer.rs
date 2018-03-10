@@ -355,7 +355,7 @@ impl<C: Clocks, D: DirWriter> Syncer<C, D> {
         }
         let c = &self.clocks;
         for &id in &garbage {
-            c.retry_forever(&mut || {
+            clock::retry_forever(c, &mut || {
                 if let Err(e) = self.dir.unlink_file(id) {
                     if e.kind() == io::ErrorKind::NotFound {
                         warn!("dir: recording {} already deleted!", id);
@@ -366,8 +366,8 @@ impl<C: Clocks, D: DirWriter> Syncer<C, D> {
                 Ok(())
             });
         }
-        c.retry_forever(&mut || self.dir.sync());
-        c.retry_forever(&mut || self.db.lock().delete_garbage(self.dir_id, &mut garbage));
+        clock::retry_forever(c, &mut || self.dir.sync());
+        clock::retry_forever(c, &mut || self.db.lock().delete_garbage(self.dir_id, &mut garbage));
     }
 
     /// Saves the given recording and causes rotation to happen. Called from worker thread.
@@ -380,8 +380,8 @@ impl<C: Clocks, D: DirWriter> Syncer<C, D> {
         let stream_id = id.stream();
 
         // Free up a like number of bytes.
-        self.clocks.retry_forever(&mut || f.sync_all());
-        self.clocks.retry_forever(&mut || self.dir.sync());
+        clock::retry_forever(&self.clocks, &mut || f.sync_all());
+        clock::retry_forever(&self.clocks, &mut || self.dir.sync());
         let mut db = self.db.lock();
         db.mark_synced(id).unwrap();
         delete_recordings(&mut db, stream_id, 0).unwrap();
@@ -553,7 +553,7 @@ impl<'a, C: Clocks, D: DirWriter> Writer<'a, C, D> {
             flags: db::RecordingFlags::Growing as i32,
             ..Default::default()
         })?;
-        let f = self.clocks.retry_forever(&mut || self.dir.create_file(id));
+        let f = clock::retry_forever(self.clocks, &mut || self.dir.create_file(id));
 
         self.state = WriterState::Open(InnerWriter {
             f,
@@ -601,7 +601,7 @@ impl<'a, C: Clocks, D: DirWriter> Writer<'a, C, D> {
         }
         let mut remaining = pkt;
         while !remaining.is_empty() {
-            let written = self.clocks.retry_forever(&mut || w.f.write(remaining));
+            let written = clock::retry_forever(self.clocks, &mut || w.f.write(remaining));
             remaining = &remaining[written..];
         }
         w.unflushed_sample = Some(UnflushedSample {

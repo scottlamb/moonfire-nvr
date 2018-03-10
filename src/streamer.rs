@@ -42,7 +42,7 @@ pub static ROTATE_INTERVAL_SEC: i64 = 60;
 
 /// Common state that can be used by multiple `Streamer` instances.
 pub struct Environment<'a, 'b, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
-    pub clocks: &'a C,
+    pub clocks: Arc<C>,
     pub opener: &'a stream::Opener<S>,
     pub db: &'b Arc<Database>,
     pub shutdown: &'b Arc<AtomicBool>,
@@ -57,7 +57,7 @@ pub struct Streamer<'a, C, S> where C: Clocks, S: 'a + stream::Stream {
     db: Arc<Database>,
     dir: Arc<dir::SampleFileDir>,
     syncer_channel: writer::SyncerChannel<::std::fs::File>,
-    clocks: &'a C,
+    clocks: Arc<C>,
     opener: &'a stream::Opener<S>,
     stream_id: i32,
     short_name: String,
@@ -77,7 +77,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             db: env.db.clone(),
             dir,
             syncer_channel: syncer_channel,
-            clocks: env.clocks,
+            clocks: env.clocks.clone(),
             opener: env.opener,
             stream_id: stream_id,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
@@ -103,14 +103,14 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
         info!("{}: Opening input: {}", self.short_name, self.redacted_url);
 
         let mut stream = {
-            let _t = TimerGuard::new(self.clocks, || format!("opening {}", self.redacted_url));
+            let _t = TimerGuard::new(&*self.clocks, || format!("opening {}", self.redacted_url));
             self.opener.open(stream::Source::Rtsp(&self.url))?
         };
         let realtime_offset = self.clocks.realtime() - self.clocks.monotonic();
         // TODO: verify width/height.
         let extra_data = stream.get_extra_data()?;
         let video_sample_entry_id = {
-            let _t = TimerGuard::new(self.clocks, || "inserting video sample entry");
+            let _t = TimerGuard::new(&*self.clocks, || "inserting video sample entry");
             self.db.lock().insert_video_sample_entry(extra_data.width, extra_data.height,
                                                      extra_data.sample_entry,
                                                      extra_data.rfc6381_codec)?
@@ -121,11 +121,11 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
         // Seconds since epoch at which to next rotate.
         let mut rotate: Option<i64> = None;
         let mut transformed = Vec::new();
-        let mut w = writer::Writer::new(self.clocks, &self.dir, &self.db, &self.syncer_channel,
+        let mut w = writer::Writer::new(&*self.clocks, &self.dir, &self.db, &self.syncer_channel,
                                         self.stream_id, video_sample_entry_id);
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = {
-                let _t = TimerGuard::new(self.clocks, || "getting next packet");
+                let _t = TimerGuard::new(&*self.clocks, || "getting next packet");
                 stream.get_next()?
             };
             let pts = pkt.pts().ok_or_else(|| format_err!("packet with no pts"))?;
@@ -140,7 +140,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             rotate = if let Some(r) = rotate {
                 if frame_realtime.sec > r && pkt.is_key() {
                     trace!("{}: write on normal rotation", self.short_name);
-                    let _t = TimerGuard::new(self.clocks, || "closing writer");
+                    let _t = TimerGuard::new(&*self.clocks, || "closing writer");
                     w.close(Some(pts));
                     None
                 } else {
@@ -159,7 +159,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
                     // usual.  This ensures there's plenty of frame times to use when calculating
                     // the start time.
                     let r = r + if w.previously_opened()? { 0 } else { self.rotate_interval_sec };
-                    let _t = TimerGuard::new(self.clocks, || "creating writer");
+                    let _t = TimerGuard::new(&*self.clocks, || "creating writer");
                     r
                 },
             };
@@ -173,13 +173,13 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks, S: 'a + stream::Stream {
             } else {
                 orig_data
             };
-            let _t = TimerGuard::new(self.clocks,
+            let _t = TimerGuard::new(&*self.clocks,
                                       || format!("writing {} bytes", transformed_data.len()));
             w.write(transformed_data, local_time, pts, pkt.is_key())?;
             rotate = Some(r);
         }
         if rotate.is_some() {
-            let _t = TimerGuard::new(self.clocks, || "closing writer");
+            let _t = TimerGuard::new(&*self.clocks, || "closing writer");
             w.close(None);
         }
         Ok(())
@@ -322,7 +322,7 @@ mod tests {
     fn basic() {
         testutil::init();
         // 2015-04-25 00:00:00 UTC
-        let clocks = clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0));
+        let clocks = Arc::new(clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0)));
         clocks.sleep(time::Duration::seconds(86400));  // to 2015-04-26 00:00:00 UTC
 
         let stream = stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
@@ -337,7 +337,7 @@ mod tests {
         };
         let db = testutil::TestDb::new();
         let env = super::Environment{
-            clocks: &clocks,
+            clocks: Arc::clone(&clocks),
             opener: &opener,
             db: &db.db,
             shutdown: &opener.shutdown,

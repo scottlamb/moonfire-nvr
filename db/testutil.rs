@@ -28,6 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use base::clock;
 use db;
 use dir;
 use fnv::FnvHashMap;
@@ -77,9 +78,10 @@ impl TestDb {
     pub fn new() -> TestDb {
         let tmpdir = TempDir::new("moonfire-nvr-test").unwrap();
 
+        let clocks = Arc::new(clock::RealClocks{});
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         db::Database::init(&mut conn).unwrap();
-        let db = Arc::new(db::Database::new(conn, true).unwrap());
+        let db = Arc::new(db::Database::new(clocks, conn, true).unwrap());
         let (test_camera_uuid, sample_file_dir_id);
         let path = tmpdir.path().to_str().unwrap().to_owned();
         let dir;

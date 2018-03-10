@@ -52,11 +52,25 @@ create table version (
 
 -- Tracks every time the database has been opened in read/write mode.
 -- This is used to ensure directories are in sync with the database (see
--- schema.proto:DirMeta). It may be used in the API for etags and such in the
--- future.
+-- schema.proto:DirMeta), to disambiguate uncommitted recordings, and
+-- potentially to understand time problems.
 create table open (
   id integer primary key,
-  uuid blob unique not null check (length(uuid) = 16)
+  uuid blob unique not null check (length(uuid) = 16),
+
+  -- Information about when / how long the database was open. These may be all
+  -- null, for example in the open that represents all information written
+  -- prior to database version 3.
+
+  -- System time when the database was opened.
+  start_time_90k integer,
+
+  -- System time when the database was closed or (on crash) last flushed.
+  end_time_90k integer,
+
+  -- How long the database was open. This is end_time_90k - start_time_90k if
+  -- there were no time steps during this time.
+  duration_90k integer
 );
 
 create table sample_file_dir (
