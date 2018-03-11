@@ -424,8 +424,9 @@ impl Service {
             };
             let (p, mime) = match e.file_name().to_str() {
                 Some(n) if n == "index.html" => ("/".to_owned(), mime::TEXT_HTML),
-                Some(n) if n.ends_with(".js") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
                 Some(n) if n.ends_with(".html") => (format!("/{}", n), mime::TEXT_HTML),
+                Some(n) if n.ends_with(".js") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
+                Some(n) if n.ends_with(".map") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
                 Some(n) if n.ends_with(".png") => (format!("/{}", n), mime::IMAGE_PNG),
                 Some(n) => {
                     warn!("UI directory file {:?} has unknown extension; skipping", n);
