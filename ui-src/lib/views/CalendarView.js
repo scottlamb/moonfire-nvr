@@ -1,5 +1,34 @@
-// vim: set et sw=2:
+// vim: set et sw=2 ts=2:
 //
+// This file is part of Moonfire NVR, a security camera digital video recorder.
+// Copyright (C) 2018 Dolf Starreveld <dolf@starreveld.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// In addition, as a special exception, the copyright holders give
+// permission to link the code of portions of this program with the
+// OpenSSL library under certain conditions as described in each
+// individual source file, and distribute linked combinations including
+// the two.
+//
+// You must obey the GNU General Public License in all respects for all
+// of the code used other than OpenSSL. If you modify file(s) with this
+// exception, you may extend this exception to your version of the
+// file(s), but you are not obligated to do so. If you do not wish to do
+// so, delete this exception statement from your version. If you delete
+// this exception statement from all source files in the program, then
+// also delete it here.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import $ from 'jquery';
 import 'jquery-ui/themes/base/button.css';
@@ -202,25 +231,26 @@ export default class CalendarView {
    * @param  {String}  newTimeStr Time string from input element
    * @param  {Boolean} isEnd      True if this is for end time
    */
-  _pickerTimeChanged(newTimeStr, isEnd) {
-    console.log('newTimeStr: ' + newTimeStr);
+  _pickerTimeChanged(event, isEnd) {
+    const pickerElement = event.currentTarget;
+    const newTimeStr = pickerElement.value;
     const selectedRange = this._selectedRange;
-    parsedTS = isEnd
+    const parsedTS = isEnd
       ? selectedRange.setEndTime(newTimeStr)
       : selectedRange.setStartTime(newTimeStr);
     if (parsedTS === null) {
       console.log('bad time change');
-      $(e.target).addClass('ui-state-error');
+      $(pickerElement).addClass('ui-state-error');
       return;
     }
-    $(e.target).removeClass('ui-state-error');
+    $(pickerElement).removeClass('ui-state-error');
     console.log(
-      (isEnd ? 'end' : 'start') +
-        ' time change to: ' +
+      (isEnd ? 'End' : 'Start') +
+        ' time changed to: ' +
         parsedTS +
         ' (' +
-        this._timeFormatter.formatTimeStamp90k(parsedTS),
-      ')'
+        this._timeFormatter.formatTimeStamp90k(parsedTS) +
+        ')'
     );
     this._informRangeChange();
   }
@@ -296,7 +326,7 @@ export default class CalendarView {
     // Handle changing of a time input (either from or to)
     const handler = (e, isEnd) => {
       console.log('Time changed for: ' + (isEnd ? 'end' : 'start'));
-      this._pickerTimeChanged(e.currentTarget.value, isEnd);
+      this._pickerTimeChanged(e, isEnd);
     };
     this._startTimeElement.change((e) => handler(e, false));
     this._endTimeElement.change((e) => handler(e, true));

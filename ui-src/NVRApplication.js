@@ -1,8 +1,37 @@
-// vim: set et sw=2:
+// vim: set et sw=2 ts=2:
 //
+// This file is part of Moonfire NVR, a security camera digital video recorder.
+// Copyright (C) 2018 Dolf Starreveld <dolf@starreveld.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// In addition, as a special exception, the copyright holders give
+// permission to link the code of portions of this program with the
+// OpenSSL library under certain conditions as described in each
+// individual source file, and distribute linked combinations including
+// the two.
+//
+// You must obey the GNU General Public License in all respects for all
+// of the code used other than OpenSSL. If you modify file(s) with this
+// exception, you may extend this exception to your version of the
+// file(s), but you are not obligated to do so. If you do not wish to do
+// so, delete this exception statement from your version. If you delete
+// this exception statement from all source files in the program, then
+// also delete it here.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 // TODO: test abort.
 // TODO: add error bar on fetch failure.
-// TODO: style: no globals? string literals? line length? fn comments?
 // TODO: live updating.
 
 import 'jquery-ui/themes/base/button.css';
@@ -36,9 +65,29 @@ const api = new MoonfireAPI();
 let cameraViews = null; // CameraView objects
 let calendarView = null; // CalendarView object
 
-// IANA timezone name.
+/**
+ * Currently selected time format specification.
+ *
+ * @type {String}
+ */
 let timeFmt = 'YYYY-MM-DD HH:mm:ss';
+
+/**
+ * Currently active time formatter.
+ * This is lazy initialized at the point we receive the timezone information
+ * and never changes afterwards, except possibly for changing the timezone.
+ *
+ * @type {[type]}
+ */
 let timeFormatter = null;
+
+/**
+ * Currently active time formatter for internal time format.
+ * This is lazy initialized at the point we receive the timezone information
+ * and never changes afterwards, except possibly for changing the timezone.
+ *
+ * @type {[type]}
+ */
 let timeFormatter90k = null;
 
 /**
@@ -75,25 +124,20 @@ function newTimeFormat(format) {
 function onSelectVideo(nvrSettingsView, camera, range, recording) {
   console.log('Recording clicked: ', recording);
   const trimmedRange = recording.range90k(nvrSettingsView.trim ? range : null);
-  console.log('Forming video url');
   const url = api.videoPlayUrl(
     camera.uuid,
     recording,
     trimmedRange,
     nvrSettingsView.timeStampTrack
   );
-  console.log('Video url: ' + url);
   const video = $('<video controls preload="auto" autoplay="true" />');
   const dialog = $('<div class="playdialog" />').append(video);
-  console.log('have dialog');
   $('body').append(dialog);
-  console.log('appended dialog');
 
   let [formattedStart, formattedEnd] = timeFormatter90k.formatSameDayShortened(
     trimmedRange.startTime90k,
     trimmedRange.endTime90k
   );
-  console.log('range: ' + formattedStart + '-' + formattedEnd);
   dialog.dialog({
     title: camera.shortName + ', ' + formattedStart + ' to ' + formattedEnd,
     width: recording.videoSampleEntryWidth / 4,
@@ -102,7 +146,7 @@ function onSelectVideo(nvrSettingsView, camera, range, recording) {
     },
   });
   // Now that dialog is up, set the src so video starts
-  console.log('Video setting rc: ', url);
+  console.log('Video url: ' + url);
   video.attr('src', url);
 }
 
@@ -110,7 +154,7 @@ function onSelectVideo(nvrSettingsView, camera, range, recording) {
  * Fetch camera view data for a given date/time range.
  *
  * @param  {Range90k} selectedRange Desired time range
- * @param  {Number} videoLength Desired length of video segments
+ * @param  {Number} videoLength Desired length of video segments, or Infinity
  */
 function fetch(selectedRange, videoLength) {
   if (selectedRange.startTime90k === null) {
@@ -129,15 +173,9 @@ function fetch(selectedRange, videoLength) {
       selectedRange.endTime90k,
       videoLength
     );
-    if (url === cameraView.recordingsUrl) {
-      /*
-       * @TODO: Can this actually happen?
-       */
-      continue; // already in progress, nothing to do.
-    }
     if (cameraView.recordingsReq !== null) {
       /*
-       * @TODO: Aborting here does not see right.
+       * @TODO: Aborting here does not seem right.
        * If there is another request, it would be because settings changed
        * and so an abort would leave the UI in a possible inconcistent state.
        */
@@ -147,6 +185,7 @@ function fetch(selectedRange, videoLength) {
     let r = api.request(url);
     cameraView.recordingsUrl = url;
     cameraView.recordingsReq = r;
+    cameraView.recordingsRange = selectedRange.range90k();
     r.always(function() {
       cameraView.recordingsReq = null;
     });
@@ -166,27 +205,6 @@ function fetch(selectedRange, videoLength) {
 }
 
 /**
- * Setup the calendar for use.
- *
- * A CalendarView is established as necessary and then it is initialized
- * from the camera views. This allows the view to determine what days/dates
- * are involved and configure datepickers etc.
- *
- * This should only change when a new cameras load happens and this function
- * should be called again.
- *
- * We also setup a handler for when the view indicates the user selectable
- * date range had changed. This is used to fetch new detailed data.
- *
- * @param  {Iterable} views     Camera views
- * @param  {Number} videoLength Desired length of video segments
- * @return {CalendarView}       The camera view to be used
- */
-function setupCalendar(views) {
-  calendarView.initializeWith(views);
-}
-
-/**
  * Initialize the page after receiving camera data.
  *
  * Sets the following globals:
@@ -195,8 +213,7 @@ function setupCalendar(views) {
  *
  * Builds the dom for the left side controllers
  *
- * @param  {[type]} data [description]
- * @return {[type]}      [description]
+ * @param  {Object} data JSON resulting from the main API request /api/?days=
  */
 function onReceivedCameras(data) {
   newTimeZone(data.timeZoneName);
@@ -205,14 +222,10 @@ function onReceivedCameras(data) {
   const nvrSettingsView = new NVRSettingsView();
   nvrSettingsView.onVideoLengthChange = (vl) =>
     fetch(calendarView.selectedRange, vl);
-  nvrSettingsView.onTimeFormatChange = (format) => {
+  nvrSettingsView.onTimeFormatChange = (format) =>
     cameraViews.forEach((view) => (view.timeFormat = format));
-  };
-  nvrSettingsView.onTrimChange = (t) => {
-    console.log('Trim handler');
-    const newTrim = e.target.checked;
-    cameraViews.forEach((view) => (view.trimmed = newTrim));
-  };
+  nvrSettingsView.onTrimChange = (t) =>
+    cameraViews.forEach((view) => (view.trimmed = t));
   newTimeFormat(nvrSettingsView.timeFormatString);
 
   calendarView = new CalendarView({timeZone: timeFormatter.tz});

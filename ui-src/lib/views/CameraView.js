@@ -1,5 +1,34 @@
-// vim: set et sw=2:
+// vim: set et sw=2 ts=2:
 //
+// This file is part of Moonfire NVR, a security camera digital video recorder.
+// Copyright (C) 2018 Dolf Starreveld <dolf@starreveld.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// In addition, as a special exception, the copyright holders give
+// permission to link the code of portions of this program with the
+// OpenSSL library under certain conditions as described in each
+// individual source file, and distribute linked combinations including
+// the two.
+//
+// You must obey the GNU General Public License in all respects for all
+// of the code used other than OpenSSL. If you modify file(s) with this
+// exception, you may extend this exception to your version of the
+// file(s), but you are not obligated to do so. If you do not wish to do
+// so, delete this exception statement from your version. If you delete
+// this exception statement from all source files in the program, then
+// also delete it here.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import RecordingsView from './RecordingsView';
 
@@ -61,6 +90,28 @@ export default class CameraView {
   }
 
   /**
+   * Get the currently remembered recordings range for this camera.
+   *
+   * This is just passed on to the recordings view.
+   *
+   * @return {Range90k} Currently remembered range
+   */
+  get recordingsRange() {
+    return this.recordingsView.recordingsRange;
+  }
+
+  /**
+   * Set the recordings range for this view.
+   *
+   * This is just passed on to the recordings view.
+   *
+   * @param  {Range90k} range90k Range to remember
+   */
+  set recordingsRange(range90k) {
+    this.recordingsView.recordingsRange = range90k;
+  }
+
+  /**
    * Set whether loading indicator should be shown or not.
    *
    * This indicator is really on the recordings list.
@@ -99,6 +150,13 @@ export default class CameraView {
     this.recordingsView.timeFormat = formatStr;
   }
 
+  /**
+   * Set the trimming option of the cameraview as desired.
+   *
+   * This is really just passed on to the recordings view.
+   *
+   * @param  {Boolean} enabled True if trimming should be enabled
+   */
   set trimmed(enabled) {
     this.recordingsView.trimmed = enabled;
   }

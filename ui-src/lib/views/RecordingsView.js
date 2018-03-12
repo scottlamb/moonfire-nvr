@@ -1,5 +1,34 @@
-// vim: set et sw=2:
+// vim: set et sw=2 ts=2:
 //
+// This file is part of Moonfire NVR, a security camera digital video recorder.
+// Copyright (C) 2018 Dolf Starreveld <dolf@starreveld.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// In addition, as a special exception, the copyright holders give
+// permission to link the code of portions of this program with the
+// OpenSSL library under certain conditions as described in each
+// individual source file, and distribute linked combinations including
+// the two.
+//
+// You must obey the GNU General Public License in all respects for all
+// of the code used other than OpenSSL. If you modify file(s) with this
+// exception, you may extend this exception to your version of the
+// file(s), but you are not obligated to do so. If you do not wish to do
+// so, delete this exception statement from your version. If you delete
+// this exception statement from all source files in the program, then
+// also delete it here.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import $ from 'jquery';
 
@@ -58,6 +87,7 @@ export default class RecordingsView {
     }
     this._trimmed = trimmed;
     this._recordings = null;
+    this._recordingsRange = null;
     this._clickHandler = null;
     if (parent) {
       parent.append(this._element);
@@ -77,11 +107,12 @@ export default class RecordingsView {
     tab.append(
       $('<tr class="name">').append($('<th colspan=6/>').text(cameraName)),
       $('<tr class="hdr">').append(
-      $(
-        _columnOrder
-          .map((name) => '<th>' + _columnLabels[name] + '</th>')
-          .join('')
-      )),
+        $(
+          _columnOrder
+            .map((name) => '<th>' + _columnLabels[name] + '</th>')
+            .join('')
+        )
+      ),
       $('</tr>'),
       $('<tr class="loading"><td colspan=6>loading...</td></tr>').hide()
     );
@@ -97,7 +128,7 @@ export default class RecordingsView {
    * @param  {Boolean} trimmed  True if timestamps should be trimmed
    */
   _updateRecordings() {
-    const trimRange = this._trimmed ? this._cameraRange : null;
+    const trimRange = this._trimmed ? this.recordingsRange : null;
     const recordings = this._recordings;
     this._element.children('tr.r').each((rowIndex, row) => {
       const values = this._formatter.format(recordings[rowIndex], trimRange);
@@ -108,9 +139,31 @@ export default class RecordingsView {
   }
 
   /**
-   * get whether time ranges in the recording list are being trimmed.
+   * Get the currently remembered recordings range for this view.
    *
-   * @return {Boolean} [description]
+   * This range corresponds to what was in the data time range selector UI
+   * at the time the data for this view was selected. The value is remembered
+   * purely for trimming purposes.
+   *
+   * @return {Range90k} Currently remembered range
+   */
+  get recordingsRange() {
+    return this._recordingsRange ? this._recordingsRange.clone() : null;
+  }
+
+  /**
+   * Set the recordings range for this view.
+   *
+   * @param  {Range90k} range90k Range to remember
+   */
+  set recordingsRange(range90k) {
+    this._recordingsRange = range90k ? range90k.clone() : null;
+  }
+
+  /**
+   * Get whether time ranges in the recording list are being trimmed.
+   *
+   * @return {Boolean} True if time ranges are being trimmed
    */
   get trimmed() {
     return this._trimmed;

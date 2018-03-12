@@ -1,8 +1,38 @@
-// vim: set et sw=2:
+// vim: set et sw=2 ts=2:
 //
+// This file is part of Moonfire NVR, a security camera digital video recorder.
+// Copyright (C) 2018 Dolf Starreveld <dolf@starreveld.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// In addition, as a special exception, the copyright holders give
+// permission to link the code of portions of this program with the
+// OpenSSL library under certain conditions as described in each
+// individual source file, and distribute linked combinations including
+// the two.
+//
+// You must obey the GNU General Public License in all respects for all
+// of the code used other than OpenSSL. If you modify file(s) with this
+// exception, you may extend this exception to your version of the
+// file(s), but you are not obligated to do so. If you do not wish to do
+// so, delete this exception statement from your version. If you delete
+// this exception statement from all source files in the program, then
+// also delete it here.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import Time90kParser from '../support/Time90kParser';
-import { TimeStamp90kFormatter } from '../support/TimeFormatter';
+import {TimeStamp90kFormatter} from '../support/TimeFormatter';
+import Range90k from './Range90k';
 
 /**
  * Class representing a calendar timestamp range based on 90k units.
@@ -23,24 +53,40 @@ export default class CalendarTSRange {
    * @param  {String} timeZone Desired timezone, e.g. 'America/Los_Angeles'
    */
   constructor(timeZone) {
-    this._start = { dateStr: null, timeStr: '', ts90k: null };
-    this._end = { dateStr: null, timeStr: '', ts90k: null };
+    this._start = {dateStr: null, timeStr: '', ts90k: null};
+    this._end = {dateStr: null, timeStr: '', ts90k: null};
     // Don't need to keep timezone, but need parser and formatter
     this._timeFormatter = new TimeStamp90kFormatter(timeZone);
     this._timeParser = new Time90kParser(timeZone);
   }
 
+  /**
+   * Determine if a valid start date string is present.
+   *
+   * @return {Boolean} True if start date string is present
+   */
   hasStart() {
     return this.start.dateStr !== null;
   }
+
+  /**
+   * Determine if a valid end date string is present.
+   *
+   * @return {Boolean} True if end date string is present
+   */
   hasEnd() {
     return this.end.dateStr !== null;
   }
 
+  /**
+   * Determine if a valid start and end date string is present.
+   *
+   * @return {Boolean} True if start and end end date string is present
+   */
   hasRange() {
     return this.hasStart() && this.hasEnd();
   }
-  
+
   /**
    * Return the range's start component.
    *
@@ -87,6 +133,17 @@ export default class CalendarTSRange {
   }
 
   /**
+   * Return the calendar range in terms of a range over 90k timestamps.
+   *
+   * @return {Range90k} Range object or null if don't have start and end
+   */
+  range90k() {
+    return this.hasRange()
+      ? new Range90k(this.startTime90k, this.endTime90k)
+      : null;
+  }
+
+  /**
    * Internal function to update either start or end type range component.
    *
    * Strings are parsed to check if they are valid. Update only takes place
@@ -95,20 +152,30 @@ export default class CalendarTSRange {
    * - HH:MM:ss:FFFFFZ format, where each componet may be empty to indicate 0
    * - YYYY-MM-DD format for the date
    *
+   * NOTE: This function potentially modifies the content of the range
+   * argument. This is on purpose and should reflect the new range values
+   * upon succesful parsing!
+   *
    * @param {object} range   A range component
    * @param {String} dateStr Date string, if null range's value is re-used
    * @param {String} timeStr Time string, if null range's value is re-used
-   * @param {Boolean} addOne  True if one should be added to date (for end)
-   * @return {void}
+   * @param {Boolean} dateOnlyThenEndOfDay  True if one should be added to date
+   *                                        which is only meaningful if there
+   *                                        is no time specified here, and also
+   *                                        not present in the range.
+   * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
-  _setRangeTime(range, dateStr, timeStr, addOne) {
+  _setRangeTime(range, dateStr, timeStr, dateOnlyThenEndOfDay) {
+    dateStr = dateStr || range.dateStr;
+    timeStr = timeStr || range.timeStr;
     const newTs90k = this._timeParser.parseDateTime90k(
-      dateStr || range.dateStr,
-      timeStr || range.timeStr,
-      addOne
+      dateStr,
+      timeStr,
+      dateOnlyThenEndOfDay
     );
     if (newTs90k !== null) {
       range.dateStr = dateStr;
+      range.timeStr = timeStr;
       range.ts90k = newTs90k;
       return newTs90k;
     }
@@ -118,11 +185,11 @@ export default class CalendarTSRange {
   /**
    * Set start component of range from date and time strings.
    *
-   * Uses _setRangeTime with appropriate addOne value.
+   * Uses _setRangeTime with appropriate dateOnlyThenEndOfDay value.
    *
    * @param {String} dateStr Date string
    * @param {String} timeStr Time string
-   * @return {void}
+   * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setStartDate(dateStr, timeStr = null) {
     return this._setRangeTime(this._start, dateStr, timeStr, false);
@@ -131,10 +198,10 @@ export default class CalendarTSRange {
   /**
    * Set time of start component of range time string.
    *
-   * Uses _setRangeTime with appropriate addOne value.
+   * Uses _setRangeTime with appropriate dateOnlyThenEndOfDay value.
    *
    * @param {String} timeStr Time string
-   * @return {void}
+   * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setStartTime(timeStr) {
     return this._setRangeTime(this._start, null, timeStr, false);
@@ -147,7 +214,7 @@ export default class CalendarTSRange {
    *
    * @param {String} dateStr Date string
    * @param {String} timeStr Time string
-   * @return {void}
+   * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setEndDate(dateStr, timeStr = null) {
     return this._setRangeTime(this._end, dateStr, timeStr, true);
@@ -159,11 +226,12 @@ export default class CalendarTSRange {
    * Uses _setRangeTime with appropriate addOne value.
    *
    * @param {String} timeStr Time string
-   * @return {void}
+   * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setEndTime(timeStr) {
     return this._setRangeTime(this._end, null, timeStr, true);
   }
+
   /**
    * Format a timestamp in 90k units in the manner consistent with
    * what the parser of this module expects.
