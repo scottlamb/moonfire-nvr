@@ -60,6 +60,16 @@ module.exports = (env, args) => {
         test: /\.png$/,
         use: ['file-loader'],
       }, {
+        test: /\.ico$/,
+        use: [
+          {
+            loader: 'file-loader',
+            options: {
+              name: '[name].[ext]'
+            }
+          }
+        ]
+      }, {
         // Load css and then in-line in head
         test: /\.css$/,
         loader: 'style-loader!css-loader',
