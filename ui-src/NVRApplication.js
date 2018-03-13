@@ -141,8 +141,11 @@ function onSelectVideo(nvrSettingsView, camera, range, recording) {
   dialog.dialog({
     title: camera.shortName + ', ' + formattedStart + ' to ' + formattedEnd,
     width: recording.videoSampleEntryWidth / 4,
-    close: function() {
-      dialog.remove();
+    close: () => {
+        const videoDOMElement = video[0];
+        videoDOMElement.pause();
+        videoDOMElement.src = ''; // Remove current source to stop loading
+        dialog.remove();
     },
   });
   // Now that dialog is up, set the src so video starts
