@@ -5,6 +5,8 @@
 // TODO: style: no globals? string literals? line length? fn comments?
 // TODO: live updating.
 
+import './favicon.ico';
+
 import 'jquery-ui/themes/base/button.css';
 import 'jquery-ui/themes/base/core.css';
 import 'jquery-ui/themes/base/datepicker.css';
