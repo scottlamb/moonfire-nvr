@@ -97,11 +97,7 @@ export default class Recording extends JsonWrapper {
    * @return {Range90k}                Resulting range
    */
   range90k(trimmedAgainst = null) {
-    let result = new Range90k(
-      this.startTime90k,
-      this.endTime90k,
-      this.duration90k
-    );
+    let result = new Range90k(this.startTime90k, this.endTime90k);
     return trimmedAgainst ? result.trimmed(trimmedAgainst) : result;
   }
   /**

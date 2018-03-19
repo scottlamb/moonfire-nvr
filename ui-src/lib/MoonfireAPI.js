@@ -80,7 +80,7 @@ export default class MoonfireAPI {
    * @param  {String} start90k   Timestamp for beginning of range of interest
    * @param  {String} end90k     Timestamp for end of range of interest
    * @param  {String} split90k   Desired maximum size of segments returned, or
-   *                             null for infinite range
+   *                             Infinity for infinite range
    * @return {String}       Constructed url
    */
   recordingsUrl(cameraUUID, start90k, end90k, split90k = Infinity) {

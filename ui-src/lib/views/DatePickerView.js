@@ -166,7 +166,7 @@ export default class DatePickerView {
   }
 
   /**
-   * Set dsiabled status of picker.
+   * Set disabled status of picker.
    *
    * @param  {Boolean} disabled True to disable
    */
