@@ -31,36 +31,43 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * This module must export a map, but can use a function with no arguments
- * that returns a map, or a function that receives the "env" and "args"
- * values from webpack.
+ * Class to represent ranges of values.
  *
- * @type {Object}
+ * The range has a "low", and "high" value property and is inclusive.
+ * The "size" property returns the difference between high and low.
  */
-module.exports.settings = {
-  // Project related: use ./ in front of project root relative files!
-  app_src_dir: './ui-src',
-  dist_dir: './ui-dist',
-
-  // App related
-  app_title: 'Moonfire NVR',
-
-  // Where is the server to be found
-  moonfire: {
-    server: 'localhost',
-    port: 8080,
-  },
-
-  /*
-   * In settings override file you can add sections like below on this level.
-   * After processing, anything defined in mode.production or mode.development,
-   * as appropriate based on --mode argument to webpack, will be merged
-   * into the top level of this settings module. This allows you to add to, or
-   * override anything listed above.
+export default class Range {
+  /**
+   * Create a range.
    *
-   * webpack_mode: {
-   *  production: {},
-   *  development: {},
-  },
-  */
-};
+   * @param  {Number} low  Low value (inclusive) in range.
+   * @param  {Number} high High value (inclusive) in range.
+   */
+  constructor(low, high) {
+    if (high < low) {
+      console.log('Warning range swap: ' + low + ' - ' + high);
+      [low, high] = [high, low];
+    }
+    this.low = low;
+    this.high = high;
+  }
+
+  /**
+   * Size of the range.
+   *
+   * @return {Number} high - low
+   */
+  get size() {
+    return this.high - this.low;
+  }
+
+  /**
+   * Determine if value is inside the range.
+   *
+   * @param  {Number}  value Value to test
+   * @return {Boolean}
+   */
+  isInRange(value) {
+    return value >= this.low && value <= this.high;
+  }
+}

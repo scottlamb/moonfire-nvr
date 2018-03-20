@@ -1,0 +1,42 @@
+{
+  "folders": [
+    {
+      "path": ".",
+      "folder_exclude_patterns": [
+        "design",
+        "ffmpeg",
+        "node_modules",
+        "ui-dist"
+      ],
+      "file_exclude_patterns": ["*.png", "*.jpg", "*.gif"]
+    }
+  ],
+  "settings": {
+    "js_prettier": {
+      "additional_cli_args": {
+        "--config-precedence": "prefer-file"
+      },
+      "debug": true,
+      "prettier_cli_path": "",
+      "node_path": "",
+      "auto_format_on_save": false,
+      "auto_format_on_save_excludes": [],
+      "auto_format_on_save_requires_prettier_config": false,
+      "allow_inline_formatting": false,
+      "custom_file_extensions": [],
+      "max_file_size_limit": -1,
+      "prettier_options": {
+        "printWidth": 80,
+        "singleQuote": false,
+        "trailingComma": "none",
+        "bracketSpacing": true,
+        "jsxBracketSameLine": false,
+        "parser": "babylon",
+        "semi": true,
+        "requirePragma": false,
+        "proseWrap": "preserve",
+        "arrowParens": "avoid"
+      }
+    }
+  }
+}

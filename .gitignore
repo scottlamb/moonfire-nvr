@@ -3,6 +3,7 @@ cameras.sql
 .project
 .settings
 *.swp
+*.sublime-workspace
 node_modules
 prep.config
 settings-nvr-local.js

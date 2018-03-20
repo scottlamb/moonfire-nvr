@@ -1,0 +1,37 @@
+{
+    "printWidth": 80,
+    "singleQuote": false,
+    "trailingComma": "none",
+    "bracketSpacing": true,
+    "jsxBracketSameLine": false,
+    "parser": "babylon",
+    "semi": true,
+    "requirePragma": false,
+    "proseWrap": "preserve",
+    "arrowParens": "avoid",
+    "tabWidth": 4,
+    "overrides": [
+        {
+            "files": ["*.js"],
+            "options": {
+                "tabWidth": 2,
+                "useTabs": false,
+                "singleQuote": true,
+                "trailingComma": "es5",
+                "bracketSpacing": true,
+                "semi": true,
+                "arrowParens": "always"
+            }
+        },
+        {
+            "files": ["*.json", "moonfire.sublime-project"],
+            "options": {
+                "parser": "json",
+                "tabWidth": 4,
+                "useTabs": false,
+                "singleQuote": false,
+                "trailingComma": "none"
+            }
+        }
+    ]
+}
