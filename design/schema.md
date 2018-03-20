@@ -335,8 +335,8 @@ The times are roughly:
 
 | level    | operation   |     time |
 | :------- | :---------- | -------: |
-| presence | `readdir()` |   ~3 sec |
-| size     | `fstat()`   |   ~3 sec |
+| presence | `readdir()` | ~1.6 sec |
+| size     | `fstat()`   | ~100 sec |
 | hash     | `read()`    | ~8 hours |
 
 The `readdir()` and `fstat()` times can be tested simply:
@@ -345,9 +345,9 @@ The `readdir()` and `fstat()` times can be tested simply:
     $ cd testdir
     $ seq 1 $[60*24*365*6/12*2] | xargs touch
     $ sudo sh -c 'echo 1 > /proc/sys/vm/drop_caches'
-    $ time ls -1 -F | wc -l
+    $ time ls -1 -f | wc -l
     $ sudo sh -c 'echo 1 > /proc/sys/vm/drop_caches'
-    $ time ls -1 -F --size | wc -l
+    $ time ls -1 -f --size | wc -l
 
     (The system calls used by `ls` can be verified through strace.)
 
@@ -358,10 +358,11 @@ the Raspberry Pi 2, flash, network, and disk are all on the same USB 2.0 bus
 to be about 25 MB/sec on an idle system (~40% of the theoretical 480
 Mbit/sec). Therefore the process will take over a day.
 
-The size check is fast enough that it seems reasonable to simply always
-perform it on startup. Hash checks are too expensive to wait for in normal
-operation; they will either be a rare offline data recovery mechanism or done
-in the background at low priority.
+The presence check is fast enough that it seems reasonable to simply always
+perform it on startup. Size could be checked with a verification command used
+for more extensive verification, such as before and after schema upgrades.
+Hash checks could be performed in a rare offline data recovery mechanism or in
+the background at low priority.
 
 ### Recording table
 
