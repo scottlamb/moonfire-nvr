@@ -126,23 +126,20 @@ export default class DatePickerView {
    * Special case is when the datepicker is not (yet) attached. In that case
    * we need to initialze the datepicker with the options instead.
    *
-   * @return {Any} Result of the 'option' call.
+   * @param {object} arg0   First parameter or undefined if not given
+   * @param {array} args    Rest of the parameters (might be empty)
+   * @return {object}       Result of the 'option' call.
    */
-  option() {
+  option(arg0, ...args) {
     /*
      * Special case the scenario of calling option setting with just a map of
      * settings, when the picker is not alive. That really should translate
      * to a constructor call to the datepicker.
      */
-    if (
-      !this._alive &&
-      arguments.length == 1 &&
-      (arguments[0] === null || typeof arguments[0] === 'object')
-    ) {
-      console.log('DP special case  [' + this.domId + ']: ', arguments[0]);
-      return this._initWithOptions(arguments[0]);
+    if (!this._alive && args.length === 0 && typeof arg0 === 'object') {
+      return this._initWithOptions(arg0);
     }
-    return this._apply('option', ...arguments);
+    return this._apply('option', arg0, ...args);
   }
 
   /**
@@ -159,7 +156,7 @@ export default class DatePickerView {
   /**
    * Determine whether datepicker is disabled.
    *
-   * @return {Boolean} True if disabled.
+   * @return {Boolean}
    */
   get isDisabled() {
     return this._apply('isDisabled');

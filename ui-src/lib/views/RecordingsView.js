@@ -163,7 +163,7 @@ export default class RecordingsView {
   /**
    * Get whether time ranges in the recording list are being trimmed.
    *
-   * @return {Boolean} True if time ranges are being trimmed
+   * @return {Boolean}
    */
   get trimmed() {
     return this._trimmed;

@@ -143,7 +143,7 @@ export default class NVRSettingsView {
   /**
    * Get currently selected trim setting.
    *
-   * @return {Boolean} Trim setting.
+   * @return {Boolean}
    */
   get trim() {
     return this._trim;
@@ -152,7 +152,7 @@ export default class NVRSettingsView {
   /**
    * Determine value of timestamp tracking option
    *
-   * @return {Boolean} True if tracking desired
+   * @return {Boolean}
    */
   get timeStampTrack() {
     return this._tsTrack;

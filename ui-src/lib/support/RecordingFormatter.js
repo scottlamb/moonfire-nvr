@@ -73,7 +73,9 @@ export default class RecordingFormatter {
   }
 
   /**
-   * [format description]
+   * Produce an object whose properties are individual pieces of a recording's
+   * data, formatted for display purposes.
+   * 
    * @param  {Recording} recording    Recording to be formatted
    * @param  {Range90k} trimRange     Optional time range for trimming the
    *                                  recording's interval

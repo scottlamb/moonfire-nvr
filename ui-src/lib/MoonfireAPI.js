@@ -65,7 +65,7 @@ export default class MoonfireAPI {
   /**
    * URL that will cause the state of the NVR to be returned.
    *
-   * @param  {Boolean} days True of a return of days with available recordings
+   * @param  {Boolean} days True if a return of days with available recordings
    *                        is desired.
    * @return {String}       Constructed url
    */
@@ -74,7 +74,7 @@ export default class MoonfireAPI {
   }
 
   /**
-   * URL that will cause the state of a specificto be returned.
+   * URL that will cause the state of a specific recording to be returned.
    *
    * @param  {String} cameraUUID UUID for the camera
    * @param  {String} start90k   Timestamp for beginning of range of interest

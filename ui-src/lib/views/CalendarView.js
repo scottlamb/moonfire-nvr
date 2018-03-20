@@ -228,7 +228,7 @@ export default class CalendarView {
    * The change requires updating the selected range and then informing
    * any listeners that the range has changed (so they can update data).
    *
-   * @param  {String}  newTimeStr Time string from input element
+   * @param  {Object}  event Time Event on DOM that triggered calling this
    * @param  {Boolean} isEnd      True if this is for end time
    */
   _pickerTimeChanged(event, isEnd) {

@@ -63,7 +63,7 @@ export default class CalendarTSRange {
   /**
    * Determine if a valid start date string is present.
    *
-   * @return {Boolean} True if start date string is present
+   * @return {Boolean}
    */
   hasStart() {
     return this.start.dateStr !== null;
@@ -72,7 +72,7 @@ export default class CalendarTSRange {
   /**
    * Determine if a valid end date string is present.
    *
-   * @return {Boolean} True if end date string is present
+   * @return {Boolean}
    */
   hasEnd() {
     return this.end.dateStr !== null;
@@ -81,7 +81,7 @@ export default class CalendarTSRange {
   /**
    * Determine if a valid start and end date string is present.
    *
-   * @return {Boolean} True if start and end end date string is present
+   * @return {Boolean}
    */
   hasRange() {
     return this.hasStart() && this.hasEnd();
@@ -126,7 +126,7 @@ export default class CalendarTSRange {
   /**
    * Determine if the range has a defined start timestamp in 90k units.
    *
-   * @return {Boolean} True if it is defined
+   * @return {Boolean}
    */
   get hasStartTime() {
     return this.startTime90k !== null;

@@ -68,7 +68,7 @@ export default class CameraView {
   /**
    * Get whether the view is enabled or not.
    *
-   * @return {Boolean} True if view is enabled
+   * @return {Boolean}
    */
   get enabled() {
     return this._enabled;

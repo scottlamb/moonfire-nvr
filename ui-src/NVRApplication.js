@@ -178,9 +178,9 @@ function fetch(selectedRange, videoLength) {
     );
     if (cameraView.recordingsReq !== null) {
       /*
-       * @TODO: Aborting here does not seem right.
        * If there is another request, it would be because settings changed
-       * and so an abort would leave the UI in a possible inconcistent state.
+       * and so an abort is to make room for this new request, now necessary
+       * for the changed situation.
        */
       cameraView.recordingsReq.abort();
     }
