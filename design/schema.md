@@ -335,8 +335,8 @@ The times are roughly:
 
 | level    | operation   |     time |
 | :------- | :---------- | -------: |
-| presence | `readdir()` | ~1.6 sec |
-| size     | `fstat()`   | ~100 sec |
+| presence | `readdir()` |  ~19 sec |
+| size     | `fstat()`   | ~120 sec |
 | hash     | `read()`    | ~8 hours |
 
 The `readdir()` and `fstat()` times can be tested simply:
