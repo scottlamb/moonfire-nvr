@@ -160,7 +160,6 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           start_time_90k integer not null check (start_time_90k > 0),
           duration_90k integer not null
               check (duration_90k >= 0 and duration_90k < 5*60*90000),
-          local_time_delta_90k integer not null,
           video_samples integer not null check (video_samples > 0),
           video_sync_samples integer not null check (video_sync_samples > 0),
           video_sample_entry_id integer references video_sample_entry (id),
@@ -256,7 +255,6 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           r.sample_file_bytes,
           r.start_time_90k,
           r.duration_90k,
-          r.local_time_delta_90k,
           r.video_samples,
           r.video_sync_samples,
           r.video_sample_entry_id
