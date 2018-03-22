@@ -219,3 +219,5 @@ Version 3 adds over version 1:
 *   a simpler sample file directory layout in which files are represented by
     the same sequentially increasing id as in the database, rather than a
     separate uuid which has to be reserved in advance.
+*   additional timestamp fields which may be useful in diagnosing/correcting
+    time jumps/inconsistencies.

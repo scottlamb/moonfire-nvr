@@ -157,6 +157,8 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         create table recording_integrity (
           composite_id integer primary key references recording (composite_id),
           local_time_delta_90k integer,
+          local_time_since_open_90k integer,
+          wall_time_delta_90k integer,
           sample_file_sha1 blob check (length(sample_file_sha1) <= 20)
         );
 

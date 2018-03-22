@@ -1,6 +1,6 @@
 # Moonfire NVR Time Handling
 
-Status: **draft**
+Status: **implemented**
 
 > A man with a watch knows what time it is. A man with two watches is never
 > sure.
@@ -57,8 +57,6 @@ following statements are true:
    * the cameras are geographically close to the NVR, so in most cases network
      transmission time is under 50 ms. (Occasional delays are to be expected,
      however.)
-   * the cameras issue at least one RTCP sender report per recording.
-   * the cameras are occasionally synchronized via NTP.
 
 When one or more of those statements are false, the system should degrade
 gracefully: preserve what properties it can, gather video anyway, and when
@@ -99,8 +97,8 @@ information:
      support synchronizing clocks via NTP, but in practice cameras appear to
      use SNTP clients which simply step time periodically and provide no
      interface to determine if the clock is currently synchronized. This
-     document's author owns several cameras with clocks that run roughly 100
-     ppm fast (9 seconds per day) and are adjusted via steps.
+     document's author owns several cameras with clocks that run roughly 20
+     ppm fast (2 seconds per day) and are adjusted via steps.
    * the RTP timestamps from each of a camera's streams. As described in [RFC
      3550 section 5.1](https://tools.ietf.org/html/rfc3550#section-5.1), these
      are monotonically increasing with an unspecified reference point. They
@@ -201,6 +199,8 @@ operation but may be handy in understanding and correcting errors.
 
 ## Caveats
 
+### Stream mismatches
+
 There's no particular reason to believe this will produce perfectly matched
 streams between cameras or even of main and sub streams within a camera.
 If this is insufficient, there's an alternate calculation of start time that
@@ -238,3 +238,90 @@ detect and compensate for these clock splits.
 
 It's unclear if these additional mechanisms are desirable or worthwhile. The
 simplest approach will be adopted initially and adapted as necessary.
+
+### Time discontinuities
+
+If the local system's wall clock time jumps during a recording ([as has
+happened](https://github.com/scottlamb/moonfire-nvr/issues/9#issuecomment-322663674)),
+Moonfire NVR will continue to use the initial wall clock time for as long as
+the recording lasts. This can result in some unfortunate behaviors:
+
+   * a recording that lasts for months might have an incorrect time all the
+     way through because `ntpd` took a few minutes on startup.
+   * two recordings that were in fact simultaneous might be recorded with very
+     different times because a time jump happened between their starts.
+
+It might be better to use the new time (assuming that ntpd has made a
+correction) retroactively. This is unimplemented, but the
+`recording_integrity` database table has a `wall_time_delta_90k` field which
+could be used for this purpose, either automatically or interactively.
+
+It would also be possible to split a recording in two if a "significant" time
+jump is noted, or to allow manually restarting a recording without restarting
+the entire program.
+
+### Leap seconds
+
+UTC time is defined as the seconds since epoch _excluding
+leap seconds_. Thus, timestamps during the leap second are ambiguous, and
+durations across the leap second should be adjusted.
+
+In POSIX, the system clock (as returned by `clock_gettime(CLOCK_REALTIME,
+...`) is defined as representing UTC. Note that some
+systems may instead be following a [leap
+smear](https://developers.google.com/time/smear) policy in which instead of
+one second happening twice, the clock runs slower. For a 24-hour period, the
+clock runs slower by a factor of 1/86,400 (an extra ~11.6 μs/s).
+
+In Moonfire NVR, all wall times in the database are based on UTC as reported
+by the system, and it's assumed that `start + duration = end`. Thus, a leap
+second is similar to a one-second time jump (see "Time discontinuities"
+above).
+
+Here are some options for improvement:
+
+#### Use `clock_gettime(CLOCK_TAI, ...)` timestamps
+
+Timestamps in the TAI clock system don't skip leap seconds. There's a system
+interface intended to provide timestamps in this clock system, and Moonfire
+NVR could use it. Unfortunately this has several problems:
+
+   * `CLOCK_TAI` is only available on Linux. It'd be preferable to handle
+     timestamps in a consistent way on other platforms. (At least on macOS,
+     Moonfire NVR's current primary development platform.)
+   * `CLOCK_TAI` is wrong on startup and possibly adjusted later. The offset
+     between TAI and UTC is initially assumed to be 0. It's corrected when/if
+     a sufficiently new `ntpd` starts.
+   * We'd need a leap second table to translate this into calendar time. One
+     would have to be downloaded from the Internet periodically, and we'd need
+     to consider the case in which the available table is expired.
+   * `CLOCK_TAI` likely doesn't work properly with leap smear systems. Where
+     the leap smear prevents a time jump for `CLOCK_REALTIME`, it likely
+     introduces one for `CLOCK_TAI`.
+
+#### Use a leap second table when calculating differences
+
+Moonfire NVR could retrieve UTC timestamps from the system then translate then
+to TAI via a leap second table, either before writing them to the database or
+whenever doing math on timestamps.
+
+As with `CLOCK_TAI`, this would require downloading a leap second table from
+the Internet periodically.
+
+This would mostly solve the problem at the cost of complexity. Timestamps
+obtained from the system for a two-second period starting with each leap
+second would still be ambiguous.
+
+#### Use smeared time
+
+Moonfire NVR could make no code changes and ask the system administrator to
+use smeared time. This is the simplest option. On a leap smear system, there
+are no time jumps. The ~11.6 ppm frequency error and the maximum introduced
+absolute error of 0.5 sec can be considered acceptable.
+
+Alternatively, Moonfire NVR could assume a specific leap smear policy (such as
+24-hour linear smear from 12:00 the day before to 12:00 the day after) and
+attempt to correct the time into TAI with a leap second table. This behavior
+would work well on a system with the expected configuration and produce
+surprising results on other systems. It's unfortunate that there's no standard
+way to determine if a system is using a leap smear and with what policy.

@@ -62,14 +62,15 @@ create table open (
   -- null, for example in the open that represents all information written
   -- prior to database version 3.
 
-  -- System time when the database was opened.
+  -- System time when the database was opened, in 90 kHz units since
+  -- 1970-01-01 00:00:00Z excluding leap seconds.
   start_time_90k integer,
 
   -- System time when the database was closed or (on crash) last flushed.
   end_time_90k integer,
 
   -- How long the database was open. This is end_time_90k - start_time_90k if
-  -- there were no time steps during this time.
+  -- there were no time steps or leap seconds during this time.
   duration_90k integer
 );
 
@@ -173,9 +174,9 @@ create table recording (
   sample_file_bytes integer not null check (sample_file_bytes > 0),
 
   -- The starting time of the recording, in 90 kHz units since
-  -- 1970-01-01 00:00:00 UTC. Currently on initial connection, this is taken
-  -- from the local system time; on subsequent recordings, it exactly
-  -- matches the previous recording's end time.
+  -- 1970-01-01 00:00:00 UTC excluding leap seconds. Currently on initial
+  -- connection, this is taken from the local system time; on subsequent
+  -- recordings, it exactly matches the previous recording's end time.
   start_time_90k integer not null check (start_time_90k > 0),
 
   -- The duration of the recording, in 90 kHz units.
@@ -226,6 +227,19 @@ create table recording_integrity (
   -- and local system's clock frequency differ because each recording's delta
   -- is used to correct the durations of the next (up to 500 ppm error).
   local_time_delta_90k integer,
+
+  -- The number of 90 kHz units the local system's monotonic clock had
+  -- advanced since the database was opened, as of the start of recording.
+  -- TODO: fill this in!
+  local_time_since_open_90k integer,
+
+  -- The difference between start_time_90k+duration_90k and a wall clock
+  -- timestamp captured at end of this recording. This is meaningful for all
+  -- recordings in a run, even the initial one (run_offset=0), because
+  -- start_time_90k is derived from the wall time as of when recording
+  -- starts, not when it ends.
+  -- TODO: fill this in!
+  wall_time_delta_90k integer,
 
   -- The sha1 hash of the contents of the sample file.
   sample_file_sha1 blob check (length(sample_file_sha1) <= 20)
