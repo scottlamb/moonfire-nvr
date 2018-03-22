@@ -263,7 +263,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         from
           old_recording r cross join open o;
 
-        insert into recording_integrity
+        insert into recording_integrity (composite_id, local_time_delta_90k, sample_file_sha1)
         select
           r.composite_id,
           case when r.run_offset > 0 then local_time_delta_90k else null end,
