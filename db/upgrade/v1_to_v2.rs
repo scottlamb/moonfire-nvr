@@ -67,6 +67,32 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           uuid blob unique not null check (length(uuid) = 16),
           last_complete_open_id integer references open (id)
         );
+        create table user (
+          id integer primary key,
+          username unique not null,
+          flags integer not null,
+          password_hash text,
+          password_id integer not null default 0,
+          password_failure_count integer not null,
+          unix_uid integer
+        );
+        create table user_session (
+          session_id_hash blob primary key not null,
+          user_id integer references user (id),
+          flags integer not null,
+          domain text,
+          description text,
+          creation_password_id integer,
+          creation_peer_addr blob,
+          creation_time_sec integer not null,
+          creation_user_agent text,
+          revocation_time_sec integer,
+          revocation_reason text,
+          last_use_time_sec integer,
+          last_use_user_agent text,
+          last_use_peer_addr blob,
+          use_count not null
+        ) without rowid;
     "#)?;
     let db_uuid = ::uuid::Uuid::new_v4();
     let db_uuid_bytes = &db_uuid.as_bytes()[..];

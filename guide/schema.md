@@ -206,6 +206,7 @@ is never used.
 
 Version 3 adds over version 1:
 
+*   user authentication
 *   recording of sub streams (splits a new `stream` table out of `camera`)
 *   a per-stream knob `flush_if_sec` meant to reduce database commits (and
     thus SSD write cycles). This improves practicality of many streams.
