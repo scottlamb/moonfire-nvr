@@ -114,6 +114,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         from
           old_recording_playback;
         drop table old_recording_playback;
+        drop table old_recording;
+        drop table old_camera;
+        drop table old_video_sample_entry;
     "#)?;
     Ok(())
 }

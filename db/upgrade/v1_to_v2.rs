@@ -244,7 +244,12 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           old_camera cross join sample_file_dir
         where
           old_camera.sub_rtsp_path != '';
+    "#)?;
 
+    // Add the new video_sample_entry rows, before inserting the recordings referencing them.
+    fix_video_sample_entry(tx)?;
+
+    tx.execute_batch(r#"
         insert into recording
         select
           r.composite_id,
@@ -268,14 +273,6 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           p.sample_file_sha1
         from
           old_recording r join recording_playback p on (r.composite_id = p.composite_id);
-    "#)?;
-
-    fix_video_sample_entry(tx)?;
-
-    tx.execute_batch(r#"
-        drop table old_camera;
-        drop table old_recording;
-        drop table old_video_sample_entry;
     "#)?;
 
     Ok(())
