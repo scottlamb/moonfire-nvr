@@ -367,9 +367,6 @@ pub struct Stream {
     pub retain_bytes: i64,
     pub flush_if_sec: i64,
 
-    /// `flush_if_sec` converted to a duration for convenience.
-    pub flush_if: recording::Duration,
-
     /// The time range of recorded data associated with this stream (minimum start time and maximum
     /// end time). `None` iff there are no recordings for this camera.
     pub range: Option<Range<recording::Time>>,
@@ -407,19 +404,6 @@ pub struct Stream {
 
     /// The number of recordings in `uncommitted` which are synced and ready to commit.
     synced_recordings: usize,
-}
-
-impl Stream {
-    /// Returns the duration of synced but uncommitted recordings for the given stream.
-    /// Note recordings must be flushed in order, so a recording is considered unsynced if any
-    /// before it are unsynced.
-    pub(crate) fn unflushed(&self) -> recording::Duration {
-        let mut sum = 0;
-        for i in 0..self.synced_recordings {
-            sum += self.uncommitted[i].lock().duration_90k as i64;
-        }
-        recording::Duration(sum)
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -675,8 +659,6 @@ impl StreamStateChanger {
                         rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
                         record: sc.record,
                         flush_if_sec: sc.flush_if_sec,
-                        flush_if: recording::Duration(sc.flush_if_sec *
-                                                      recording::TIME_UNITS_PER_SEC),
                         ..s
                     })));
                 }
@@ -711,7 +693,6 @@ impl StreamStateChanger {
                     rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
                     retain_bytes: 0,
                     flush_if_sec: sc.flush_if_sec,
-                    flush_if: recording::Duration(sc.flush_if_sec * recording::TIME_UNITS_PER_SEC),
                     range: None,
                     sample_file_bytes: 0,
                     to_delete: Vec::new(),
@@ -917,7 +898,7 @@ impl LockedDatabase {
             // Fix the range.
             s.range = new_range;
         }
-        info!("Flush due to {}: added {} recordings, deleted {}, marked {} files GCed.",
+        info!("Flush (why: {}): added {} recordings, deleted {}, marked {} files GCed.",
               reason, added, deleted, gced);
         for cb in &self.on_flush {
             cb();
@@ -1387,7 +1368,6 @@ impl LockedDatabase {
                 rtsp_path: row.get_checked(4)?,
                 retain_bytes: row.get_checked(5)?,
                 flush_if_sec,
-                flush_if: recording::Duration(flush_if_sec * recording::TIME_UNITS_PER_SEC),
                 range: None,
                 sample_file_bytes: 0,
                 to_delete: Vec::new(),

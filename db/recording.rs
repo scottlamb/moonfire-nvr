@@ -156,6 +156,12 @@ impl fmt::Display for Time {
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Duration(pub i64);
 
+impl Duration {
+    pub fn to_tm_duration(&self) -> time::Duration {
+        time::Duration::nanoseconds(self.0 * 100000 / 9)
+    }
+}
+
 impl fmt::Display for Duration {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut seconds = self.0 / TIME_UNITS_PER_SEC;

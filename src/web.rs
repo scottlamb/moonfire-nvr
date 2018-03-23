@@ -564,7 +564,7 @@ mod bench {
 
     impl Server {
         fn new() -> Server {
-            let db = TestDb::new();
+            let db = TestDb::new(::base::clock::RealClocks {});
             let test_camera_uuid = db.test_camera_uuid;
             testutil::add_dummy_recordings_to_db(&db.db, 1440);
             let (tx, rx) = ::std::sync::mpsc::channel();

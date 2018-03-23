@@ -2189,6 +2189,7 @@ mod bench {
     extern crate reqwest;
     extern crate test;
 
+    use base::clock::RealClocks;
     use db::recording;
     use db::testutil::{self, TestDb};
     use futures::Stream;

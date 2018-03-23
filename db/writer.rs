@@ -47,6 +47,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration as StdDuration;
+use time::{Duration, Timespec};
 
 pub trait DirWriter : 'static + Send {
     type File : FileWriter;
@@ -83,7 +85,7 @@ impl FileWriter for ::std::fs::File {
 
 /// A command sent to the syncer. These correspond to methods in the `SyncerChannel` struct.
 enum SyncerCommand<F> {
-    AsyncSaveRecording(CompositeId, F),
+    AsyncSaveRecording(CompositeId, recording::Duration, F),
     DatabaseFlushed,
     Flush(mpsc::SyncSender<()>),
 }
@@ -101,6 +103,9 @@ struct Syncer<C: Clocks + Clone, D: DirWriter> {
     dir_id: i32,
     dir: D,
     db: Arc<db::Database<C>>,
+
+    /// Information about the next scheduled flush: monotonic time and reason.
+    next_flush: Option<(Timespec, String)>,
 }
 
 /// Starts a syncer for the given sample file directory.
@@ -204,8 +209,8 @@ fn delete_recordings(db: &mut db::LockedDatabase, stream_id: i32,
 impl<F: FileWriter> SyncerChannel<F> {
     /// Asynchronously syncs the given writer, closes it, records it into the database, and
     /// starts rotation.
-    fn async_save_recording(&self, id: CompositeId, f: F) {
-        self.0.send(SyncerCommand::AsyncSaveRecording(id, f)).unwrap();
+    fn async_save_recording(&self, id: CompositeId, duration: recording::Duration, f: F) {
+        self.0.send(SyncerCommand::AsyncSaveRecording(id, duration, f)).unwrap();
     }
 
     /// For testing: flushes the syncer, waiting for all currently-queued commands to complete.
@@ -279,6 +284,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
             dir_id,
             dir,
             db,
+            next_flush: None,
         }, d.path.clone()))
     }
 
@@ -333,11 +339,37 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
 impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
     fn run(&mut self, cmds: mpsc::Receiver<SyncerCommand<D::File>>) {
         loop {
-            match cmds.recv() {
-                Err(_) => return,  // all senders have closed the channel; shutdown
-                Ok(SyncerCommand::AsyncSaveRecording(id, f)) => self.save(id, f),
-                Ok(SyncerCommand::DatabaseFlushed) => self.collect_garbage(),
-                Ok(SyncerCommand::Flush(_)) => {},  // just drop the supplied sender, closing it.
+            // Wait for a command, the next_flush timeout (if specified), or channel disconnect.
+            let next_flush = self.next_flush.take();
+            let cmd = match next_flush {
+                None => match cmds.recv() {
+                    Err(_) => return,  // all senders are gone.
+                    Ok(cmd) => cmd,
+                },
+                Some((t, r)) => {
+                    let now = self.db.clocks().monotonic();
+
+                    // Calculate the timeout to use, mapping negative durations to 0.
+                    let timeout = (t - now).to_std().unwrap_or(StdDuration::new(0, 0));
+                    match cmds.recv_timeout(timeout) {
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,  // all senders gone.
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            self.flush(&r);
+                            continue
+                        },
+                        Ok(cmd) => {
+                            self.next_flush = Some((t, r));
+                            cmd
+                        },
+                    }
+                },
+            };
+
+            // Have a command; handle it.
+            match cmd {
+                SyncerCommand::AsyncSaveRecording(id, dur, f) => self.save(id, dur, f),
+                SyncerCommand::DatabaseFlushed => self.collect_garbage(),
+                SyncerCommand::Flush(_) => {},  // just drop the supplied sender, closing it.
             };
         }
     }
@@ -375,7 +407,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
     /// so that there can be only one dir sync and database transaction per save.
     /// Internal helper for `save`. This is separated out so that the question-mark operator
     /// can be used in the many error paths.
-    fn save(&mut self, id: CompositeId, f: D::File) {
+    fn save(&mut self, id: CompositeId, duration: recording::Duration, f: D::File) {
         let stream_id = id.stream();
 
         // Free up a like number of bytes.
@@ -384,25 +416,32 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         let mut db = self.db.lock();
         db.mark_synced(id).unwrap();
         delete_recordings(&mut db, stream_id, 0).unwrap();
-        let reason = {
-            let s = db.streams_by_id().get(&stream_id).unwrap();
-            let c = db.cameras_by_id().get(&s.camera_id).unwrap();
-            let unflushed = s.unflushed();
-            if unflushed < s.flush_if {
-                debug!("{}-{}: unflushed={} < if={}, not flushing",
-                       c.short_name, s.type_.as_str(), unflushed, s.flush_if);
+        let s = db.streams_by_id().get(&stream_id).unwrap();
+        let c = db.cameras_by_id().get(&s.camera_id).unwrap();
+
+        // Schedule a flush.
+        let how_soon = Duration::seconds(s.flush_if_sec) - duration.to_tm_duration();
+        let now = self.db.clocks().monotonic();
+        let t = now + how_soon;
+        if let Some((nft, ref r)) = self.next_flush {
+            if nft <= t {
+                trace!("{}-{}: not scheduling flush in {}; there's already one in {}: {}",
+                       c.short_name, s.type_.as_str(), how_soon, nft - now, &r);
                 return;
             }
-            format!("{}-{}: unflushed={} >= if={}",
-                    c.short_name, s.type_.as_str(), unflushed, s.flush_if)
-        };
+        }
+        let reason = format!("{} sec after start of {} {}-{} recording",
+                             s.flush_if_sec, duration, c.short_name, s.type_.as_str());
+        trace!("scheduling flush in {} because {}", how_soon, &reason);
+        self.next_flush = Some((t, reason));
+    }
 
-        if let Err(e) = db.flush(&reason) {
-            // Don't retry the commit now in case it causes extra flash write cycles.
-            // It's not necessary for correctness to flush before proceeding.
-            // Just wait until the next flush would happen naturally.
-            warn!("flush failure on save for reason {}; leaving unflushed for now: {:?}",
-                  reason, e);
+    fn flush(&mut self, reason: &str) {
+        if let Err(e) = self.db.lock().flush(reason) {
+            let d = Duration::minutes(1);
+            warn!("flush failure on save for reason {}; will retry after {}: {:?}", reason, d, e);
+            let t = self.db.clocks().monotonic() + Duration::minutes(1);
+            self.next_flush = Some((t, "retry after flush failure".to_owned()));
         }
     }
 }
@@ -639,25 +678,28 @@ impl<F: FileWriter> InnerWriter<F> {
 
     fn close(mut self, channel: &SyncerChannel<F>, next_pts: Option<i64>) -> PreviousWriter {
         let unflushed = self.unflushed_sample.take().expect("should always be an unflushed sample");
-        let (duration, flags) = match next_pts {
+        let (last_sample_duration, flags) = match next_pts {
             None => (self.adjuster.adjust(0), db::RecordingFlags::TrailingZero as i32),
             Some(p) => (self.adjuster.adjust((p - unflushed.pts_90k) as i32), 0),
         };
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&self.hasher.finish().unwrap()[..]);
         let (local_time_delta, run_offset, end);
-        self.add_sample(duration, unflushed.len, unflushed.is_key, unflushed.local_time);
+        self.add_sample(last_sample_duration, unflushed.len, unflushed.is_key,
+                        unflushed.local_time);
+        let total_duration;
         {
             let mut l = self.r.lock();
             l.flags = flags;
             local_time_delta = self.local_start - l.start;
             l.local_time_delta = local_time_delta;
             l.sample_file_sha1 = sha1_bytes;
+            total_duration = recording::Duration(l.duration_90k as i64);
             run_offset = l.run_offset;
-            end = l.start + recording::Duration(l.duration_90k as i64);
+            end = l.start + total_duration;
         }
         drop(self.r);
-        channel.async_save_recording(self.id, self.f);
+        channel.async_save_recording(self.id, total_duration, self.f);
         PreviousWriter {
             end,
             local_time_delta,
@@ -776,7 +818,6 @@ mod tests {
     }
 
     struct Harness {
-        //clocks: SimulatedClocks,
         db: Arc<db::Database<SimulatedClocks>>,
         dir_id: i32,
         _tmpdir: ::tempdir::TempDir,
@@ -801,6 +842,7 @@ mod tests {
             dir_id: *tdb.db.lock().sample_file_dirs_by_id().keys().next().unwrap(),
             dir: dir.clone(),
             db: tdb.db.clone(),
+            next_flush: None,
         };
         let (snd, rcv) = mpsc::channel();
         tdb.db.lock().on_flush(Box::new({
@@ -932,10 +974,16 @@ mod tests {
             })));
             h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 1), Box::new(|_| Ok(()))));
             h.dir.expect(MockDirAction::Sync(Box::new(|| Err(eio()))));
-            h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
+            let (gc_done_snd, gc_done_rcv) = mpsc::channel();
+            h.dir.expect(MockDirAction::Sync(Box::new(move || {
+                gc_done_snd.send(()).unwrap();
+                Ok(())
+            })));
+
             drop(w);
-            h.channel.flush();  // wait until the Save...
-            h.channel.flush();  // ...and the DatabaseFlush are processed.
+
+            gc_done_rcv.recv().unwrap();  // Wait until the successful gc sync call...
+            h.channel.flush();            // ...and the DatabaseFlush op to complete.
             f.ensure_done();
             h.dir.ensure_done();
         }

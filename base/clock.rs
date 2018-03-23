@@ -34,8 +34,9 @@ use failure::Error;
 use libc;
 use parking_lot::Mutex;
 use std::mem;
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::thread;
+use std::time::Duration as StdDuration;
 use time::{Duration, Timespec};
 
 /// Abstract interface to the system clocks. This is for testability.
@@ -48,9 +49,14 @@ pub trait Clocks : Send + Sync + 'static {
 
     /// Causes the current thread to sleep for the specified time.
     fn sleep(&self, how_long: Duration);
+
+    /// Calls `rcv.recv_timeout` or substitutes a test implementation.
+    fn recv_timeout<T>(&self, rcv: &mpsc::Receiver<T>,
+                       timeout: StdDuration) -> Result<T, mpsc::RecvTimeoutError>;
 }
 
-pub fn retry_forever<T, E: Into<Error>>(clocks: &Clocks, f: &mut FnMut() -> Result<T, E>) -> T {
+pub fn retry_forever<C, T, E>(clocks: &C, f: &mut FnMut() -> Result<T, E>) -> T
+where C: Clocks, E: Into<Error> {
     loop {
         let e = match f() {
             Ok(t) => return t,
@@ -84,6 +90,11 @@ impl Clocks for RealClocks {
             Ok(d) => thread::sleep(d),
             Err(e) => warn!("Invalid duration {:?}: {}", how_long, e),
         };
+    }
+
+    fn recv_timeout<T>(&self, rcv: &mpsc::Receiver<T>,
+                       timeout: StdDuration) -> Result<T, mpsc::RecvTimeoutError> {
+        rcv.recv_timeout(timeout)
     }
 }
 
@@ -142,5 +153,15 @@ impl Clocks for SimulatedClocks {
     fn sleep(&self, how_long: Duration) {
         let mut l = self.0.uptime.lock();
         *l = *l + how_long;
+    }
+
+    /// Advances the clock by the specified amount if data is not immediately available.
+    fn recv_timeout<T>(&self, rcv: &mpsc::Receiver<T>,
+                       timeout: StdDuration) -> Result<T, mpsc::RecvTimeoutError> {
+        let r = rcv.recv_timeout(StdDuration::new(0, 0));
+        if let Err(_) = r {
+            self.sleep(Duration::from_std(timeout).unwrap());
+        }
+        r
     }
 }
