@@ -66,7 +66,7 @@ pub fn run() -> Result<(), Error> {
         pragma journal_mode = wal;
         pragma page_size = 16384;
     "#)?;
-    db::Database::init(&mut conn)?;
+    db::init(&mut conn)?;
     info!("Database initialized.");
     Ok(())
 }

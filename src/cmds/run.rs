@@ -96,7 +96,7 @@ struct Syncer {
 
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
-    let clocks = Arc::new(clock::RealClocks{});
+    let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
         &args.flag_db_dir,
         if args.flag_read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
@@ -123,7 +123,6 @@ pub fn run() -> Result<(), Error> {
         let streams = l.streams_by_id().len();
         let env = streamer::Environment {
             db: &db,
-            clocks: clocks.clone(),
             opener: &*stream::FFMPEG,
             shutdown: &shutdown_streamers,
         };

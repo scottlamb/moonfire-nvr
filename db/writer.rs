@@ -97,11 +97,10 @@ impl<F> ::std::clone::Clone for SyncerChannel<F> {
 }
 
 /// State of the worker thread.
-struct Syncer<C: Clocks, D: DirWriter> {
-    clocks: C,
+struct Syncer<C: Clocks + Clone, D: DirWriter> {
     dir_id: i32,
     dir: D,
-    db: Arc<db::Database>,
+    db: Arc<db::Database<C>>,
 }
 
 /// Starts a syncer for the given sample file directory.
@@ -121,8 +120,9 @@ struct Syncer<C: Clocks, D: DirWriter> {
 /// Note that dropping all `SyncerChannel` clones currently includes calling
 /// `LockedDatabase::clear_on_flush`, as this function installs a hook to watch database flushes.
 /// TODO: add a join wrapper which arranges for the on flush hook to be removed automatically.
-pub fn start_syncer(db: Arc<db::Database>, dir_id: i32)
-                    -> Result<(SyncerChannel<::std::fs::File>, thread::JoinHandle<()>), Error> {
+pub fn start_syncer<C>(db: Arc<db::Database<C>>, dir_id: i32)
+                       -> Result<(SyncerChannel<::std::fs::File>, thread::JoinHandle<()>), Error>
+where C: Clocks + Clone {
     let db2 = db.clone();
     let (mut syncer, path) = Syncer::new(&db.lock(), db2, dir_id)?;
     syncer.initial_rotation()?;
@@ -216,8 +216,30 @@ impl<F: FileWriter> SyncerChannel<F> {
     }
 }
 
-impl Syncer<clock::RealClocks, Arc<dir::SampleFileDir>> {
-    fn new(l: &db::LockedDatabase, db: Arc<db::Database>, dir_id: i32)
+/// Lists files which should be "abandoned" (deleted without ever recording in the database)
+/// on opening.
+fn list_files_to_abandon(path: &str, streams_to_next: FnvHashMap<i32, i32>)
+                         -> Result<Vec<CompositeId>, Error> {
+    let mut v = Vec::new();
+    for e in ::std::fs::read_dir(path)? {
+        let e = e?;
+        let id = match dir::parse_id(e.file_name().as_bytes()) {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        let next = match streams_to_next.get(&id.stream()) {
+            Some(n) => *n,
+            None => continue,  // unknown stream.
+        };
+        if id.recording() >= next {
+            v.push(id);
+        }
+    }
+    Ok(v)
+}
+
+impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
+    fn new(l: &db::LockedDatabase, db: Arc<db::Database<C>>, dir_id: i32)
            -> Result<(Self, String), Error> {
         let d = l.sample_file_dirs_by_id()
                  .get(&dir_id)
@@ -237,7 +259,7 @@ impl Syncer<clock::RealClocks, Arc<dir::SampleFileDir>> {
                  }
              })
              .collect();
-        let to_abandon = Syncer::list_files_to_abandon(&d.path, streams_to_next)?;
+        let to_abandon = list_files_to_abandon(&d.path, streams_to_next)?;
         let mut undeletable = 0;
         for &id in &to_abandon {
             if let Err(e) = dir.unlink_file(id) {
@@ -254,33 +276,10 @@ impl Syncer<clock::RealClocks, Arc<dir::SampleFileDir>> {
         }
 
         Ok((Syncer {
-            clocks: clock::RealClocks{},
             dir_id,
             dir,
             db,
         }, d.path.clone()))
-    }
-
-    /// Lists files which should be "abandoned" (deleted without ever recording in the database)
-    /// on opening.
-    fn list_files_to_abandon(path: &str, streams_to_next: FnvHashMap<i32, i32>)
-                             -> Result<Vec<CompositeId>, Error> {
-        let mut v = Vec::new();
-        for e in ::std::fs::read_dir(path)? {
-            let e = e?;
-            let id = match dir::parse_id(e.file_name().as_bytes()) {
-                Ok(i) => i,
-                Err(_) => continue,
-            };
-            let next = match streams_to_next.get(&id.stream()) {
-                Some(n) => *n,
-                None => continue,  // unknown stream.
-            };
-            if id.recording() >= next {
-                v.push(id);
-            }
-        }
-        Ok(v)
     }
 
     /// Rotates files for all streams and deletes stale files from previous runs.
@@ -331,7 +330,7 @@ impl Syncer<clock::RealClocks, Arc<dir::SampleFileDir>> {
     }
 }
 
-impl<C: Clocks, D: DirWriter> Syncer<C, D> {
+impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
     fn run(&mut self, cmds: mpsc::Receiver<SyncerCommand<D::File>>) {
         loop {
             match cmds.recv() {
@@ -353,7 +352,7 @@ impl<C: Clocks, D: DirWriter> Syncer<C, D> {
         if garbage.is_empty() {
             return;
         }
-        let c = &self.clocks;
+        let c = &self.db.clocks();
         for &id in &garbage {
             clock::retry_forever(c, &mut || {
                 if let Err(e) = self.dir.unlink_file(id) {
@@ -380,8 +379,8 @@ impl<C: Clocks, D: DirWriter> Syncer<C, D> {
         let stream_id = id.stream();
 
         // Free up a like number of bytes.
-        clock::retry_forever(&self.clocks, &mut || f.sync_all());
-        clock::retry_forever(&self.clocks, &mut || self.dir.sync());
+        clock::retry_forever(&self.db.clocks(), &mut || f.sync_all());
+        clock::retry_forever(&self.db.clocks(), &mut || self.dir.sync());
         let mut db = self.db.lock();
         db.mark_synced(id).unwrap();
         delete_recordings(&mut db, stream_id, 0).unwrap();
@@ -412,10 +411,9 @@ impl<C: Clocks, D: DirWriter> Syncer<C, D> {
 /// metadata to the database. `Writer` hands off each recording's state to the syncer when done. It
 /// saves the recording to the database (if I/O errors do not prevent this), retries forever,
 /// or panics (if further writing on this stream is impossible).
-pub struct Writer<'a, C: Clocks, D: DirWriter> {
-    clocks: &'a C,
+pub struct Writer<'a, C: Clocks + Clone, D: DirWriter> {
     dir: &'a D,
-    db: &'a db::Database,
+    db: &'a db::Database<C>,
     channel: &'a SyncerChannel<D::File>,
     stream_id: i32,
     video_sample_entry_id: i32,
@@ -523,11 +521,10 @@ struct PreviousWriter {
     run_offset: i32,
 }
 
-impl<'a, C: Clocks, D: DirWriter> Writer<'a, C, D> {
-    pub fn new(clocks: &'a C, dir: &'a D, db: &'a db::Database, channel: &'a SyncerChannel<D::File>,
+impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
+    pub fn new(dir: &'a D, db: &'a db::Database<C>, channel: &'a SyncerChannel<D::File>,
                stream_id: i32, video_sample_entry_id: i32) -> Self {
         Writer {
-            clocks,
             dir,
             db,
             channel,
@@ -553,7 +550,7 @@ impl<'a, C: Clocks, D: DirWriter> Writer<'a, C, D> {
             flags: db::RecordingFlags::Growing as i32,
             ..Default::default()
         })?;
-        let f = clock::retry_forever(self.clocks, &mut || self.dir.create_file(id));
+        let f = clock::retry_forever(&self.db.clocks(), &mut || self.dir.create_file(id));
 
         self.state = WriterState::Open(InnerWriter {
             f,
@@ -601,7 +598,7 @@ impl<'a, C: Clocks, D: DirWriter> Writer<'a, C, D> {
         }
         let mut remaining = pkt;
         while !remaining.is_empty() {
-            let written = clock::retry_forever(self.clocks, &mut || w.f.write(remaining));
+            let written = clock::retry_forever(&self.db.clocks(), &mut || w.f.write(remaining));
             remaining = &remaining[written..];
         }
         w.unflushed_sample = Some(UnflushedSample {
@@ -669,7 +666,7 @@ impl<F: FileWriter> InnerWriter<F> {
     }
 }
 
-impl<'a, C: Clocks, D: DirWriter> Drop for Writer<'a, C, D> {
+impl<'a, C: Clocks + Clone, D: DirWriter> Drop for Writer<'a, C, D> {
     fn drop(&mut self) {
         if ::std::thread::panicking() {
             // This will probably panic again. Don't do it.
@@ -779,8 +776,8 @@ mod tests {
     }
 
     struct Harness {
-        clocks: SimulatedClocks,
-        db: Arc<db::Database>,
+        //clocks: SimulatedClocks,
+        db: Arc<db::Database<SimulatedClocks>>,
         dir_id: i32,
         _tmpdir: ::tempdir::TempDir,
         dir: MockDir,
@@ -789,7 +786,8 @@ mod tests {
     }
 
     fn new_harness() -> Harness {
-        let tdb = testutil::TestDb::new();
+        let clocks = SimulatedClocks::new(::time::Timespec::new(0, 0));
+        let tdb = testutil::TestDb::new(clocks);
         let dir_id = *tdb.db.lock().sample_file_dirs_by_id().keys().next().unwrap();
 
         // This starts a real fs-backed syncer. Get rid of it.
@@ -798,10 +796,8 @@ mod tests {
         tdb.syncer_join.join().unwrap();
 
         // Start a mocker syncer.
-        let clocks = SimulatedClocks::new(::time::Timespec::new(0, 0));
         let dir = MockDir::new();
         let mut syncer = super::Syncer {
-            clocks: clocks.clone(),
             dir_id: *tdb.db.lock().sample_file_dirs_by_id().keys().next().unwrap(),
             dir: dir.clone(),
             db: tdb.db.clone(),
@@ -818,7 +814,7 @@ mod tests {
             .spawn(move || syncer.run(rcv)).unwrap();
 
         Harness {
-            clocks,
+            //clocks,
             dir_id,
             dir,
             db: tdb.db,
@@ -837,7 +833,7 @@ mod tests {
         let video_sample_entry_id = h.db.lock().insert_video_sample_entry(
             1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
         {
-            let mut w = Writer::new(&h.clocks, &h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
+            let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                     video_sample_entry_id);
             h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1), Box::new(|_id| Err(eio()))));
             let f = MockFile::new();
@@ -895,7 +891,7 @@ mod tests {
         let video_sample_entry_id = h.db.lock().insert_video_sample_entry(
             1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
         {
-            let mut w = Writer::new(&h.clocks, &h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
+            let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                     video_sample_entry_id);
             let f = MockFile::new();
             h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),

@@ -498,6 +498,7 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
+    use base::clock::RealClocks;
     use super::*;
     use testutil::{self, TestDb};
 
@@ -643,7 +644,7 @@ mod tests {
             let bytes = 3 * i;
             encoder.add_sample(duration_90k, bytes, true, &mut r);
         }
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         // Time range [2, 2 + 4 + 6 + 8) means the 2nd, 3rd, 4th samples should be
         // included.
@@ -662,7 +663,7 @@ mod tests {
             let bytes = 3 * i;
             encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         // Time range [2 + 4 + 6, 2 + 4 + 6 + 8) means the 4th sample should be included.
         // The 3rd also gets pulled in because it is a sync frame and the 4th is not.
@@ -678,7 +679,7 @@ mod tests {
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(1, 2, true, &mut r);
         encoder.add_sample(0, 3, true, &mut r);
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 1 .. 2).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[2, 3]);
@@ -691,7 +692,7 @@ mod tests {
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::new();
         encoder.add_sample(1, 1, true, &mut r);
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 0 .. 0).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1]);
@@ -709,7 +710,7 @@ mod tests {
             let bytes = 3 * i;
             encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 0 .. 2+4+6+8+10).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[2, 4, 6, 8, 10]);
@@ -723,7 +724,7 @@ mod tests {
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(1, 2, true, &mut r);
         encoder.add_sample(0, 3, true, &mut r);
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 0 .. 2).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1, 2, 3]);

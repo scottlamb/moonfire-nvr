@@ -62,7 +62,7 @@ pub fn retry_forever<T, E: Into<Error>>(clocks: &Clocks, f: &mut FnMut() -> Resu
     }
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct RealClocks {}
 
 impl RealClocks {

@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use base::clock;
+use base::clock::Clocks;
 use db;
 use dir;
 use fnv::FnvHashMap;
@@ -64,8 +64,8 @@ pub fn init() {
     });
 }
 
-pub struct TestDb {
-    pub db: Arc<db::Database>,
+pub struct TestDb<C: Clocks + Clone> {
+    pub db: Arc<db::Database<C>>,
     pub dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
     pub syncer_channel: writer::SyncerChannel<::std::fs::File>,
     pub syncer_join: thread::JoinHandle<()>,
@@ -73,14 +73,13 @@ pub struct TestDb {
     pub test_camera_uuid: Uuid,
 }
 
-impl TestDb {
+impl<C: Clocks + Clone> TestDb<C> {
     /// Creates a test database with one camera.
-    pub fn new() -> TestDb {
+    pub fn new(clocks: C) -> Self {
         let tmpdir = TempDir::new("moonfire-nvr-test").unwrap();
 
-        let clocks = Arc::new(clock::RealClocks{});
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-        db::Database::init(&mut conn).unwrap();
+        db::init(&mut conn).unwrap();
         let db = Arc::new(db::Database::new(clocks, conn, true).unwrap());
         let (test_camera_uuid, sample_file_dir_id);
         let path = tmpdir.path().to_str().unwrap().to_owned();

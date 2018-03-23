@@ -125,7 +125,7 @@ struct Args {
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
     let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
-    let clocks = Arc::new(clock::RealClocks{});
+    let clocks = clock::RealClocks {};
     let db = Arc::new(db::Database::new(clocks, conn, true)?);
 
     let mut siv = Cursive::new();

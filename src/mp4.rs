@@ -1518,6 +1518,7 @@ impl http_serve::Entity for File {
 #[cfg(test)]
 mod tests {
     use byteorder::{BigEndian, ByteOrder};
+    use clock::RealClocks;
     use db::recording::{self, TIME_UNITS_PER_SEC};
     use db::testutil::{self, TestDb, TEST_STREAM_ID};
     use db::writer;
@@ -1745,7 +1746,7 @@ mod tests {
         }
     }
 
-    fn copy_mp4_to_db(db: &TestDb) {
+    fn copy_mp4_to_db(db: &TestDb<RealClocks>) {
         let mut input =
             stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
 
@@ -1756,8 +1757,7 @@ mod tests {
             extra_data.width, extra_data.height, extra_data.sample_entry,
             extra_data.rfc6381_codec).unwrap();
         let dir = db.dirs_by_stream_id.get(&TEST_STREAM_ID).unwrap();
-        let mut output = writer::Writer::new(&::base::clock::RealClocks{}, dir, &db.db,
-                                             &db.syncer_channel, TEST_STREAM_ID,
+        let mut output = writer::Writer::new(dir, &db.db, &db.syncer_channel, TEST_STREAM_ID,
                                              video_sample_entry_id);
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
@@ -1785,7 +1785,7 @@ mod tests {
         db.syncer_channel.flush();
     }
 
-    pub fn create_mp4_from_db(tdb: &TestDb,
+    pub fn create_mp4_from_db(tdb: &TestDb<RealClocks>,
                               skip_90k: i32, shorten_90k: i32, include_subtitles: bool) -> File {
         let mut builder = FileBuilder::new(Type::Normal);
         builder.include_timestamp_subtitle_track(include_subtitles);
@@ -1858,7 +1858,7 @@ mod tests {
 
     /// Makes a `.mp4` file which is only good for exercising the `Slice` logic for producing
     /// sample tables that match the supplied encoder.
-    fn make_mp4_from_encoders(type_: Type, db: &TestDb,
+    fn make_mp4_from_encoders(type_: Type, db: &TestDb<RealClocks>,
                               mut recordings: Vec<db::RecordingToInsert>,
                               desired_range_90k: Range<i32>) -> File {
         let mut builder = FileBuilder::new(type_);
@@ -1879,7 +1879,7 @@ mod tests {
     #[test]
     fn test_all_sync_frames() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
@@ -1933,7 +1933,7 @@ mod tests {
     #[test]
     fn test_half_sync_frames() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
@@ -1996,7 +1996,7 @@ mod tests {
     #[test]
     fn test_multi_segment() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let mut encoders = Vec::new();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
@@ -2033,7 +2033,7 @@ mod tests {
     #[test]
     fn test_zero_duration_recording() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let mut encoders = Vec::new();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
@@ -2059,7 +2059,7 @@ mod tests {
     #[test]
     fn test_media_segment() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
@@ -2102,7 +2102,7 @@ mod tests {
     #[test]
     fn test_round_trip() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 0, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
@@ -2123,7 +2123,7 @@ mod tests {
     #[test]
     fn test_round_trip_with_subtitles() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 0, true);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
@@ -2144,7 +2144,7 @@ mod tests {
     #[test]
     fn test_round_trip_with_edit_list() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 1, 0, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
@@ -2165,7 +2165,7 @@ mod tests {
     #[test]
     fn test_round_trip_with_shorten() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 1, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
@@ -2214,7 +2214,7 @@ mod bench {
 
     impl BenchServer {
         fn new() -> BenchServer {
-            let db = TestDb::new();
+            let db = TestDb::new(RealClocks {});
             testutil::add_dummy_recordings_to_db(&db.db, 60);
             let mp4 = create_mp4_from_db(&db, 0, 0, false);
             let p = mp4.0.initial_sample_byte_pos;
@@ -2256,7 +2256,7 @@ mod bench {
     #[bench]
     fn build_index(b: &mut Bencher) {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         testutil::add_dummy_recordings_to_db(&db.db, 1);
 
         let db = db.db.lock();
@@ -2307,7 +2307,7 @@ mod bench {
     #[bench]
     fn mp4_construction(b: &mut Bencher) {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         testutil::add_dummy_recordings_to_db(&db.db, 60);
         b.iter(|| {
             create_mp4_from_db(&db, 0, 0, false);
