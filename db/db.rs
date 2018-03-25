@@ -1552,7 +1552,6 @@ impl LockedDatabase {
 
     /// Updates a camera.
     pub fn update_camera(&mut self, camera_id: i32, mut camera: CameraChange) -> Result<(), Error> {
-        // TODO: sample_file_dir_id. disallow change when data is stored; change otherwise.
         let tx = self.conn.transaction()?;
         let streams;
         let c = self
