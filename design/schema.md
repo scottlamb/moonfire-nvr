@@ -1,7 +1,6 @@
 # Moonfire NVR Storage Schema
 
-Status: **current**. This is largely implemented; there is optimization and
-testing work left to do.
+Status: **current**.
 
 This is the initial design for the most fundamental parts of the Moonfire NVR
 storage schema. See also [guide/schema.md](../guide/schema.md) for more
@@ -128,7 +127,7 @@ together.
 
 Each recording is stored in two places:
 
-* the recording samples directory, intended to be stored on spinning disk.
+* a sample file directory, intended to be stored on spinning disk.
   Each file in this directory is simply a concatenation of the compressed,
   timestamped video samples (also called "packets" or encoded frames), as
   received from the camera. In MPEG-4 terminology (see [ISO
@@ -225,89 +224,219 @@ The design avoids the need for the following constraints:
 * Serving close to live. It's possible to serve a recording as it is being
   written.
 
+### Lifecycle of a sample file directory
+
+One major disadvantage to splitting the state in two (the SQLite3 database in
+flash and the sample file directories on spinning disk) is the possibility of
+inconsistency. There are many ways this could arise:
+
+* a sample file directory's disk is unexpectedly not mounted due to hardware
+  failure or misconfiguration.
+* the administrator mixing up the mount points of two filesystems holding
+  different sample file directories.
+* the administrator renaming a sample file directory without updating the database.
+* the administrator restoring the database from backup but not the sample file
+  directory, or vice versa.
+* the administrator providing two sample file directory paths pointed at the
+  same inode via symlinks or non-canonical paths. (Note that flock(2) has a
+  design flaw in which multiple file descriptors can share a lock, so the current
+  locking scheme is not sufficient to detect this otherwise.)
+* database and sample file directories forked from the same version, opened
+  the same number of times, then crossed.
+
+To combat this, each sample file directory has some metadata its database row
+and stored file called `meta`. These track uuids associated with the database
+and directory to avoid mixups. They also track sequence numbers and uuids
+associated with "opens": each time the database has been opened in read/write
+mode.
+
+```sql
+create table open (
+  id integer primary key,
+  uuid blob unique not null check (length(uuid) = 16)
+);
+
+create table sample_file_dir (
+  id integer primary key,
+  path text unique not null,
+  uuid blob unique not null check (length(uuid) = 16),
+
+  -- The last (read/write) open of this directory which fully completed.
+  -- See schema.proto:DirMeta for a more complete description.
+  last_complete_open_id integer references open (id)
+);
+```
+
+```proto
+message DirMeta {
+  // A uuid associated with the database, in binary form. dir_uuid is strictly
+  // more powerful, but it improves diagnostics to know if the directory
+  // belongs to the expected database at all or not.
+  bytes db_uuid = 1;
+
+  // A uuid associated with the directory itself.
+  bytes dir_uuid = 2;
+
+  // Corresponds to an entry in the `open` database table.
+  message Open {
+    uint32 id = 1;
+    bytes uuid = 2;
+  }
+
+  // The last open that was known to be recorded in the database as completed.
+  // Absent if this has never happened. Note this can backtrack in exactly one
+  // scenario: when deleting the directory, after all associated files have
+  // been deleted, last_complete_open can be moved to in_progress_open.
+  Open last_complete_open = 3;
+
+  // The last run which is in progress, if different from last_complete_open.
+  // This may or may not have been recorded in the database, but it's
+  // guaranteed that no data has yet been written by this open.
+  Open in_progress_open = 4;
+}
+```
+
+These are updated through procedures below:
+
+*Write the metadata file*
+
+This is a sub-procedure used in several places below.
+
+Precondition: the directory's lock is held with `LOCK_EX` (exclusive).
+
+  1. Write a new `meta.tmp` (opened with `O_CREAT|O_TRUNC` to discard an
+     existing temporary file if any).
+  2. `fsync` the `meta.tmp` file descriptor.
+  3. `rename` `meta.tmp` to `meta`.
+  4. `fsync` the directory.
+
+*Open the database as read-only*
+
+  1. Lock the database directory with `LOCK_SH` (shared).
+  2. Open the SQLite database with `SQLITE_OPEN_READ_ONLY`.
+
+*Open the database as read-write*
+
+  1. Lock the database directory with `LOCK_EX` (exclusive).
+  2. Open the SQLite database with `SQLITE_OPEN_READ_WRITE`.
+  3. Insert a new `open` table row with the new sequence number and uuid.
+
+*Create a sample file directory*
+
+Precondition: database open read-write.
+
+  1. Lock the sample file directory with `LOCK_EX` (exclusive).
+  2. Verify there is no metadata file or `last_complete_open` is unset.
+  3. Write new metadata file with a fresh `dir_uuid` and a `in_progress_open`
+     matching the database's current open.
+  4. Add a matching row to the database with `last_complete_open_id` matching
+     the current open.
+  5. Update the metadata file to move `in_progress_open` to
+     `last_complete_open`.
+
+*Open a sample file directory read-only*
+
+Precondition: database open (read-only or read-write).
+
+  1. Lock the sample file directory with `LOCK_SH` (shared).
+  2. Verify the metadata file matches the database:
+        * database uuid matches.
+        * dir uuid matches.
+        * if the database's `last_complete_open` is set, it must match the
+          directory's `last_complete_open` or `in_progress_open`.
+        * if the database's `last_complete_open` is absent, the directory's
+          must be as well.
+
+*Open a sample file directory read-write*
+
+Precondition: database open read-write.
+
+  1. Lock the sample file directory with `LOCK_EX` (exclusive).
+  2. Verify the metadata file matches the database (as above).
+  3. Update the metadata file with `in_progress_open` matching the current
+     open.
+  3. Update the database row with `last_complete_open_id` matching the current
+     open.
+  4. Update the metadata file with `last_complete_open` rather than
+     `in_progress_open`.
+  5. Run the recording startup procedure for this directory.
+
+*Close a sample file directory*
+
+  1. Drop the sample file directory lock.
+
+*Delete a sample file directory*
+
+  1. Remove all sample files (of all three categories described below:
+     `recording` table rows, `garbage` table rows, and files with recording
+     ids >= their stream's `next_recording_id`); see "delete a recording"
+     procedure below.
+  2. Rewrite the directory metadata with `in_progress_open` set to the current open,
+     `last_complete_open` cleared.
+  3. Delete the directory's row from the database.
+
 ### Lifecycle of a recording
 
 Because a major part of the recording state is outside the SQL database, care
 must be taken to guarantee consistency and durability. Moonfire NVR maintains
 three invariants about sample files:
 
-1. `recording` table rows have sample files on disk
-   (named by the given UUID) with the indicated size and SHA-1 hash.
-2. There are no sample files without a corresponding `recording` or
-   `reserved_sample_files` table row referencing their UUID.
-3. After an orderly shutdown of Moonfire NVR, there are no
-   `reserved_sample_files` rows, even if there have been previous crashes.
+  1. `recording` table rows have sample files on disk with the indicated size
+     and SHA-1 hash.
+  2. Exactly one of the following statements is true for every sample file:
+        * It has a `recording` table row.
+        * It has a `garbage` table row.
+        * Its recording id is greater than or equal to the `next_recording_id`
+          for its stream.
+  3. After an orderly shutdown of Moonfire NVR, there is a `recording` table row
+     for every sample file, even if there have been previous crashes.
 
 The first invariant provides certainty that a recording is properly stored. It
 would be prohibitively expensive to verify hashes on demand (when listing or
 serving recordings), or in some cases even to verify the size of the files via
 `stat()` calls.
 
-The second invariant avoids an accidental data loss scenario. On startup, as
-part of normal crash recovery, Moonfire NVR should delete sample files which are
-half-written (and useless without their indices) and ones which were already in
-the process of being deleted (for exceeding their retention time). The absence
-of a `recording` table row could be taken to indicate one of these conditions.
-But consider another possibility: the SQLite database might not match the sample
-directory. This could happen if the wrong disk is mounted at a given path or
-after a botched restore from backup. Moonfire NVR would delete everything in
-this case! It's far safer to require a specific mention of each file to be
-deleted, requiring human intervention before touching unexpected files.
+The second invariant improves auditability of the database and sample file
+directory.
 
 The third invariant prevents accumulation of garbage files which could fill the
 drive and stop recording.
-
-Sample files are named by UUID. Imagine if files were named by autoincrement
-instead. One file could be mistaken for another on database vs directory
-mismatch. With UUIDs, this is impossible: by design they can be assumed to be
-universally unique, so two distinct recordings will never share a UUID.
 
 These invariants are updated through the following procedure:
 
 *Create a recording:*
 
-1. Insert a `reserved_sample_files` row, in state `WRITING`.
-2. Write the sample file, aborting if `open(..., O\_WRONLY|O\_CREATE|O\_EXCL)`
-   fails with `EEXIST`. (This would indicate a non-unique UUID, a serious
-   defect.)
+1. Write the sample file, aborting if `open(..., O\_WRONLY|O\_CREATE|O\_EXCL)`
+   fails with `EEXIST`.
 3. `fsync()` the sample file.
 4. `fsync()` the sample file directory.
-5. Replace the `reserved_sample_files` row with a `recording` row,
-   marking its size and SHA-1 hash in the process.
+5. Insert the `recording` row, marking its size and SHA-1 hash in the process.
 
 *Delete a recording:*
 
-1. Replace the `recording` row with a `reserved_sample_files` row in state
-   `DELETED`.
+1. Replace the `recording` row with a `garbage` row.
 2. `unlink()` the sample file, warning on `ENOENT`. (This would indicate
    invariant #2 is false.)
 3. `fsync()` the sample file directory.
-4. Delete the `reserved_sample_files` row.
+4. Delete the `garbage` row.
 
 *Startup (crash recovery):*
 
 1. Acquire a lock to guarantee this is the only Moonfire NVR process running
    against the given database. This lock is not released until program shutdown.
-2. Query `reserved_sample_files` table.
-3. `unlink()` all the sample files associated with rows returned by #2,
-   ignoring `ENOENT`.
+2. Query `garbage` table and `next_recording_id` field in the `stream` table.
+3. `unlink()` all the sample files associated with garbage rows, ignoring
+   `ENOENT.
+4. For each stream, `unlink()` all the existing files with recording ids >=
+   `next_recording_id`.
 4. `fsync()` the samples directory.
-5. Delete the rows returned by #2 from the `reserved_sample_files` table.
+5. Delete all rows from the `garbage` table.
 
 The procedures can be batched: while for a given recording, the steps must be
 strictly ordered, multiple recordings can be proceeding through the steps
 simultaneously. In particular, there is no need to hurry syncing deletions to
 disk, so deletion steps #3 and #4 can be done opportunistically if it's
 desirable to avoid extra disk seeks or flash write cycles.
-
-There could be another procedure for moving a sample file from one filesystem
-to another. This might be used when splitting cameras across hard drives.
-New states could be introduced indicating that a recording is "is moving from
-A to B" (thus, A is complete, and B is in an undefined state) or "has just
-moved from A to B" (thus, B is complete, and A may be present or not).
-Alternatively, a camera might have a search path specified for its recordings,
-such that the first directory in which a recording is found must have a
-complete copy (and subsequent directories' copies may be partial/corrupt).
 
 It'd also be possible to conserve some partial recordings. Moonfire NVR could,
 as a recording is written, record the latest sample tables,
@@ -372,6 +501,7 @@ The snippet below is a illustrative excerpt of the SQLite schema; see
     -- A single, typically 60-second, recorded segment of video.
     create table recording (
       id integer primary key,
+      open_id integer references open (id),
       camera_id integer references camera (id) not null,
 
       sample_file_uuid blob unique not null,

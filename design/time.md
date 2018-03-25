@@ -1,6 +1,6 @@
 # Moonfire NVR Time Handling
 
-Status: **implemented**
+Status: **current**
 
 > A man with a watch knows what time it is. A man with two watches is never
 > sure.

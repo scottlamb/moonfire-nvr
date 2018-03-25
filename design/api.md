@@ -1,7 +1,6 @@
 # Moonfire NVR API
 
-Status: **unstable**. This is an early draft; the API may change without
-warning.
+Status: **current**.
 
 ## Objective
 

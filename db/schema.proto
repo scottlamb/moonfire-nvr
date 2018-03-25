@@ -32,21 +32,8 @@ syntax = "proto3";
 
 // Metadata stored in sample file dirs as "<dir>/meta". This is checked
 // against the metadata stored within the database to detect inconsistencies
-// between the directory and database, including the following:
-//
-// * sample file directory's disk not being mounted.
-// * mixing up mount points of two sample file directories belonging to the
-//   same database.
-// * directory renames not properly recorded in the database.
-// * restoration of the database from backup but not the sample file
-//   directory.
-// * restoration of the sample file directory but not the database.
-// * two sample file directory paths pointed at the same inode via symlinks
-//   or non-canonical paths. (Note that flock(2) has a design flaw in which
-//   multiple file descriptors can share a lock, so the current locking scheme
-//   is not sufficient to detect this otherwise.)
-// * database and sample file directories forked from the same version, opened
-//   the same number of times, then crossed.
+// between the directory and database, such as those described in
+// design/schema.md.
 message DirMeta {
   // A uuid associated with the database, in binary form. dir_uuid is strictly
   // more powerful, but it improves diagnostics to know if the directory
