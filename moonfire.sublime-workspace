@@ -1,0 +1,719 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"_recordin",
+				"_recordingsRange"
+			],
+			[
+				"_record",
+				"_recordingsRange"
+			],
+			[
+				"selec",
+				"selectedRange"
+			],
+			[
+				"jquer",
+				"jqueryUIBundleModules"
+			],
+			[
+				"rec",
+				"recordingClickHandler"
+			],
+			[
+				"recordin",
+				"recordingsView"
+			],
+			[
+				"timeF",
+				"timeFormatter"
+			],
+			[
+				"timeSta",
+				"formatTimeStamp90k"
+			],
+			[
+				"form",
+				"formatTime90k"
+			],
+			[
+				"ret",
+				"returns\t@returns"
+			],
+			[
+				"webpack",
+				"webpackConfig2"
+			],
+			[
+				"webPackConf",
+				"webpackConfig2"
+			],
+			[
+				"project",
+				"projectRoot"
+			],
+			[
+				"prject",
+				"projectRoot"
+			],
+			[
+				"datepi",
+				"datepicker"
+			],
+			[
+				"_time",
+				"_timeFormatter"
+			],
+			[
+				"topi",
+				"toPickerTimeId"
+			],
+			[
+				"fromP",
+				"fromPickerTimeId"
+			],
+			[
+				"toP",
+				"toPickerId"
+			],
+			[
+				"star",
+				"startTime90k"
+			],
+			[
+				"record",
+				"recordingsView"
+			],
+			[
+				"update",
+				"updateRecordings"
+			],
+			[
+				"new",
+				"newTimeFormat"
+			],
+			[
+				"formatT",
+				"formatTime90K"
+			],
+			[
+				"_camer",
+				"_cameraRange"
+			],
+			[
+				"trimmed",
+				"trimmedAgainst"
+			],
+			[
+				"dur",
+				"duration90k"
+			],
+			[
+				"formatTim",
+				"formatTimeStamp90K"
+			],
+			[
+				"le",
+				"length"
+			],
+			[
+				"displa",
+				"displayObjects"
+			],
+			[
+				"checkb",
+				"checkboxSelector"
+			],
+			[
+				"dom",
+				"domElement"
+			],
+			[
+				"came",
+				"cameraCheckBoxDOM"
+			],
+			[
+				"camera",
+				"cameraJson"
+			],
+			[
+				"to",
+				"totalSampleFileBytes"
+			],
+			[
+				"vide",
+				"videoSampleEntryHeight"
+			],
+			[
+				"vieo",
+				"videoSampleEntryWidth"
+			],
+			[
+				"cam",
+				"cameraJson"
+			],
+			[
+				"Recordin",
+				"RecordingY"
+			],
+			[
+				"Js",
+				"jsonwrapper"
+			],
+			[
+				"end",
+				"endTime90k"
+			],
+			[
+				"js",
+				"jsonData"
+			],
+			[
+				"recor",
+				"recordingJson"
+			],
+			[
+				"start",
+				"startTime90k"
+			],
+			[
+				"ra",
+				"rate"
+			],
+			[
+				"root",
+				"rootFinder"
+			],
+			[
+				"Prod_Med",
+				"Prod_Media_PRF"
+			],
+			[
+				"Prod_Bill",
+				"Prod_Billing_Portal"
+			],
+			[
+				"Prod_C",
+				"Prod_CSP_BD"
+			],
+			[
+				"Prod_M",
+				"Prod_Media"
+			],
+			[
+				"Prod_DA",
+				"Prod_DASRT"
+			],
+			[
+				"Plat",
+				"PlatQA"
+			],
+			[
+				"Pro",
+				"Prod_DDC"
+			],
+			[
+				"Prod",
+				"Prod_DDC"
+			],
+			[
+				"Pr",
+				"Prod_DDC"
+			],
+			[
+				"Collee",
+				"ColleenK"
+			],
+			[
+				"Coll",
+				"ColleenK"
+			],
+			[
+				"ISab",
+				"ISabine"
+			],
+			[
+				"ro",
+				"roam_conf"
+			],
+			[
+				"_debugCe",
+				"_debugCellValue"
+			],
+			[
+				"debug",
+				"debugCellValue"
+			],
+			[
+				"zami",
+				"ZamiLoadSensors"
+			],
+			[
+				"execSes",
+				"execSensorsCalibrateZero"
+			]
+		]
+	},
+	"buffers":
+	[
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 359.0,
+		"last_filter": "pack ins ",
+		"selected_items":
+		[
+			[
+				"pack ins ",
+				"Package Control: Install Package"
+			],
+			[
+				"pac list",
+				"Package Control: List Packages"
+			],
+			[
+				"pac ins",
+				"Package Control: Install Package"
+			],
+			[
+				"pack rem",
+				"Package Control: Remove Package"
+			],
+			[
+				"pack list",
+				"Package Control: List Packages"
+			],
+			[
+				"pack ins",
+				"Package Control: Install Package"
+			],
+			[
+				"pac inst",
+				"Package Control: Install Package"
+			],
+			[
+				"pac li",
+				"Package Control: List Packages"
+			],
+			[
+				"pac re",
+				"Package Control: Remove Package"
+			],
+			[
+				"pack li",
+				"Package Control: List Packages"
+			],
+			[
+				"insta",
+				"Package Control: Install Package"
+			],
+			[
+				"package",
+				"Package Control: Remove Package"
+			],
+			[
+				" instal",
+				"Package Control: Install Package"
+			],
+			[
+				"pack",
+				"Preferences: Browse Packages"
+			],
+			[
+				"inst",
+				"Package Control: Install Package"
+			],
+			[
+				"rem",
+				"Package Control: Remove Package"
+			],
+			[
+				"remove",
+				"Package Control: Remove Package"
+			],
+			[
+				"in",
+				"Package Control: Install Package"
+			],
+			[
+				"re",
+				"Package Control: Remove Package"
+			],
+			[
+				"install p",
+				"Package Control: Install Package"
+			],
+			[
+				"install",
+				"Package Control: Install Package"
+			],
+			[
+				"insall",
+				"Package Control: Install Package"
+			],
+			[
+				"instal",
+				"Package Control: Install Package"
+			],
+			[
+				"packa",
+				"Package Control: Install Package"
+			]
+		],
+		"width": 476.0
+	},
+	"console":
+	{
+		"height": 322.0,
+		"history":
+		[
+			"import urllib.request,os,hashlib; h = '6f4c264a24d933ce70df5dedcf1dcaee' + 'ebe013ee18cced0ef93d5f746d80ef60'; pf = 'Package Control.sublime-package'; ipp = sublime.installed_packages_path(); urllib.request.install_opener( urllib.request.build_opener( urllib.request.ProxyHandler()) ); by = urllib.request.urlopen( 'http://packagecontrol.io/' + pf.replace(' ', '%20')).read(); dh = hashlib.sha256(by).hexdigest(); print('Error validating download (got %s instead of %s), please try manual install' % (dh, h)) if dh != h else open(os.path.join( ipp, pf), 'wb' ).write(by)",
+			"import urllib.request,os,hashlib; h = 'eb2297e1a458f27d836c04bb0cbaf282' + 'd0e7a3098092775ccb37ca9d6b2e4b7d'; pf = 'Package Control.sublime-package'; ipp = sublime.installed_packages_path(); urllib.request.install_opener( urllib.request.build_opener( urllib.request.ProxyHandler()) ); by = urllib.request.urlopen( 'http://packagecontrol.io/' + pf.replace(' ', '%20')).read(); dh = hashlib.sha256(by).hexdigest(); print('Error validating download (got %s instead of %s), please try manual install' % (dh, h)) if dh != h else open(os.path.join( ipp, pf), 'wb' ).write(by)"
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"file_history":
+	[
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/models/Range.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/models/Recording.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/support/RecordingFormatter.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/models/Range90k.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/views/RecordingsView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/views/CameraView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/models/CalendarTSRange.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/views/NVRSettingsView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/NVRApplication.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/index.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/MoonfireAPI.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/assets/index.html",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/views/DatePickerView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/views/CheckboxGroupView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/views/CalendarView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/support/URLBuilder.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/support/TimeFormatter.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/support/Time90kParser.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/webpack/parts/Settings.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/webpack/base.config.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/webpack/dev.config.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/webpack/NVRSettings.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/webpack/prod.config.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/settings-nvr-local.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/settings-nvr.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/models/Camera.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/models/JsonWrapper.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/node_modules/jquery-ui/ui/widgets/datepicker.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-dist/vendor.bundle.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-dist/nvr.bundle.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/assets/index.css",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/HTMLBeautify/HTMLBeautify.sublime-settings",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/moonfire.sublime-project",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/User/ESLint-Formatter.sublime-settings",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/ESLint-Formatter/ESLint-Formatter.sublime-settings",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/.eslintrc.json",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/.prettierrc.json",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/ui-src/lib/IteratorUtils.js",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/JsPrettier/JsPrettier.sublime-settings",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/User/JsPrettier.sublime-settings",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/JsFormat/JsFormat.sublime-settings",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/guide/easy-install.md",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/guide/developing-ui.md",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire-nvr/README.md",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/User/Preferences.sublime-settings",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/Default/Preferences.sublime-settings",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/views/DatePickerView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/TimeFormatter.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/models/Camera.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/Time90kParser.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/models/CalendarTSRange.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/index.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/RecordingFormatter.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/views/CalendarView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/views/IteratorUtils.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/models/Range.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/views/CameraView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/views/RecordingsView.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/index.html",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/models/Range90k.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/models/Recording.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/recordingformatter.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/views/RecordingsDisplay.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/webpack/base.config.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/webpack/dev.config.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/jsonwrapper.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/recordingsdisplay.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/recording.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/camera.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/range90k.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/lib/cameradisplay.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/recordingsdisplay.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/webpack/prod.config.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/camera.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/recordingstable.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/recordingformatter.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/jsonwrapper.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/package.json",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/webpack.config.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/ui-src/recording.js",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/.eslintrc.js",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/User/JsFormat.sublime-settings",
+		"/Users/dolf/Documents/Dev/Dolf/moonfire/webpack/full.config.js",
+		"/Users/dolf/Desktop/git config",
+		"/Users/dolf/Desktop/Signatures/dolf-simple.html",
+		"/Users/dolf/Desktop/Signatures/reg-simple.html",
+		"/Users/dolf/Desktop/dolf.vcf",
+		"/Users/dolf/Desktop/Dolf HTML.html",
+		"/Users/dolf/Desktop/Signatures/sig/dolf-home.vcf",
+		"/Users/dolf/Desktop/Signatures/dolf-home.html",
+		"/Users/dolf/Desktop/Starfield HTML.html",
+		"/Users/dolf/Desktop/Signatures/starfield-medium.html",
+		"/Users/dolf/Desktop/Signatures/reg-medium.html",
+		"/Users/dolf/Desktop/Signatures/dolf-medium.html",
+		"/Users/dolf/Desktop/Signatures/dolf-dolf.html",
+		"/Users/dolf/Desktop/recipients.txt",
+		"/Users/dolf/Desktop/t2.txt",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/HTML-CSS-JS Prettify/.jsbeautifyrc.defaults.json",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/User/.jsbeautifyrc",
+		"/Users/dolf/Desktop/x.js",
+		"/Users/dolf/Documents/Dolf-Sites/starreveld.com/index.html",
+		"/Users/dolf/Desktop/types.txt",
+		"/Users/dolf/Desktop/t.txt",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/User/JavascriptBeautify.sublime-settings",
+		"/Users/dolf/Library/Application Support/Sublime Text 3/Packages/Javascript Beautify/JavascriptBeautify.sublime-settings",
+		"/Users/dolf/Documents/Dolf-Sites/starreveld.com/Scripts/mmenudom.js",
+		"/Users/dolf/Documents/Dolf-Sites/starreveld.com/crossdomain.xml",
+		"/Users/dolf/Downloads/weather.dms",
+		"/Users/dolf/hta.txt",
+		"/Users/dolf/Desktop/x/Roots/FunctionNext.java",
+		"/Users/dolf/Desktop/x/Roots/Interval.java",
+		"/Users/dolf/Desktop/x/Roots/Function1.java",
+		"/Users/dolf/Desktop/x/RootsMain.java",
+		"/Users/dolf/Documents/Dev/Dolf/ubnt-logview/README",
+		"/Users/dolf/Desktop/goldens.dot",
+		"/Users/dolf/Documents/Dev/Anderson/READ ME",
+		"/Users/dolf/Desktop/x/Animals/Dog.java",
+		"/Users/dolf/Desktop/x/Animals/IAnimal.java",
+		"/Users/dolf/Desktop/x/Animals/Animal.java",
+		"/Users/dolf/Desktop/x/Animals/Cat.java",
+		"/Users/dolf/Desktop/x/AniMain.java",
+		"/Users/dolf/Desktop/x/Animals/Crate.java",
+		"/Users/dolf/Dropbox/Dolf/Dropbox/Akamai/Drawings/akamai.dot",
+		"/Users/dolf/Desktop/x/Animals/BaseAnimal.java",
+		"/Users/dolf/Desktop/T2.java",
+		"/Users/dolf/Desktop/T1.java",
+		"/Users/dolf/Desktop/main.java",
+		"/Users/dolf/Downloads/MTR"
+	],
+	"find":
+	{
+		"height": 39.0
+	},
+	"find_in_files":
+	{
+		"height": 101.0,
+		"where_history":
+		[
+			""
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"Recording ra",
+			"Trim ",
+			"\\'Trim",
+			"'Trim ",
+			"trim range",
+			"Range90k",
+			"Camera range",
+			"_updateRecordings",
+			"updateRecord",
+			"recordingsRange",
+			"fetch",
+			"_updateRecordings",
+			"onTrimChange",
+			"onSelec",
+			"trimHandler",
+			"addOnedateOnlyThenEndOfDay",
+			"parseDateTime90k",
+			"\\[description\\]",
+			"[description]",
+			"console.log",
+			"new range",
+			"recordingsUrl\\(",
+			"recordingsUrl(",
+			"_videoLength",
+			"_videoLengthHandler",
+			"onVideoLengthChange",
+			"fetch(",
+			"onTimeCh",
+			"videoLength",
+			"fetch\\(",
+			"fetch(",
+			"#split",
+			"fetch(",
+			"onVideoLengthChange",
+			"_videoLengthHandler",
+			"videoLengthE",
+			"_trimHandler",
+			"onTrimChange",
+			"initializeWith",
+			"setupCalendar",
+			"onTrimChange",
+			"dsiabl",
+			"_pickerTimeChanged",
+			"_updateRangeDates",
+			"_setRangeTime",
+			"new time",
+			"_informRangeChange",
+			"_setRangetim",
+			"timeFmt",
+			"('.*'),",
+			"dialog",
+			"import",
+			"require",
+			"dialog",
+			"jquery-ui/themes/base/button.css",
+			"('.*'),",
+			"jquery-ui/themes/base/button.css",
+			"<<",
+			"process.env.NODE_ENV",
+			"'NVR",
+			"NVR",
+			"recording cli"
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": true,
+		"replace_history":
+		[
+			"import(/* webpackChunkName: \"jquery\" */ $1);",
+			"require($1);"
+		],
+		"reverse": false,
+		"show_context": false,
+		"use_buffer2": false,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"sheets":
+			[
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 23.0
+	},
+	"input":
+	{
+		"height": 35.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.SublimeLinter":
+	{
+		"height": 0.0
+	},
+	"output.SublimeLinter Messages":
+	{
+		"height": 102.0
+	},
+	"output.find_results":
+	{
+		"height": 300.0
+	},
+	"output.unsaved_changes":
+	{
+		"height": 102.0
+	},
+	"pinned_build_system": "",
+	"project": "moonfire.sublime-project",
+	"replace":
+	{
+		"height": 70.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": true,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 205.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}

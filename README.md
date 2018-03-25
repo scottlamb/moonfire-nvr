@@ -56,6 +56,7 @@ make this possible:
 
 *   [License](LICENSE.txt) — GPLv3
 *   [Building and installing](guide/install.md)
+*   [UI Development](guide/developing-ui.md)
 *   [Troubleshooting](guide/troubleshooting.md)
 
 # <a name="help"></a> Getting help and getting involved

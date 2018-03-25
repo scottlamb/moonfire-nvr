@@ -55,11 +55,15 @@ Options:
     --db-dir=DIR           Set the directory holding the SQLite3 index database.
                            This is typically on a flash device.
                            [default: /var/lib/moonfire-nvr/db]
-    --ui-dir=DIR           Set the directory with the user interface files (.html, .js, etc).
+    --ui-dir=DIR           Set the directory with the user interface files
+                           (.html, .js, etc).
                            [default: /usr/local/lib/moonfire-nvr/ui]
     --http-addr=ADDR       Set the bind address for the unencrypted HTTP server.
                            [default: 0.0.0.0:8080]
     --read-only            Forces read-only mode / disables recording.
+    --allow-origin=ORIGIN  If present, adds a Access-Control-Allow-Origin:
+                           header to HTTP responses. This may be useful for
+                           Javascript development.
 "#;
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +72,7 @@ struct Args {
     flag_http_addr: String,
     flag_ui_dir: String,
     flag_read_only: bool,
+    flag_allow_origin: Option<String>,
 }
 
 fn setup_shutdown_future(h: &reactor::Handle) -> Box<Future<Item = (), Error = ()>> {
@@ -111,7 +116,8 @@ pub fn run() -> Result<(), Error> {
     }
     info!("Directories are opened.");
 
-    let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), resolve_zone())?;
+    let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), args.flag_allow_origin,
+                              resolve_zone())?;
 
     // Start a streamer for each stream.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));

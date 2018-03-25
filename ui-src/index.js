@@ -5,6 +5,8 @@
 // TODO: style: no globals? string literals? line length? fn comments?
 // TODO: live updating.
 
+import './favicon.ico';
+
 import 'jquery-ui/themes/base/button.css';
 import 'jquery-ui/themes/base/core.css';
 import 'jquery-ui/themes/base/datepicker.css';
@@ -56,13 +58,38 @@ function req(url) {
   });
 }
 
-// Produces a human-readable but unambiguous format of the given timestamp:
-// ISO-8601 plus an extra colon component after the seconds indicating the
-// fractional time in 90,000ths of a second.
-function formatTime(ts90k) {
-  const m = moment.tz(ts90k / 90, zone);
-  const frac = ts90k % 90000;
-  return m.format('YYYY-MM-DDTHH:mm:ss:' + String(100000 + frac).substr(1) + 'Z');
+/**
+ * Format timestamp using a format string.
+ *
+ * The timestamp to be formatted is expected to be in units of 90,000 to a
+ * second (90k format).
+ * 
+ * The format string should comply with what is accepted by moment.format,
+ * with one addition. A format pattern of FFFFF (5 Fs) can be used. This
+ * format pattern will be replaced with the fractional second part of the
+ * timestamp, still in 90k units. Thus if the timestamp was 89900 (which is
+ * almost a full second; 0.99888 seconds decimal), the output would be
+ * 89900, and NOT 0.99888. Only a pattern of five Fs is recognized and it
+ * will produce exactly a five position output! You cannot vary the number
+ * of Fs to produce less.
+ *
+ * The default format string was chosen to produce results identical to
+ * a previous version of this code that was hard-coded to produce that output.
+ * 
+ * @param  {Number} ts90k  Timestamp in 90k units
+ * @param  {String} format moment.format plus FFFFF pattern supported
+ * @return {String}        Formatted timestamp
+ */
+function formatTime(ts90k, format = 'YYYY-MM-DDTHH:mm:ss:FFFFFZ') {
+  const ms = ts90k / 90.0;
+  const fracFmt = 'FFFFF';
+  let fracLoc = format.indexOf(fracFmt);
+  if (fracLoc != -1) {
+    const frac = ts90k % 90000;
+    format = format.substr(0, fracLoc) + String(100000 + frac).substr(1) +
+             format.substr(fracLoc + fracFmt.length);
+  }
+  return moment.tz(ms, zone).format(format);
 }
 
 function onSelectVideo(camera, streamType, range, recording) {
@@ -111,7 +138,12 @@ function onSelectVideo(camera, streamType, range, recording) {
   dialog.dialog({
       title: camera.shortName + " " + streamType + ", " + formattedStart + " to " + formattedEnd,
       width: recording.videoSampleEntryWidth / 4,
-      close: function() { dialog.remove(); },
+      close: () => {
+        const videoDOMElement = video[0];
+        videoDOMElement.pause();
+        videoDOMElement.src = ''; // Remove current source to stop loading
+        dialog.remove();
+      },
   });
   video.attr("src", url);
 }

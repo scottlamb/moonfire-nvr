@@ -13,84 +13,17 @@ edge version from the command line via git:
 ## Building from source
 
 There are no binary packages of Moonfire NVR available yet, so it must be built
-from source.
+from source. To do so, you can follow two paths:
 
-Moonfire NVR is written in the [Rust Programming
-Language](https://www.rust-lang.org/en-US/). In the long term, I expect this
-will result in a more secure, full-featured, easy-to-install software.
+* Scripted install: You will run some shell scripts (after preparing one or
+  two files, and will be completely done. This is by far the easiest option,
+  in particular for first time builders/installers. This process is fully
+  described. Read more in [Easy Installation](easy-install.md)
+* Manual build and install. This is explained in detail in these
+  [instructions](install-manual.md)
 
-You will need the following C libraries installed:
-
-* [ffmpeg](http://ffmpeg.org/) version 2.x or 3.x, including `libavutil`,
-  `libavcodec` (to inspect H.264 frames), and `libavformat` (to connect to RTSP
-  servers and write `.mp4` files).
-
-  Note ffmpeg library versions older than 55.1.101, along with all versions of
-  the competing project [libav](http://libav.org), don't not support socket
-  timeouts for RTSP. For reliable reconnections on error, it's strongly
-  recommended to use ffmpeg library versions >= 55.1.101.
-
-* [SQLite3](https://www.sqlite.org/).
-
-* [`ncursesw`](https://www.gnu.org/software/ncurses/), the UTF-8 version of
-  the `ncurses` library.
-
-On recent Ubuntu or Raspbian, the following command will install
-all non-Rust dependencies:
-
-    $ sudo apt-get install \
-                   build-essential \
-                   libavcodec-dev \
-                   libavformat-dev \
-                   libavutil-dev \
-                   libncurses5-dev \
-                   libncursesw5-dev \
-                   libsqlite3-dev \
-                   libssl-dev \
-                   pkgconf
-
-Next, you need Rust 1.17+ and Cargo. The easiest way to install them is by following
-the instructions at [rustup.rs](https://www.rustup.rs/).
-
-Finally, building the UI requires [yarn](https://yarnpkg.com/en/).
-
-You can continue to follow the build/install instructions below for a manual
-build and install, or alternatively you can run the prep script called `prep.sh`.
-
-    $ cd moonfire-nvr
-    $ ./prep.sh
-
-The script will take the following command line options, should you need them:
-
-* `-S`: Skip updating and installing dependencies through apt-get. This too can be
-        useful on repeated builds.
-
-You can edit variables at the start of the script to influence names and
-directories, but defaults should suffice in most cases. For details refer to
-the script itself. We will mention just one option, needed when you follow the
-suggestion to separate database and samples between flash storage and a hard disk.
-If you have the hard disk mounted on, lets say `/media/nvr`, and you want to
-store the video samples inside a directory named `samples` there, you would set:
-
-    SAMPLES_DIR=/media/nvr/samples
-
-The script will perform all necessary steps to leave you with a fully built,
-installed moonfire-nvr binary. The only thing
-you'll have to do manually is add your camera configuration(s) to the database.
-Alternatively, before running the script, you can create a file named `cameras.sql`
-in the same directory as the `prep.sh` script and it will be automatically
-included for you.
-For instructions, you can skip to "[Camera configuration and hard disk mounting](#camera)".
-
-Once prerequisites are installed, Moonfire NVR can be built as follows:
-
-    $ yarn
-    $ yarn build
-    $ cargo test
-    $ cargo build --release
-    $ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
-    $ sudo mkdir /usr/local/lib/moonfire-nvr
-    $ sudo cp -R ui-dist /usr/local/lib/moonfire-nvr/ui
+Regardless of the approach for setup and installation above that you choose,
+please read the further configuration instructions below.
 
 ## Further configuration
 
@@ -103,13 +36,13 @@ state:
      H.264 video. These should be quite large and are typically stored on hard
      drives.
 
+Both states are intended to be accessed by moonfire-nvr only, but can be
+changed after building. See below.
 (See [schema.md](schema.md) for more information.)
 
-Both kinds of state are intended to be accessed only by Moonfire NVR itself.
-However, the interface for adding new cameras is not yet written, so you will
-have to manually insert cameras with the `sqlite3` command line tool prior to
-starting Moonfire NVR.
-
+The database changes and sample file directory changes require the moonfire-nvr
+binary to be built, so can only be done after completing the build. The other
+settings and preparations should be done before building.
 Manual commands would look something like this:
 
     $ sudo addgroup --system moonfire-nvr
@@ -118,7 +51,7 @@ Manual commands would look something like this:
     $ sudo -u moonfire-nvr -H mkdir db sample
     $ sudo -u moonfire-nvr moonfire-nvr init
 
-### <a name="cameras"></a>Camera configuration and hard drive mounting
+### <a name="drive mounting"></a>Camera configuration and hard drive mounting
 
 If a dedicated hard drive is available, set up the mount point:
 
@@ -130,7 +63,7 @@ database. If the daemon is running, you will need to stop it temporarily:
 
     $ sudo systemctl stop moonfire-nvr
 
-You can configure the system through a text-based user interface:
+You can configure the system's database through a text-based user interface:
 
     $ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
 

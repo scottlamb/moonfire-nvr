@@ -1,8 +1,11 @@
 cameras.sql
+.DS_Store
 .project
 .settings
 *.swp
 node_modules
 prep.config
+settings-nvr-local.js
 target
 ui-dist
+yarn-error.log

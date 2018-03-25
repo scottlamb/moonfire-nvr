@@ -40,7 +40,7 @@ use futures::{future, stream};
 use futures_cpupool;
 use json;
 use http_serve;
-use hyper::header;
+use hyper::header::{self, Header};
 use hyper::server::{self, Request, Response};
 use mime;
 use mp4;
@@ -192,6 +192,7 @@ struct ServiceInner {
     db: Arc<db::Database>,
     dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
     ui_files: HashMap<String, UiFile>,
+    allow_origin: Option<header::AccessControlAllowOrigin>,
     pool: futures_cpupool::CpuPool,
     time_zone_name: String,
 }
@@ -416,7 +417,8 @@ impl ServiceInner {
 pub struct Service(Arc<ServiceInner>);
 
 impl Service {
-    pub fn new(db: Arc<db::Database>, ui_dir: Option<&str>, zone: String) -> Result<Self, Error> {
+    pub fn new(db: Arc<db::Database>, ui_dir: Option<&str>, allow_origin: Option<String>,
+               zone: String) -> Result<Self, Error> {
         let mut ui_files = HashMap::new();
         if let Some(d) = ui_dir {
             Service::fill_ui_files(d, &mut ui_files);
@@ -438,10 +440,15 @@ impl Service {
             }
             Arc::new(d)
         };
+        let allow_origin = match allow_origin {
+            None => None,
+            Some(o) => Some(header::AccessControlAllowOrigin::parse_header(&header::Raw::from(o))?),
+        };
         Ok(Service(Arc::new(ServiceInner {
             db,
             dirs_by_stream_id,
             ui_files,
+            allow_origin,
             pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
             time_zone_name: zone,
         })))
@@ -466,8 +473,11 @@ impl Service {
             };
             let (p, mime) = match e.file_name().to_str() {
                 Some(n) if n == "index.html" => ("/".to_owned(), mime::TEXT_HTML),
-                Some(n) if n.ends_with(".js") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
                 Some(n) if n.ends_with(".html") => (format!("/{}", n), mime::TEXT_HTML),
+                Some(n) if n.ends_with(".ico") => (format!("/{}", n),
+                                                   "image/vnd.microsoft.icon".parse().unwrap()),
+                Some(n) if n.ends_with(".js") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
+                Some(n) if n.ends_with(".map") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
                 Some(n) if n.ends_with(".png") => (format!("/{}", n), mime::IMAGE_PNG),
                 Some(n) => {
                     warn!("UI directory file {:?} has unknown extension; skipping", n);
@@ -508,6 +518,11 @@ impl server::Service for Service {
             },
             Path::NotFound => self.0.not_found(),
             Path::Static => self.0.static_file(&req),
+        };
+        let res = if let Some(ref o) = self.0.allow_origin {
+            res.map(|resp| resp.with_header(o.clone()))
+        } else {
+            res
         };
         future::result(res.map_err(|e| {
             error!("error: {}", e);
@@ -570,7 +585,8 @@ mod bench {
             let (tx, rx) = ::std::sync::mpsc::channel();
             ::std::thread::spawn(move || {
                 let addr = "127.0.0.1:0".parse().unwrap();
-                let service = super::Service::new(db.db.clone(), None, "".to_owned()).unwrap();
+                let service = super::Service::new(db.db.clone(), None, None,
+                                                  "".to_owned()).unwrap();
                 let server = hyper::server::Http::new()
                     .bind(&addr, move || Ok(service.clone()))
                     .unwrap();
