@@ -78,7 +78,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         );
         create table user_session (
           session_id_hash blob primary key not null,
-          user_id integer references user (id),
+          user_id integer references user (id) not null,
           flags integer not null,
           domain text,
           description text,
@@ -87,7 +87,10 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           creation_time_sec integer not null,
           creation_user_agent text,
           revocation_time_sec integer,
-          revocation_reason text,
+          revocation_user_agent text,
+          revocation_peer_addr blob,
+          revocation_reason integer,
+          revocation_reason_detail text,
           last_use_time_sec integer,
           last_use_user_agent text,
           last_use_peer_addr blob,

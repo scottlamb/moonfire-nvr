@@ -340,7 +340,7 @@ create table user_session (
   -- remember, the session id is assumed to itself have sufficient entropy.
   session_id_hash blob primary key not null,
 
-  user_id integer references user (id),
+  user_id integer references user (id) not null,
 
   -- A bitwise mask of flags, currently all properties of the HTTP cookie used to hold the session:
   -- 1: HttpOnly
@@ -350,7 +350,7 @@ create table user_session (
 
   -- The domain of the HTTP cookie used to store this session. The outbound
   -- `Set-Cookie` header never specifies a scope, so this matches the `Host:` of
-  -- the inbound HTTP request.
+  -- the inbound HTTP request (minus the :port, if any was specified).
   domain text,
 
   -- An editable description which might describe the device/program which uses
@@ -358,12 +358,26 @@ create table user_session (
   description text,
 
   creation_password_id integer,        -- the id it was created from, if created via password
-  creation_peer_addr blob,             -- IPv4 or IPv6 address, or null for Unix socket.
   creation_time_sec integer not null,  -- sec since epoch
+  creation_peer_addr blob,             -- IPv4 or IPv6 address, or null for Unix socket.
   creation_user_agent text,            -- User-Agent header from inbound HTTP request.
 
   revocation_time_sec integer,         -- sec since epoch
-  revocation_reason text,
+  revocation_user_agent text,          -- User-Agent header from inbound HTTP request.
+  revocation_peer_addr blob,           -- IPv4 or IPv6 address, or null for Unix socket/no peer.
+
+  -- A value indicating the reason for revocation, with optional additional
+  -- text detail. Enumeration values:
+  -- 0: logout link clicked (i.e. from within the session itself)
+  --
+  -- This might be extended for a variety of other reasons:
+  -- x: user revoked (while authenticated in another way)
+  -- x: password change invalidated all sessions created with that password
+  -- x: expired (due to fixed total time or time inactive)
+  -- x: evicted (due to too many sessions)
+  -- x: suspicious activity
+  revocation_reason integer,
+  revocation_reason_detail text,
 
   -- Information about requests which used this session, updated lazily on database flush.
   last_use_time_sec integer,           -- sec since epoch
