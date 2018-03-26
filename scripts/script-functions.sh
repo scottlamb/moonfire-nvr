@@ -82,7 +82,7 @@ catPrefix()
 
 mkdir_moonfire()
 {
-	sudo -u ${NVR_USER} -H mkdir "$@"
+	sudo -u "${NVR_USER}" -H mkdir "$@"
 }
 
 echo_multi()
@@ -342,7 +342,8 @@ prep_moonfire_user()
 			--ingroup "${NVR_GROUP}" --home "${NVR_HOME}"
 	fi
 	if [ ! -d "${NVR_HOME}" ]; then
-		mkdir_moonfire "${NVR_HOME}"
+		sudo mkdir "${NVR_HOME}"
+		sudo chown "${NVR_USER}:${NVR_GROUP}"  "${NVR_HOME}"
 	fi
 	sudo chown ${NVR_USER}:${NVR_GROUP} "${NVR_HOME}"
 }

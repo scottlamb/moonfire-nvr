@@ -35,6 +35,7 @@
 
 initEnvironmentVars
 makePrepConfig
+export DEBIAN_FRONTEND=noninteractive
 
 
 # Process command line options
@@ -119,9 +120,9 @@ if ! versionAtLeast "$ffv" "$FFMPEG_MIN_VERSION"; then
 		echo_info -x "Fetching FFmpeg source..."
 		git clone --depth 1 -b "release/${FFMPEG_RELEASE_VERSION}" https://github.com/FFmpeg/FFmpeg.git
 		cd FFmpeg
-		pt=`uname -p 2>& /dev/null`
+		pt=`uname -p 2>/dev/null`
 		if [ -z "${pt##*86*}" ]; then
-			sudo apt-get install -y yasm
+			DEBIAN_FRONTEND=noninteractive sudo apt-get install -y yasm
 		fi
 		./configure --enable-shared
 		make
