@@ -116,26 +116,4 @@ export default class TimeFormatter {
     }
     return moment.tz(ms, this._tz).format(format);
   }
-
-  /**
-   * Format timestamp expressed in mill-seconds.
-   *
-   * @param  {Number} ms     A timestamp in ms to be formatted
-   * @return {String}        Formatted timestamp
-   */
-  formatTimeStampMs(ms) {
-    // Convert to 90k value first
-    return this.formatTimeStamp90k(ms * 90);
-  }
-
-  /**
-   * Format timestamp expressed in mill-seconds.
-   *
-   * @param  {Number} s      A timestamp in s to be formatted
-   * @return {String}        Formatted timestamp
-   */
-  formatTimeStampSec(s) {
-    // Convert to 90k value first
-    return this.formatTimeStamp90k(s * 90000);
-  }
 }
