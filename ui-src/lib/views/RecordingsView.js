@@ -267,8 +267,8 @@ export default class RecordingsView {
     $('tr.r', tbody).remove();
     this._recordings.forEach((r) => {
       let row = $('<tr class="r" />');
-      row.append(_columnOrder.map((k) => $('<td/>')));
-      row.on('click', (e) => {
+      row.append(_columnOrder.map(() => $('<td/>')));
+      row.on('click', () => {
         console.log('Video clicked');
         if (this._clickHandler !== null) {
           console.log('Video clicked handler call');

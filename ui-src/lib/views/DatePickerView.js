@@ -32,10 +32,27 @@
 
 import $ from 'jquery';
 
+import 'jquery-ui/themes/base/core.css';
+import 'jquery-ui/themes/base/datepicker.css';
+import 'jquery-ui/themes/base/theme.css';
+import 'jquery-ui/ui/widgets/datepicker';
+
 /**
  * Class to encapsulate datepicker UI widget from jQuery.
  */
 export default class DatePickerView {
+  /**
+   * Get the singleton datepicker instance.
+   *
+   * This is useful for accessing implementation constants, such as
+   * date formats etc.
+   *
+   * @return {jQuery.datepicker} JQuery datepicker instance
+   */
+  static get datepicker() {
+    return $.datepicker;
+  }
+
   /**
    * Construct wapper an attach to a specified parent DOM node.
    *
@@ -85,11 +102,11 @@ export default class DatePickerView {
    *
    * @return {Any} Function result
    */
-  _apply() {
+  _apply(...args) {
     if (!this._alive) {
-      console.log('WARN: datepicker not constructed yet [' + this.domId + ']');
+      console.warn('datepicker not constructed yet [%s]', this.domId);
     }
-    return this._pickerElement.datepicker(...arguments);
+    return this._pickerElement.datepicker(...args);
   }
 
   /**

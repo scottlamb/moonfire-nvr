@@ -59,7 +59,7 @@ export default class MoonfireAPI {
     url.hostname = host;
     url.port = port;
     console.log('API: ' + url.origin + url.pathname);
-    this._builder = new URLBuilder(url.origin + url.pathname);
+    this._builder = new URLBuilder(url.origin + url.pathname, relativeUrls);
   }
 
   /**

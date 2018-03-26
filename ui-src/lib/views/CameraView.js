@@ -83,7 +83,7 @@ export default class CameraView {
     this._enabled = enabled;
     this.recordingsView.show = enabled;
     console.log(
-      'Camera ',
+      'Camera %s %s',
       this.camera.shortName,
       this.enabled ? 'enabled' : 'disabled'
     );

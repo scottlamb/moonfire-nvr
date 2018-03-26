@@ -34,31 +34,32 @@
 // TODO: add error bar on fetch failure.
 // TODO: live updating.
 
-import 'jquery-ui/themes/base/button.css';
+import $ from 'jquery';
+
+// tooltip needs:
+// css.structure: ../../themes/base/core.css
+// css.structure: ../../themes/base/tooltip.css
+// css.theme: ../../themes/base/theme.css
+
 import 'jquery-ui/themes/base/core.css';
-import 'jquery-ui/themes/base/datepicker.css';
-import 'jquery-ui/themes/base/dialog.css';
-import 'jquery-ui/themes/base/resizable.css';
-import 'jquery-ui/themes/base/theme.css';
 import 'jquery-ui/themes/base/tooltip.css';
+import 'jquery-ui/themes/base/theme.css';
 
 // This causes our custom css to be loaded after the above!
-require('./assets/index.css');
+import './assets/index.css';
 
-import $ from 'jquery';
-import 'jquery-ui/ui/widgets/datepicker';
-import 'jquery-ui/ui/widgets/dialog';
+// Get ui widgets themselves
 import 'jquery-ui/ui/widgets/tooltip';
 
 import Camera from './lib/models/Camera';
 import CameraView from './lib/views/CameraView';
 import CalendarView from './lib/views/CalendarView';
+import VideoDialogView from './lib/views/VideoDialogView';
 import NVRSettingsView from './lib/views/NVRSettingsView';
 import CheckboxGroupView from './lib/views/CheckboxGroupView';
 import RecordingFormatter from './lib/support/RecordingFormatter';
-import TimeFormatter, {
-  TimeStamp90kFormatter,
-} from './lib/support/TimeFormatter';
+import TimeFormatter from './lib/support/TimeFormatter';
+import TimeStamp90kFormatter from './lib/support/TimeStamp90kFormatter';
 import MoonfireAPI from './lib/MoonfireAPI';
 
 const api = new MoonfireAPI();
@@ -130,27 +131,18 @@ function onSelectVideo(nvrSettingsView, camera, range, recording) {
     trimmedRange,
     nvrSettingsView.timeStampTrack
   );
-  const video = $('<video controls preload="auto" autoplay="true" />');
-  const dialog = $('<div class="playdialog" />').append(video);
-  $('body').append(dialog);
-
-  let [formattedStart, formattedEnd] = timeFormatter90k.formatSameDayShortened(
+  const [
+    formattedStart,
+    formattedEnd,
+  ] = timeFormatter90k.formatSameDayShortened(
     trimmedRange.startTime90k,
     trimmedRange.endTime90k
   );
-  dialog.dialog({
-    title: camera.shortName + ', ' + formattedStart + ' to ' + formattedEnd,
-    width: recording.videoSampleEntryWidth / 4,
-    close: () => {
-        const videoDOMElement = video[0];
-        videoDOMElement.pause();
-        videoDOMElement.src = ''; // Remove current source to stop loading
-        dialog.remove();
-    },
-  });
-  // Now that dialog is up, set the src so video starts
-  console.log('Video url: ' + url);
-  video.attr('src', url);
+  const videoTitle =
+    camera.shortName + ', ' + formattedStart + ' to ' + formattedEnd;
+  new VideoDialogView()
+    .attach($('body'))
+    .play(videoTitle, recording.videoSampleEntryWidth / 4, url);
 }
 
 /**
@@ -193,16 +185,19 @@ function fetch(selectedRange, videoLength) {
       cameraView.recordingsReq = null;
     });
     r
-      .then(function(data, status, req) {
+      .then(function(data /* , status, req */) {
         // Sort recordings in descending order.
         data.recordings.sort(function(a, b) {
           return b.startId - a.startId;
         });
-        console.log('Fetched results > updating recordings');
+        console.log(
+          'Fetched results for "%s" > updating recordings',
+          cameraView.camera.shortName
+        );
         cameraView.recordingsJSON = data.recordings;
       })
       .catch(function(data, status, err) {
-        console.log(url, ' load failed: ', status, ': ', err);
+        console.error(url, ' load failed: ', status, ': ', err);
       });
   }
 }
@@ -295,11 +290,11 @@ export default class NVRApplication {
       .request(api.nvrUrl(true))
       .done((data) => onReceivedCameras(data))
       .fail((req, status, err) => {
-        console.log('NVR load error: ', status, err);
+        console.error('NVR load error: ', status, err);
         onReceivedCameras({cameras: []});
       })
       .catch((e) => {
-        console.log('NVR load exception: ', e);
+        console.error('NVR load exception: ', e);
         onReceivedCameras({cameras: []});
       });
   }

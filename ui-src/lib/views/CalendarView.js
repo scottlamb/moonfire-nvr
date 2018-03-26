@@ -31,20 +31,10 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import $ from 'jquery';
-import 'jquery-ui/themes/base/button.css';
-import 'jquery-ui/themes/base/core.css';
-import 'jquery-ui/themes/base/datepicker.css';
-import 'jquery-ui/themes/base/dialog.css';
-import 'jquery-ui/themes/base/resizable.css';
-import 'jquery-ui/themes/base/theme.css';
-import 'jquery-ui/themes/base/tooltip.css';
-import 'jquery-ui/ui/widgets/datepicker';
-import 'jquery-ui/ui/widgets/dialog';
-import 'jquery-ui/ui/widgets/tooltip';
 
 import DatePickerView from './DatePickerView';
 import CalendarTSRange from '../models/CalendarTSRange';
-import {TimeStamp90kFormatter} from '../support/TimeFormatter';
+import TimeStamp90kFormatter from '../support/TimeStamp90kFormatter';
 import Time90kParser from '../support/Time90kParser';
 
 /**
@@ -177,10 +167,11 @@ export default class CalendarView {
 
     if (this._sameDay) {
       fromPickerView.option({
-        dateFormat: $.datepicker.ISO_8601,
+        dateFormat: DatePickerView.datepicker.ISO_8601,
         minDate: minDateStr,
         maxDate: maxDateStr,
-        onSelect: (dateStr, picker) => this._updateRangeDates(dateStr, dateStr),
+        onSelect: (dateStr /* , picker */) =>
+          this._updateRangeDates(dateStr, dateStr),
         beforeShowDay: beforeShowDay,
         disabled: false,
       });
@@ -188,21 +179,21 @@ export default class CalendarView {
       toPickerView.activate(); // Default state, but alive
     } else {
       fromPickerView.option({
-        dateFormat: $.datepicker.ISO_8601,
+        dateFormat: DatePickerView.datepicker.ISO_8601,
         minDate: minDateStr,
-        onSelect: (dateStr, picker) => {
-          toPickerView.option('minDate', this.fromDateISO);
+        onSelect: (dateStr /* , picker */) => {
+          toPickerView.minDate = this.fromDateISO;
           this._updateRangeDates(dateStr, this.toDateISO);
         },
         beforeShowDay: beforeShowDay,
         disabled: false,
       });
       toPickerView.option({
-        dateFormat: $.datepicker.ISO_8601,
+        dateFormat: DatePickerView.datepicker.ISO_8601,
         minDate: fromPickerView.dateISO,
         maxDate: maxDateStr,
-        onSelect: (dateStr, picker) => {
-          fromPickerView.option('maxDate', this.toDateISO);
+        onSelect: (dateStr /* , picker */) => {
+          fromPickerView.maxDate = this.toDateISO;
           this._updateRangeDates(this.fromDateISO, dateStr);
         },
         beforeShowDay: beforeShowDay,
@@ -228,7 +219,7 @@ export default class CalendarView {
    * The change requires updating the selected range and then informing
    * any listeners that the range has changed (so they can update data).
    *
-   * @param  {Object}  event Time Event on DOM that triggered calling this
+   * @param  {event}  event       DOM event that triggered us
    * @param  {Boolean} isEnd      True if this is for end time
    */
   _pickerTimeChanged(event, isEnd) {
@@ -239,7 +230,7 @@ export default class CalendarView {
       ? selectedRange.setEndTime(newTimeStr)
       : selectedRange.setStartTime(newTimeStr);
     if (parsedTS === null) {
-      console.log('bad time change');
+      console.warn('bad time change');
       $(pickerElement).addClass('ui-state-error');
       return;
     }

@@ -3,7 +3,20 @@
         "ecmaVersion": 6,
         "sourceType": "module"
     },
+    "env": {
+      "es6": true,
+      "browser": true,
+      "node": true
+    },
     "extends": "google",
     "rules": {
+      "init-declarations": ["error", "always"],
+      "no-catch-shadow": ["error"],
+      "no-delete-var": ["error"],
+      "no-shadow": ["error", { "builtinGlobals": false, "hoist": "functions", "allow": [] }],
+      "no-shadow-restricted-names": ["error"],
+      "no-undef": ["error", {"typeof": true}],
+      "no-unused-vars": ["error", { "vars": "all", "args": "after-used", "ignoreRestSiblings": false }],
+      "no-use-before-define": ["error", { "functions": true, "classes": true }]
     }
 }

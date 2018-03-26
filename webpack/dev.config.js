@@ -44,6 +44,7 @@ module.exports = (env, args) => {
     },
     devtool: 'inline-source-map',
     optimization: {
+      minimize: false,
       namedChunks: true,
     },
     devServer: {
@@ -54,11 +55,11 @@ module.exports = (env, args) => {
       hot: true,
       clientLogLevel: 'info',
       proxy: {
-        '/api': `http://${nvrSettings.moonfire.server}:${nvrSettings.moonfire.port}`,
+        '/api': `http://${nvrSettings.moonfire.server}:${
+          nvrSettings.moonfire.port
+        }`,
       },
     },
-    plugins: [
-      new webpack.HotModuleReplacementPlugin(),
-    ],
+    plugins: [new webpack.HotModuleReplacementPlugin()],
   });
 };

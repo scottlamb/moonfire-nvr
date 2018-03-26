@@ -32,7 +32,7 @@
 
 import moment from 'moment-timezone';
 
-export const internalTimeFormat = 'YYYY-MM-DDTHH:mm:ss:FFFFFZ';
+
 export const defaultTimeFormat = 'YYYY-MM-DD HH:mm:ss';
 
 /**
@@ -115,52 +115,5 @@ export default class TimeFormatter {
         format.substr(fracLoc + fracFmt.length);
     }
     return moment.tz(ms, this._tz).format(format);
-  }
-}
-
-/**
- * Specialized class similar to TimeFormatter but forcing a specific time format
- * for internal usage purposes.
- */
-export class TimeStamp90kFormatter {
-  /**
-   * Construct from just a timezone specification.
-   *
-   * @param  {String} tz Timezone
-   */
-  constructor(tz) {
-    this._formatter = new TimeFormatter(internalTimeFormat, tz);
-  }
-
-  /**
-   * Format a timestamp in 90k units using internal format.
-   *
-   * @param {Number} ts90k timestamp in 90,000ths of a second resolution
-   * @return {String}        Formatted timestamp
-   */
-  formatTimeStamp90k(ts90k) {
-    return this._formatter.formatTimeStamp90k(ts90k);
-  }
-
-  /**
-   * Given two timestamp return formatted versions of both, where the second
-   * one may have been shortened if it falls on the same date as the first one.
-   *
-   * @param  {Number} ts1 First timestamp in 90k units
-   * @param  {Number} ts2 Secodn timestamp in 90k units
-   * @return {Array}     Array with two elements: [ ts1Formatted, ts2Formatted ]
-   */
-  formatSameDayShortened(ts1, ts2) {
-    let ts1Formatted = this.formatTimeStamp90k(ts1);
-    let ts2Formatted = this.formatTimeStamp90k(ts2);
-    let timePos = this._formatter.formatStr.indexOf('T');
-    if (timePos != -1) {
-      const datePortion = ts1Formatted.substr(0, timePos);
-      ts1Formatted = datePortion + ' ' + ts1Formatted.substr(timePos + 1);
-      if (ts2Formatted.startsWith(datePortion)) {
-        ts2Formatted = ts2Formatted.substr(timePos + 1);
-      }
-    }
-    return [ts1Formatted, ts2Formatted];
   }
 }
