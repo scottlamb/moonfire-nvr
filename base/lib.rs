@@ -35,3 +35,4 @@ extern crate parking_lot;
 extern crate time;
 
 pub mod clock;
+pub mod strutil;

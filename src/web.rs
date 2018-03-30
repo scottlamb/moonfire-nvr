@@ -30,6 +30,7 @@
 
 extern crate hyper;
 
+use base::strutil;
 use core::borrow::Borrow;
 use core::str::FromStr;
 use db::{self, recording};
@@ -54,7 +55,6 @@ use std::fs;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
-use strutil;
 use url::form_urlencoded;
 use uuid::Uuid;
 

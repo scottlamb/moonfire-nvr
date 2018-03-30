@@ -78,6 +78,7 @@
 
 extern crate time;
 
+use base::strutil;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db::recording::{self, TIME_UNITS_PER_SEC};
 use db::{self, dir};
@@ -98,7 +99,6 @@ use std::io;
 use std::ops::Range;
 use std::mem;
 use std::sync::Arc;
-use strutil;
 
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
@@ -1517,6 +1517,7 @@ impl http_serve::Entity for File {
 ///      to verify the output is byte-for-byte as expected.
 #[cfg(test)]
 mod tests {
+    use base::strutil;
     use byteorder::{BigEndian, ByteOrder};
     use clock::RealClocks;
     use db::recording::{self, TIME_UNITS_PER_SEC};
@@ -1531,7 +1532,6 @@ mod tests {
     use std::ops::Range;
     use std::path::Path;
     use std::str;
-    use strutil;
     use super::*;
     use stream::{self, Opener, Stream};
 

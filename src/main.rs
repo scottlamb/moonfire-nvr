@@ -72,7 +72,6 @@ mod mp4;
 mod slices;
 mod stream;
 mod streamer;
-mod strutil;
 mod web;
 
 /// Commandline usage string. This is in the particular format expected by the `docopt` crate.
