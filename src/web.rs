@@ -40,6 +40,7 @@ use fnv::FnvHashMap;
 use futures::{future, stream};
 use futures_cpupool;
 use json;
+use http;
 use http_serve;
 use hyper::header::{self, Header};
 use hyper::server::{self, Request, Response};
@@ -184,7 +185,7 @@ impl Segments {
 /// The files themselves are opened on every request so they can be changed during development.
 #[derive(Debug)]
 struct UiFile {
-    mime: mime::Mime,
+    mime: http::header::HeaderValue,
     path: PathBuf,
 }
 
@@ -408,7 +409,9 @@ impl ServiceInner {
             Some(s) => s,
         };
         let f = fs::File::open(&s.path)?;
-        let e = http_serve::ChunkedReadFile::new(f, Some(self.pool.clone()), s.mime.clone())?;
+        let mut hdrs = http::HeaderMap::new();
+        hdrs.insert(http::header::CONTENT_TYPE, s.mime.clone());
+        let e = http_serve::ChunkedReadFile::new(f, Some(self.pool.clone()), hdrs)?;
         Ok(http_serve::serve(e, &req))
     }
 }
@@ -472,13 +475,12 @@ impl Service {
                 },
             };
             let (p, mime) = match e.file_name().to_str() {
-                Some(n) if n == "index.html" => ("/".to_owned(), mime::TEXT_HTML),
-                Some(n) if n.ends_with(".html") => (format!("/{}", n), mime::TEXT_HTML),
-                Some(n) if n.ends_with(".ico") => (format!("/{}", n),
-                                                   "image/vnd.microsoft.icon".parse().unwrap()),
-                Some(n) if n.ends_with(".js") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
-                Some(n) if n.ends_with(".map") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
-                Some(n) if n.ends_with(".png") => (format!("/{}", n), mime::IMAGE_PNG),
+                Some(n) if n == "index.html" => ("/".to_owned(), "text/html"),
+                Some(n) if n.ends_with(".html") => (format!("/{}", n), "text/html"),
+                Some(n) if n.ends_with(".ico") => (format!("/{}", n), "image/vnd.microsoft.icon"),
+                Some(n) if n.ends_with(".js") => (format!("/{}", n), "text/javascript"),
+                Some(n) if n.ends_with(".map") => (format!("/{}", n), "text/javascript"),
+                Some(n) if n.ends_with(".png") => (format!("/{}", n), "image/png"),
                 Some(n) => {
                     warn!("UI directory file {:?} has unknown extension; skipping", n);
                     continue;
@@ -490,7 +492,7 @@ impl Service {
                 },
             };
             files.insert(p, UiFile {
-                mime,
+                mime: http::header::HeaderValue::from_static(mime),
                 path: e.path(),
             });
         }

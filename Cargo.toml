@@ -17,14 +17,16 @@ bundled = ["rusqlite/bundled"]
 members = ["base", "db", "ffmpeg"]
 
 [dependencies]
+bytes = "0.4.6"
 byteorder = "1.0"
 docopt = "0.8"
 failure = "0.1.1"
 futures = "0.1"
 futures-cpupool = "0.1"
 fnv = "1.0"
+http = "0.1.5"
 http-serve = { git = "https://github.com/scottlamb/http-serve" }
-hyper = "0.11.16"
+hyper = "0.11.25"
 lazy_static = "1.0"
 libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }

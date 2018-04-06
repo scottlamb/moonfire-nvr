@@ -30,6 +30,7 @@
 
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
+extern crate bytes;
 extern crate byteorder;
 extern crate core;
 extern crate docopt;
@@ -37,6 +38,7 @@ extern crate futures;
 extern crate futures_cpupool;
 #[macro_use] extern crate failure;
 extern crate fnv;
+extern crate http;
 extern crate http_serve;
 extern crate hyper;
 #[macro_use] extern crate lazy_static;

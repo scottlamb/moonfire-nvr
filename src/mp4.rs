@@ -79,11 +79,13 @@
 extern crate time;
 
 use base::strutil;
+use bytes::BytesMut;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db::recording::{self, TIME_UNITS_PER_SEC};
 use db::{self, dir};
 use failure::Error;
 use futures::stream;
+use http;
 use http_serve;
 use hyper::header;
 use memmap;
@@ -1484,20 +1486,21 @@ impl http_serve::Entity for File {
     type Chunk = slices::Chunk;
     type Body = slices::Body;
 
-    fn add_headers(&self, hdrs: &mut header::Headers) {
-        let mut mime = String::with_capacity(64);
-        mime.push_str("video/mp4; codecs=\"");
+    fn add_headers(&self, hdrs: &mut http::header::HeaderMap) {
+        let mut mime = BytesMut::with_capacity(64);
+        mime.extend_from_slice(b"video/mp4; codecs=\"");
         let mut first = true;
         for e in &self.0.video_sample_entries {
             if first {
                 first = false
             } else {
-                mime.push_str(", ");
+                mime.extend_from_slice(b", ");
             }
-            mime.push_str(&e.rfc6381_codec);
+            mime.extend_from_slice(e.rfc6381_codec.as_bytes());
         }
-        mime.push('"');
-        hdrs.set(header::ContentType(mime.parse().unwrap()));
+        mime.extend_from_slice(b"\"");
+        hdrs.insert(http::header::CONTENT_TYPE,
+                    http::header::HeaderValue::from_shared(mime.freeze()).unwrap());
     }
     fn last_modified(&self) -> Option<header::HttpDate> { Some(self.0.last_modified) }
     fn etag(&self) -> Option<header::EntityTag> { Some(self.0.etag.clone()) }
