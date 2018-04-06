@@ -43,9 +43,12 @@ use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
 use web;
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
-// They seem to be correct for Linux and OS X at least.
+// They seem to be correct for Linux and macOS at least.
 const LOCALTIME_PATH: &'static str = "/etc/localtime";
-const ZONEINFO_PATH: &'static str = "/usr/share/zoneinfo/";
+const ZONEINFO_PATHS: [&'static str; 2] = [
+    "/usr/share/zoneinfo/",       // Linux, macOS < High Sierra
+    "/var/db/timezone/zoneinfo/"  // macOS High Sierra
+];
 
 const USAGE: &'static str = r#"
 Usage: moonfire-nvr run [options]
@@ -86,11 +89,12 @@ fn setup_shutdown_future(h: &reactor::Handle) -> Box<Future<Item = (), Error = (
 fn resolve_zone() -> String {
     let p = ::std::fs::read_link(LOCALTIME_PATH).expect("unable to read localtime symlink");
     let p = p.to_str().expect("localtime symlink destination must be valid UTF-8");
-    if !p.starts_with(ZONEINFO_PATH) {
-        panic!("Expected {} to point to a path within {}; actually points to {}",
-               LOCALTIME_PATH, ZONEINFO_PATH, p);
+    for zp in &ZONEINFO_PATHS {
+        if p.starts_with(zp) {
+            return p[zp.len()..].into();
+        }
     }
-    p[ZONEINFO_PATH.len()..].into()
+    panic!("{} points to unexpected path {}", LOCALTIME_PATH, p)
 }
 
 struct Syncer {
