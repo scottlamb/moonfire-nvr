@@ -322,7 +322,7 @@ create table user (
 
   -- Updated lazily on database flush; reset when password_id is incremented.
   -- This could be used to automatically disable the password on hitting a threshold.
-  password_failure_count integer not null,
+  password_failure_count integer not null default 0,
 
   -- If set, a Unix UID that is accepted for authentication when using HTTP over
   -- a Unix domain socket. (Additionally, the UID running Moonfire NVR can authenticate
@@ -332,20 +332,35 @@ create table user (
 );
 
 -- A single session, whether for browser or robot use.
+-- These map at the HTTP layer to two cookies (exact format described
+-- elsewhere):
+--
+-- * "s" holds the session id and an encrypted sequence number for replay
+--   protection. To decrease chance of leaks, it's normally marked as
+--   HttpOnly, preventing client-side Javascript from accessing it.
+--
+-- * "sc" holds state needed by client Javascript, such as a CSRF token (which
+--   should be copied into POST request bodies) and username (which should be
+--   presented in the UI). It should never be marked HttpOnly.
 create table user_session (
-  -- The session id is a 48-byte blob (which is base64 encoded to 64 bytes in the HTTP cookie).
-  -- This is the unencoded SHA3-256 of the unencoded session id. Much like `password_hash`,
-  -- a hash is used here so that a leaked database backup can't be trivially used to steal
-  -- credentials. The hash is unsalted; unlike passwords designed for humans to
-  -- remember, the session id is assumed to itself have sufficient entropy.
+  -- The session id is a 20-byte blob. This is the unencoded, unsalted Blake2b-160
+  -- (also 20 bytes) of the unencoded session id. Much like `password_hash`, a
+  -- hash is used here so that a leaked database backup can't be trivially used
+  -- to steal credentials.
   session_id_hash blob primary key not null,
 
   user_id integer references user (id) not null,
 
-  -- A bitwise mask of flags, currently all properties of the HTTP cookie used to hold the session:
-  -- 1: HttpOnly
-  -- 2: Secure
-  -- 4: SameSite (lax)
+  -- A TBD-byte random number. Used to derive keys for the replay protection
+  -- and CSRF tokens.
+  seed blob not null,
+
+  -- A bitwise mask of flags, currently all properties of the HTTP cookies
+  -- used to hold the session:
+  -- 1: HttpOnly ("s" cookie only)
+  -- 2: Secure (both cookies)
+  -- 4: SameSite=Lax (both cookies)
+  -- 8: SameSite=Strict ("s" cookie only) - 4 must also be set.
   flags integer not null,
 
   -- The domain of the HTTP cookie used to store this session. The outbound
@@ -359,8 +374,8 @@ create table user_session (
 
   creation_password_id integer,        -- the id it was created from, if created via password
   creation_time_sec integer not null,  -- sec since epoch
-  creation_peer_addr blob,             -- IPv4 or IPv6 address, or null for Unix socket.
   creation_user_agent text,            -- User-Agent header from inbound HTTP request.
+  creation_peer_addr blob,             -- IPv4 or IPv6 address, or null for Unix socket.
 
   revocation_time_sec integer,         -- sec since epoch
   revocation_user_agent text,          -- User-Agent header from inbound HTTP request.
@@ -383,7 +398,7 @@ create table user_session (
   last_use_time_sec integer,           -- sec since epoch
   last_use_user_agent text,            -- User-Agent header from inbound HTTP request.
   last_use_peer_addr blob,             -- IPv4 or IPv6 address, or null for Unix socket.
-  use_count not null
+  use_count not null default 0
 ) without rowid;
 
 create index user_session_uid on user_session (user_id);

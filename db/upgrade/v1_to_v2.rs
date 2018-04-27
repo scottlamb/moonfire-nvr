@@ -73,19 +73,20 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           flags integer not null,
           password_hash text,
           password_id integer not null default 0,
-          password_failure_count integer not null,
+          password_failure_count integer not null default 0,
           unix_uid integer
         );
         create table user_session (
           session_id_hash blob primary key not null,
           user_id integer references user (id) not null,
+          seed blob not null,
           flags integer not null,
           domain text,
           description text,
           creation_password_id integer,
-          creation_peer_addr blob,
           creation_time_sec integer not null,
           creation_user_agent text,
+          creation_peer_addr blob,
           revocation_time_sec integer,
           revocation_user_agent text,
           revocation_peer_addr blob,
@@ -94,7 +95,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           last_use_time_sec integer,
           last_use_user_agent text,
           last_use_peer_addr blob,
-          use_count not null
+          use_count not null default 0
         ) without rowid;
     "#)?;
     let db_uuid = ::uuid::Uuid::new_v4();
