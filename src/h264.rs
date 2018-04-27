@@ -41,7 +41,7 @@
 //! would be more trouble than it's worth.
 
 use byteorder::{BigEndian, WriteBytesExt};
-use error::{Error, Result};
+use failure::Error;
 use regex::bytes::Regex;
 
 // See ISO/IEC 14496-10 table 7-1 - NAL unit type codes, syntax element categories, and NAL unit
@@ -59,8 +59,8 @@ const NAL_UNIT_TYPE_MASK: u8 = 0x1F;  // bottom 5 bits of first byte of unit.
 ///
 /// TODO: detect invalid byte streams. For example, several 0x00s not followed by a 0x01, a stream
 /// stream not starting with 0x00 0x00 0x00 0x01, or an empty NAL unit.
-fn decode_h264_annex_b<'a, F>(data: &'a [u8], mut f: F) -> Result<()>
-where F: FnMut(&'a [u8]) -> Result<()> {
+fn decode_h264_annex_b<'a, F>(data: &'a [u8], mut f: F) -> Result<(), Error>
+where F: FnMut(&'a [u8]) -> Result<(), Error> {
     lazy_static! {
         static ref START_CODE: Regex = Regex::new(r"(\x00{2,}\x01)").unwrap();
     }
@@ -73,21 +73,21 @@ where F: FnMut(&'a [u8]) -> Result<()> {
 }
 
 /// Parses Annex B extra data, returning a tuple holding the `sps` and `pps` substrings.
-fn parse_annex_b_extra_data(data: &[u8]) -> Result<(&[u8], &[u8])> {
+fn parse_annex_b_extra_data(data: &[u8]) -> Result<(&[u8], &[u8]), Error> {
     let mut sps = None;
     let mut pps = None;
     decode_h264_annex_b(data, |unit| {
         let nal_type = (unit[0] as u8) & NAL_UNIT_TYPE_MASK;
         match nal_type {
-            NAL_UNIT_SEQ_PARAMETER_SET => { sps = Some(unit); },
-            NAL_UNIT_PIC_PARAMETER_SET => { pps = Some(unit); },
-            _ => { return Err(Error::new(format!("Expected SPS and PPS; got type {}", nal_type))); }
+            NAL_UNIT_SEQ_PARAMETER_SET => sps = Some(unit),
+            NAL_UNIT_PIC_PARAMETER_SET => pps = Some(unit),
+            _ => bail!("Expected SPS and PPS; got type {}", nal_type),
         };
         Ok(())
     })?;
     match (sps, pps) {
         (Some(s), Some(p)) => Ok((s, p)),
-        _ => Err(Error::new("SPS and PPS must be specified".to_owned())),
+        _ => bail!("SPS and PPS must be specified"),
     }
 }
 
@@ -107,7 +107,7 @@ pub struct ExtraData {
 
 impl ExtraData {
     /// Parses "extradata" from ffmpeg. This data may be in either Annex B format or AVC format.
-    pub fn parse(extradata: &[u8], width: u16, height: u16) -> Result<ExtraData> {
+    pub fn parse(extradata: &[u8], width: u16, height: u16) -> Result<ExtraData, Error> {
         let mut sps_and_pps = None;
         let need_transform;
         let avcc_len = if extradata.starts_with(b"\x00\x00\x00\x01") ||
@@ -198,11 +198,9 @@ impl ExtraData {
             sample_entry.extend_from_slice(pps);
 
             if sample_entry.len() - avcc_len_pos != avcc_len {
-                return Err(Error::new(format!("internal error: anticipated AVCConfigurationBox \
-                                               length {}, but was actually {}; sps length \
-                                               {}, pps length {}",
-                                              avcc_len, sample_entry.len() - avcc_len_pos,
-                                              sps.len(), pps.len())));
+                bail!("internal error: anticipated AVCConfigurationBox \
+                       length {}, but was actually {}; sps length {}, pps length {}",
+                      avcc_len, sample_entry.len() - avcc_len_pos, sps.len(), pps.len());
             }
             sample_entry.len() - before
         } else {
@@ -211,15 +209,17 @@ impl ExtraData {
         };
 
         if sample_entry.len() - avc1_len_pos != avc1_len {
-            return Err(Error::new(format!("internal error: anticipated AVCSampleEntry length \
-                                           {}, but was actually {}; AVCDecoderConfiguration \
-                                           length {}", avc1_len, sample_entry.len() - avc1_len_pos,
-                                           avc_decoder_config_len)));
+            bail!("internal error: anticipated AVCSampleEntry length \
+                   {}, but was actually {}; AVCDecoderConfiguration length {}",
+                  avc1_len, sample_entry.len() - avc1_len_pos, avc_decoder_config_len);
         }
-        let rfc6381_codec = rfc6381_codec_from_sample_entry(&sample_entry)?;
+        let profile_idc = sample_entry[103];
+        let constraint_flags = sample_entry[104];
+        let level_idc = sample_entry[105];
+        let codec = format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags, level_idc);
         Ok(ExtraData {
             sample_entry,
-            rfc6381_codec,
+            rfc6381_codec: codec,
             width,
             height,
             need_transform,
@@ -227,21 +227,10 @@ impl ExtraData {
     }
 }
 
-pub fn rfc6381_codec_from_sample_entry(sample_entry: &[u8]) -> Result<String> {
-    if sample_entry.len() < 99 || &sample_entry[4..8] != b"avc1" ||
-       &sample_entry[90..94] != b"avcC" {
-        return Err(Error::new("not a valid AVCSampleEntry".to_owned()));
-    }
-    let profile_idc = sample_entry[103];
-    let constraint_flags_byte = sample_entry[104];
-    let level_idc = sample_entry[105];
-    Ok(format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags_byte, level_idc))
-}
-
 /// Transforms sample data from Annex B format to AVC format. Should be called on samples iff
 /// `ExtraData::need_transform` is true. Uses an out parameter `avc_sample` rather than a return
 /// so that memory allocations can be reused from sample to sample.
-pub fn transform_sample_data(annexb_sample: &[u8], avc_sample: &mut Vec<u8>) -> Result<()> {
+pub fn transform_sample_data(annexb_sample: &[u8], avc_sample: &mut Vec<u8>) -> Result<(), Error> {
     // See AVCParameterSamples, ISO/IEC 14496-15 section 5.3.2.
     avc_sample.clear();
 
@@ -259,7 +248,7 @@ pub fn transform_sample_data(annexb_sample: &[u8], avc_sample: &mut Vec<u8>) -> 
 
 #[cfg(test)]
 mod tests {
-    use testutil;
+    use db::testutil;
 
     const ANNEX_B_TEST_INPUT: [u8; 35] = [
         0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x00, 0x1f,

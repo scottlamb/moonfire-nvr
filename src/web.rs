@@ -30,20 +30,22 @@
 
 extern crate hyper;
 
+use base::strutil;
 use core::borrow::Borrow;
 use core::str::FromStr;
-use db;
-use dir::SampleFileDir;
-use error::Error;
+use db::{self, recording};
+use db::dir::SampleFileDir;
+use failure::Error;
+use fnv::FnvHashMap;
 use futures::{future, stream};
 use futures_cpupool;
 use json;
+use http;
 use http_serve;
 use hyper::header::{self, Header};
 use hyper::server::{self, Request, Response};
 use mime;
 use mp4;
-use recording;
 use reffers::ARefs;
 use regex::Regex;
 use serde_json;
@@ -54,25 +56,25 @@ use std::fs;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
-use strutil;
 use url::form_urlencoded;
 use uuid::Uuid;
 
 lazy_static! {
     /// Regex used to parse the `s` query parameter to `view.mp4`.
     /// As described in `design/api.md`, this is of the form
-    /// `START_ID[-END_ID][.[REL_START_TIME]-[REL_END_TIME]]`.
-    static ref SEGMENTS_RE: Regex = Regex::new(r"^(\d+)(-\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
+    /// `START_ID[-END_ID][@OPEN_ID][.[REL_START_TIME]-[REL_END_TIME]]`.
+    static ref SEGMENTS_RE: Regex =
+        Regex::new(r"^(\d+)(-\d+)?(@\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
 }
 
 enum Path {
-    TopLevel,                       // "/api/"
-    InitSegment([u8; 20]),          // "/api/init/<sha1>.mp4"
-    Camera(Uuid),                   // "/api/cameras/<uuid>/"
-    CameraRecordings(Uuid),         // "/api/cameras/<uuid>/recordings"
-    CameraViewMp4(Uuid),            // "/api/cameras/<uuid>/view.mp4"
-    CameraViewMp4Segment(Uuid),     // "/api/cameras/<uuid>/view.m4s"
-    Static,                         // "<other path>"
+    TopLevel,                                    // "/api/"
+    InitSegment([u8; 20]),                       // "/api/init/<sha1>.mp4"
+    Camera(Uuid),                                // "/api/cameras/<uuid>/"
+    StreamRecordings(Uuid, db::StreamType),      // "/api/cameras/<uuid>/<type>/recordings"
+    StreamViewMp4(Uuid, db::StreamType),         // "/api/cameras/<uuid>/<type>/view.mp4"
+    StreamViewMp4Segment(Uuid, db::StreamType),  // "/api/cameras/<uuid>/<type>/view.m4s"
+    Static,                                      // "<other path>"
     NotFound,
 }
 
@@ -101,18 +103,33 @@ fn decode_path(path: &str) -> Path {
         None => { return Path::NotFound; },
         Some(s) => s,
     };
-    let (uuid, path) = path.split_at(slash);
+    let uuid = &path[0 .. slash];
+    let path = &path[slash+1 .. ];
 
     // TODO(slamb): require uuid to be in canonical format.
     let uuid = match Uuid::parse_str(uuid) {
         Ok(u) => u,
         Err(_) => { return Path::NotFound },
     };
+
+    if path.is_empty() {
+        return Path::Camera(uuid);
+    }
+
+    let slash = match path.find('/') {
+        None => { return Path::NotFound; },
+        Some(s) => s,
+    };
+    let (type_, path) = path.split_at(slash);
+
+    let type_ = match db::StreamType::parse(type_) {
+        None => { return Path::NotFound; },
+        Some(t) => t,
+    };
     match path {
-        "/" => Path::Camera(uuid),
-        "/recordings" => Path::CameraRecordings(uuid),
-        "/view.mp4" => Path::CameraViewMp4(uuid),
-        "/view.m4s" => Path::CameraViewMp4Segment(uuid),
+        "/recordings" => Path::StreamRecordings(uuid, type_),
+        "/view.mp4" => Path::StreamViewMp4(uuid, type_),
+        "/view.m4s" => Path::StreamViewMp4Segment(uuid, type_),
         _ => Path::NotFound,
     }
 }
@@ -120,6 +137,7 @@ fn decode_path(path: &str) -> Path {
 #[derive(Debug, Eq, PartialEq)]
 struct Segments {
     ids: Range<i32>,
+    open_id: Option<u32>,
     start_time: i64,
     end_time: Option<i64>,
 }
@@ -129,17 +147,21 @@ impl Segments {
         let caps = SEGMENTS_RE.captures(input).ok_or(())?;
         let ids_start = i32::from_str(caps.get(1).unwrap().as_str()).map_err(|_| ())?;
         let ids_end = match caps.get(2) {
-            Some(e) => i32::from_str(&e.as_str()[1..]).map_err(|_| ())?,
+            Some(m) => i32::from_str(&m.as_str()[1..]).map_err(|_| ())?,
             None => ids_start,
         } + 1;
+        let open_id = match caps.get(3) {
+            Some(m) => Some(u32::from_str(&m.as_str()[1..]).map_err(|_| ())?),
+            None => None,
+        };
         if ids_start < 0 || ids_end <= ids_start {
             return Err(());
         }
-        let start_time = caps.get(3).map_or(Ok(0), |m| i64::from_str(m.as_str())).map_err(|_| ())?;
+        let start_time = caps.get(4).map_or(Ok(0), |m| i64::from_str(m.as_str())).map_err(|_| ())?;
         if start_time < 0 {
             return Err(());
         }
-        let end_time = match caps.get(4) {
+        let end_time = match caps.get(5) {
             Some(v) => {
                 let e = i64::from_str(v.as_str()).map_err(|_| ())?;
                 if e <= start_time {
@@ -149,10 +171,11 @@ impl Segments {
             },
             None => None
         };
-        Ok(Segments{
+        Ok(Segments {
             ids: ids_start .. ids_end,
-            start_time: start_time,
-            end_time: end_time,
+            open_id,
+            start_time,
+            end_time,
         })
     }
 }
@@ -162,13 +185,13 @@ impl Segments {
 /// The files themselves are opened on every request so they can be changed during development.
 #[derive(Debug)]
 struct UiFile {
-    mime: mime::Mime,
+    mime: http::header::HeaderValue,
     path: PathBuf,
 }
 
 struct ServiceInner {
     db: Arc<db::Database>,
-    dir: Arc<SampleFileDir>,
+    dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
     ui_files: HashMap<String, UiFile>,
     allow_origin: Option<header::AccessControlAllowOrigin>,
     pool: futures_cpupool::CpuPool,
@@ -201,7 +224,7 @@ impl ServiceInner {
             let db = self.db.lock();
             serde_json::to_writer(&mut w, &json::TopLevel {
                     time_zone_name: &self.time_zone_name,
-                    cameras: (db.cameras_by_id(), days),
+                    cameras: (&db, days),
             })?;
         }
         Ok(resp)
@@ -212,13 +235,13 @@ impl ServiceInner {
         if let Some(mut w) = http_serve::streaming_body(&req, &mut resp).build() {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
-                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            serde_json::to_writer(&mut w, &json::Camera::new(camera, true))?
+                           .ok_or_else(|| format_err!("no such camera {}", uuid))?;
+            serde_json::to_writer(&mut w, &json::Camera::wrap(camera, &db, true)?)?
         };
         Ok(resp)
     }
 
-    fn camera_recordings(&self, req: &Request, uuid: Uuid)
+    fn stream_recordings(&self, req: &Request, uuid: Uuid, type_: db::StreamType)
                          -> Result<Response<slices::Body>, Error> {
         let (r, split) = {
             let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
@@ -240,19 +263,25 @@ impl ServiceInner {
         {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
-                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            db.list_aggregated_recordings(camera.id, r, split, |row| {
+                           .ok_or_else(|| format_err!("no such camera {}", uuid))?;
+            let stream_id = camera.streams[type_.index()]
+                                  .ok_or_else(|| format_err!("no such stream {}/{}", uuid, type_))?;
+            db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
                 let end = row.ids.end - 1;  // in api, ids are inclusive.
+                let vse = db.video_sample_entries_by_id().get(&row.video_sample_entry_id).unwrap();
                 out.recordings.push(json::Recording {
                     start_id: row.ids.start,
-                    end_id: if end == row.ids.start + 1 { None } else { Some(end) },
+                    end_id: if end == row.ids.start { None } else { Some(end) },
                     start_time_90k: row.time.start.0,
                     end_time_90k: row.time.end.0,
                     sample_file_bytes: row.sample_file_bytes,
+                    open_id: row.open_id,
+                    first_uncommitted: row.first_uncommitted,
                     video_samples: row.video_samples,
-                    video_sample_entry_width: row.video_sample_entry.width,
-                    video_sample_entry_height: row.video_sample_entry.height,
-                    video_sample_entry_sha1: strutil::hex(&row.video_sample_entry.sha1),
+                    video_sample_entry_width: vse.width,
+                    video_sample_entry_height: vse.height,
+                    video_sample_entry_sha1: strutil::hex(&vse.sha1),
+                    growing: row.growing,
                 });
                 Ok(())
             })?;
@@ -267,33 +296,34 @@ impl ServiceInner {
     fn init_segment(&self, sha1: [u8; 20], req: &Request) -> Result<Response<slices::Body>, Error> {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
         let db = self.db.lock();
-        for ent in db.video_sample_entries() {
+        for ent in db.video_sample_entries_by_id().values() {
             if ent.sha1 == sha1 {
                 builder.append_video_sample_entry(ent.clone());
-                let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
+                let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
                 return Ok(http_serve::serve(mp4, req));
             }
         }
         self.not_found()
     }
 
-    fn camera_view_mp4(&self, uuid: Uuid, type_: mp4::Type, query: Option<&str>, req: &Request)
-                       -> Result<Response<slices::Body>, Error> {
-        let camera_id = {
+    fn stream_view_mp4(&self, req: &Request, uuid: Uuid, stream_type_: db::StreamType,
+                       mp4_type_: mp4::Type) -> Result<Response<slices::Body>, Error> {
+        let stream_id = {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
-                           .ok_or_else(|| Error::new("no such camera".to_owned()))?;
-            camera.id
+                           .ok_or_else(|| format_err!("no such camera {}", uuid))?;
+            camera.streams[stream_type_.index()]
+                  .ok_or_else(|| format_err!("no such stream {}/{}", uuid, stream_type_))?
         };
-        let mut builder = mp4::FileBuilder::new(type_);
-        if let Some(q) = query {
+        let mut builder = mp4::FileBuilder::new(mp4_type_);
+        if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value) = (key.borrow(), value.borrow());
                 match key {
                     "s" => {
                         let s = Segments::parse(value).map_err(
-                            |_| Error::new(format!("invalid s parameter: {}", value)))?;
-                        debug!("camera_view_mp4: appending s={:?}", s);
+                            |_| format_err!("invalid s parameter: {}", value))?;
+                        debug!("stream_view_mp4: appending s={:?}", s);
                         let mut est_segments = (s.ids.end - s.ids.start) as usize;
                         if let Some(end) = s.end_time {
                             // There should be roughly ceil((end - start) /
@@ -310,19 +340,26 @@ impl ServiceInner {
                         let db = self.db.lock();
                         let mut prev = None;
                         let mut cur_off = 0;
-                        db.list_recordings_by_id(camera_id, s.ids.clone(), |r| {
+                        db.list_recordings_by_id(stream_id, s.ids.clone(), &mut |r| {
+                            let recording_id = r.id.recording();
+
+                            if let Some(o) = s.open_id {
+                                if r.open_id != o {
+                                    bail!("recording {} has open id {}, requested {}",
+                                          r.id, r.open_id, o);
+                                }
+                            }
+
                             // Check for missing recordings.
                             match prev {
-                                None if r.id == s.ids.start => {},
-                                None => return Err(Error::new(format!("no such recording {}/{}",
-                                                                      camera_id, s.ids.start))),
-                                Some(id) if r.id != id + 1 => {
-                                    return Err(Error::new(format!("no such recording {}/{}",
-                                                                  camera_id, id + 1)));
+                                None if recording_id == s.ids.start => {},
+                                None => bail!("no such recording {}/{}", stream_id, s.ids.start),
+                                Some(id) if r.id.recording() != id + 1 => {
+                                    bail!("no such recording {}/{}", stream_id, id + 1);
                                 },
                                 _ => {},
                             };
-                            prev = Some(r.id);
+                            prev = Some(recording_id);
 
                             // Add a segment for the relevant part of the recording, if any.
                             let end_time = s.end_time.unwrap_or(i64::max_value());
@@ -331,11 +368,11 @@ impl ServiceInner {
                                 let start = cmp::max(0, s.start_time - cur_off);
                                 let end = cmp::min(d, end_time - cur_off);
                                 let times = start as i32 .. end as i32;
-                                debug!("...appending recording {}/{} with times {:?} (out of dur {})",
-                                       r.camera_id, r.id, times, d);
+                                debug!("...appending recording {} with times {:?} \
+                                       (out of dur {})", r.id, times, d);
                                 builder.append(&db, r, start as i32 .. end as i32)?;
                             } else {
-                                debug!("...skipping recording {}/{} dur {}", r.camera_id, r.id, d);
+                                debug!("...skipping recording {} dur {}", r.id, d);
                             }
                             cur_off += d;
                             Ok(())
@@ -344,28 +381,25 @@ impl ServiceInner {
                         // Check for missing recordings.
                         match prev {
                             Some(id) if s.ids.end != id + 1 => {
-                                return Err(Error::new(format!("no such recording {}/{}",
-                                                              camera_id, s.ids.end - 1)));
+                                bail!("no such recording {}/{}", stream_id, s.ids.end - 1);
                             },
                             None => {
-                                return Err(Error::new(format!("no such recording {}/{}",
-                                                              camera_id, s.ids.start)));
+                                bail!("no such recording {}/{}", stream_id, s.ids.start);
                             },
                             _ => {},
                         };
                         if let Some(end) = s.end_time {
                             if end > cur_off {
-                                return Err(Error::new(
-                                        format!("end time {} is beyond specified recordings", end)));
+                                bail!("end time {} is beyond specified recordings", end);
                             }
                         }
                     },
                     "ts" => builder.include_timestamp_subtitle_track(value == "true"),
-                    _ => return Err(Error::new(format!("parameter {} not understood", key))),
+                    _ => bail!("parameter {} not understood", key),
                 }
             };
         }
-        let mp4 = builder.build(self.db.clone(), self.dir.clone())?;
+        let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
         Ok(http_serve::serve(mp4, req))
     }
 
@@ -375,7 +409,9 @@ impl ServiceInner {
             Some(s) => s,
         };
         let f = fs::File::open(&s.path)?;
-        let e = http_serve::ChunkedReadFile::new(f, Some(self.pool.clone()), s.mime.clone())?;
+        let mut hdrs = http::HeaderMap::new();
+        hdrs.insert(http::header::CONTENT_TYPE, s.mime.clone());
+        let e = http_serve::ChunkedReadFile::new(f, Some(self.pool.clone()), hdrs)?;
         Ok(http_serve::serve(e, &req))
     }
 }
@@ -384,20 +420,36 @@ impl ServiceInner {
 pub struct Service(Arc<ServiceInner>);
 
 impl Service {
-    pub fn new(db: Arc<db::Database>, dir: Arc<SampleFileDir>, ui_dir: Option<&str>,
-               allow_origin: Option<String>, zone: String) -> Result<Self, Error> {
+    pub fn new(db: Arc<db::Database>, ui_dir: Option<&str>, allow_origin: Option<String>,
+               zone: String) -> Result<Self, Error> {
         let mut ui_files = HashMap::new();
         if let Some(d) = ui_dir {
             Service::fill_ui_files(d, &mut ui_files);
         }
         debug!("UI files: {:#?}", ui_files);
+        let dirs_by_stream_id = {
+            let l = db.lock();
+            let mut d =
+                FnvHashMap::with_capacity_and_hasher(l.streams_by_id().len(), Default::default());
+            for (&id, s) in l.streams_by_id().iter() {
+                let dir_id = match s.sample_file_dir_id {
+                    Some(d) => d,
+                    None => continue,
+                };
+                d.insert(id, l.sample_file_dirs_by_id()
+                              .get(&dir_id)
+                              .unwrap()
+                              .get()?);
+            }
+            Arc::new(d)
+        };
         let allow_origin = match allow_origin {
             None => None,
             Some(o) => Some(header::AccessControlAllowOrigin::parse_header(&header::Raw::from(o))?),
         };
         Ok(Service(Arc::new(ServiceInner {
             db,
-            dir,
+            dirs_by_stream_id,
             ui_files,
             allow_origin,
             pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
@@ -423,13 +475,12 @@ impl Service {
                 },
             };
             let (p, mime) = match e.file_name().to_str() {
-                Some(n) if n == "index.html" => ("/".to_owned(), mime::TEXT_HTML),
-                Some(n) if n.ends_with(".html") => (format!("/{}", n), mime::TEXT_HTML),
-                Some(n) if n.ends_with(".ico") => (format!("/{}", n),
-                                                   "image/vnd.microsoft.icon".parse().unwrap()),
-                Some(n) if n.ends_with(".js") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
-                Some(n) if n.ends_with(".map") => (format!("/{}", n), mime::TEXT_JAVASCRIPT),
-                Some(n) if n.ends_with(".png") => (format!("/{}", n), mime::IMAGE_PNG),
+                Some(n) if n == "index.html" => ("/".to_owned(), "text/html"),
+                Some(n) if n.ends_with(".html") => (format!("/{}", n), "text/html"),
+                Some(n) if n.ends_with(".ico") => (format!("/{}", n), "image/vnd.microsoft.icon"),
+                Some(n) if n.ends_with(".js") => (format!("/{}", n), "text/javascript"),
+                Some(n) if n.ends_with(".map") => (format!("/{}", n), "text/javascript"),
+                Some(n) if n.ends_with(".png") => (format!("/{}", n), "image/png"),
                 Some(n) => {
                     warn!("UI directory file {:?} has unknown extension; skipping", n);
                     continue;
@@ -441,7 +492,7 @@ impl Service {
                 },
             };
             files.insert(p, UiFile {
-                mime,
+                mime: http::header::HeaderValue::from_static(mime),
                 path: e.path(),
             });
         }
@@ -460,12 +511,12 @@ impl server::Service for Service {
             Path::InitSegment(sha1) => self.0.init_segment(sha1, &req),
             Path::TopLevel => self.0.top_level(&req),
             Path::Camera(uuid) => self.0.camera(&req, uuid),
-            Path::CameraRecordings(uuid) => self.0.camera_recordings(&req, uuid),
-            Path::CameraViewMp4(uuid) => {
-                self.0.camera_view_mp4(uuid, mp4::Type::Normal, req.uri().query(), &req)
+            Path::StreamRecordings(uuid, type_) => self.0.stream_recordings(&req, uuid, type_),
+            Path::StreamViewMp4(uuid, type_) => {
+                self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::Normal)
             },
-            Path::CameraViewMp4Segment(uuid) => {
-                self.0.camera_view_mp4(uuid, mp4::Type::MediaSegment, req.uri().query(), &req)
+            Path::StreamViewMp4Segment(uuid, type_) => {
+                self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::MediaSegment)
             },
             Path::NotFound => self.0.not_found(),
             Path::Static => self.0.static_file(&req),
@@ -484,27 +535,31 @@ impl server::Service for Service {
 
 #[cfg(test)]
 mod tests {
+    use db::testutil;
     use super::Segments;
-    use testutil;
 
     #[test]
     fn test_segments() {
         testutil::init();
-        assert_eq!(Segments{ids: 1..2, start_time: 0, end_time: None},
+        assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 0, end_time: None},
                    Segments::parse("1").unwrap());
-        assert_eq!(Segments{ids: 1..2, start_time: 26, end_time: None},
+        assert_eq!(Segments{ids: 1..2, open_id: Some(42), start_time: 0, end_time: None},
+                   Segments::parse("1@42").unwrap());
+        assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 26, end_time: None},
                    Segments::parse("1.26-").unwrap());
-        assert_eq!(Segments{ids: 1..2, start_time: 0, end_time: Some(42)},
+        assert_eq!(Segments{ids: 1..2, open_id: Some(42), start_time: 26, end_time: None},
+                   Segments::parse("1@42.26-").unwrap());
+        assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 0, end_time: Some(42)},
                    Segments::parse("1.-42").unwrap());
-        assert_eq!(Segments{ids: 1..2, start_time: 26, end_time: Some(42)},
+        assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 26, end_time: Some(42)},
                    Segments::parse("1.26-42").unwrap());
-        assert_eq!(Segments{ids: 1..6, start_time: 0, end_time: None},
+        assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 0, end_time: None},
                    Segments::parse("1-5").unwrap());
-        assert_eq!(Segments{ids: 1..6, start_time: 26, end_time: None},
+        assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 26, end_time: None},
                    Segments::parse("1-5.26-").unwrap());
-        assert_eq!(Segments{ids: 1..6, start_time: 0, end_time: Some(42)},
+        assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 0, end_time: Some(42)},
                    Segments::parse("1-5.-42").unwrap());
-        assert_eq!(Segments{ids: 1..6, start_time: 26, end_time: Some(42)},
+        assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 26, end_time: Some(42)},
                    Segments::parse("1-5.26-42").unwrap());
     }
 }
@@ -514,9 +569,9 @@ mod bench {
     extern crate reqwest;
     extern crate test;
 
+    use db::testutil::{self, TestDb};
     use hyper;
     use self::test::Bencher;
-    use testutil::{self, TestDb};
     use uuid::Uuid;
 
     struct Server {
@@ -526,14 +581,13 @@ mod bench {
 
     impl Server {
         fn new() -> Server {
-            let db = TestDb::new();
+            let db = TestDb::new(::base::clock::RealClocks {});
             let test_camera_uuid = db.test_camera_uuid;
             testutil::add_dummy_recordings_to_db(&db.db, 1440);
             let (tx, rx) = ::std::sync::mpsc::channel();
             ::std::thread::spawn(move || {
                 let addr = "127.0.0.1:0".parse().unwrap();
-                let (db, dir) = (db.db.clone(), db.dir.clone());
-                let service = super::Service::new(db.clone(), dir.clone(), None, None,
+                let service = super::Service::new(db.db.clone(), None, None,
                                                   "".to_owned()).unwrap();
                 let server = hyper::server::Http::new()
                     .bind(&addr, move || Ok(service.clone()))
@@ -554,10 +608,10 @@ mod bench {
     }
 
     #[bench]
-    fn serve_camera_recordings(b: &mut Bencher) {
+    fn serve_stream_recordings(b: &mut Bencher) {
         testutil::init();
         let server = &*SERVER;
-        let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/recordings", server.base_url,
+        let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/main/recordings", server.base_url,
                                                server.test_camera_uuid)).unwrap();
         let mut buf = Vec::new();
         let client = reqwest::Client::new();

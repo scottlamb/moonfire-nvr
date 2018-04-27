@@ -29,9 +29,9 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use clock;
-use db;
-use dir;
-use error::Error;
+use db::{self, dir, writer};
+use failure::Error;
+use fnv::FnvHashMap;
 use futures::{Future, Stream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,9 +43,12 @@ use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
 use web;
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
-// They seem to be correct for Linux and OS X at least.
+// They seem to be correct for Linux and macOS at least.
 const LOCALTIME_PATH: &'static str = "/etc/localtime";
-const ZONEINFO_PATH: &'static str = "/usr/share/zoneinfo/";
+const ZONEINFO_PATHS: [&'static str; 2] = [
+    "/usr/share/zoneinfo/",       // Linux, macOS < High Sierra
+    "/var/db/timezone/zoneinfo/"  // macOS High Sierra
+];
 
 const USAGE: &'static str = r#"
 Usage: moonfire-nvr run [options]
@@ -55,9 +58,6 @@ Options:
     --db-dir=DIR           Set the directory holding the SQLite3 index database.
                            This is typically on a flash device.
                            [default: /var/lib/moonfire-nvr/db]
-    --sample-file-dir=DIR  Set the directory holding video data.
-                           This is typically on a hard drive.
-                           [default: /var/lib/moonfire-nvr/sample]
     --ui-dir=DIR           Set the directory with the user interface files
                            (.html, .js, etc).
                            [default: /usr/local/lib/moonfire-nvr/ui]
@@ -72,7 +72,6 @@ Options:
 #[derive(Debug, Deserialize)]
 struct Args {
     flag_db_dir: String,
-    flag_sample_file_dir: String,
     flag_http_addr: String,
     flag_ui_dir: String,
     flag_read_only: bool,
@@ -90,50 +89,106 @@ fn setup_shutdown_future(h: &reactor::Handle) -> Box<Future<Item = (), Error = (
 fn resolve_zone() -> String {
     let p = ::std::fs::read_link(LOCALTIME_PATH).expect("unable to read localtime symlink");
     let p = p.to_str().expect("localtime symlink destination must be valid UTF-8");
-    if !p.starts_with(ZONEINFO_PATH) {
-        panic!("Expected {} to point to a path within {}; actually points to {}",
-               LOCALTIME_PATH, ZONEINFO_PATH, p);
+    for zp in &ZONEINFO_PATHS {
+        if p.starts_with(zp) {
+            return p[zp.len()..].into();
+        }
     }
-    p[ZONEINFO_PATH.len()..].into()
+    panic!("{} points to unexpected path {}", LOCALTIME_PATH, p)
+}
+
+struct Syncer {
+    dir: Arc<dir::SampleFileDir>,
+    channel: writer::SyncerChannel<::std::fs::File>,
+    join: thread::JoinHandle<()>,
 }
 
 pub fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
+    let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
         &args.flag_db_dir,
         if args.flag_read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
-    let db = Arc::new(db::Database::new(conn).unwrap());
-    let dir = dir::SampleFileDir::new(&args.flag_sample_file_dir, db.clone()).unwrap();
+    let db = Arc::new(db::Database::new(clocks.clone(), conn, !args.flag_read_only).unwrap());
     info!("Database is loaded.");
 
-    let s = web::Service::new(db.clone(), dir.clone(), Some(&args.flag_ui_dir),
-                              args.flag_allow_origin, resolve_zone())?;
+    {
+        let mut l = db.lock();
+        let dirs_to_open: Vec<_> =
+            l.streams_by_id().values().filter_map(|s| s.sample_file_dir_id).collect();
+        l.open_sample_file_dirs(&dirs_to_open)?;
+    }
+    info!("Directories are opened.");
 
-    // Start a streamer for each camera.
+    let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), args.flag_allow_origin,
+                              resolve_zone())?;
+
+    // Start a streamer for each stream.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));
     let mut streamers = Vec::new();
-    let syncer = if !args.flag_read_only {
-        let (syncer_channel, syncer_join) = dir::start_syncer(dir.clone()).unwrap();
+    let syncers = if !args.flag_read_only {
         let l = db.lock();
-        let cameras = l.cameras_by_id().len();
-        let env = streamer::Environment{
+        let mut dirs = FnvHashMap::with_capacity_and_hasher(
+            l.sample_file_dirs_by_id().len(), Default::default());
+        let streams = l.streams_by_id().len();
+        let env = streamer::Environment {
             db: &db,
-            dir: &dir,
-            clocks: &clock::REAL,
             opener: &*stream::FFMPEG,
             shutdown: &shutdown_streamers,
         };
-        for (i, (id, camera)) in l.cameras_by_id().iter().enumerate() {
-            let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / cameras as i64;
-            let mut streamer = streamer::Streamer::new(&env, syncer_channel.clone(), *id, camera,
+
+        // Get the directories that need syncers.
+        for stream in l.streams_by_id().values() {
+            if let (Some(id), true) = (stream.sample_file_dir_id, stream.record) {
+                dirs.entry(id).or_insert_with(|| {
+                    let d = l.sample_file_dirs_by_id().get(&id).unwrap();
+                    info!("Starting syncer for path {}", d.path);
+                    d.get().unwrap()
+                });
+            }
+        }
+
+        // Then, with the lock dropped, create syncers.
+        drop(l);
+        let mut syncers = FnvHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
+        for (id, dir) in dirs.drain() {
+            let (channel, join) = writer::start_syncer(db.clone(), id)?;
+            syncers.insert(id, Syncer {
+                dir,
+                channel,
+                join,
+            });
+        }
+
+        // Then start up streams.
+        let l = db.lock();
+        for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
+            if !stream.record {
+                continue;
+            }
+            let camera = l.cameras_by_id().get(&stream.camera_id).unwrap();
+            let sample_file_dir_id = match stream.sample_file_dir_id {
+                Some(s) => s,
+                None => {
+                    warn!("Can't record stream {} ({}/{}) because it has no sample file dir",
+                          id, camera.short_name, stream.type_.as_str());
+                    continue;
+                },
+            };
+            let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
+            let syncer = syncers.get(&sample_file_dir_id).unwrap();
+            let mut streamer = streamer::Streamer::new(&env, syncer.dir.clone(),
+                                                       syncer.channel.clone(), *id, camera, stream,
                                                        rotate_offset_sec,
                                                        streamer::ROTATE_INTERVAL_SEC);
-            let name = format!("stream-{}", streamer.short_name());
+            info!("Starting streamer for {}", streamer.short_name());
+            let name = format!("s-{}", streamer.short_name());
             streamers.push(thread::Builder::new().name(name).spawn(move|| {
                 streamer.run();
             }).expect("can't create thread"));
         }
-        Some((syncer_channel, syncer_join))
+        drop(l);
+        Some(syncers)
     } else { None };
 
     // Start the web interface.
@@ -153,10 +208,14 @@ pub fn run() -> Result<(), Error> {
         streamer.join().unwrap();
     }
 
-    if let Some((syncer_channel, syncer_join)) = syncer {
-        info!("Shutting down syncer.");
-        drop(syncer_channel);
-        syncer_join.join().unwrap();
+    if let Some(mut ss) = syncers {
+        // The syncers shut down when all channels to them have been dropped.
+        // The database maintains one; and `ss` holds one. Drop both.
+        db.lock().clear_on_flush();
+        for (_, s) in ss.drain() {
+            drop(s.channel);
+            s.join.join().unwrap();
+        }
     }
 
     info!("Exiting.");

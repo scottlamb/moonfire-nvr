@@ -173,25 +173,6 @@ trap finish EXIT
 pre_install_prep
 
 
-# Initialize camera from sql file if present
-# (DEPRECATED: Will be removed in future version
-#
-CAMERAS_PATH="${MOONFIRE_DIR}/cameras.sql"
-if [ ! -r "${CAMERAS_PATH}" ]; then
-	CAMERAS_PATH="${MOONFIRE_DIR}/../cameras.sql"
-	if [ ! -r "${CAMERAS_PATH}" ]; then
-		CAMERAS_PATH=
-	fi
-fi
-if [ ! -z "${CAMERAS_PATH}" ]; then
-	echo_warn "Camera configuration through sql file is deprecated and will not be supported in the future." \
-		"Use \"moonfire-nvr config\" instead." 
-	echo_info -x "Adding camera confguration to db..."
-	addCameras
-else
-	echo_warn -x "No cameras auto configured. Use \"moonfire-nvr config\" to do it later..."
-fi
-
 read_lines <<-'INSTRUCTIONS'
 Unless there are errors above, everything you need should have been installed
 and you are now ready to build, install, and then use moonfire.

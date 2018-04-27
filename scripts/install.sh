@@ -104,7 +104,6 @@ After=network-online.target
 
 [Service]
 ExecStart=${SERVICE_BIN} run \\
-    --sample-file-dir=${SAMPLE_MEDIA_DIR}/${SAMPLE_FILE_DIR} \\
     --db-dir=${DB_DIR} \\
     --ui-dir=${LIB_DIR}/ui \\
     --http-addr=0.0.0.0:${NVR_PORT}

@@ -168,7 +168,6 @@ been done for you. If not, Create
 
     [Service]
     ExecStart=/usr/local/bin/moonfire-nvr run \
-        --sample-file-dir=/var/lib/moonfire-nvr/samples \
         --db-dir=/var/lib/moonfire-nvr/db \
         --http-addr=0.0.0.0:8080
     Environment=TZ=:/etc/localtime

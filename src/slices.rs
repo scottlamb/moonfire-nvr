@@ -30,10 +30,10 @@
 
 //! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
-use error::Error;
-use reffers::ARefs;
+use failure::Error;
 use futures::stream;
 use futures::Stream;
+use reffers::ARefs;
 use std::fmt;
 use std::ops::Range;
 
@@ -96,9 +96,8 @@ impl<S> Slices<S> where S: Slice {
     /// Appends the given slice, which must have end > the Slice's current len.
     pub fn append(&mut self, slice: S) -> Result<(), Error> {
         if slice.end() <= self.len {
-            return Err(Error::new(
-                    format!("end {} <= len {} while adding slice {:?} to slices:\n{:?}",
-                            slice.end(), self.len, slice, self)));
+            bail!("end {} <= len {} while adding slice {:?} to slices:\n{:?}",
+                  slice.end(), self.len, slice, self);
         }
         self.len = slice.end();
         self.slices.push(slice);
@@ -152,11 +151,11 @@ impl<S> Slices<S> where S: Slice {
 
 #[cfg(test)]
 mod tests {
+    use db::testutil;
     use futures::{Future, Stream};
     use futures::stream;
     use std::ops::Range;
     use super::{Slice, Slices};
-    use testutil;
 
     #[derive(Debug, Eq, PartialEq)]
     pub struct FakeChunk {

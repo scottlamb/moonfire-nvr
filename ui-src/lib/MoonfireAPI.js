@@ -77,13 +77,14 @@ export default class MoonfireAPI {
    * URL that will cause the state of a specific recording to be returned.
    *
    * @param  {String} cameraUUID UUID for the camera
+   * @param  {String} streamType "main" or "sub"
    * @param  {String} start90k   Timestamp for beginning of range of interest
    * @param  {String} end90k     Timestamp for end of range of interest
    * @param  {String} split90k   Desired maximum size of segments returned, or
    *                             Infinity for infinite range
    * @return {String}       Constructed url
    */
-  recordingsUrl(cameraUUID, start90k, end90k, split90k = Infinity) {
+  recordingsUrl(cameraUUID, streamType, start90k, end90k, split90k = Infinity) {
     const query = {
       startTime90k: start90k,
       endTime90k: end90k,
@@ -92,7 +93,7 @@ export default class MoonfireAPI {
       query.split90k = split90k;
     }
     return this._builder.makeUrl(
-      'cameras/' + cameraUUID + '/recordings',
+      'cameras/' + cameraUUID + '/' + streamType + '/recordings',
       query
     );
   }
@@ -101,15 +102,20 @@ export default class MoonfireAPI {
    * URL that will playback a video segment.
    *
    * @param  {String} cameraUUID UUID for the camera from whence comes the video
+   * @param  {String} streamType "main" or "sub"
    * @param  {Recording}  recording     Recording model object
-   * @param  {Range90k}  trimmedRange   Range restricting segments
-   * @param  {Boolean} timestampTrack   True if track should be timestamped
+   * @param  {Range90k}   trimmedRange   Range restricting segments
+   * @param  {Boolean}    timestampTrack   True if track should be timestamped
    * @return {String}                 Constructed url
    */
-  videoPlayUrl(cameraUUID, recording, trimmedRange, timestampTrack = true) {
+  videoPlayUrl(cameraUUID, streamType, recording, trimmedRange,
+               timestampTrack = true) {
     let sParam = recording.startId;
     if (recording.endId !== undefined) {
       sParam += '-' + recording.endId;
+    }
+    if (recording.firstUncommitted !== undefined) {
+      sParam += '@' + recording.openId; // disambiguate.
     }
     let rel = '';
     if (recording.startTime90k < trimmedRange.startTime90k) {
@@ -118,6 +124,9 @@ export default class MoonfireAPI {
     rel += '-';
     if (recording.endTime90k > trimmedRange.endTime90k) {
       rel += trimmedRange.endTime90k - recording.startTime90k;
+    } else if (recording.growing !== undefined) {
+      // View just the portion described by recording.
+      rel += recording.endTime90k - recording.startTime90k;
     }
     if (rel !== '-') {
       sParam += '.' + rel;
@@ -126,7 +135,8 @@ export default class MoonfireAPI {
       s: sParam,
       ts: timestampTrack,
     });
-    return this._builder.makeUrl('cameras/' + cameraUUID + '/view.mp4', {
+    return this._builder.makeUrl('cameras/' + cameraUUID + '/' + streamType +
+                                 '/view.mp4', {
       s: sParam,
       ts: timestampTrack,
     });

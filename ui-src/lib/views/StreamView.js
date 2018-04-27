@@ -33,29 +33,29 @@
 import RecordingsView from './RecordingsView';
 
 /**
- * Class handling a camer view.
- *
- * A camera view consists of a list of available recording segments for
- * playback.
+ * Stream view: a list of available recording segments for playback.
  */
-export default class CameraView {
+export default class StreamView {
   /**
-   * Construct the view.
-   *
    * @param  {Camera} cameraModel        Model object for camera
+   * @param  {String} streamType         "main" or "sub"
    * @param  {[type]} recordingFormatter Formatter to be used by recordings
    * @param  {[type]} trimmed            True if rec. ranges should be trimmed
    * @param  {[type]} recordingsParent   Parent element to attach to or null)
    */
   constructor(
     cameraModel,
+    streamType,
     recordingFormatter,
     trimmed,
     recordingsParent = null
   ) {
     this.camera = cameraModel;
+    this.streamType = streamType;
+    this.stream = cameraModel.streams[streamType];
     this.recordingsView = new RecordingsView(
       this.camera,
+      this.streamType,
       recordingFormatter,
       trimmed,
       recordingsParent
@@ -82,11 +82,8 @@ export default class CameraView {
   set enabled(enabled) {
     this._enabled = enabled;
     this.recordingsView.show = enabled;
-    console.log(
-      'Camera %s %s',
-      this.camera.shortName,
-      this.enabled ? 'enabled' : 'disabled'
-    );
+    console.log('Stream %s-%s %s', this.camera.shortName, this.streamType,
+                this.enabled ? 'enabled' : 'disabled');
   }
 
   /**

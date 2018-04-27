@@ -1,7 +1,6 @@
 # Moonfire NVR API
 
-Status: **unstable**. This is an early draft; the API may change without
-warning.
+Status: **current**.
 
 ## Objective
 
@@ -44,29 +43,32 @@ The `application/json` response will have a dict as follows:
     *   `uuid`: in text format
     *   `shortName`: a short name (typically one or two words)
     *   `description`: a longer description (typically a phrase or paragraph)
-    *   `retainBytes`: the configured total number of bytes of completed
-        recordings to retain.
-    *   `minStartTime90k`: the start time of the earliest recording for this
-        camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
-    *   `maxEndTime90k`: the end time of the latest recording for this camera,
-        in 90kHz units since 1970-01-01 00:00:00 UTC.
-    *   `totalDuration90k`: the total duration recorded, in 90 kHz units.
-        This is no greater than `maxEndTime90k - maxStartTime90k`; it will be
-        lesser if there are gaps in the recorded data.
-    *   `totalSampleFileBytes`: the total number of bytes of sample data (the
-        `mdat` portion of a `.mp4` file).
-    *   `days`: object representing calendar days (in the server's time zone)
-        with non-zero total duration of recordings for that day. The keys are
-        of the form `YYYY-mm-dd`; the values are objects with the following
-        attributes:
-        *   `totalDuration90k` is the total duration recorded during that day.
-            If a recording spans a day boundary, some portion of it is accounted to
-            each day.
-        *   `startTime90k` is the start of that calendar day in the server's time
-            zone.
-        *   `endTime90k` is the end of that calendar day in the server's time zone.
-            It is usually 24 hours after the start time. It might be 23 hours or 25
-            hours during spring forward or fall back, respectively.
+    *   `streams`: a dict of stream type ("main" or "sub") to a dictionary
+        describing the stream:
+        *   `retainBytes`: the configured total number of bytes of completed
+            recordings to retain.
+        *   `minStartTime90k`: the start time of the earliest recording for
+            this camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
+        *   `maxEndTime90k`: the end time of the latest recording for this
+            camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
+        *   `totalDuration90k`: the total duration recorded, in 90 kHz units.
+            This is no greater than `maxEndTime90k - maxStartTime90k`; it will
+            be lesser if there are gaps in the recorded data.
+        *   `totalSampleFileBytes`: the total number of bytes of sample data
+            (the `mdat` portion of a `.mp4` file).
+        *   `days`: object representing calendar days (in the server's time
+            zone) with non-zero total duration of recordings for that day. The
+            keys are of the form `YYYY-mm-dd`; the values are objects with the
+            following attributes:
+            *   `totalDuration90k` is the total duration recorded during that
+                day.  If a recording spans a day boundary, some portion of it
+                is accounted to each day.
+            *   `startTime90k` is the start of that calendar day in the
+                server's time zone.
+            *   `endTime90k` is the end of that calendar day in the server's
+                time zone.  It is usually 24 hours after the start time. It
+                might be 23 hours or 25 hours during spring forward or fall
+                back, respectively.
 
 Example response:
 
@@ -78,23 +80,27 @@ Example response:
       "uuid": "fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe",
       "shortName": "driveway",
       "description": "Hikvision DS-2CD2032 overlooking the driveway from east",
-      "retainBytes": 536870912000,
-      "minStartTime90k": 130888729442361,
-      "maxEndTime90k": 130985466591817,
-      "totalDuration90k": 96736169725,
-      "totalSampleFileBytes": 446774393937,
-      "days": {
-        "2016-05-01": {
-          "endTime90k": 131595516000000,
-          "startTime90k": 131587740000000,
-          "totalDuration90k": 52617609
-        },
-        "2016-05-02": {
-          "endTime90k": 131603292000000,
-          "startTime90k": 131595516000000,
-          "totalDuration90k": 20946022
+      "streams": {
+        "main": {
+          "retainBytes": 536870912000,
+          "minStartTime90k": 130888729442361,
+          "maxEndTime90k": 130985466591817,
+          "totalDuration90k": 96736169725,
+          "totalSampleFileBytes": 446774393937,
+          "days": {
+            "2016-05-01": {
+              "endTime90k": 131595516000000,
+              "startTime90k": 131587740000000,
+              "totalDuration90k": 52617609
+            },
+            "2016-05-02": {
+              "endTime90k": 131603292000000,
+              "startTime90k": 131595516000000,
+              "totalDuration90k": 20946022
+            }
+          }
         }
-      },
+      }
     },
     ...
   ],
@@ -109,29 +115,33 @@ Example response:
 
 ```json
 {
-  "days": {
-    "2016-05-01": {
-      "endTime90k": 131595516000000,
-      "startTime90k": 131587740000000,
-      "totalDuration90k": 52617609
-    },
-    "2016-05-02": {
-      "endTime90k": 131603292000000,
-      "startTime90k": 131595516000000,
-      "totalDuration90k": 20946022
+  "description": "",
+  "streams": {
+    "main": {
+      "days": {
+        "2016-05-01": {
+          "endTime90k": 131595516000000,
+          "startTime90k": 131587740000000,
+          "totalDuration90k": 52617609
+        },
+        "2016-05-02": {
+          "endTime90k": 131603292000000,
+          "startTime90k": 131595516000000,
+          "totalDuration90k": 20946022
+        }
+      },
+      "maxEndTime90k": 131598273666690,
+      "minStartTime90k": 131590386129355,
+      "retainBytes": 104857600,
+      "totalDuration90k": 73563631,
+      "totalSampleFileBytes": 98901406
     }
   },
-  "description": "",
-  "maxEndTime90k": 131598273666690,
-  "minStartTime90k": 131590386129355,
-  "retainBytes": 104857600,
-  "shortName": "driveway",
-  "totalDuration90k": 73563631,
-  "totalSampleFileBytes": 98901406
+  "shortName": "driveway"
 }
 ```
 
-### `/api/cameras/<uuid>/recordings`
+### `/api/cameras/<uuid>/<stream>/recordings`
 
 A GET returns information about recordings, in descending order.
 
@@ -159,6 +169,20 @@ Each recording object has the following properties:
     together are as described. Adjacent recordings from the same RTSP session
     may be coalesced in this fashion to reduce the amount of redundant data
     transferred.
+*   `firstUncommitted` (optional). If this range is not fully committed to the
+    database, the first id that is uncommitted. This is significant because
+    it's possible that after a crash and restart, this id will refer to a
+    completely different recording. That recording will have a different
+    `openId`.
+*   `growing` (optional). If this boolean is true, the recording `endId` is
+    still being written to. Accesses to this id (such as `view.mp4`) may
+    retrieve more data than described here if not bounded by duration.
+    Additionally, if `startId` == `endId`, the start time of the recording is
+    "unanchored" and may change in subsequent accesses.
+*   `openId`. Each time Moonfire NVR starts in read-write mode, it is assigned
+    an increasing "open id". This field is the open id as of when these
+    recordings were written. This can be used to disambiguate ids referring to
+    uncommitted recordings.
 *   `startTime90k`: the start time of the given recording. Note this may be
     less than the requested `startTime90k` if this recording was ongoing
     at the requested time.
@@ -175,7 +199,7 @@ Each recording object has the following properties:
 Example request URI (with added whitespace between parameters):
 
 ```
-/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/recordings
+/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/recordings
     ?startTime90k=130888729442361
     &endTime90k=130985466591817
 ```
@@ -204,7 +228,7 @@ Example response:
 }
 ```
 
-### `/api/cameras/<uuid>/view.mp4`
+### `/api/cameras/<uuid>/<stream>/view.mp4`
 
 A GET returns a `.mp4` file, with an etag and support for range requests. The
 MIME type will be `video/mp4`, with a `codecs` parameter as specified in [RFC
@@ -213,10 +237,12 @@ MIME type will be `video/mp4`, with a `codecs` parameter as specified in [RFC
 Expected query parameters:
 
 *   `s` (one or more): a string of the form
-    `START_ID[-END_ID][.[REL_START_TIME]-[REL_END_TIME]]`. This specifies
-    recording segments to include. The produced `.mp4` file will be a
+    `START_ID[-END_ID][@OPEN_ID][.[REL_START_TIME]-[REL_END_TIME]]`. This
+    specifies recording segments to include. The produced `.mp4` file will be a
     concatenation of the segments indicated by all `s` parameters.  The ids to
-    retrieve are as returned by the `/recordings` URL. The optional start and
+    retrieve are as returned by the `/recordings` URL. The open id is optional
+    and will be enforced if present; it's recommended for disambiguation when
+    the requested range includes uncommitted recordings. The optional start and
     end times are in 90k units and relative to the start of the first specified
     id. These can be used to clip the returned segments. Note they can be used
     to skip over some ids entirely; this is allowed so that the caller doesn't
@@ -230,27 +256,27 @@ Expected query parameters:
 Example request URI to retrieve all of recording id 1 from the given camera:
 
 ```
-    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1
 ```
 
 Example request URI to retrieve all of recording ids 1–5 from the given camera,
 with timestamp subtitles:
 
 ```
-    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1-5&ts=true
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1-5&ts=true
 ```
 
 Example request URI to retrieve recording id 1, skipping its first 26
 90,000ths of a second:
 
 ```
-    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/view.mp4?s=1.26
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1.26
 ```
 
 TODO: error behavior on missing segment. It should be a 404, likely with an
 `application/json` body describing what portion if any (still) exists.
 
-### `/api/cameras/<uuid>/view.m4s`
+### `/api/cameras/<uuid>/<stream>/view.m4s`
 
 A GET returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
 media segment][media-segment]. The MIME type will be `video/mp4`, with a

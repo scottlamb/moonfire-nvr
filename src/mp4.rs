@@ -78,17 +78,19 @@
 
 extern crate time;
 
+use base::strutil;
+use bytes::BytesMut;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use db;
-use dir;
-use error::Error;
+use db::recording::{self, TIME_UNITS_PER_SEC};
+use db::{self, dir};
+use failure::Error;
 use futures::stream;
+use http;
 use http_serve;
 use hyper::header;
 use memmap;
 use openssl::hash;
 use parking_lot::{Once, ONCE_INIT};
-use recording::{self, TIME_UNITS_PER_SEC};
 use reffers::ARefs;
 use slices::{self, Body, Chunk, Slices};
 use smallvec::SmallVec;
@@ -99,7 +101,6 @@ use std::io;
 use std::ops::Range;
 use std::mem;
 use std::sync::Arc;
-use strutil;
 
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
@@ -381,16 +382,13 @@ impl Segment {
         self.index_once.call_once(|| {
             let index = unsafe { &mut *self.index.get() };
             *index = db.lock()
-                       .with_recording_playback(self.s.camera_id, self.s.recording_id,
-                                                |playback| self.build_index(playback))
+                       .with_recording_playback(self.s.id, |playback| self.build_index(playback))
                        .map_err(|e| { error!("Unable to build index for segment: {:?}", e); });
         });
         let index: &'a _ = unsafe { &*self.index.get() };
         match *index {
             Ok(ref b) => return Ok(f(&b[..], self.lens())),
-            Err(()) => {
-                return Err(Error::new("Unable to build index; see previous error.".to_owned()))
-            },
+            Err(()) => bail!("Unable to build index; see previous error."),
         }
     }
 
@@ -599,7 +597,7 @@ enum SliceType {
 impl Slice {
     fn new(end: u64, t: SliceType, p: usize) -> Result<Self, Error> {
         if end >= (1<<40) || p >= (1<<20) {
-            return Err(Error::new(format!("end={} p={} too large for Slice", end, p)));
+            bail!("end={} p={} too large for Slice", end, p);
         }
 
         Ok(Slice(end | ((t as u64) << 40) | ((p as u64) << 44)))
@@ -629,9 +627,7 @@ impl Slice {
         }
         let truns =
             mp4.0.db.lock()
-               .with_recording_playback(s.s.camera_id, s.s.recording_id,
-                                        |playback| s.truns(playback, pos, len))
-               .map_err(|e| { Error::new(format!("Unable to build index for segment: {:?}", e)) })?;
+               .with_recording_playback(s.s.id, |playback| s.truns(playback, pos, len))?;
         let truns = ARefs::new(truns);
         Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]))
     }
@@ -760,23 +756,24 @@ impl FileBuilder {
                   rel_range_90k: Range<i32>) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero() {
-                return Err(Error::new(format!(
-                    "unable to append recording {}/{} after recording {}/{} with trailing zero",
-                    row.camera_id, row.id, prev.s.camera_id, prev.s.recording_id)));
+                bail!("unable to append recording {} after recording {} with trailing zero",
+                      row.id, prev.s.id);
             }
         }
         let s = Segment::new(db, &row, rel_range_90k, self.next_frame_num)?;
 
         self.next_frame_num += s.s.frames as u32;
         self.segments.push(s);
-        if !self.video_sample_entries.iter().any(|e| e.id == row.video_sample_entry.id) {
-            self.video_sample_entries.push(row.video_sample_entry);
+        if !self.video_sample_entries.iter().any(|e| e.id == row.video_sample_entry_id) {
+            let vse = db.video_sample_entries_by_id().get(&row.video_sample_entry_id).unwrap();
+            self.video_sample_entries.push(vse.clone());
         }
         Ok(())
     }
 
     /// Builds the `File`, consuming the builder.
-    pub fn build(mut self, db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>)
+    pub fn build(mut self, db: Arc<db::Database>,
+                 dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>)
                  -> Result<File, Error> {
         let mut max_end = None;
         let mut etag = hash::Hasher::new(hash::MessageDigest::sha1())?;
@@ -809,11 +806,11 @@ impl FileBuilder {
             }
 
             // Update the etag to reflect this segment.
-            let mut data = [0_u8; 24];
+            let mut data = [0_u8; 28];
             let mut cursor = io::Cursor::new(&mut data[..]);
-            cursor.write_i32::<BigEndian>(s.s.camera_id)?;
-            cursor.write_i32::<BigEndian>(s.s.recording_id)?;
+            cursor.write_i64::<BigEndian>(s.s.id.0)?;
             cursor.write_i64::<BigEndian>(s.s.start.0)?;
+            cursor.write_u32::<BigEndian>(s.s.open_id)?;
             cursor.write_i32::<BigEndian>(d.start)?;
             cursor.write_i32::<BigEndian>(d.end)?;
             etag.update(cursor.into_inner())?;
@@ -838,9 +835,8 @@ impl FileBuilder {
                 // If the segment is > 4 GiB, the 32-bit trun data offsets are untrustworthy.
                 // We'd need multiple moof+mdat sequences to support large media segments properly.
                 if self.body.slices.len() > u32::max_value() as u64 {
-                    return Err(Error::new(format!(
-                                "media segment has length {}, greater than allowed 4 GiB",
-                                self.body.slices.len())));
+                    bail!("media segment has length {}, greater than allowed 4 GiB",
+                          self.body.slices.len());
                 }
 
                 p
@@ -876,7 +872,7 @@ impl FileBuilder {
                     ::std::time::Duration::from_secs(max_end as u64);
         Ok(File(Arc::new(FileInner {
             db,
-            dir,
+            dirs_by_stream_id,
             segments: self.segments,
             slices: self.body.slices,
             buf: self.body.buf,
@@ -1088,7 +1084,7 @@ impl FileBuilder {
             let skip = s.s.desired_range_90k.start - actual_start_90k;
             let keep = s.s.desired_range_90k.end - s.s.desired_range_90k.start;
             if skip < 0 || keep < 0 {
-                return Err(Error::new(format!("skip={} keep={} on segment {:#?}", skip, keep, s)));
+                bail!("skip={} keep={} on segment {:#?}", skip, keep, s);
             }
             cur_media_time += skip as u64;
             if unflushed.segment_duration + unflushed.media_time == cur_media_time {
@@ -1418,7 +1414,7 @@ impl BodyState {
 
 struct FileInner {
     db: Arc<db::Database>,
-    dir: Arc<dir::SampleFileDir>,
+    dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
     segments: Vec<Segment>,
     slices: Slices<Slice>,
     buf: Vec<u8>,
@@ -1451,11 +1447,10 @@ impl FileInner {
     ///      happen because nothing should be touching Moonfire NVR's files but itself.
     fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> Result<Chunk, Error> {
         let s = &self.segments[i];
-        let uuid = {
-            self.db.lock().with_recording_playback(s.s.camera_id, s.s.recording_id,
-                                                   |p| Ok(p.sample_file_uuid))?
-        };
-        let f = self.dir.open_sample_file(uuid)?;
+        let f = self.dirs_by_stream_id
+                    .get(&s.s.id.stream())
+                    .ok_or_else(|| format_err!("{}: stream not found", s.s.id))?
+                    .open_file(s.s.id)?;
         let start = s.s.sample_file_range().start + r.start;
         let mmap = Box::new(unsafe {
             memmap::MmapOptions::new()
@@ -1491,20 +1486,21 @@ impl http_serve::Entity for File {
     type Chunk = slices::Chunk;
     type Body = slices::Body;
 
-    fn add_headers(&self, hdrs: &mut header::Headers) {
-        let mut mime = String::with_capacity(64);
-        mime.push_str("video/mp4; codecs=\"");
+    fn add_headers(&self, hdrs: &mut http::header::HeaderMap) {
+        let mut mime = BytesMut::with_capacity(64);
+        mime.extend_from_slice(b"video/mp4; codecs=\"");
         let mut first = true;
         for e in &self.0.video_sample_entries {
             if first {
                 first = false
             } else {
-                mime.push_str(", ");
+                mime.extend_from_slice(b", ");
             }
-            mime.push_str(&e.rfc6381_codec);
+            mime.extend_from_slice(e.rfc6381_codec.as_bytes());
         }
-        mime.push('"');
-        hdrs.set(header::ContentType(mime.parse().unwrap()));
+        mime.extend_from_slice(b"\"");
+        hdrs.insert(http::header::CONTENT_TYPE,
+                    http::header::HeaderValue::from_shared(mime.freeze()).unwrap());
     }
     fn last_modified(&self) -> Option<header::HttpDate> { Some(self.0.last_modified) }
     fn etag(&self) -> Option<header::EntityTag> { Some(self.0.etag.clone()) }
@@ -1524,24 +1520,23 @@ impl http_serve::Entity for File {
 ///      to verify the output is byte-for-byte as expected.
 #[cfg(test)]
 mod tests {
+    use base::strutil;
     use byteorder::{BigEndian, ByteOrder};
-    use db;
-    use dir;
+    use clock::RealClocks;
+    use db::recording::{self, TIME_UNITS_PER_SEC};
+    use db::testutil::{self, TestDb, TEST_STREAM_ID};
+    use db::writer;
     use futures::Future;
     use futures::Stream as FuturesStream;
     use hyper::header;
     use openssl::hash;
-    use recording::{self, TIME_UNITS_PER_SEC};
     use http_serve::{self, Entity};
     use std::fs;
     use std::ops::Range;
     use std::path::Path;
-    use std::sync::Arc;
     use std::str;
-    use strutil;
     use super::*;
     use stream::{self, Opener, Stream};
-    use testutil::{self, TestDb, TEST_CAMERA_ID};
 
     fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64) {
         let mut p = 0;
@@ -1754,7 +1749,7 @@ mod tests {
         }
     }
 
-    fn copy_mp4_to_db(db: &TestDb) {
+    fn copy_mp4_to_db(db: &TestDb<RealClocks>) {
         let mut input =
             stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
 
@@ -1764,8 +1759,9 @@ mod tests {
         let video_sample_entry_id = db.db.lock().insert_video_sample_entry(
             extra_data.width, extra_data.height, extra_data.sample_entry,
             extra_data.rfc6381_codec).unwrap();
-        let mut output = db.dir.create_writer(&db.syncer_channel, None,
-                                              TEST_CAMERA_ID, video_sample_entry_id).unwrap();
+        let dir = db.dirs_by_stream_id.get(&TEST_STREAM_ID).unwrap();
+        let mut output = writer::Writer::new(dir, &db.db, &db.syncer_channel, TEST_STREAM_ID,
+                                             video_sample_entry_id);
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
         // It's needed because dir::Writer calculates a packet's duration from its pts and the
@@ -1788,25 +1784,25 @@ mod tests {
                          pkt.is_key()).unwrap();
             end_pts = Some(pts + pkt.duration() as i64);
         }
-        output.close(end_pts).unwrap();
+        output.close(end_pts);
         db.syncer_channel.flush();
     }
 
-    pub fn create_mp4_from_db(db: Arc<db::Database>, dir: Arc<dir::SampleFileDir>,
+    pub fn create_mp4_from_db(tdb: &TestDb<RealClocks>,
                               skip_90k: i32, shorten_90k: i32, include_subtitles: bool) -> File {
         let mut builder = FileBuilder::new(Type::Normal);
         builder.include_timestamp_subtitle_track(include_subtitles);
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
         {
-            let db = db.lock();
-            db.list_recordings_by_time(TEST_CAMERA_ID, all_time, |r| {
+            let db = tdb.db.lock();
+            db.list_recordings_by_time(TEST_STREAM_ID, all_time, &mut |r| {
                 let d = r.duration_90k;
                 assert!(skip_90k + shorten_90k < d);
                 builder.append(&*db, r, skip_90k .. d - shorten_90k).unwrap();
                 Ok(())
             }).unwrap();
         }
-        builder.build(db, dir).unwrap()
+        builder.build(tdb.db.clone(), tdb.dirs_by_stream_id.clone()).unwrap()
     }
 
     fn write_mp4(mp4: &File, dir: &Path) -> String {
@@ -1865,13 +1861,13 @@ mod tests {
 
     /// Makes a `.mp4` file which is only good for exercising the `Slice` logic for producing
     /// sample tables that match the supplied encoder.
-    fn make_mp4_from_encoders(type_: Type, db: &TestDb,
-                              mut encoders: Vec<recording::SampleIndexEncoder>,
+    fn make_mp4_from_encoders(type_: Type, db: &TestDb<RealClocks>,
+                              mut recordings: Vec<db::RecordingToInsert>,
                               desired_range_90k: Range<i32>) -> File {
         let mut builder = FileBuilder::new(type_);
         let mut duration_so_far = 0;
-        for e in encoders.drain(..) {
-            let row = db.create_recording_from_encoder(e);
+        for r in recordings.drain(..) {
+            let row = db.insert_recording_from_encoder(r);
             let d_start = if desired_range_90k.start < duration_so_far { 0 }
                           else { desired_range_90k.start - duration_so_far };
             let d_end = if desired_range_90k.end > duration_so_far + row.duration_90k
@@ -1879,23 +1875,24 @@ mod tests {
             duration_so_far += row.duration_90k;
             builder.append(&db.db.lock(), row, d_start .. d_end).unwrap();
         }
-        builder.build(db.db.clone(), db.dir.clone()).unwrap()
+        builder.build(db.db.clone(), db.dirs_by_stream_id.clone()).unwrap()
     }
 
     /// Tests sample table for a simple video index of all sync frames.
     #[test]
     fn test_all_sync_frames() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, true);
+            encoder.add_sample(duration_90k, bytes, true, &mut r);
         }
 
         // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![encoder], 2 .. 2+4+6+8);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2 .. 2+4+6+8);
         let track = find_track(mp4, 1);
         assert!(track.edts_cursor.is_none());
         let mut cursor = track.stbl_cursor;
@@ -1939,17 +1936,18 @@ mod tests {
     #[test]
     fn test_half_sync_frames() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, (i % 2) == 1);
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
 
         // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![encoder], 2+4+6 .. 2+4+6+8);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2+4+6 .. 2+4+6+8);
         let track = find_track(mp4, 1);
 
         // Examine edts. It should skip the 3rd frame.
@@ -2001,17 +1999,19 @@ mod tests {
     #[test]
     fn test_multi_segment() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let mut encoders = Vec::new();
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(1, 1, true);
-        encoder.add_sample(2, 2, false);
-        encoder.add_sample(3, 3, true);
-        encoders.push(encoder);
+        encoder.add_sample(1, 1, true, &mut r);
+        encoder.add_sample(2, 2, false, &mut r);
+        encoder.add_sample(3, 3, true, &mut r);
+        encoders.push(r);
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(4, 4, true);
-        encoder.add_sample(5, 5, false);
-        encoders.push(encoder);
+        encoder.add_sample(4, 4, true, &mut r);
+        encoder.add_sample(5, 5, false, &mut r);
+        encoders.push(r);
 
         // This should include samples 3 and 4 only, both sync frames.
         let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1+2 .. 1+2+3+4);
@@ -2036,15 +2036,17 @@ mod tests {
     #[test]
     fn test_zero_duration_recording() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         let mut encoders = Vec::new();
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(2, 1, true);
-        encoder.add_sample(3, 2, false);
-        encoders.push(encoder);
+        encoder.add_sample(2, 1, true, &mut r);
+        encoder.add_sample(3, 2, false, &mut r);
+        encoders.push(r);
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(0, 3, true);
-        encoders.push(encoder);
+        encoder.add_sample(0, 3, true, &mut r);
+        encoders.push(r);
 
         // Multi-segment recording with an edit list, encoding with a zero-duration recording.
         let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1 .. 2+3);
@@ -2060,17 +2062,18 @@ mod tests {
     #[test]
     fn test_media_segment() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
+        let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, (i % 2) == 1);
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
 
         // Time range [2+4+6, 2+4+6+8+1) means the 4th sample and part of the 5th are included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
-        let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![encoder],
+        let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![r],
                                          2+4+6 .. 2+4+6+8+1);
         let mut cursor = BoxCursor::new(mp4);
         cursor.down();
@@ -2102,9 +2105,9 @@ mod tests {
     #[test]
     fn test_round_trip() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
-        let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
+        let mp4 = create_mp4_from_db(&db, 0, 0, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
         compare_mp4s(&new_filename, 0, 0);
 
@@ -2113,18 +2116,19 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "c56ef7eb3b4a713ceafebc3dc7958bd9e62a2fae";
+        const EXPECTED_ETAG: &'static str = "04298efb2df0cc45a6cea65dfdf2e817a3b42ca8";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
     }
 
     #[test]
     fn test_round_trip_with_subtitles() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
-        let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, true);
+        let mp4 = create_mp4_from_db(&db, 0, 0, true);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
         compare_mp4s(&new_filename, 0, 0);
 
@@ -2133,18 +2137,19 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "3bdc2c8ce521df50155d0ca4d7497ada448fa7c3";
+        const EXPECTED_ETAG: &'static str = "16a4f6348560c3de0d149675dccba21ef7906be3";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
     }
 
     #[test]
     fn test_round_trip_with_edit_list() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
-        let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 1, 0, false);
+        let mp4 = create_mp4_from_db(&db, 1, 0, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
         compare_mp4s(&new_filename, 1, 0);
 
@@ -2153,18 +2158,19 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("d655945f94e18e6ed88a2322d27522aff6f76403", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "3986d3bd9b866c3455fb7359fb134aa2d9107af7";
+        const EXPECTED_ETAG: &'static str = "80e418b029e81aa195f90aa6b806015a5030e5be";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
     }
 
     #[test]
     fn test_round_trip_with_shorten() {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
-        let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 1, false);
+        let mp4 = create_mp4_from_db(&db, 0, 1, false);
         let new_filename = write_mp4(&mp4, db.tmpdir.path());
         compare_mp4s(&new_filename, 0, 1);
 
@@ -2173,9 +2179,10 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "9e789398c9a71ca834fec8fbc55b389f99d12dda";
+        const EXPECTED_ETAG: &'static str = "5bfea0f20108a7c5b77ef1e21d82ef2abc29540f";
         assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
         drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
     }
 }
@@ -2185,15 +2192,16 @@ mod bench {
     extern crate reqwest;
     extern crate test;
 
+    use base::clock::RealClocks;
+    use db::recording;
+    use db::testutil::{self, TestDb};
     use futures::Stream;
     use futures::future;
     use hyper;
     use http_serve;
-    use recording;
     use reffers::ARefs;
     use self::test::Bencher;
     use super::tests::create_mp4_from_db;
-    use testutil::{self, TestDb};
     use url::Url;
 
     /// An HTTP server for benchmarking.
@@ -2210,9 +2218,9 @@ mod bench {
 
     impl BenchServer {
         fn new() -> BenchServer {
-            let db = TestDb::new();
+            let db = TestDb::new(RealClocks {});
             testutil::add_dummy_recordings_to_db(&db.db, 60);
-            let mp4 = create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
+            let mp4 = create_mp4_from_db(&db, 0, 0, false);
             let p = mp4.0.initial_sample_byte_pos;
             let (tx, rx) = ::std::sync::mpsc::channel();
             ::std::thread::spawn(move || {
@@ -2252,14 +2260,14 @@ mod bench {
     #[bench]
     fn build_index(b: &mut Bencher) {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         testutil::add_dummy_recordings_to_db(&db.db, 1);
 
         let db = db.db.lock();
         let segment = {
             let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
             let mut row = None;
-            db.list_recordings_by_time(testutil::TEST_CAMERA_ID, all_time, |r| {
+            db.list_recordings_by_time(testutil::TEST_STREAM_ID, all_time, &mut |r| {
                 row = Some(r);
                 Ok(())
             }).unwrap();
@@ -2267,7 +2275,7 @@ mod bench {
             let rel_range_90k = 0 .. row.duration_90k;
             super::Segment::new(&db, &row, rel_range_90k, 1).unwrap()
         };
-        db.with_recording_playback(segment.s.camera_id, segment.s.recording_id, |playback| {
+        db.with_recording_playback(segment.s.id, |playback| {
             let v = segment.build_index(playback).unwrap();  // warm.
             b.bytes = v.len() as u64;  // define the benchmark performance in terms of output bytes.
             b.iter(|| segment.build_index(playback).unwrap());
@@ -2303,10 +2311,10 @@ mod bench {
     #[bench]
     fn mp4_construction(b: &mut Bencher) {
         testutil::init();
-        let db = TestDb::new();
+        let db = TestDb::new(RealClocks {});
         testutil::add_dummy_recordings_to_db(&db.db, 60);
         b.iter(|| {
-            create_mp4_from_db(db.db.clone(), db.dir.clone(), 0, 0, false);
+            create_mp4_from_db(&db, 0, 0, false);
         });
     }
 }

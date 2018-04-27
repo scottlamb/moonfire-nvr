@@ -52,18 +52,18 @@ import './assets/index.css';
 import 'jquery-ui/ui/widgets/tooltip';
 
 import Camera from './lib/models/Camera';
-import CameraView from './lib/views/CameraView';
 import CalendarView from './lib/views/CalendarView';
 import VideoDialogView from './lib/views/VideoDialogView';
 import NVRSettingsView from './lib/views/NVRSettingsView';
-import CheckboxGroupView from './lib/views/CheckboxGroupView';
 import RecordingFormatter from './lib/support/RecordingFormatter';
+import StreamSelectorView from './lib/views/StreamSelectorView';
+import StreamView from './lib/views/StreamView';
 import TimeFormatter from './lib/support/TimeFormatter';
 import TimeStamp90kFormatter from './lib/support/TimeStamp90kFormatter';
 import MoonfireAPI from './lib/MoonfireAPI';
 
 const api = new MoonfireAPI();
-let cameraViews = null; // CameraView objects
+let streamViews = null; // StreamView objects
 let calendarView = null; // CalendarView object
 
 /**
@@ -118,15 +118,17 @@ function newTimeFormat(format) {
  *
  * @param  {NVRSettings} nvrSettingsView NVRSettingsView in effect
  * @param  {object} camera Object for the camera
+ * @param  {String} streamType "main" or "sub"
  * @param  {object} range Range Object
  * @param  {object} recording Recording object
  * @return {void}
  */
-function onSelectVideo(nvrSettingsView, camera, range, recording) {
+function onSelectVideo(nvrSettingsView, camera, streamType, range, recording) {
   console.log('Recording clicked: ', recording);
   const trimmedRange = recording.range90k(nvrSettingsView.trim ? range : null);
   const url = api.videoPlayUrl(
     camera.uuid,
+    streamType,
     recording,
     trimmedRange,
     nvrSettingsView.timeStampTrack
@@ -146,7 +148,7 @@ function onSelectVideo(nvrSettingsView, camera, range, recording) {
 }
 
 /**
- * Fetch camera view data for a given date/time range.
+ * Fetch stream view data for a given date/time range.
  *
  * @param  {Range90k} selectedRange Desired time range
  * @param  {Number} videoLength Desired length of video segments, or Infinity
@@ -161,28 +163,29 @@ function fetch(selectedRange, videoLength) {
       ' to ' +
       selectedRange.formatTimeStamp90k(selectedRange.endTime90k)
   );
-  for (let cameraView of cameraViews) {
+  for (let streamView of streamViews) {
     let url = api.recordingsUrl(
-      cameraView.camera.uuid,
+      streamView.camera.uuid,
+      streamView.streamType,
       selectedRange.startTime90k,
       selectedRange.endTime90k,
       videoLength
     );
-    if (cameraView.recordingsReq !== null) {
+    if (streamView.recordingsReq !== null) {
       /*
        * If there is another request, it would be because settings changed
        * and so an abort is to make room for this new request, now necessary
        * for the changed situation.
        */
-      cameraView.recordingsReq.abort();
+      streamView.recordingsReq.abort();
     }
-    cameraView.delayedShowLoading(500);
+    streamView.delayedShowLoading(500);
     let r = api.request(url);
-    cameraView.recordingsUrl = url;
-    cameraView.recordingsReq = r;
-    cameraView.recordingsRange = selectedRange.range90k();
+    streamView.recordingsUrl = url;
+    streamView.recordingsReq = r;
+    streamView.recordingsRange = selectedRange.range90k();
     r.always(function() {
-      cameraView.recordingsReq = null;
+      streamView.recordingsReq = null;
     });
     r
       .then(function(data /* , status, req */) {
@@ -191,10 +194,10 @@ function fetch(selectedRange, videoLength) {
           return b.startId - a.startId;
         });
         console.log(
-          'Fetched results for "%s" > updating recordings',
-          cameraView.camera.shortName
+          'Fetched results for "%s-%s" > updating recordings',
+          streamView.camera.shortName, streamView.streamType
         );
-        cameraView.recordingsJSON = data.recordings;
+        streamView.recordingsJSON = data.recordings;
       })
       .catch(function(data, status, err) {
         console.error(url, ' load failed: ', status, ': ', err);
@@ -207,7 +210,7 @@ function fetch(selectedRange, videoLength) {
  *
  * Sets the following globals:
  * zone - timezone from data received
- * cameraViews - array of views, one per camera
+ * streamViews - array of views, one per stream
  *
  * Builds the dom for the left side controllers
  *
@@ -221,56 +224,56 @@ function onReceivedCameras(data) {
   nvrSettingsView.onVideoLengthChange = (vl) =>
     fetch(calendarView.selectedRange, vl);
   nvrSettingsView.onTimeFormatChange = (format) =>
-    cameraViews.forEach((view) => (view.timeFormat = format));
+    streamViews.forEach((view) => (view.timeFormat = format));
   nvrSettingsView.onTrimChange = (t) =>
-    cameraViews.forEach((view) => (view.trimmed = t));
+    streamViews.forEach((view) => (view.trimmed = t));
   newTimeFormat(nvrSettingsView.timeFormatString);
 
   calendarView = new CalendarView({timeZone: timeFormatter.tz});
   calendarView.onRangeChange = (selectedRange) =>
     fetch(selectedRange, nvrSettingsView.videoLength);
 
-  const camerasParent = $('#cameras');
+  const streamsParent = $('#streams');
   const videos = $('#videos');
 
-  cameraViews = data.cameras.map((cameraJson) => {
+  streamViews = [];
+  let streamSelectorCameras = [];
+  for (const cameraJson of data.cameras) {
     const camera = new Camera(cameraJson);
-    const cv = new CameraView(
-      camera,
-      new RecordingFormatter(timeFormatter.formatStr, timeFormatter.tz),
-      nvrSettingsView.trim,
-      videos
-    );
-    cv.onRecordingClicked = (recordingModel) => {
-      console.log('Recording clicked', recordingModel);
-      onSelectVideo(
-        nvrSettingsView,
-        camera,
-        calendarView.selectedRange,
-        recordingModel
-      );
-    };
-    return cv;
-  });
-
-  // Create camera enable checkboxes
-  const cameraCheckBoxes = new CheckboxGroupView(
-    cameraViews.map((cv) => ({
-      id: cv.camera.uuid,
-      checked: true,
-      text: cv.camera.shortName,
-      camView: cv,
-    })),
-    camerasParent
-  );
-  cameraCheckBoxes.onCheckChange = (groupEl) => {
-    groupEl.camView.enabled = groupEl.checked;
-    calendarView.initializeWith(cameraViews);
+    let cameraStreams = {};
+    Object.keys(camera.streams).forEach((streamType) => {
+      const sv = new StreamView(
+          camera,
+          streamType,
+          new RecordingFormatter(timeFormatter.formatStr, timeFormatter.tz),
+          nvrSettingsView.trim,
+          videos);
+      sv.onRecordingClicked = (recordingModel) => {
+        console.log('Recording clicked', recordingModel);
+        onSelectVideo(
+          nvrSettingsView,
+          camera,
+          streamType,
+          calendarView.selectedRange,
+          recordingModel
+        );
+      };
+      streamViews.push(sv);
+      cameraStreams[streamType] = sv;
+    });
+    streamSelectorCameras.push({
+      camera: camera,
+      streamViews: cameraStreams,
+    });
   };
 
-  calendarView.initializeWith(cameraViews);
+  // Create stream enable checkboxes
+  const streamSelector =
+      new StreamSelectorView(streamSelectorCameras, streamsParent);
+  streamSelector.onChange = () => calendarView.initializeWith(streamViews);
+  calendarView.initializeWith(streamViews);
 
-  console.log('Loaded: ' + cameraViews.length + ' camera views');
+  console.log('Loaded: ' + streamViews.length + ' stream views');
 }
 
 /**

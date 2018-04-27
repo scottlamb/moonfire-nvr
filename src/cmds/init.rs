@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use db;
-use error::Error;
+use failure::Error;
 
 static USAGE: &'static str = r#"
 Initializes a database.
@@ -66,9 +66,7 @@ pub fn run() -> Result<(), Error> {
         pragma journal_mode = wal;
         pragma page_size = 16384;
     "#)?;
-    let tx = conn.transaction()?;
-    tx.execute_batch(include_str!("../schema.sql"))?;
-    tx.commit()?;
+    db::init(&mut conn)?;
     info!("Database initialized.");
     Ok(())
 }

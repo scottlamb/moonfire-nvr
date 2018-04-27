@@ -1,5 +1,5 @@
-// This file is part of Moonfire NVR, a security camera digital video recorder.
-// Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
+// This file is part of Moonfire NVR, a security camera network video recorder.
+// Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -28,24 +28,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use db::recording;
-use failure::Error;
+extern crate failure;
+extern crate libc;
+#[macro_use] extern crate log;
+extern crate parking_lot;
+extern crate time;
 
-const USAGE: &'static str = r#"
-Usage: moonfire-nvr ts <ts>...
-       moonfire-nvr ts --help
-"#;
-
-#[derive(Debug, Deserialize)]
-struct Args {
-    arg_ts: Vec<String>,
-}
-
-pub fn run() -> Result<(), Error> {
-    let arg: Args = super::parse_args(&USAGE)?;
-    for timestamp in &arg.arg_ts {
-        let t = recording::Time::parse(timestamp)?;
-        println!("{} == {}", t, t.0);
-    }
-    Ok(())
-}
+pub mod clock;
+pub mod strutil;
