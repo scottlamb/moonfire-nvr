@@ -46,22 +46,29 @@ export default class Recording extends JsonWrapper {
     super(recordingJson);
   }
 
-  /**
-   * Get recording's startId.
-   *
-   * @return {String} startId for recording
-   */
+  /** @return {Number} */
   get startId() {
     return this.json.startId;
   }
 
-  /**
-   * Get recording's endId.
-   *
-   * @return {String} endId for recording
-   */
+  /** @return {Number} */
   get endId() {
     return this.json.endId;
+  }
+
+  /** @return {Number} */
+  get openId() {
+    return this.json.openId;
+  }
+
+  /** @return {Number} or undefined */
+  get firstUncommitted() {
+    return this.json.firstUncommitted;
+  }
+
+  /** @return {Boolean} or undefined */
+  get growing() {
+    return this.json.growing;
   }
 
   /**

@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use error::Error;
+use failure::Error;
 use h264;
 use moonfire_ffmpeg;
 use std::os::raw::c_char;
@@ -129,7 +129,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
         }
         let video_i = match video_i {
             Some(i) => i,
-            None => { return Err(Error::new("no video stream".to_owned())) },
+            None => bail!("no video stream"),
         };
 
         let mut stream = FfmpegStream{
@@ -156,13 +156,12 @@ impl Stream for FfmpegStream {
         let video = self.input.streams().get(self.video_i);
         let tb = video.time_base();
         if tb.num != 1 || tb.den != 90000 {
-            return Err(Error::new(format!("video stream has timebase {}/{}; expected 1/90000",
-                                          tb.num, tb.den)));
+            bail!("video stream has timebase {}/{}; expected 1/90000", tb.num, tb.den);
         }
         let codec = video.codec();
         let codec_id = codec.codec_id();
         if !codec_id.is_h264() {
-            return Err(Error::new(format!("stream's video codec {:?} is not h264", codec_id)));
+            bail!("stream's video codec {:?} is not h264", codec_id);
         }
         h264::ExtraData::parse(codec.extradata(), codec.width() as u16, codec.height() as u16)
     }

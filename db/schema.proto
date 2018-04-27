@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera digital video recorder.
-// Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
+// Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -28,24 +28,35 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use db::recording;
-use failure::Error;
+syntax = "proto3";
 
-const USAGE: &'static str = r#"
-Usage: moonfire-nvr ts <ts>...
-       moonfire-nvr ts --help
-"#;
+// Metadata stored in sample file dirs as "<dir>/meta". This is checked
+// against the metadata stored within the database to detect inconsistencies
+// between the directory and database, such as those described in
+// design/schema.md.
+message DirMeta {
+  // A uuid associated with the database, in binary form. dir_uuid is strictly
+  // more powerful, but it improves diagnostics to know if the directory
+  // belongs to the expected database at all or not.
+  bytes db_uuid = 1;
 
-#[derive(Debug, Deserialize)]
-struct Args {
-    arg_ts: Vec<String>,
-}
+  // A uuid associated with the directory itself.
+  bytes dir_uuid = 2;
 
-pub fn run() -> Result<(), Error> {
-    let arg: Args = super::parse_args(&USAGE)?;
-    for timestamp in &arg.arg_ts {
-        let t = recording::Time::parse(timestamp)?;
-        println!("{} == {}", t, t.0);
-    }
-    Ok(())
+  // Corresponds to an entry in the `open` database table.
+  message Open {
+    uint32 id = 1;
+    bytes uuid = 2;
+  }
+
+  // The last open that was known to be recorded in the database as completed.
+  // Absent if this has never happened. Note this can backtrack in exactly one
+  // scenario: when deleting the directory, after all associated files have
+  // been deleted, last_complete_open can be moved to in_progress_open.
+  Open last_complete_open = 3;
+
+  // The last run which is in progress, if different from last_complete_open.
+  // This may or may not have been recorded in the database, but it's
+  // guaranteed that no data has yet been written by this open.
+  Open in_progress_open = 4;
 }

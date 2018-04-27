@@ -73,18 +73,19 @@ export default class RecordingsView {
    * Construct display from camera data and use supplied formatter.
    *
    * @param  {Camera} camera camera object (immutable)
+   * @param  {String} streamType "main" or "sub"
    * @param  {RecordingFormatter} recordingFormatter Desired formatter
    * @param  {Boolean} trimmed True if the display should include trimmed ranges
    * @param  {jQuery} parent Parent to which new DOM is attached, or null
    */
-  constructor(camera, recordingFormatter, trimmed = false, parent = null) {
+  constructor(camera, streamType, recordingFormatter, trimmed = false,
+              parent = null) {
     this._cameraName = camera.shortName;
     this._cameraRange = camera.range90k;
     this._formatter = recordingFormatter;
-    this._element = $(`tab-${camera.uuid}`); // Might not be there initially
-    if (this._element.length == 0) {
-      this._element = this._createElement(camera.uuid, camera.shortName);
-    }
+
+    const id = `tab-${camera.uuid}-${streamType}`;
+    this._element = this._createElement(id, camera.shortName, streamType);
     this._trimmed = trimmed;
     this._recordings = null;
     this._recordingsRange = null;
@@ -100,12 +101,14 @@ export default class RecordingsView {
    *
    * @param {String} id DOM id for the main element
    * @param {String} cameraName Name of the corresponding camera
+   * @param  {String} streamType "main" or "sub"
    * @return {jQuery} Partial DOM as jQuery object
    */
-  _createElement(id, cameraName) {
+  _createElement(id, cameraName, streamType) {
     const tab = $('<tbody>').attr('id', id);
     tab.append(
-      $('<tr class="name">').append($('<th colspan=6/>').text(cameraName)),
+      $('<tr class="name">').append($('<th colspan=6/>')
+                            .text(cameraName + ' ' + streamType)),
       $('<tr class="hdr">').append(
         $(
           _columnOrder

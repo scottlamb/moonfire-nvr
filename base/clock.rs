@@ -1,5 +1,5 @@
-// This file is part of Moonfire NVR, a security camera digital video recorder.
-// Copyright (C) 2016 Scott Lamb <slamb@slamb.org>
+// This file is part of Moonfire NVR, a security camera network video recorder.
+// Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -30,14 +30,17 @@
 
 //! Clock interface and implementations for testability.
 
+use failure::Error;
 use libc;
-#[cfg(test)] use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::mem;
+use std::sync::{Arc, mpsc};
 use std::thread;
+use std::time::Duration as StdDuration;
 use time::{Duration, Timespec};
 
 /// Abstract interface to the system clocks. This is for testability.
-pub trait Clocks : Sync {
+pub trait Clocks : Send + Sync + 'static {
     /// Gets the current time from `CLOCK_REALTIME`.
     fn realtime(&self) -> Timespec;
 
@@ -46,12 +49,26 @@ pub trait Clocks : Sync {
 
     /// Causes the current thread to sleep for the specified time.
     fn sleep(&self, how_long: Duration);
+
+    /// Calls `rcv.recv_timeout` or substitutes a test implementation.
+    fn recv_timeout<T>(&self, rcv: &mpsc::Receiver<T>,
+                       timeout: StdDuration) -> Result<T, mpsc::RecvTimeoutError>;
 }
 
-/// Singleton "real" clocks.
-pub static REAL: RealClocks = RealClocks {};
+pub fn retry_forever<C, T, E>(clocks: &C, f: &mut FnMut() -> Result<T, E>) -> T
+where C: Clocks, E: Into<Error> {
+    loop {
+        let e = match f() {
+            Ok(t) => return t,
+            Err(e) => e.into(),
+        };
+        let sleep_time = Duration::seconds(1);
+        warn!("sleeping for {:?} after error: {:?}", sleep_time, e);
+        clocks.sleep(sleep_time);
+    }
+}
 
-/// Real clocks; see static `REAL` instance.
+#[derive(Copy, Clone)]
 pub struct RealClocks {}
 
 impl RealClocks {
@@ -74,17 +91,22 @@ impl Clocks for RealClocks {
             Err(e) => warn!("Invalid duration {:?}: {}", how_long, e),
         };
     }
+
+    fn recv_timeout<T>(&self, rcv: &mpsc::Receiver<T>,
+                       timeout: StdDuration) -> Result<T, mpsc::RecvTimeoutError> {
+        rcv.recv_timeout(timeout)
+    }
 }
 
 /// Logs a warning if the TimerGuard lives "too long", using the label created by a supplied
 /// function.
-pub struct TimerGuard<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> {
+pub struct TimerGuard<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> {
     clocks: &'a C,
     label_f: Option<F>,
     start: Timespec,
 }
 
-impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
+impl<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
     pub fn new(clocks: &'a C, label_f: F) -> Self {
         TimerGuard {
             clocks,
@@ -94,7 +116,8 @@ impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C,
     }
 }
 
-impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> Drop for TimerGuard<'a, C, S, F> {
+impl<'a, C, S, F> Drop for TimerGuard<'a, C, S, F>
+where C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a {
     fn drop(&mut self) {
         let elapsed = self.clocks.monotonic() - self.start;
         if elapsed.num_seconds() >= 1 {
@@ -105,30 +128,40 @@ impl<'a, C: Clocks + 'a, S: AsRef<str>, F: FnOnce() -> S + 'a> Drop for TimerGua
 }
 
 /// Simulated clock for testing.
-#[cfg(test)]
-pub struct SimulatedClocks {
+#[derive(Clone)]
+pub struct SimulatedClocks(Arc<SimulatedClocksInner>);
+
+struct SimulatedClocksInner {
     boot: Timespec,
     uptime: Mutex<Duration>,
 }
 
-#[cfg(test)]
 impl SimulatedClocks {
-    pub fn new(boot: Timespec) -> SimulatedClocks {
-        SimulatedClocks {
+    pub fn new(boot: Timespec) -> Self {
+        SimulatedClocks(Arc::new(SimulatedClocksInner {
             boot: boot,
             uptime: Mutex::new(Duration::seconds(0)),
-        }
+        }))
     }
 }
 
-#[cfg(test)]
 impl Clocks for SimulatedClocks {
-    fn realtime(&self) -> Timespec { self.boot + *self.uptime.lock().unwrap() }
-    fn monotonic(&self) -> Timespec { Timespec::new(0, 0) + *self.uptime.lock().unwrap() }
+    fn realtime(&self) -> Timespec { self.0.boot + *self.0.uptime.lock() }
+    fn monotonic(&self) -> Timespec { Timespec::new(0, 0) + *self.0.uptime.lock() }
 
     /// Advances the clock by the specified amount without actually sleeping.
     fn sleep(&self, how_long: Duration) {
-        let mut l = self.uptime.lock().unwrap();
+        let mut l = self.0.uptime.lock();
         *l = *l + how_long;
+    }
+
+    /// Advances the clock by the specified amount if data is not immediately available.
+    fn recv_timeout<T>(&self, rcv: &mpsc::Receiver<T>,
+                       timeout: StdDuration) -> Result<T, mpsc::RecvTimeoutError> {
+        let r = rcv.recv_timeout(StdDuration::new(0, 0));
+        if let Err(_) = r {
+            self.sleep(Duration::from_std(timeout).unwrap());
+        }
+        r
     }
 }

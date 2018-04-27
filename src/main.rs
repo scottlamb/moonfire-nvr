@@ -30,22 +30,26 @@
 
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
+extern crate bytes;
 extern crate byteorder;
 extern crate core;
 extern crate docopt;
 extern crate futures;
 extern crate futures_cpupool;
+#[macro_use] extern crate failure;
 extern crate fnv;
+extern crate http;
 extern crate http_serve;
 extern crate hyper;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 #[macro_use] extern crate log;
-extern crate lru_cache;
 extern crate reffers;
 extern crate rusqlite;
 extern crate memmap;
 extern crate mime;
+extern crate moonfire_base as base;
+extern crate moonfire_db as db;
 extern crate moonfire_ffmpeg;
 extern crate mylog;
 extern crate openssl;
@@ -61,21 +65,15 @@ extern crate tokio_signal;
 extern crate url;
 extern crate uuid;
 
-mod clock;
-mod coding;
+use base::clock as clock;
+
 mod cmds;
-mod db;
-mod dir;
-mod error;
 mod h264;
 mod json;
 mod mp4;
-mod recording;
 mod slices;
 mod stream;
 mod streamer;
-mod strutil;
-#[cfg(test)] mod testutil;
 mod web;
 
 /// Commandline usage string. This is in the particular format expected by the `docopt` crate.
@@ -141,7 +139,7 @@ fn main() {
     h.clone().install().unwrap();
 
     if let Err(e) = { let _a = h.async(); args.arg_command.unwrap().run() } {
-        error!("{}", e);
+        error!("{:?}", e);
         ::std::process::exit(1);
     }
     info!("Success.");

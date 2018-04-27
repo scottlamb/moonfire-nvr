@@ -38,7 +38,7 @@ import TimeStamp90kFormatter from '../support/TimeStamp90kFormatter';
 import Time90kParser from '../support/Time90kParser';
 
 /**
- * Find the earliest and latest dates from an array of CameraView
+ * Find the earliest and latest dates from an array of StreamView
  * objects.
  *
  * Each camera view has a "days" property, whose keys identify days with
@@ -47,20 +47,20 @@ import Time90kParser from '../support/Time90kParser';
  *
  * "days" for camera views that are not enabled are ignored.
  *
- * @param  {[Iterable]} cameraViews Camera views to look into
+ * @param  {[Iterable]} streamViews Camera views to look into
  * @return {[Set, String, String]}       Array with set of all dates, and
  *                                       earliest and latest dates
  */
-function minMaxDates(cameraViews) {
+function minMaxDates(streamViews) {
   /*
    * Produce a set with all dates, across all enabled cameras, that
    * have at least one recording available (allDates).
    */
   const allDates = new Set(
     [].concat(
-      ...cameraViews
+      ...streamViews
         .filter((v) => v.enabled)
-        .map((v) => Array.from(v.camera.days.keys()))
+        .map((v) => Array.from(v.stream.days.keys()))
     )
   );
   return [
@@ -137,7 +137,7 @@ export default class CalendarView {
     this._minDateStr = null;
     this._maxDateStr = null;
     this._singleDateStr = null;
-    this._cameraViews = null;
+    this._streamViews = null;
     this._rangeChangedHandler = null;
   }
 
@@ -329,12 +329,12 @@ export default class CalendarView {
    * This is necessary as the camera views ultimately define the limits on
    * the date pickers.
    *
-   * @param  {Iterable} cameraViews Collection of camera views
+   * @param  {Iterable} streamViews Collection of camera views
    */
-  initializeWith(cameraViews) {
-    this._cameraViews = cameraViews;
+  initializeWith(streamViews) {
+    this._streamViews = streamViews;
     [this._availableDates, this._minDateStr, this._maxDateStr] = minMaxDates(
-      cameraViews
+      streamViews
     );
     this._configureDatePickers();
 

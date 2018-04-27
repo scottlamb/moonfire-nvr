@@ -191,3 +191,34 @@ indexes, the number of (mostly 1024-byte) read syscalls on the database
 dropped from 605 to 39.
 
 The general upgrade procedure applies to this upgrade.
+
+### Version 1 to version 2 to version 3
+
+This upgrade affects the sample file directory as well as the database. Thus,
+the restore procedure written above of simply copying back the databae is
+insufficient. To do a full restore, you would need to back up and restore the
+sample file directory as well. This directory is considerably larger, so
+consider an alternate procedure of crossing your fingers, and being prepared
+to start over from scratch if there's a problem.
+
+Version 2 represents a half-finished upgrade from version 1 to version 3; it
+is never used.
+
+Version 3 adds over version 1:
+
+*   user authentication
+*   recording of sub streams (splits a new `stream` table out of `camera`)
+*   a per-stream knob `flush_if_sec` meant to reduce database commits (and
+    thus SSD write cycles). This improves practicality of many streams.
+*   support for multiple sample file directories, to take advantage of
+    multiple hard drives (or multiple RAID volumes).
+*   an interlock between database and sample file directories to avoid various
+    mixups that could cause data integrity problems.
+*   recording the RFC-6381 codec associated with a video sample entry, so that
+    logic for determining this is no longer needed as part of the database
+    layer.
+*   a simpler sample file directory layout in which files are represented by
+    the same sequentially increasing id as in the database, rather than a
+    separate uuid which has to be reserved in advance.
+*   additional timestamp fields which may be useful in diagnosing/correcting
+    time jumps/inconsistencies.

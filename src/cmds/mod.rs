@@ -28,9 +28,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use dir;
+use db::dir;
 use docopt;
-use error::Error;
+use failure::{Error, Fail};
 use libc;
 use rusqlite;
 use std::path::Path;
@@ -75,13 +75,11 @@ enum OpenMode {
 /// Locks and opens the database.
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
 fn open_conn(db_dir: &str, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connection), Error> {
-    let dir = dir::Fd::open(db_dir)?;
+    let dir = dir::Fd::open(db_dir, mode == OpenMode::Create)?;
     let ro = mode == OpenMode::ReadOnly;
     dir.lock(if ro { libc::LOCK_SH } else { libc::LOCK_EX } | libc::LOCK_NB)
-       .map_err(|e| Error{description: format!("db dir {:?} already in use; can't get {} lock",
-                                               db_dir,
-                                               if ro { "shared" } else { "exclusive" }),
-                          cause: Some(Box::new(e))})?;
+       .map_err(|e| e.context(format!("db dir {:?} already in use; can't get {} lock",
+                                      db_dir, if ro { "shared" } else { "exclusive" })))?;
     let conn = rusqlite::Connection::open_with_flags(
         Path::new(&db_dir).join("db"),
         match mode {

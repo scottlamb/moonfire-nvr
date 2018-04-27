@@ -29,11 +29,13 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use db;
+use failure::Error;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
+use std::ops::Not;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct TopLevel<'a> {
     pub time_zone_name: &'a str,
@@ -41,17 +43,25 @@ pub struct TopLevel<'a> {
     // Use a custom serializer which presents the map's values as a sequence and includes the
     // "days" attribute or not, according to the bool in the tuple.
     #[serde(serialize_with = "TopLevel::serialize_cameras")]
-    pub cameras: (&'a BTreeMap<i32, db::Camera>, bool),
+    pub cameras: (&'a db::LockedDatabase, bool),
 }
 
-/// JSON serialization wrapper for a single camera when processing `/cameras/` and
-/// `/cameras/<uuid>/`. See `design/api.md` for details.
+/// JSON serialization wrapper for a single camera when processing `/api/` and
+/// `/api/cameras/<uuid>/`. See `design/api.md` for details.
 #[derive(Debug, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Camera<'a> {
     pub uuid: Uuid,
     pub short_name: &'a str,
     pub description: &'a str,
+
+    #[serde(serialize_with = "Camera::serialize_streams")]
+    pub streams: [Option<Stream<'a>>; 2],
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct Stream<'a> {
     pub retain_bytes: i64,
     pub min_start_time_90k: Option<i64>,
     pub max_end_time_90k: Option<i64>,
@@ -59,26 +69,54 @@ pub struct Camera<'a> {
     pub total_sample_file_bytes: i64,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(serialize_with = "Camera::serialize_days")]
-    pub days: Option<&'a BTreeMap<db::CameraDayKey, db::CameraDayValue>>,
+    #[serde(serialize_with = "Stream::serialize_days")]
+    pub days: Option<&'a BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
 }
 
 impl<'a> Camera<'a> {
-    pub fn new(c: &'a db::Camera, include_days: bool) -> Self {
-        Camera{
+    pub fn wrap(c: &'a db::Camera, db: &'a db::LockedDatabase, include_days: bool) -> Result<Self, Error> {
+        Ok(Camera {
             uuid: c.uuid,
             short_name: &c.short_name,
             description: &c.description,
-            retain_bytes: c.retain_bytes,
-            min_start_time_90k: c.range.as_ref().map(|r| r.start.0),
-            max_end_time_90k: c.range.as_ref().map(|r| r.end.0),
-            total_duration_90k: c.duration.0,
-            total_sample_file_bytes: c.sample_file_bytes,
-            days: if include_days { Some(&c.days) } else { None },
-        }
+            streams: [
+                Stream::wrap(db, c.streams[0], include_days)?,
+                Stream::wrap(db, c.streams[1], include_days)?,
+            ],
+        })
     }
 
-    fn serialize_days<S>(days: &Option<&BTreeMap<db::CameraDayKey, db::CameraDayValue>>,
+    fn serialize_streams<S>(streams: &[Option<Stream<'a>>; 2], serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        let mut map = serializer.serialize_map(Some(streams.len()))?;
+        for (i, s) in streams.iter().enumerate() {
+            if let &Some(ref s) = s {
+                map.serialize_key(db::StreamType::from_index(i).expect("invalid stream type index").as_str())?;
+                map.serialize_value(s)?;
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'a> Stream<'a> {
+    fn wrap(db: &'a db::LockedDatabase, id: Option<i32>, include_days: bool) -> Result<Option<Self>, Error> {
+        let id = match id {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+        let s = db.streams_by_id().get(&id).ok_or_else(|| format_err!("missing stream {}", id))?;
+        Ok(Some(Stream {
+            retain_bytes: s.retain_bytes,
+            min_start_time_90k: s.range.as_ref().map(|r| r.start.0),
+            max_end_time_90k: s.range.as_ref().map(|r| r.end.0),
+            total_duration_90k: s.duration.0,
+            total_sample_file_bytes: s.sample_file_bytes,
+            days: if include_days { Some(&s.days) } else { None },
+        }))
+    }
+
+    fn serialize_days<S>(days: &Option<&BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
                          serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
         let days = match *days {
@@ -89,7 +127,7 @@ impl<'a> Camera<'a> {
         for (k, v) in days {
             map.serialize_key(k.as_ref())?;
             let bounds = k.bounds();
-            map.serialize_value(&CameraDayValue{
+            map.serialize_value(&StreamDayValue{
                 start_time_90k: bounds.start.0,
                 end_time_90k: bounds.end.0,
                 total_duration_90k: v.duration.0,
@@ -101,7 +139,7 @@ impl<'a> Camera<'a> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all="camelCase")]
-struct CameraDayValue {
+struct StreamDayValue {
     pub start_time_90k: i64,
     pub end_time_90k: i64,
     pub total_duration_90k: i64,
@@ -109,12 +147,14 @@ struct CameraDayValue {
 
 impl<'a> TopLevel<'a> {
     /// Serializes cameras as a list (rather than a map), optionally including the `days` field.
-    fn serialize_cameras<S>(cameras: &(&BTreeMap<i32, db::Camera>, bool),
+    fn serialize_cameras<S>(cameras: &(&db::LockedDatabase, bool),
                             serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
-        let mut seq = serializer.serialize_seq(Some(cameras.0.len()))?;
-        for c in cameras.0.values() {
-            seq.serialize_element(&Camera::new(c, cameras.1))?;
+        let (db, include_days) = *cameras;
+        let cs = db.cameras_by_id();
+        let mut seq = serializer.serialize_seq(Some(cs.len()))?;
+        for (_, c) in cs {
+            seq.serialize_element(&Camera::wrap(c, db, include_days).unwrap())?;  // TODO: no unwrap.
         }
         seq.end()
     }
@@ -134,9 +174,16 @@ pub struct Recording {
     pub video_samples: i64,
     pub video_sample_entry_sha1: String,
     pub start_id: i32,
+    pub open_id: u32,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_uncommitted: Option<i32>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_id: Option<i32>,
     pub video_sample_entry_width: u16,
     pub video_sample_entry_height: u16,
+
+    #[serde(skip_serializing_if = "Not::not")]
+    pub growing: bool,
 }

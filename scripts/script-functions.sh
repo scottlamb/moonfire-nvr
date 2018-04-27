@@ -359,25 +359,6 @@ fix_localtime()
 	fi
 }
 
-# Add/update cameras in the database
-#
-# $1: path to cameras.sql file
-# $2: moonfire service name
-# $3: moonfire user name
-# $4: moonfire database path
-#
-addCameras()
-{
-	local cpath="${CAMERAS_PATH:-$1}"
-	if [ -r "${cpath}" ]; then
-		echo_info -x 'Add cameras...'
-		# Before adding cameras, must stop service
-		moonfire stop "${SERVICE_NAME:-$2}" >/dev/null 2>&1
-		sudo -u ${NVR_USER:-$3} -H sqlite3 "${DB_PATH:-$4}" < "${cpath}"
-		moonfire start "${SERVICE_NAME:-$2}" >/dev/null 2>&1
-	fi
-}
-
 pre_install_prep()
 {
 	prep_moonfire_user
