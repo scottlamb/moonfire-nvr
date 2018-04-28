@@ -74,10 +74,6 @@ module.exports = (env, args) => {
           ],
         },
         {
-          test: /\.png$/,
-          use: ['file-loader'],
-        },
-        {
           // Load css and then in-line in head
           test: /\.css$/,
           use: ['style-loader', 'css-loader'],

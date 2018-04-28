@@ -32,6 +32,7 @@
 
 import $ from 'jquery';
 
+import 'jquery-ui/themes/base/button.css';
 import 'jquery-ui/themes/base/core.css';
 import 'jquery-ui/themes/base/dialog.css';
 import 'jquery-ui/themes/base/theme.css';
