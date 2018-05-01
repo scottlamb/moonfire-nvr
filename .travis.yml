@@ -2,7 +2,19 @@ language: rust
 rust:
   - stable
   - nightly
-  - 1.17
+  - 1.17.0
+addons:
+  apt:
+    packages:
+      - build-essential
+      - libavcodec-dev
+      - libavformat-dev
+      - libavutil-dev
+      - libncurses5-dev
+      - libncursesw5-dev
+      - libsqlite3-dev
+      - libssl-dev
+      - pkg-config
 matrix:
   allow_failures:
     - rust: nightly
