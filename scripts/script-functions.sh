@@ -150,7 +150,6 @@ initEnvironmentVars()
 	if [ -r "${MOONFIRE_DIR}/prep.config" ]; then
 		. "${MOONFIRE_DIR}/prep.config"
 	fi
-	SRC_DIR="$(resolvePath "$MOONFIRE_DIR/src")"
 	NVR_USER="${NVR_USER:-moonfire-nvr}"
 	NVR_GROUP="${NVR_GROUP:-$NVR_USER}"
 	NVR_PORT="${NVR_PORT:-8080}"
@@ -281,16 +280,12 @@ sudo_warn()
 #
 setup_db()
 {
-	DB_NAME=${1:-db}
 	if [ ! -d "${DB_DIR}" ]; then
 		echo_info -x 'Create database directory...'
 		mkdir_moonfire -p "${DB_DIR}"
 	fi
-	DB_PATH="${DB_DIR}/${DB_NAME}"
-	if [ ! -f "${DB_PATH}" ]; then
-		echo_info -x 'Create database and initialize...'
-		sudo -u "${NVR_USER}" -H sqlite3 "${DB_PATH}" < "${SRC_DIR}/schema.sql"
-	fi
+	echo_info -x 'Ensure database is initialized...'
+	sudo -u "${NVR_USER}" -H -- "${SERVICE_BIN}" init --db-dir="${DB_DIR}"
 }
 
 # Make sure all sample directories and files owned by moonfire
@@ -362,7 +357,7 @@ fix_localtime()
 pre_install_prep()
 {
 	prep_moonfire_user
-	setup_db db
+	setup_db
 	prep_sample_file_dir
 	fix_localtime
 }
