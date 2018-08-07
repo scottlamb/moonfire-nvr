@@ -1,25 +1,26 @@
+dist: trusty
+sudo: required
 language: rust
 rust:
   - stable
   - nightly
-  - 1.17.0
+  - 1.20.0
 addons:
   apt:
     packages:
       - build-essential
-      - libavcodec-dev
-      - libavformat-dev
-      - libavutil-dev
       - libncurses5-dev
       - libncursesw5-dev
       - libsqlite3-dev
       - libssl-dev
       - pkg-config
+      - yasm
 matrix:
   allow_failures:
     - rust: nightly
 cache: cargo
 script:
+  - (git clone --depth 1 -b "release/3.4" https://github.com/FFmpeg/FFmpeg.git && cd FFmpeg && ./configure --enable-shared && make && sudo make install && sudo ldconfig)
   - cargo build --verbose --all
   - cargo test --verbose --all
   - 'if [ $TRAVIS_RUST_VERSION = nightly ]; then cargo bench --verbose --all; fi'

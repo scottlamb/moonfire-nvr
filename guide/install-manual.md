@@ -49,8 +49,8 @@ all non-Rust dependencies:
                    libssl-dev \
                    pkgconf
 
-Next, you need Rust 1.17+ and Cargo. The easiest way to install them is by following
-the instructions at [rustup.rs](https://www.rustup.rs/).
+Next, you need Rust 1.20+ and Cargo. The easiest way to install them is by
+following the instructions at [rustup.rs](https://www.rustup.rs/).
 
 Finally, building the UI requires [yarn](https://yarnpkg.com/en/).
 
