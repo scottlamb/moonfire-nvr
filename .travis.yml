@@ -4,7 +4,7 @@ language: rust
 rust:
   - stable
   - nightly
-  - 1.20.0
+  - 1.21.0
 addons:
   apt:
     packages:
@@ -20,7 +20,7 @@ matrix:
     - rust: nightly
 cache: cargo
 script:
-  - (git clone --depth 1 -b "release/3.4" https://github.com/FFmpeg/FFmpeg.git && cd FFmpeg && ./configure --enable-shared && make && sudo make install && sudo ldconfig)
+  - (git clone --depth 1 -b "release/3.4" https://github.com/FFmpeg/FFmpeg.git && cd FFmpeg && ./configure --enable-shared && make -jobs=2 && sudo make install --jobs=2 && sudo ldconfig)
   - cargo build --verbose --all
   - cargo test --verbose --all
   - 'if [ $TRAVIS_RUST_VERSION = nightly ]; then cargo bench --verbose --all; fi'
