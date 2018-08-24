@@ -394,7 +394,7 @@ impl Segment {
         // Slow path. Need to iterate through the index.
         trace!("recording::Segment::new slow path, desired_range_90k={:?}, recording={:#?}",
                self_.desired_range_90k, recording);
-        db.with_recording_playback(self_.id, |playback| {
+        db.with_recording_playback(self_.id, &mut |playback| {
             let mut begin = Box::new(SampleIndexIterator::new());
             let data = &(&playback).video_index;
             let mut it = SampleIndexIterator::new();
@@ -437,8 +437,9 @@ impl Segment {
             self_.video_sample_entry_id_and_trailing_zero =
                 recording.video_sample_entry_id |
                 (((it.duration_90k == 0) as i32) << 31);
-            Ok(self_)
-        })
+            Ok(())
+        })?;
+        Ok(self_)
     }
 
     pub fn video_sample_entry_id(&self) -> i32 {
@@ -632,7 +633,7 @@ mod tests {
     fn get_frames<F, T>(db: &db::Database, segment: &Segment, f: F) -> Vec<T>
     where F: Fn(&SampleIndexIterator) -> T {
         let mut v = Vec::new();
-        db.lock().with_recording_playback(segment.id, |playback| {
+        db.lock().with_recording_playback(segment.id, &mut |playback| {
             segment.foreach(playback, |it| { v.push(f(it)); Ok(()) })
         }).unwrap();
         v

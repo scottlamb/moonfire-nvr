@@ -1153,8 +1153,9 @@ impl LockedDatabase {
     /// Calls `f` with a single `recording_playback` row.
     /// Note the lock is held for the duration of `f`.
     /// This uses a LRU cache to reduce the number of retrievals from the database.
-    pub fn with_recording_playback<F, R>(&self, id: CompositeId, f: F) -> Result<R, Error>
-    where F: FnOnce(&RecordingPlayback) -> Result<R, Error> {
+    pub fn with_recording_playback<R>(&self, id: CompositeId,
+                                      f: &mut FnMut(&RecordingPlayback) -> Result<R, Error>)
+                                      -> Result<R, Error> {
         // Check for uncommitted path.
         let s = self.streams_by_id
                     .get(&id.stream())

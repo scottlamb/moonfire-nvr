@@ -382,8 +382,8 @@ impl Segment {
         self.index_once.call_once(|| {
             let index = unsafe { &mut *self.index.get() };
             *index = db.lock()
-                       .with_recording_playback(self.s.id, |playback| self.build_index(playback))
-                       .map_err(|e| { error!("Unable to build index for segment: {:?}", e); });
+                .with_recording_playback(self.s.id, &mut |playback| self.build_index(playback))
+                .map_err(|e| { error!("Unable to build index for segment: {:?}", e); });
         });
         let index: &'a _ = unsafe { &*self.index.get() };
         match *index {
@@ -627,7 +627,7 @@ impl Slice {
         }
         let truns =
             mp4.0.db.lock()
-               .with_recording_playback(s.s.id, |playback| s.truns(playback, pos, len))?;
+               .with_recording_playback(s.s.id, &mut |playback| s.truns(playback, pos, len))?;
         let truns = ARefs::new(truns);
         Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]))
     }
@@ -2275,7 +2275,7 @@ mod bench {
             let rel_range_90k = 0 .. row.duration_90k;
             super::Segment::new(&db, &row, rel_range_90k, 1).unwrap()
         };
-        db.with_recording_playback(segment.s.id, |playback| {
+        db.with_recording_playback(segment.s.id, &mut |playback| {
             let v = segment.build_index(playback).unwrap();  // warm.
             b.bytes = v.len() as u64;  // define the benchmark performance in terms of output bytes.
             b.iter(|| segment.build_index(playback).unwrap());

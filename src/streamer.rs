@@ -302,7 +302,7 @@ mod tests {
     }
 
     fn get_frames(db: &db::LockedDatabase, id: CompositeId) -> Vec<Frame> {
-        db.with_recording_playback(id, |rec| {
+        db.with_recording_playback(id, &mut |rec| {
             let mut it = recording::SampleIndexIterator::new();
             let mut frames = Vec::new();
             while it.next(&rec.video_index).unwrap() {
