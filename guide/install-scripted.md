@@ -41,7 +41,7 @@ created), although if you do a re-install of Moonfire, in particular a much
 newer version, it is a good idea to run it again as requirements and pre-requisites
 may have changed. Running the script multiple times should not have any negative effects.
 
-*WARNING* It is quite possible that during the running of the setup script,
+*Note:* It is quite possible that during the running of the setup script,
 in particular during the building of libavutil you will see several compiler
 warnings. This, while undesirable, is a direct result of the original
 developers not cleaning up the cause(s) of these warnings. They are, however,
@@ -62,9 +62,9 @@ This script will perform all steps necessary to build a complete Moonfire
 setup. If there are no build errors, this script will then automatically
 invoke the install script (see below).
 
-There are two options you may pass to this script. The first is "-B" which
+There are two options you may pass to this script. The first is `-B` which
 means "build only". In other words, this will stop the automatic invocation
-of the install script. The other option available is "-t" and causes the
+of the install script. The other option available is `-t` and causes the
 script to ignore the results of any tests. In other words, even if tests
 fail, the build phase will be considered successful. This can occasionally
 be useful if you are doing development, and have temporarily broken one
@@ -80,7 +80,7 @@ like this:
 This script will copy various files resulting from the build to the correct
 locations. It will also create a "service configuration" for systemctl that
 can be used to control Moonfire. This service configuration can be prevented
-by using the "-s" option to this script. It will also prevent the automatic
+by using the `-s` option to this script. It will also prevent the automatic
 start of this configuration.
 
 ## Configuration variables

@@ -38,7 +38,7 @@ make this possible:
   drives costing about $100), so we can afford to keep many camera-months of
   both streams on disk.
 * decoding and analyzing only select "key" video frames (see
-  [wikipedia](https://en.wikipedia.org/wiki/Video_compression_picture_types).
+  [wikipedia](https://en.wikipedia.org/wiki/Video_compression_picture_types)).
 * off-loading expensive work to a GPU. Even the Raspberry Pi has a
   surprisingly powerful GPU.
 * using [HTTP Live Streaming](https://en.wikipedia.org/wiki/HTTP_Live_Streaming)

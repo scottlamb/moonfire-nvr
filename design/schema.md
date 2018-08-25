@@ -426,7 +426,7 @@ These invariants are updated through the following procedure:
    against the given database. This lock is not released until program shutdown.
 2. Query `garbage` table and `next_recording_id` field in the `stream` table.
 3. `unlink()` all the sample files associated with garbage rows, ignoring
-   `ENOENT.
+   `ENOENT`.
 4. For each stream, `unlink()` all the existing files with recording ids >=
    `next_recording_id`.
 4. `fsync()` the sample file directory.
