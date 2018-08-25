@@ -231,7 +231,7 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
 /// Returns the number of recordings which were deleted.
 pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: i32,
                                 ids: Range<CompositeId>)
-                                -> Result<i32, Error> {
+                                -> Result<usize, Error> {
     let mut insert = tx.prepare_cached(r#"
         insert into garbage (sample_file_dir_id, composite_id)
         select

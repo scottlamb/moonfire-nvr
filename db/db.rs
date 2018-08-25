@@ -1502,7 +1502,7 @@ impl LockedDatabase {
         }
         let mut meta = d.get().meta(&self.uuid);
         meta.in_progress_open = mem::replace(&mut meta.last_complete_open,
-                                             ::protobuf::singular::SingularPtrField::none());
+                                             ::protobuf::SingularPtrField::none());
         dir.write_meta(&meta)?;
         if self.conn.execute("delete from sample_file_dir where id = ?", &[&dir_id])? != 1 {
             bail!("missing database row for dir {}", dir_id);
