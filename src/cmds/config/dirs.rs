@@ -229,7 +229,7 @@ fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
                     add_dir(&db, siv, &path)
                 }
             })
-            .button("Cancel", |siv| siv.pop_layer())
+            .button("Cancel", |siv| { siv.pop_layer(); })
         .title("Add sample file directory"));
 }
 
@@ -257,7 +257,7 @@ fn delete_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
                     delete_dir(&db, siv, dir_id)
                 }
             })
-            .button("Cancel", |siv| siv.pop_layer())
+            .button("Cancel", |siv| { siv.pop_layer(); })
         .title("Delete sample file directory"));
 }
 
@@ -378,7 +378,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
         .child(views::DummyView.full_width());
     buttons.add_child(change_button.with_id("change"));
     buttons.add_child(views::DummyView);
-    buttons.add_child(views::Button::new("Cancel", |siv| siv.pop_layer()));
+    buttons.add_child(views::Button::new("Cancel", |siv| { siv.pop_layer(); }));
     siv.add_layer(
         views::Dialog::around(
             views::LinearLayout::vertical()

@@ -68,7 +68,7 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
                 .unwrap_or(0);
         let d = *siv.find_id::<views::SelectView<Option<i32>>>(
             &format!("{}_sample_file_dir", t.as_str()))
-            .unwrap().selection();
+            .unwrap().selection().unwrap();
         c.streams[t.index()] = db::StreamChange {
             rtsp_path: p,
             sample_file_dir_id: d,
@@ -124,7 +124,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
     let sink = siv.cb_sink().clone();
     ::std::thread::spawn(move || {
         let r = press_test_inner(&url);
-        sink.send(Box::new(move |siv| {
+        sink.send(Box::new(move |siv: &mut Cursive| {
             // Polling is no longer necessary.
             siv.set_fps(0);
             siv.pop_layer();
@@ -142,7 +142,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
                     format!("{} stream at {}:\n\n{}", t.as_str(), url, description))
                     .title("Stream test succeeded")
                     .dismiss_button("Back"));
-        })).unwrap();
+        }));
     });
 }
 
