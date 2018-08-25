@@ -157,8 +157,6 @@ initEnvironmentVars()
 	NVR_HOME="${NVR_HOME_BASE}/${NVR_USER}"
 	DB_NAME="${DB_NAME:-db}"
 	DB_DIR="${DB_DIR:-$NVR_HOME/${DB_NAME}}"
-	SAMPLE_FILE_DIR="${SAMPLE_FILE_DIR:-sample}"
-	SAMPLE_MEDIA_DIR="${SAMPLE_MEDIA_DIR:-$NVR_HOME}"
 	SERVICE_NAME="${SERVICE_NAME:-moonfire-nvr}"
 	SERVICE_DESC="${SERVICE_DESC:-Moonfire NVR}"
 	SERVICE_BIN="${SERVICE_BIN:-/usr/local/bin/moonfire-nvr}"
@@ -177,8 +175,6 @@ makePrepConfig()
 		cat >"${MOONFIRE_DIR}/prep.config" <<-EOF_CONFIG
 			NVR_USER=$NVR_USER
 			NVR_PORT=$NVR_PORT
-			SAMPLE_FILE_DIR=$SAMPLE_FILE_DIR
-			#SAMPLE_MEDIA_DIR=/mount/media
 			SERVICE_NAME=$SERVICE_NAME
 			SERVICE_DESC="$SERVICE_DESC"
 EOF_CONFIG
@@ -292,36 +288,8 @@ setup_db()
 #
 fix_ownership()
 {
-	sudo chown -R ${NVR_USER}.${NVR_USER} "$1"
+	sudo chown -R ${NVR_USER}:${NVR_USER} "$1"
 	echo_info -x "Fix ownership of files in \"$1\"..."
-}
-
-# Make sure samples directory is ready
-#
-prep_sample_file_dir()
-{
-	if [ -z "${SAMPLE_MEDIA_DIR}" ]; then
-		echo_fatal -x "SAMPLE_MEDIA_DIR variable not configured. Check configuration."
-		exit 1
-	fi
-	SAMPLE_FILE_PATH="${SAMPLE_MEDIA_DIR}/${SAMPLE_FILE_DIR}"
-	if [ "${SAMPLE_FILE_PATH##${NVR_HOME}}" != "${SAMPLE_FILE_PATH}" ]; then
-		# Under the home directory, create if not there
-		if [ ! -d "${SAMPLE_FILE_PATH}" ]; then
-			echo_info -x "Created sample file directory: \"$SAMPLE_FILE_PATH\"..."
-			mkdir_moonfire -p "${SAMPLE_FILE_PATH}"
-		fi
-	else
-		if [ ! -d "${SAMPLE_FILE_PATH}" ]; then
-			read_lines <<-MSG1
-	Samples directory $SAMPLE_FILE_PATH does not exist. 
-	If a mounted file system, make sure /etc/fstab is properly configured, 
-	and file system is mounted and directory created.
-	MSG1
-			echo_fatal -L
-		fi
-	fi
-	fix_ownership "${SAMPLE_FILE_PATH}"
 }
 
 # Create user and groups if not there
@@ -358,7 +326,5 @@ pre_install_prep()
 {
 	prep_moonfire_user
 	setup_db
-	prep_sample_file_dir
 	fix_localtime
 }
-

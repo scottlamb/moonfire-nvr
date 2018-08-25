@@ -429,7 +429,7 @@ These invariants are updated through the following procedure:
    `ENOENT.
 4. For each stream, `unlink()` all the existing files with recording ids >=
    `next_recording_id`.
-4. `fsync()` the samples directory.
+4. `fsync()` the sample file directory.
 5. Delete all rows from the `garbage` table.
 
 The procedures can be batched: while for a given recording, the steps must be

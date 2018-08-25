@@ -1,14 +1,9 @@
-# Installing Moonfire NVR
+# Building and installing Moonfire NVR manually
 
-This document describes how to install Moonfire NVR on a Linux system.
-
-## Downloading
-
-See the [github page](https://github.com/scottlamb/moonfire-nvr) (in case
-you're not reading this text there already). You can download the bleeding
-edge version from the command line via git:
-
-    $ git clone https://github.com/scottlamb/moonfire-nvr.git
+This guide will walk you through building and installing Moonfire NVR manually.
+You should have already downloaded the source code as mentioned in
+[install.md](install.md), and after completing these instructions you should go
+back to that page to complete configuration.
 
 ## Building from source
 
@@ -54,34 +49,6 @@ following the instructions at [rustup.rs](https://www.rustup.rs/).
 
 Finally, building the UI requires [yarn](https://yarnpkg.com/en/).
 
-You can continue to follow the build/install instructions below for a manual
-build and install, or alternatively you can run the prep script called `prep.sh`.
-
-    $ cd moonfire-nvr
-    $ ./prep.sh
-
-The script will take the following command line options, should you need them:
-
-* `-S`: Skip updating and installing dependencies through apt-get. This too can be
-        useful on repeated builds.
-
-You can edit variables at the start of the script to influence names and
-directories, but defaults should suffice in most cases. For details refer to
-the script itself. We will mention just one option, needed when you follow the
-suggestion to separate database and samples between flash storage and a hard disk.
-If you have the hard disk mounted on, lets say `/media/nvr`, and you want to
-store the video samples inside a directory named `samples` there, you would set:
-
-    SAMPLE_FILE_DIR=/media/nvr/samples
-
-The script will perform all necessary steps to leave you with a fully built,
-installed moonfire-nvr binary. The only thing
-you'll have to do manually is add your camera configuration(s) to the database.
-Alternatively, before running the script, you can create a file named `cameras.sql`
-in the same directory as the `prep.sh` script and it will be automatically
-included for you.
-For instructions, you can skip to "[Camera configuration and hard disk mounting](#camera)".
-
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
     $ yarn
@@ -92,74 +59,21 @@ Once prerequisites are installed, Moonfire NVR can be built as follows:
     $ sudo mkdir /usr/local/lib/moonfire-nvr
     $ sudo cp -R ui-dist /usr/local/lib/moonfire-nvr/ui
 
-## Further configuration
+## Creating the user and database
 
-Moonfire NVR should be run under a dedicated user. It keeps two kinds of
-state:
-
-   * a SQLite database, typically <1 GiB. It should be stored on flash if
-     available.
-   * the "sample file directory", which holds the actual samples/frames of
-     H.264 video. This should be quite large and typically is stored on a hard
-     drive.
-
-(See [schema.md](schema.md) for more information.)
-
-Both kinds of state are intended to be accessed only by Moonfire NVR itself.
-However, the interface for adding new cameras is not yet written, so you will
-have to manually insert cameras with the `sqlite3` command line tool prior to
-starting Moonfire NVR.
-
-Manual commands would look something like this:
+You can create Moonfire NVR's dedicated user and SQLite database with the
+following commands:
 
     $ sudo addgroup --system moonfire-nvr
     $ sudo adduser --system moonfire-nvr --home /var/lib/moonfire-nvr
     $ sudo mkdir /var/lib/moonfire-nvr
+    $ sudo chown moonfire-nvr:moonfire-nvr /var/lib/moonfire-nvr
     $ sudo -u moonfire-nvr -H mkdir db sample
     $ sudo -u moonfire-nvr moonfire-nvr init
 
-### <a name="cameras"></a>Camera configuration and hard drive mounting
+## System Service
 
-If a dedicated hard drive is available, set up the mount point:
-
-    $ sudo vim /etc/fstab
-    $ sudo mount /var/lib/moonfire-nvr/sample
-
-Once setup is complete, it is time to add camera configurations to the
-database. If the daemon is running, you will need to stop it temporarily:
-
-    $ sudo systemctl stop moonfire-nvr
-
-You can configure the system through a text-based user interface:
-
-    $ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
-
-In the user interface, add your cameras under the "Edit cameras" dialog.
-There's a "Test" button to verify your settings directly from the dialog.
-
-After the cameras look correct, go to "Edit retention" to assign disk space to
-each camera. Leave a little slack (at least 100 MB per camera) between the total
-limit and the filesystem capacity, even if you store nothing else on the disk.
-There are several reasons this is needed:
-
-   * The limit currently controls fully-written files only. There will be up
-     to two minutes of video per camera of additional video.
-   * The rotation happens after the limit is exceeded, not proactively.
-   * Moonfire NVR currently doesn't account for the unused space in the final
-     filesystem block at the end of each file.
-   * Moonfire NVR doesn't account for the space used for directory listings.
-   * If a file is open when it is deleted (such as if a HTTP client is
-     downloading it), it stays around until the file is closed. Moonfire NVR
-     currently doesn't account for this.
-
-When finished, start the daemon:
-
-    $ sudo systemctl start moonfire-nvr
-
-### System Service
-
-Moonfire NVR can be run as a systemd service. If you used `prep.sh` this has
-been done for you. If not, Create
+Moonfire NVR can be run as a systemd service. Create
 `/etc/systemd/system/moonfire-nvr.service`:
 
     [Unit]
@@ -188,14 +102,20 @@ been done for you. If not, Create
 Note that the HTTP port currently has no authentication, encryption, or
 logging; it should not be directly exposed to the Internet.
 
-Complete the installation through `systemctl` commands:
+Tell `systemd` to look for the new file:
 
     $ sudo systemctl daemon-reload
-    $ sudo systemctl start moonfire-nvr
-    $ sudo systemctl status moonfire-nvr
-    $ sudo systemctl enable moonfire-nvr
 
 See the [systemd](http://www.freedesktop.org/wiki/Software/systemd/)
 documentation for more information. The [manual
 pages](http://www.freedesktop.org/software/systemd/man/) for `systemd.service`
 and `systemctl` may be of particular interest.
+
+Don't enable or start the service just yet; you'll need to do some more
+configuration first.
+
+## Completing installation
+
+After the steps on this page, go back to [Downloading, installing, and
+configuring Moonfire NVR](install.md) to set up the sample file directory and
+configure the system.

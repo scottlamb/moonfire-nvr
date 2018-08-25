@@ -91,7 +91,7 @@ if ! cargo test; then
 fi
 if ! cargo build --release; then
 	echo_error -x "Server/release build failed." "Try to run the following manually for more info" \
-			 "RUST_TEST_THREADS=1 cargo build --release --verbose" ''
+			 "cargo build --release --verbose" ''
 	exit 1
 fi
 
