@@ -30,15 +30,12 @@
 
 //! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
+use body::{BoxedError, wrap_error};
 use failure::Error;
 use futures::stream;
 use futures::Stream;
-use reffers::ARefs;
 use std::fmt;
 use std::ops::Range;
-
-pub type Chunk = ARefs<'static, [u8]>;
-pub type Body = Box<Stream<Item = Chunk, Error = ::hyper::Error> + Send>;
 
 /// Writes a byte range to the given `io::Write` given a context argument; meant for use with
 /// `Slices`.
@@ -54,7 +51,7 @@ pub trait Slice : fmt::Debug + Sized + Sync + 'static {
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
     fn get_range(&self, ctx: &Self::Ctx, r: Range<u64>, len: u64)
-                 -> Box<Stream<Item = Self::Chunk, Error = ::hyper::Error> + Send>;
+                 -> Box<Stream<Item = Self::Chunk, Error = BoxedError> + Send>;
 
     fn get_slices(ctx: &Self::Ctx) -> &Slices<Self>;
 }
@@ -113,10 +110,10 @@ impl<S> Slices<S> where S: Slice {
     /// Writes `range` to `out`.
     /// This interface mirrors `http_serve::Entity::write_to`, with the additional `ctx` argument.
     pub fn get_range(&self, ctx: &S::Ctx, range: Range<u64>)
-                     -> Box<Stream<Item = S::Chunk, Error = ::hyper::Error> + Send> {
+                     -> Box<Stream<Item = S::Chunk, Error = BoxedError> + Send> {
         if range.start > range.end || range.end > self.len {
-            error!("Bad range {:?} for slice of length {}", range, self.len);
-            return Box::new(stream::once(Err(::hyper::Error::Incomplete)));
+            return Box::new(stream::once(Err(wrap_error(format_err!(
+                        "Bad range {:?} for slice of length {}", range, self.len)))));
         }
 
         // Binary search for the first slice of the range to write, determining its index and
@@ -143,7 +140,7 @@ impl<S> Slices<S> where S: Slice {
                 let l = s_end - slice_start;
                 body = s.get_range(&c, start_pos .. min_end - slice_start, l);
             };
-            Some(Ok::<_, ::hyper::Error>((body, (c, i+1, 0, min_end))))
+            Some(Ok::<_, BoxedError>((body, (c, i+1, 0, min_end))))
         });
         Box::new(bodies.flatten())
     }
@@ -151,6 +148,7 @@ impl<S> Slices<S> where S: Slice {
 
 #[cfg(test)]
 mod tests {
+    use body::BoxedError;
     use db::testutil;
     use futures::{Future, Stream};
     use futures::stream;
@@ -176,7 +174,7 @@ mod tests {
         fn end(&self) -> u64 { self.end }
 
         fn get_range(&self, _ctx: &&'static Slices<FakeSlice>, r: Range<u64>, _l: u64)
-                     -> Box<Stream<Item = FakeChunk, Error = ::hyper::Error> + Send> {
+                     -> Box<Stream<Item = FakeChunk, Error = BoxedError> + Send> {
             Box::new(stream::once(Ok(FakeChunk{slice: self.name, range: r})))
         }
 

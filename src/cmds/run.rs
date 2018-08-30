@@ -33,12 +33,13 @@ use db::{self, dir, writer};
 use failure::Error;
 use fnv::FnvHashMap;
 use futures::{Future, Stream};
+use std::error::Error as StdError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use stream;
 use streamer;
-use tokio_core::reactor;
+use tokio;
 use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
 use web;
 
@@ -78,12 +79,12 @@ struct Args {
     flag_allow_origin: Option<String>,
 }
 
-fn setup_shutdown_future(h: &reactor::Handle) -> Box<Future<Item = (), Error = ()>> {
-    let int = Signal::new(SIGINT, h).flatten_stream().into_future();
-    let term = Signal::new(SIGTERM, h).flatten_stream().into_future();
-    Box::new(int.select(term)
-                .map(|_| ())
-                .map_err(|_| ()))
+fn setup_shutdown() -> impl Future<Item = (), Error = ()> + Send {
+    let int = Signal::new(SIGINT).flatten_stream().into_future();
+    let term = Signal::new(SIGTERM).flatten_stream().into_future();
+    int.select(term)
+       .map(|_| ())
+       .map_err(|_| ())
 }
 
 fn resolve_zone() -> String {
@@ -193,14 +194,18 @@ pub fn run() -> Result<(), Error> {
 
     // Start the web interface.
     let addr = args.flag_http_addr.parse().unwrap();
-    let server = ::hyper::server::Http::new()
-        .bind(&addr, move || Ok(s.clone()))
-        .unwrap();
+    let server = ::hyper::server::Server::bind(&addr).tcp_nodelay(true).serve(
+        move || Ok::<_, Box<StdError + Send + Sync>>(s.clone()));
 
-    let shutdown = setup_shutdown_future(&server.handle());
+    let shutdown = setup_shutdown().shared();
 
     info!("Ready to serve HTTP requests");
-    server.run_until(shutdown).unwrap();
+    let reactor = ::std::thread::spawn({
+        let shutdown = shutdown.clone();
+        || tokio::run(server.with_graceful_shutdown(shutdown.map(|_| ()))
+                            .map_err(|e| error!("hyper error: {}", e)))
+    });
+    shutdown.wait().unwrap();
 
     info!("Shutting down streamers.");
     shutdown_streamers.store(true, Ordering::SeqCst);
@@ -218,6 +223,8 @@ pub fn run() -> Result<(), Error> {
         }
     }
 
+    info!("Waiting for HTTP requests to finish.");
+    reactor.join().unwrap();
     info!("Exiting.");
     Ok(())
 }

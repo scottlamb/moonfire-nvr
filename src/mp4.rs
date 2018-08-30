@@ -79,20 +79,22 @@
 extern crate time;
 
 use base::strutil;
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
+use body::{Chunk, BoxedError, wrap_error};
 use db::recording::{self, TIME_UNITS_PER_SEC};
 use db::{self, dir};
 use failure::Error;
+use futures::Stream;
 use futures::stream;
 use http;
+use http::header::HeaderValue;
 use http_serve;
-use hyper::header;
 use memmap;
 use openssl::hash;
 use parking_lot::{Once, ONCE_INIT};
 use reffers::ARefs;
-use slices::{self, Body, Chunk, Slices};
+use slices::{self, Slices};
 use smallvec::SmallVec;
 use std::cell::UnsafeCell;
 use std::cmp;
@@ -101,6 +103,7 @@ use std::io;
 use std::ops::Range;
 use std::mem;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
@@ -615,7 +618,7 @@ impl Slice {
         let mp4 = ARefs::new(mp4.0.clone());
         let r = r.start as usize .. r.end as usize;
         let p = self.p();
-        mp4.try_map(|mp4| Ok(&mp4.segments[p].get_index(&mp4.db, f)?[r]))
+        Ok(mp4.try_map(|mp4| Ok::<_, Error>(&mp4.segments[p].get_index(&mp4.db, f)?[r]))?.into())
     }
 
     fn wrap_truns(&self, mp4: &File, r: Range<u64>, len: usize) -> Result<Chunk, Error> {
@@ -629,16 +632,17 @@ impl Slice {
             mp4.0.db.lock()
                .with_recording_playback(s.s.id, &mut |playback| s.truns(playback, pos, len))?;
         let truns = ARefs::new(truns);
-        Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]))
+        Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]).into())
     }
 }
 
 impl slices::Slice for Slice {
     type Ctx = File;
-    type Chunk = slices::Chunk;
+    type Chunk = Chunk;
 
     fn end(&self) -> u64 { return self.0 & 0xFF_FF_FF_FF_FF }
-    fn get_range(&self, f: &File, range: Range<u64>, len: u64) -> Body {
+    fn get_range(&self, f: &File, range: Range<u64>, len: u64)
+                 -> Box<Stream<Item = Self::Chunk, Error = BoxedError> + Send> {
         trace!("getting mp4 slice {:?}'s range {:?} / {}", self, range, len);
         let p = self.p();
         let res = match self.t() {
@@ -649,12 +653,12 @@ impl slices::Slice for Slice {
             },
             SliceType::Buf => {
                 let r = ARefs::new(f.0.clone());
-                Ok(r.map(|f| &f.buf[p+range.start as usize .. p+range.end as usize]))
+                Ok(r.map(|f| &f.buf[p+range.start as usize .. p+range.end as usize]).into())
             },
             SliceType::VideoSampleEntry => {
                 let r = ARefs::new(f.0.clone());
                 Ok(r.map(|f| &f.video_sample_entries[p]
-                               .data[range.start as usize .. range.end as usize]))
+                               .data[range.start as usize .. range.end as usize]).into())
             },
             SliceType::Stts => self.wrap_index(f, range.clone(), &Segment::stts),
             SliceType::Stsz => self.wrap_index(f, range.clone(), &Segment::stsz),
@@ -665,15 +669,12 @@ impl slices::Slice for Slice {
             SliceType::Truns => self.wrap_truns(f, range.clone(), len as usize),
         };
         Box::new(stream::once(res
-            .map_err(|e| {
-                error!("Error producing {:?}: {:?}", self, e);
-                ::hyper::Error::Incomplete
-            })
+            .map_err(|e| wrap_error(e))
             .and_then(move |c| {
-                if c.len() != (range.end - range.start) as usize {
-                    error!("Error producing {:?}: range {:?} produced incorrect len {}.",
-                           self, range, c.len());
-                    return Err(::hyper::Error::Incomplete);
+                if c.remaining() != (range.end - range.start) as usize {
+                    return Err(wrap_error(format_err!(
+                        "Error producing {:?}: range {:?} produced incorrect len {}.",
+                        self, range, c.remaining())));
                 }
                 Ok(c)
             })))
@@ -868,8 +869,8 @@ impl FileBuilder {
         }
         debug!("segments: {:#?}", self.segments);
         debug!("slices: {:?}", self.body.slices);
-        let mtime = ::std::time::UNIX_EPOCH +
-                    ::std::time::Duration::from_secs(max_end as u64);
+        let last_modified = ::std::time::UNIX_EPOCH +
+                            ::std::time::Duration::from_secs(max_end as u64);
         Ok(File(Arc::new(FileInner {
             db,
             dirs_by_stream_id,
@@ -878,8 +879,9 @@ impl FileBuilder {
             buf: self.body.buf,
             video_sample_entries: self.video_sample_entries,
             initial_sample_byte_pos,
-            last_modified: mtime.into(),
-            etag: header::EntityTag::strong(strutil::hex(&etag.finish()?)),
+            last_modified,
+            etag: HeaderValue::from_str(&format!("\"{}\"", &strutil::hex(&etag.finish()?)))
+                  .expect("hex string should be valid UTF-8"),
         })))
     }
 
@@ -1420,8 +1422,8 @@ struct FileInner {
     buf: Vec<u8>,
     video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
     initial_sample_byte_pos: u64,
-    last_modified: header::HttpDate,
-    etag: header::EntityTag,
+    last_modified: SystemTime,
+    etag: HeaderValue,
 }
 
 impl FileInner {
@@ -1433,7 +1435,7 @@ impl FileInner {
             let r = s.s.sample_file_range();
             pos += r.end - r.start;
         }
-        Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]))
+        Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]).into())
     }
 
     /// Gets a `Chunk` of video sample data from disk.
@@ -1459,7 +1461,7 @@ impl FileInner {
                 .map(&f)?
             });
         use core::ops::Deref;
-        Ok(ARefs::new(mmap).map(|m| m.deref()))
+        Ok(ARefs::new(mmap).map(|m| m.deref()).into())
     }
 
     fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, l: u64) -> Result<Chunk, Error> {
@@ -1475,7 +1477,7 @@ impl FileInner {
             use std::io::Write;
             write!(v, "{}", tm.strftime(SUBTITLE_TEMPLATE)?)?;
         }
-        Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]))
+        Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]).into())
     }
 }
 
@@ -1483,8 +1485,8 @@ impl FileInner {
 pub struct File(Arc<FileInner>);
 
 impl http_serve::Entity for File {
-    type Chunk = slices::Chunk;
-    type Body = slices::Body;
+    type Data = Chunk;
+    type Error = BoxedError;
 
     fn add_headers(&self, hdrs: &mut http::header::HeaderMap) {
         let mut mime = BytesMut::with_capacity(64);
@@ -1502,10 +1504,13 @@ impl http_serve::Entity for File {
         hdrs.insert(http::header::CONTENT_TYPE,
                     http::header::HeaderValue::from_shared(mime.freeze()).unwrap());
     }
-    fn last_modified(&self) -> Option<header::HttpDate> { Some(self.0.last_modified) }
-    fn etag(&self) -> Option<header::EntityTag> { Some(self.0.etag.clone()) }
+    fn last_modified(&self) -> Option<SystemTime> { Some(self.0.last_modified) }
+    fn etag(&self) -> Option<HeaderValue> { Some(self.0.etag.clone()) }
     fn len(&self) -> u64 { self.0.slices.len() }
-    fn get_range(&self, range: Range<u64>) -> Body { self.0.slices.get_range(self, range) }
+    fn get_range(&self, range: Range<u64>)
+                 -> Box<Stream<Item = Self::Data, Error = Self::Error> + Send> {
+        self.0.slices.get_range(self, range)
+    }
 }
 
 /// Tests. There are two general strategies used to validate the resulting files:
@@ -1521,6 +1526,7 @@ impl http_serve::Entity for File {
 #[cfg(test)]
 mod tests {
     use base::strutil;
+    use bytes::Buf;
     use byteorder::{BigEndian, ByteOrder};
     use clock::RealClocks;
     use db::recording::{self, TIME_UNITS_PER_SEC};
@@ -1528,7 +1534,6 @@ mod tests {
     use db::writer;
     use futures::Future;
     use futures::Stream as FuturesStream;
-    use hyper::header;
     use openssl::hash;
     use http_serve::{self, Entity};
     use std::fs;
@@ -1538,26 +1543,28 @@ mod tests {
     use super::*;
     use stream::{self, Opener, Stream};
 
-    fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64) {
+    fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64)
+    where E::Error : ::std::fmt::Debug {
         let mut p = 0;
         e.get_range(start .. start + slice.len() as u64)
          .for_each(|chunk| {
-             let c: &[u8] = chunk.as_ref();
+             let c: &[u8] = chunk.bytes();
              slice[p .. p + c.len()].copy_from_slice(c);
              p += c.len();
-             Ok::<_, ::hyper::Error>(())
+             Ok::<_, E::Error>(())
          })
         .wait()
         .unwrap();
     }
 
     /// Returns the SHA-1 digest of the given `Entity`.
-    fn digest<E: http_serve::Entity>(e: &E) -> hash::DigestBytes {
+    fn digest<E: http_serve::Entity>(e: &E) -> hash::DigestBytes
+    where E::Error : ::std::fmt::Debug {
         e.get_range(0 .. e.len())
          .fold(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap(), |mut sha1, chunk| {
-             let c: &[u8] = chunk.as_ref();
+             let c: &[u8] = chunk.bytes();
              sha1.update(c).unwrap();
-             Ok::<_, ::hyper::Error>(sha1)
+             Ok::<_, E::Error>(sha1)
          })
          .wait()
          .unwrap()
@@ -1812,7 +1819,7 @@ mod tests {
         use ::std::io::Write;
         mp4.get_range(0 .. mp4.len())
            .for_each(|chunk| {
-               out.write_all(&chunk)?;
+               out.write_all(chunk.bytes())?;
                Ok(())
            })
            .wait()
@@ -2116,8 +2123,8 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "04298efb2df0cc45a6cea65dfdf2e817a3b42ca8";
-        assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
+        const EXPECTED_ETAG: &'static str = "\"04298efb2df0cc45a6cea65dfdf2e817a3b42ca8\"";
+        assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
@@ -2137,8 +2144,8 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "16a4f6348560c3de0d149675dccba21ef7906be3";
-        assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
+        const EXPECTED_ETAG: &'static str = "\"16a4f6348560c3de0d149675dccba21ef7906be3\"";
+        assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
@@ -2158,8 +2165,8 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("d655945f94e18e6ed88a2322d27522aff6f76403", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "80e418b029e81aa195f90aa6b806015a5030e5be";
-        assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
+        const EXPECTED_ETAG: &'static str = "\"80e418b029e81aa195f90aa6b806015a5030e5be\"";
+        assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
@@ -2179,8 +2186,8 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
         assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "5bfea0f20108a7c5b77ef1e21d82ef2abc29540f";
-        assert_eq!(Some(header::EntityTag::strong(EXPECTED_ETAG.to_owned())), mp4.etag());
+        const EXPECTED_ETAG: &'static str = "\"5bfea0f20108a7c5b77ef1e21d82ef2abc29540f\"";
+        assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
         db.syncer_join.join().unwrap();
@@ -2195,12 +2202,11 @@ mod bench {
     use base::clock::RealClocks;
     use db::recording;
     use db::testutil::{self, TestDb};
-    use futures::Stream;
-    use futures::future;
+    use futures::{Future, future};
     use hyper;
     use http_serve;
-    use reffers::ARefs;
     use self::test::Bencher;
+    use std::error::Error as StdError;
     use super::tests::create_mp4_from_db;
     use url::Url;
 
@@ -2225,14 +2231,14 @@ mod bench {
             let (tx, rx) = ::std::sync::mpsc::channel();
             ::std::thread::spawn(move || {
                 let addr = "127.0.0.1:0".parse().unwrap();
-                let server = hyper::server::Http::new()
-                    .bind(&addr, move || Ok(MyService(mp4.clone())))
-                    .unwrap();
-                tx.send(server.local_addr().unwrap()).unwrap();
-                server.run().unwrap();
+                let server = hyper::server::Server::bind(&addr)
+                    .tcp_nodelay(true)
+                    .serve(move || Ok::<_, Box<StdError + Send + Sync>>(MyService(mp4.clone())));
+                tx.send(server.local_addr()).unwrap();
+                ::tokio::run(server.map_err(|e| panic!(e)));
             });
             let addr = rx.recv().unwrap();
-            BenchServer{
+            BenchServer {
                 url: Url::parse(&format!("http://{}:{}/", addr.ip(), addr.port())).unwrap(),
                 generated_len: p,
             }
@@ -2241,14 +2247,13 @@ mod bench {
 
     struct MyService(super::File);
 
-    impl hyper::server::Service for MyService {
-        type Request = hyper::server::Request;
-        type Response = hyper::server::Response<
-            Box<Stream<Item = ARefs<'static, [u8]>, Error = hyper::Error> + Send>>;
-        type Error = hyper::Error;
-        type Future = future::FutureResult<Self::Response, Self::Error>;
+    impl hyper::service::Service for MyService {
+        type ReqBody = ::hyper::Body;
+        type ResBody = ::body::Body;
+        type Error = ::body::BoxedError;
+        type Future = future::FutureResult<::http::Response<Self::ResBody>, Self::Error>;
 
-        fn call(&self, req: hyper::server::Request) -> Self::Future {
+        fn call(&mut self, req: ::http::Request<Self::ReqBody>) -> Self::Future {
             future::ok(http_serve::serve(self.0.clone(), &req))
         }
     }

@@ -31,25 +31,22 @@
 extern crate hyper;
 
 use base::strutil;
+use body::{Body, BoxedError, wrap_error};
 use core::borrow::Borrow;
 use core::str::FromStr;
 use db::{self, recording};
 use db::dir::SampleFileDir;
 use failure::Error;
 use fnv::FnvHashMap;
-use futures::{future, stream};
+use futures::future;
 use futures_cpupool;
 use json;
-use http;
+use http::{self, Request, Response, status::StatusCode};
 use http_serve;
-use hyper::header::{self, Header};
-use hyper::server::{self, Request, Response};
-use mime;
+use http::header::{self, HeaderValue};
 use mp4;
-use reffers::ARefs;
 use regex::Regex;
 use serde_json;
-use slices;
 use std::collections::HashMap;
 use std::cmp;
 use std::fs;
@@ -185,7 +182,7 @@ impl Segments {
 /// The files themselves are opened on every request so they can be changed during development.
 #[derive(Debug)]
 struct UiFile {
-    mime: http::header::HeaderValue,
+    mime: HeaderValue,
     path: PathBuf,
 }
 
@@ -193,21 +190,21 @@ struct ServiceInner {
     db: Arc<db::Database>,
     dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
     ui_files: HashMap<String, UiFile>,
-    allow_origin: Option<header::AccessControlAllowOrigin>,
+    allow_origin: Option<HeaderValue>,
     pool: futures_cpupool::CpuPool,
     time_zone_name: String,
 }
 
 impl ServiceInner {
-    fn not_found(&self) -> Result<Response<slices::Body>, Error> {
-        let body: slices::Body = Box::new(stream::once(Ok(ARefs::new(&b"not found"[..]))));
-        Ok(Response::new()
-            .with_status(hyper::StatusCode::NotFound)
-            .with_header(header::ContentType(mime::TEXT_PLAIN))
-            .with_body(body))
+    fn not_found(&self) -> Result<Response<Body>, Error> {
+        let body: Body = (&b"not found"[..]).into();
+        Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"))
+            .body(body)?)
     }
 
-    fn top_level(&self, req: &Request) -> Result<Response<slices::Body>, Error> {
+    fn top_level(&self, req: &Request<::hyper::Body>) -> Result<Response<Body>, Error> {
         let mut days = false;
         if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
@@ -219,8 +216,10 @@ impl ServiceInner {
             }
         }
 
-        let mut resp = Response::new().with_header(header::ContentType(mime::APPLICATION_JSON));
-        if let Some(mut w) = http_serve::streaming_body(&req, &mut resp).build() {
+        let (mut resp, writer) = http_serve::streaming_body(&req).build();
+        resp.headers_mut().insert(header::CONTENT_TYPE,
+                                  HeaderValue::from_static("application/json"));
+        if let Some(mut w) = writer {
             let db = self.db.lock();
             serde_json::to_writer(&mut w, &json::TopLevel {
                     time_zone_name: &self.time_zone_name,
@@ -230,9 +229,11 @@ impl ServiceInner {
         Ok(resp)
     }
 
-    fn camera(&self, req: &Request, uuid: Uuid) -> Result<Response<slices::Body>, Error> {
-        let mut resp = Response::new().with_header(header::ContentType(mime::APPLICATION_JSON));
-        if let Some(mut w) = http_serve::streaming_body(&req, &mut resp).build() {
+    fn camera(&self, req: &Request<::hyper::Body>, uuid: Uuid) -> Result<Response<Body>, Error> {
+        let (mut resp, writer) = http_serve::streaming_body(&req).build();
+        resp.headers_mut().insert(header::CONTENT_TYPE,
+                                  HeaderValue::from_static("application/json"));
+        if let Some(mut w) = writer {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| format_err!("no such camera {}", uuid))?;
@@ -241,8 +242,8 @@ impl ServiceInner {
         Ok(resp)
     }
 
-    fn stream_recordings(&self, req: &Request, uuid: Uuid, type_: db::StreamType)
-                         -> Result<Response<slices::Body>, Error> {
+    fn stream_recordings(&self, req: &Request<::hyper::Body>, uuid: Uuid, type_: db::StreamType)
+                         -> Result<Response<Body>, Error> {
         let (r, split) = {
             let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
             let mut split = recording::Duration(i64::max_value());
@@ -286,14 +287,17 @@ impl ServiceInner {
                 Ok(())
             })?;
         }
-        let mut resp = Response::new().with_header(header::ContentType(mime::APPLICATION_JSON));
-        if let Some(mut w) = http_serve::streaming_body(&req, &mut resp).build() {
+        let (mut resp, writer) = http_serve::streaming_body(&req).build();
+        resp.headers_mut().insert(header::CONTENT_TYPE,
+                                  HeaderValue::from_static("application/json"));
+        if let Some(mut w) = writer {
             serde_json::to_writer(&mut w, &out)?
         };
         Ok(resp)
     }
 
-    fn init_segment(&self, sha1: [u8; 20], req: &Request) -> Result<Response<slices::Body>, Error> {
+    fn init_segment(&self, sha1: [u8; 20], req: &Request<::hyper::Body>)
+        -> Result<Response<Body>, Error> {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
         let db = self.db.lock();
         for ent in db.video_sample_entries_by_id().values() {
@@ -306,8 +310,9 @@ impl ServiceInner {
         self.not_found()
     }
 
-    fn stream_view_mp4(&self, req: &Request, uuid: Uuid, stream_type_: db::StreamType,
-                       mp4_type_: mp4::Type) -> Result<Response<slices::Body>, Error> {
+    fn stream_view_mp4(&self, req: &Request<::hyper::Body>, uuid: Uuid,
+                       stream_type_: db::StreamType, mp4_type_: mp4::Type)
+                       -> Result<Response<Body>, Error> {
         let stream_id = {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
@@ -403,14 +408,14 @@ impl ServiceInner {
         Ok(http_serve::serve(mp4, req))
     }
 
-    fn static_file(&self, req: &Request) -> Result<Response<slices::Body>, Error> {
+    fn static_file(&self, req: &Request<::hyper::Body>) -> Result<Response<Body>, Error> {
         let s = match self.ui_files.get(req.uri().path()) {
             None => { return self.not_found() },
             Some(s) => s,
         };
         let f = fs::File::open(&s.path)?;
         let mut hdrs = http::HeaderMap::new();
-        hdrs.insert(http::header::CONTENT_TYPE, s.mime.clone());
+        hdrs.insert(header::CONTENT_TYPE, s.mime.clone());
         let e = http_serve::ChunkedReadFile::new(f, Some(self.pool.clone()), hdrs)?;
         Ok(http_serve::serve(e, &req))
     }
@@ -445,7 +450,7 @@ impl Service {
         };
         let allow_origin = match allow_origin {
             None => None,
-            Some(o) => Some(header::AccessControlAllowOrigin::parse_header(&header::Raw::from(o))?),
+            Some(o) => Some(HeaderValue::from_str(&o)?),
         };
         Ok(Service(Arc::new(ServiceInner {
             db,
@@ -492,22 +497,22 @@ impl Service {
                 },
             };
             files.insert(p, UiFile {
-                mime: http::header::HeaderValue::from_static(mime),
+                mime: HeaderValue::from_static(mime),
                 path: e.path(),
             });
         }
     }
 }
 
-impl server::Service for Service {
-    type Request = Request;
-    type Response = Response<slices::Body>;
-    type Error = hyper::Error;
-    type Future = future::FutureResult<Self::Response, Self::Error>;
+impl ::hyper::service::Service for Service {
+    type ReqBody = ::hyper::Body;
+    type ResBody = Body;
+    type Error = BoxedError;
+    type Future = future::FutureResult<Response<Self::ResBody>, Self::Error>;
 
-    fn call(&self, req: Request) -> Self::Future {
+    fn call(&mut self, req: Request<::hyper::Body>) -> Self::Future {
         debug!("request on: {}", req.uri());
-        let res = match decode_path(req.uri().path()) {
+        let mut res = match decode_path(req.uri().path()) {
             Path::InitSegment(sha1) => self.0.init_segment(sha1, &req),
             Path::TopLevel => self.0.top_level(&req),
             Path::Camera(uuid) => self.0.camera(&req, uuid),
@@ -521,15 +526,12 @@ impl server::Service for Service {
             Path::NotFound => self.0.not_found(),
             Path::Static => self.0.static_file(&req),
         };
-        let res = if let Some(ref o) = self.0.allow_origin {
-            res.map(|resp| resp.with_header(o.clone()))
-        } else {
-            res
-        };
-        future::result(res.map_err(|e| {
-            error!("error: {}", e);
-            hyper::Error::Incomplete
-        }))
+        if let Ok(ref mut resp) = res {
+            if let Some(ref o) = self.0.allow_origin {
+                resp.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, o.clone());
+            }
+        }
+        future::result(res.map_err(|e| wrap_error(e)))
     }
 }
 
@@ -570,8 +572,10 @@ mod bench {
     extern crate test;
 
     use db::testutil::{self, TestDb};
+    use futures::Future;
     use hyper;
     use self::test::Bencher;
+    use std::error::Error as StdError;
     use uuid::Uuid;
 
     struct Server {
@@ -589,11 +593,11 @@ mod bench {
                 let addr = "127.0.0.1:0".parse().unwrap();
                 let service = super::Service::new(db.db.clone(), None, None,
                                                   "".to_owned()).unwrap();
-                let server = hyper::server::Http::new()
-                    .bind(&addr, move || Ok(service.clone()))
-                    .unwrap();
-                tx.send(server.local_addr().unwrap()).unwrap();
-                server.run().unwrap();
+                let server = hyper::server::Server::bind(&addr)
+                    .tcp_nodelay(true)
+                    .serve(move || Ok::<_, Box<StdError + Send + Sync>>(service.clone()));
+                tx.send(server.local_addr()).unwrap();
+                ::tokio::run(server.map_err(|e| panic!(e)));
             });
             let addr = rx.recv().unwrap();
             Server {

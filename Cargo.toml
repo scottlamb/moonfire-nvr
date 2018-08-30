@@ -25,13 +25,12 @@ futures = "0.1"
 futures-cpupool = "0.1"
 fnv = "1.0"
 http = "0.1.5"
-http-serve = { git = "https://github.com/scottlamb/http-serve", rev = "b361ee" }
-hyper = "0.11.25"
+http-serve = "0.1.0"
+hyper = "0.12.9"
 lazy_static = "1.0"
 libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }
 memmap = "0.6"
-mime = "0.3"
 moonfire-base = { path = "base" }
 moonfire-db = { path = "db" }
 moonfire-ffmpeg = { path = "ffmpeg" }
@@ -46,8 +45,8 @@ serde_derive = "1.0"
 serde_json = "1.0"
 smallvec = "0.6"
 time = "0.1"
-tokio-core = "0.1"
-tokio-signal = "0.1"
+tokio = "0.1.8"
+tokio-signal = "0.2"
 url = "1.4"
 uuid = { version = "0.6", features = ["serde", "std", "v4"] }
 
@@ -65,8 +64,3 @@ debug = true
 
 [profile.bench]
 debug = true
-
-[replace]
-
-# This hyper fork has a patch to disable Nagle's algorithm.
-"hyper:0.11.16" = { git = "https://github.com/scottlamb/hyper", branch = "moonfire-on-0.11.x" }
