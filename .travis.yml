@@ -18,9 +18,15 @@ addons:
 matrix:
   allow_failures:
     - rust: nightly
-cache: cargo
+cache:
+  cargo: true
+  directories:
+    - ffmpeg-3.4.4
+  timeout: 300
+install:
+  - test -f ffmpeg-3.4.4/configure || (wget https://ffmpeg.org/releases/ffmpeg-3.4.4.tar.xz && tar xf ffmpeg-3.4.4.tar.xz)
+  - pushd ffmpeg-3.4.4 && ./configure --enable-shared && make --jobs=2 && sudo make install --jobs=2&& sudo ldconfig && rm -f ffbuild/config.log && popd
 script:
-  - (git clone --depth 1 -b "release/3.4" https://github.com/FFmpeg/FFmpeg.git && cd FFmpeg && ./configure --enable-shared && make --jobs=2 && sudo make install --jobs=2 && sudo ldconfig)
-  - cargo build --verbose --all
-  - cargo test --verbose --all
-  - 'if [ $TRAVIS_RUST_VERSION = nightly ]; then cargo bench --verbose --all; fi'
+  - cargo build --all
+  - cargo test --all
+  - 'if [ $TRAVIS_RUST_VERSION = nightly ]; then cargo bench --all; fi'
