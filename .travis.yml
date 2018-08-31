@@ -1,10 +1,5 @@
 dist: trusty
 sudo: required
-language: rust
-rust:
-  - stable
-  - nightly
-  - 1.27.0
 addons:
   apt:
     packages:
@@ -16,17 +11,39 @@ addons:
       - pkg-config
       - yasm
 matrix:
+  include:
+    - language: rust
+      rust: stable
+      env: FFMPEG_VERSION=3.4.4
+      install:
+        - ci/install-ffmpeg.sh
+      script:
+        - ci/script-rust.sh
+    - language: rust
+      rust: nightly
+      env: FFMPEG_VERSION=3.4.4
+      install:
+        - ci/install-ffmpeg.sh
+      script:
+        - ci/script-rust.sh
+    - language: rust
+      rust: 1.27.0
+      env: FFMPEG_VERSION=3.4.4
+      install:
+        - ci/install-ffmpeg.sh
+      script:
+        - ci/script-rust.sh
+    - language: node_js
+      node_js: "8"
+      script:
+        - yarn
+        - yarn build
+        - node_modules/eslint/bin/eslint.js ui-src
   allow_failures:
     - rust: nightly
 cache:
   cargo: true
+  yarn: true
   directories:
     - ffmpeg-3.4.4
   timeout: 600
-install:
-  - test -f ffmpeg-3.4.4/configure || (wget https://ffmpeg.org/releases/ffmpeg-3.4.4.tar.xz && tar xf ffmpeg-3.4.4.tar.xz)
-  - pushd ffmpeg-3.4.4 && ./configure --enable-shared && make --jobs=2 && sudo make install --jobs=2&& sudo ldconfig && rm -f ffbuild/config.log && popd
-script:
-  - cargo build --all
-  - cargo test --all
-  - 'if [ $TRAVIS_RUST_VERSION = nightly ]; then cargo bench --all; fi'
