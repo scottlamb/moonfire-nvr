@@ -65,7 +65,7 @@ export default class Range {
    * Determine if value is inside the range.
    *
    * @param  {Number}  value Value to test
-   * @return {Boolean} 
+   * @return {Boolean}
    */
   isInRange(value) {
     return value >= this.low && value <= this.high;
