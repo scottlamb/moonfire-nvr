@@ -22,7 +22,7 @@ cache:
   cargo: true
   directories:
     - ffmpeg-3.4.4
-  timeout: 300
+  timeout: 600
 install:
   - test -f ffmpeg-3.4.4/configure || (wget https://ffmpeg.org/releases/ffmpeg-3.4.4.tar.xz && tar xf ffmpeg-3.4.4.tar.xz)
   - pushd ffmpeg-3.4.4 && ./configure --enable-shared && make --jobs=2 && sudo make install --jobs=2&& sudo ldconfig && rm -f ffbuild/config.log && popd
