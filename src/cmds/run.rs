@@ -46,6 +46,7 @@ use web;
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
 // They seem to be correct for Linux and macOS at least.
 const LOCALTIME_PATH: &'static str = "/etc/localtime";
+const TIMEZONE_PATH: &'static str = "/etc/timezone";
 const ZONEINFO_PATHS: [&'static str; 2] = [
     "/usr/share/zoneinfo/",       // Linux, macOS < High Sierra
     "/var/db/timezone/zoneinfo/"  // macOS High Sierra
@@ -87,15 +88,71 @@ fn setup_shutdown() -> impl Future<Item = (), Error = ()> + Send {
        .map_err(|_| ())
 }
 
-fn resolve_zone() -> String {
-    let p = ::std::fs::read_link(LOCALTIME_PATH).expect("unable to read localtime symlink");
-    let p = p.to_str().expect("localtime symlink destination must be valid UTF-8");
+fn trim_zoneinfo(p: &str) -> &str {
     for zp in &ZONEINFO_PATHS {
         if p.starts_with(zp) {
-            return p[zp.len()..].into();
+            return &p[zp.len()..];
         }
     }
-    panic!("{} points to unexpected path {}", LOCALTIME_PATH, p)
+    return p;
+}
+
+/// Attempt to resolve the timezone of the server.
+/// The Javascript running in the browser needs this to match the server's timezone calculations.
+fn resolve_zone() -> Result<String, Error> {
+    // If the environmental variable `TZ` exists, is valid UTF-8, and doesn't just reference
+    // `/etc/localtime/`, use that.
+    if let Ok(tz) = ::std::env::var("TZ") {
+        let mut p: &str = &tz;
+
+        // Strip of an initial `:` if present. Having `TZ` set in this way is a trick to avoid
+        // repeated `tzset` calls:
+        // https://blog.packagecloud.io/eng/2017/02/21/set-environment-variable-save-thousands-of-system-calls/
+        if p.starts_with(':') {
+            p = &p[1..];
+        }
+
+        p = trim_zoneinfo(p);
+
+        if !p.starts_with('/') {
+            return Ok(p.to_owned());
+        }
+        if p != LOCALTIME_PATH {
+            bail!("Unable to resolve env TZ={} to a timezone.", &tz);
+        }
+    }
+
+    // If `LOCALTIME_PATH` is a symlink, use that. On some systems, it's instead a copy of the
+    // desired timezone, which unfortunately doesn't contain its own name.
+    match ::std::fs::read_link(LOCALTIME_PATH) {
+        Ok(localtime_dest) => {
+            let localtime_dest = match localtime_dest.to_str() {
+                Some(d) => d,
+                None => bail!("{} symlink destination is invalid UTF-8", LOCALTIME_PATH),
+            };
+            let p = trim_zoneinfo(localtime_dest);
+            if p.starts_with('/') {
+                bail!("Unable to resolve {} symlink destination {} to a timezone.",
+                      LOCALTIME_PATH, &localtime_dest);
+            }
+            return Ok(p.to_owned());
+        },
+        Err(e) => {
+            use ::std::io::ErrorKind;
+            if e.kind() != ErrorKind::NotFound && e.kind() != ErrorKind::InvalidInput {
+                bail!("Unable to read {} symlink: {}", LOCALTIME_PATH, e);
+            }
+        },
+    };
+
+    // If `TIMEZONE_PATH` is a file, use its contents as the zone name.
+    match ::std::fs::read_to_string(TIMEZONE_PATH) {
+        Ok(z) => return Ok(z),
+        Err(e) => {
+            bail!("Unable to resolve timezone from TZ env, {}, or {}. Last error: {}",
+                  LOCALTIME_PATH, TIMEZONE_PATH, e);
+        }
+    }
 }
 
 struct Syncer {
@@ -121,8 +178,9 @@ pub fn run() -> Result<(), Error> {
     }
     info!("Directories are opened.");
 
-    let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), args.flag_allow_origin,
-                              resolve_zone())?;
+    let zone = resolve_zone()?;
+    info!("Resolved timezone: {}", &zone);
+    let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), args.flag_allow_origin, zone)?;
 
     // Start a streamer for each stream.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));

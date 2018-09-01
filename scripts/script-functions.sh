@@ -311,20 +311,8 @@ prep_moonfire_user()
 	sudo chown ${NVR_USER}:${NVR_GROUP} "${NVR_HOME}"
 }
 
-# Correct possible timezone issues
-#
-fix_localtime()
-{
-	if [ ! -L /etc/localtime ] && [ -f /etc/timezone ] &&
-			[ -f "/usr/share/zoneinfo/`cat /etc/timezone`" ]; then
-		echo_info -x "Correcting /etc/localtime setup issue..."
-		sudo ln -sf /usr/share/zoneinfo/`cat /etc/timezone` /etc/localtime
-	fi
-}
-
 pre_install_prep()
 {
 	prep_moonfire_user
 	setup_db
-	fix_localtime
 }

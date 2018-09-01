@@ -42,7 +42,8 @@ all non-Rust dependencies:
                    libncursesw5-dev \
                    libsqlite3-dev \
                    libssl-dev \
-                   pkgconf
+                   pkgconf \
+                   tzdata
 
 Next, you need Rust 1.27+ and Cargo. The easiest way to install them is by
 following the instructions at [rustup.rs](https://www.rustup.rs/).
