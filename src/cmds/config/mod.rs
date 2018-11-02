@@ -47,6 +47,7 @@ use std::str::FromStr;
 
 mod cameras;
 mod dirs;
+mod users;
 
 static USAGE: &'static str = r#"
 Interactive configuration editor.
@@ -137,8 +138,9 @@ pub fn run() -> Result<(), Error> {
                 let db = db.clone();
                 move |siv, item| item(&db, siv)
             })
-            .item("Directories and retention".to_string(), dirs::top_dialog)
             .item("Cameras and streams".to_string(), cameras::top_dialog)
+            .item("Directories and retention".to_string(), dirs::top_dialog)
+            .item("Users".to_string(), users::top_dialog)
             )
         .button("Quit", |siv| siv.quit())
         .title("Main menu"));
