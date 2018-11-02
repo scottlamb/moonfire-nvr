@@ -33,7 +33,7 @@ use blake2_rfc::blake2b::blake2b;
 use failure::Error;
 use fnv::FnvHashMap;
 use libpasta;
-use rusqlite::{Connection, Transaction};
+use rusqlite::{self, Connection, Transaction};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
