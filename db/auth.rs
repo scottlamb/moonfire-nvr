@@ -1,0 +1,897 @@
+// This file is part of Moonfire NVR, a security camera digital video recorder.
+// Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// In addition, as a special exception, the copyright holders give
+// permission to link the code of portions of this program with the
+// OpenSSL library under certain conditions as described in each
+// individual source file, and distribute linked combinations including
+// the two.
+//
+// You must obey the GNU General Public License in all respects for all
+// of the code used other than OpenSSL. If you modify file(s) with this
+// exception, you may extend this exception to your version of the
+// file(s), but you are not obligated to do so. If you do not wish to do
+// so, delete this exception statement from your version. If you delete
+// this exception statement from all source files in the program, then
+// also delete it here.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+use base::strutil;
+use blake2_rfc::blake2b::blake2b;
+use failure::Error;
+use fnv::FnvHashMap;
+use libpasta;
+use rusqlite::{Connection, Transaction};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::net::IpAddr;
+
+lazy_static! {
+    static ref PASTA_CONFIG: libpasta::Config = if cfg!(test) {
+        // In test builds, use bcrypt with the cost turned down. Password hash functions are
+        // designed to be slow; when run un-optimized, they're unpleasantly slow with default
+        // settings. Security doesn't matter for cfg(test).
+        libpasta::Config::with_primitive(libpasta::primitives::Bcrypt::new(2))
+    } else {
+        libpasta::Config::default()
+    };
+}
+
+enum UserFlags {
+    Disabled = 1,
+}
+
+#[derive(Debug)]
+pub struct User {
+    pub id: i32,
+    pub username: String,
+    pub flags: i32,
+    password_hash: Option<String>,
+    pub password_id: i32,
+    pub password_failure_count: i64,
+    pub unix_uid: Option<i32>,
+
+    /// True iff this `User` has changed since the last flush.
+    /// Only a couple things are flushed lazily: `password_failure_count` and (on upgrade to a new
+    /// algorithm) `password_hash`.
+    dirty: bool,
+}
+
+impl User {
+    pub fn change(&self) -> UserChange {
+        UserChange {
+            id: Some(self.id),
+            username: self.username.to_string(),
+            flags: self.flags,
+            set_password_hash: None,
+            unix_uid: self.unix_uid,
+        }
+    }
+
+    pub fn has_password(&self) -> bool { self.password_hash.is_some() }
+    fn disabled(&self) -> bool { (self.flags & UserFlags::Disabled as i32) != 0 }
+}
+
+/// A change to a user.
+///
+///    * an insertion returned via `UserChange::add_user`.
+///    * an update returned via `User::change`.
+///
+/// Apply via `DatabaseGuard::apply_user_change` (which internally calls `auth::State::apply`).
+#[derive(Clone, Debug)]
+pub struct UserChange {
+    id: Option<i32>,
+    pub username: String,
+    pub flags: i32,
+    set_password_hash: Option<Option<String>>,
+    pub unix_uid: Option<i32>,
+}
+
+impl UserChange {
+    pub fn add_user(username: String) -> Self {
+        UserChange {
+            id: None,
+            username,
+            flags: 0,
+            set_password_hash: None,
+            unix_uid: None,
+        }
+    }
+
+    pub fn set_password(&mut self, pwd: String) {
+        self.set_password_hash = Some(Some(PASTA_CONFIG.hash_password(&pwd)));
+    }
+
+    pub fn clear_password(&mut self) {
+        self.set_password_hash = Some(None);
+    }
+
+    pub fn disable(&mut self) {
+        self.flags |= UserFlags::Disabled as i32;
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Request {
+    pub when_sec: Option<i64>,
+    pub user_agent: Option<Vec<u8>>,
+    pub addr: Option<IpAddr>,
+}
+
+impl Request {
+    fn addr_buf(&self) -> Option<IpAddrBuf> {
+        match self.addr {
+            None => None,
+            Some(IpAddr::V4(ref a)) => Some(IpAddrBuf::V4(a.octets())),
+            Some(IpAddr::V6(ref a)) => Some(IpAddrBuf::V6(a.octets())),
+        }
+    }
+}
+
+enum IpAddrBuf {
+    V4([u8; 4]),
+    V6([u8; 16]),
+}
+
+impl AsRef<[u8]> for IpAddrBuf {
+    fn as_ref(&self) -> &[u8] {
+        match *self {
+            IpAddrBuf::V4(ref s) => &s[..],
+            IpAddrBuf::V6(ref s) => &s[..],
+        }
+    }
+}
+
+pub struct FromSqlIpAddr(Option<IpAddr>);
+
+impl rusqlite::types::FromSql for FromSqlIpAddr {
+    fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
+        use rusqlite::types::ValueRef;
+        match value {
+            ValueRef::Null => Ok(FromSqlIpAddr(None)),
+            ValueRef::Blob(ref b) => {
+                match b.len() {
+                    4 => {
+                        let mut buf = [0u8; 4];
+                        buf.copy_from_slice(b);
+                        Ok(FromSqlIpAddr(Some(buf.into())))
+                    },
+                    16 => {
+                        let mut buf = [0u8; 16];
+                        buf.copy_from_slice(b);
+                        Ok(FromSqlIpAddr(Some(buf.into())))
+                    },
+                    _ => Err(rusqlite::types::FromSqlError::InvalidType),
+                }
+            },
+            _ => Err(rusqlite::types::FromSqlError::InvalidType),
+        }
+    }
+}
+
+pub enum SessionFlags {
+    HttpOnly = 1,
+    Secure = 2,
+    SameSite = 4,
+}
+
+#[derive(Copy, Clone)]
+pub enum RevocationReason {
+    LoggedOut = 1,
+}
+
+#[derive(Debug, Default)]
+pub struct Session {
+    user_id: i32,
+    flags: i32,  // bitmask of SessionFlags enum values
+    domain: Vec<u8>,
+    description: Option<String>,
+
+    creation_password_id: Option<i32>,
+    creation: Request,
+
+    revocation: Request,
+    revocation_reason: Option<i32>,  // see RevocationReason enum
+    revocation_reason_detail: Option<String>,
+
+    last_use: Request,
+    use_count: i32,
+    dirty: bool,
+}
+
+/// A raw session id (not base64-encoded). Sensitive. Never stored in the database.
+pub struct RawSessionId([u8; 48]);
+
+impl RawSessionId {
+    pub fn new() -> Self { RawSessionId([0u8; 48]) }
+
+    fn hash(&self) -> SessionHash {
+        let r = blake2b(32, &[], &self.0[..]);
+        let mut h = SessionHash([0u8; 32]);
+        h.0.copy_from_slice(r.as_bytes());
+        h
+    }
+}
+
+impl AsRef<[u8]> for RawSessionId {
+    fn as_ref(&self) -> &[u8] { &self.0[..] }
+}
+
+impl AsMut<[u8]> for RawSessionId {
+    fn as_mut(&mut self) -> &mut [u8] { &mut self.0[..] }
+}
+
+impl fmt::Debug for RawSessionId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "RawSessionId(\"{}\")", &strutil::hex(&self.0[..]))
+    }
+}
+
+/// Blake2b-256 of the raw (not base64-encoded) 48-byte session id.
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct SessionHash([u8; 32]);
+
+impl fmt::Debug for SessionHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "SessionHash(\"{}\")", &strutil::hex(&self.0[..]))
+    }
+}
+
+pub(crate) struct State {
+    users_by_id: BTreeMap<i32, User>,
+    users_by_name: BTreeMap<String, i32>,
+
+    /// Some of the sessions stored in the database.
+    /// Guaranteed to contain all "dirty" sessions (ones with unflushed changes); may contain
+    /// others.
+    ///
+    /// TODO: Add eviction of clean sessions. Keep a linked hash set of clean session hashes and
+    /// evict the oldest when its size exceeds a threshold. Or just evict everything on every flush
+    /// (and accept more frequent database accesses).
+    sessions: FnvHashMap<SessionHash, Session>,
+}
+
+impl State {
+    pub fn init(conn: &Connection) -> Result<Self, Error> {
+        let mut state = State {
+            users_by_id: BTreeMap::new(),
+            users_by_name: BTreeMap::new(),
+            sessions: FnvHashMap::default(),
+        };
+        let mut stmt = conn.prepare(r#"
+            select
+                id,
+                username,
+                flags,
+                password_hash,
+                password_id,
+                password_failure_count,
+                unix_uid
+            from
+                user
+        "#)?;
+        let mut rows = stmt.query(&[])?;
+        while let Some(row) = rows.next() {
+            let row = row?;
+            let id = row.get_checked(0)?;
+            let name: String = row.get_checked(1)?;
+            state.users_by_id.insert(id, User {
+                id,
+                username: name.clone(),
+                flags: row.get_checked(2)?,
+                password_hash: row.get_checked(3)?,
+                password_id: row.get_checked(4)?,
+                password_failure_count: row.get_checked(5)?,
+                unix_uid: row.get_checked(6)?,
+                dirty: false,
+            });
+            state.users_by_name.insert(name, id);
+        }
+        Ok(state)
+    }
+
+    pub fn apply(&mut self, conn: &Connection, change: UserChange) -> Result<&User, Error> {
+        if let Some(id) = change.id {
+            self.update_user(conn, id, change)
+        } else {
+            self.add_user(conn, change)
+        }
+    }
+
+    pub fn users_by_id(&self) -> &BTreeMap<i32, User> { &self.users_by_id }
+
+    fn update_user(&mut self, conn: &Connection, id: i32, change: UserChange)
+                   -> Result<&User, Error> {
+        let mut stmt = conn.prepare_cached(r#"
+            update user
+            set
+                username = :username,
+                password_hash = :password_hash,
+                password_id = :password_id,
+                password_failure_count = :password_failure_count,
+                flags = :flags,
+                unix_uid = :unix_uid
+            where
+                id = :id
+        "#)?;
+        let e = self.users_by_id.entry(id);
+        let e = match e {
+            ::std::collections::btree_map::Entry::Vacant(_) => panic!("missing uid {}!", id),
+            ::std::collections::btree_map::Entry::Occupied(e) => e,
+        };
+        {
+            let (phash, pid, pcount) = match change.set_password_hash.as_ref() {
+                None => {
+                    let u = e.get();
+                    (&u.password_hash, u.password_id, u.password_failure_count)
+                },
+                Some(h) => (h, e.get().password_id + 1, 0),
+            };
+            stmt.execute_named(&[
+                (":username", &&change.username[..]),
+                (":password_hash", phash),
+                (":password_id", &pid),
+                (":password_failure_count", &pcount),
+                (":flags", &change.flags),
+                (":unix_uid", &change.unix_uid),
+                (":id", &id),
+            ])?;
+        }
+        let u = e.into_mut();
+        u.username = change.username;
+        if let Some(h) = change.set_password_hash {
+            u.password_hash = h;
+            u.password_id += 1;
+            u.password_failure_count = 0;
+        }
+        u.flags = change.flags;
+        u.unix_uid = change.unix_uid;
+        Ok(u)
+    }
+
+    fn add_user(&mut self, conn: &Connection, change: UserChange) -> Result<&User, Error> {
+        let mut stmt = conn.prepare_cached(r#"
+            insert into user (username,  password_hash,  flags,  unix_uid)
+                      values (:username, :password_hash, :flags, :unix_uid)
+        "#)?;
+        let password_hash = change.set_password_hash.unwrap_or(None);
+        stmt.execute_named(&[
+            (":username", &&change.username[..]),
+            (":password_hash", &password_hash),
+            (":flags", &change.flags),
+            (":unix_uid", &change.unix_uid),
+        ])?;
+        let id = conn.last_insert_rowid() as i32;
+        self.users_by_name.insert(change.username.clone(), id);
+        let e = self.users_by_id.entry(id);
+        let e = match e {
+            ::std::collections::btree_map::Entry::Vacant(e) => e,
+            ::std::collections::btree_map::Entry::Occupied(_) => panic!("uid {} conflict!", id),
+        };
+        Ok(e.insert(User {
+            id,
+            username: change.username,
+            flags: change.flags,
+            password_hash,
+            password_id: 0,
+            password_failure_count: 0,
+            unix_uid: change.unix_uid,
+            dirty: false,
+        }))
+    }
+
+    pub fn delete_user(&mut self, conn: &mut Connection, id: i32) -> Result<(), Error> {
+        let tx = conn.transaction()?;
+        tx.execute("delete from user_session where user_id = ?", &[&id])?;
+        {
+            let mut user_stmt = tx.prepare_cached("delete from user where id = ?")?;
+            if user_stmt.execute(&[&id])? != 1 {
+                bail!("user {} not found", id);
+            }
+        }
+        tx.commit()?;
+        let name = self.users_by_id.remove(&id).unwrap().username;
+        self.users_by_name.remove(&name).unwrap();
+        self.sessions.retain(|_k, ref mut v| v.user_id != id);
+        Ok(())
+    }
+
+    pub fn login_by_password(&mut self, conn: &Connection, req: Request, username: &str,
+                             password: String, domain: Vec<u8>, session_flags: i32)
+                             -> Result<(RawSessionId, &Session), Error> {
+        let id = match self.users_by_name.get(username) {
+            None => bail!("no such user {:?}", username),
+            Some(&id) => id,
+        };
+        let u = self.users_by_id.get_mut(&id).expect("users_by_name implies users_by_id");
+        if u.disabled() {
+            bail!("user {:?} is disabled", username);
+        }
+        let new_hash = {
+            let hash = match u.password_hash.as_ref() {
+                None => bail!("no password set for user {:?}", username),
+                Some(h) => h,
+            };
+            match PASTA_CONFIG.verify_password_update_hash(hash, &password) {
+                libpasta::HashUpdate::Failed => {
+                    u.dirty = true;
+                    u.password_failure_count += 1;
+                    bail!("incorrect password for user {:?}", username);
+                },
+                libpasta::HashUpdate::Verified(new_pwd) => new_pwd,
+            }
+        };
+        if let Some(h) = new_hash {
+            u.password_hash = Some(h);
+            u.dirty = true;
+        }
+        let password_id = u.password_id;
+        State::make_session(conn, req, u, domain, Some(password_id), session_flags,
+                            &mut self.sessions)
+    }
+
+    fn make_session<'s>(conn: &Connection, creation: Request, user: &mut User, domain: Vec<u8>,
+                        creation_password_id: Option<i32>, flags: i32,
+                        sessions: &'s mut FnvHashMap<SessionHash, Session>)
+                        -> Result<(RawSessionId, &'s Session), Error> {
+        let mut session_id = RawSessionId::new();
+        ::openssl::rand::rand_bytes(&mut session_id.0).unwrap();
+        let mut seed = [0u8; 32];
+        ::openssl::rand::rand_bytes(&mut seed).unwrap();
+        let hash = session_id.hash();
+        let mut stmt = conn.prepare_cached(r#"
+            insert into user_session (session_id_hash,  user_id,  seed,  flags,  domain,
+                                      creation_password_id,  creation_time_sec,
+                                      creation_user_agent,  creation_peer_addr)
+                              values (:session_id_hash, :user_id, :seed, :flags, :domain,
+                                      :creation_password_id, :creation_time_sec,
+                                      :creation_user_agent, :creation_peer_addr)
+        "#)?;
+        let addr = creation.addr_buf();
+        let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
+        stmt.execute_named(&[
+            (":session_id_hash", &&hash.0[..]),
+            (":user_id", &user.id),
+            (":seed", &&seed[..]),
+            (":flags", &flags),
+            (":domain", &domain),
+            (":creation_password_id", &creation_password_id),
+            (":creation_time_sec", &creation.when_sec),
+            (":creation_user_agent", &creation.user_agent),
+            (":creation_peer_addr", &addr),
+        ])?;
+        let e = match sessions.entry(hash) {
+            ::std::collections::hash_map::Entry::Occupied(_) => panic!("duplicate session hash!"),
+            ::std::collections::hash_map::Entry::Vacant(e) => e,
+        };
+        let session = e.insert(Session {
+            user_id: user.id,
+            flags,
+            domain,
+            creation_password_id,
+            creation,
+            ..Default::default()
+        });
+        Ok((session_id, session))
+    }
+
+    pub fn authenticate_session(&mut self, conn: &Connection, req: Request,
+                                session: &RawSessionId) -> Result<(SessionHash, &User), Error> {
+        let hash = session.hash();
+        let s = match self.sessions.entry(hash) {
+            ::std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            ::std::collections::hash_map::Entry::Vacant(e) => e.insert(lookup_session(conn, hash)?),
+        };
+        let u = match self.users_by_id.get(&s.user_id) {
+            None => bail!("session references nonexistent user!"),
+            Some(u) => u,
+        };
+        if let Some(r) = s.revocation_reason {
+            bail!("session is no longer valid (reason={})", r);
+        }
+        s.last_use = req;
+        s.use_count += 1;
+        s.dirty = true;
+        if u.disabled() {
+            bail!("user {:?} is disabled", &u.username);
+        }
+        Ok((hash, u))
+    }
+
+    pub fn revoke_session(&mut self, conn: &Connection, reason: RevocationReason,
+                          detail: Option<String>, req: Request, hash: SessionHash)
+                          -> Result<(), Error> {
+        let s = match self.sessions.entry(hash) {
+            ::std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            ::std::collections::hash_map::Entry::Vacant(e) => e.insert(lookup_session(conn, hash)?),
+        };
+        if s.revocation_reason.is_none() {
+            let mut stmt = conn.prepare(r#"
+                update user_session
+                set
+                    revocation_time_sec = ?,
+                    revocation_user_agent = ?,
+                    revocation_peer_addr = ?,
+                    revocation_reason = ?,
+                    revocation_reason_detail = ?
+                where
+                    session_id_hash = ?
+            "#)?;
+            let addr = req.addr_buf();
+            let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
+            stmt.execute(&[
+                &req.when_sec,
+                &req.user_agent,
+                &addr,
+                &(reason as i32),
+                &detail,
+                &&hash.0[..],
+            ])?;
+            s.revocation = req;
+            s.revocation_reason = Some(reason as i32);
+        }
+        Ok(())
+    }
+
+    pub fn flush(&mut self, tx: &Transaction) -> Result<(), Error> {
+        let mut u_stmt = tx.prepare(r#"
+            update user
+            set
+                password_failure_count = :password_failure_count,
+                password_hash = :password_hash
+            where
+                id = :id
+        "#)?;
+        let mut s_stmt = tx.prepare(r#"
+            update user_session
+            set
+                last_use_time_sec = :last_use_time_sec,
+                last_use_user_agent = :last_use_user_agent,
+                last_use_peer_addr = :last_use_peer_addr,
+                use_count = :use_count
+            where
+                session_id_hash = :hash
+        "#)?;
+        for (&id, u) in &self.users_by_id {
+            if !u.dirty {
+                continue;
+            }
+            info!("flushing user with hash: {}", u.password_hash.as_ref().unwrap());
+            u_stmt.execute_named(&[
+                (":password_failure_count", &u.password_failure_count),
+                (":password_hash", &u.password_hash),
+                (":id", &id),
+            ])?;
+        }
+        for (_, s) in &self.sessions {
+            if !s.dirty {
+                continue;
+            }
+            let addr = s.last_use.addr_buf();
+            let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
+            s_stmt.execute_named(&[
+                (":last_use_time_sec", &s.last_use.when_sec),
+                (":last_use_user_agent", &s.last_use.user_agent),
+                (":last_use_peer_addr", &addr),
+                (":use_count", &s.use_count),
+            ])?;
+        }
+        Ok(())
+    }
+
+    pub fn post_flush(&mut self) {
+        for (_, u) in &mut self.users_by_id {
+            u.dirty = false;
+        }
+        for (_, s) in &mut self.sessions {
+            s.dirty = false;
+        }
+    }
+}
+
+fn lookup_session(conn: &Connection, hash: SessionHash) -> Result<Session, Error> {
+    let mut stmt = conn.prepare_cached(r#"
+        select
+            user_id,
+            flags,
+            domain,
+            description,
+            creation_password_id,
+            creation_time_sec,
+            creation_user_agent,
+            creation_peer_addr,
+            revocation_time_sec,
+            revocation_user_agent,
+            revocation_peer_addr,
+            revocation_reason,
+            revocation_reason_detail,
+            last_use_time_sec,
+            last_use_user_agent,
+            last_use_peer_addr,
+            use_count
+        from
+            user_session
+        where
+            session_id_hash = ?
+    "#)?;
+    let mut rows = stmt.query(&[&&hash.0[..]])?;
+    let row = match rows.next() {
+        None => bail!("no such session"),
+        Some(Err(e)) => return Err(e.into()),
+        Some(Ok(r)) => r,
+    };
+    let creation_addr: FromSqlIpAddr = row.get_checked(7)?;
+    let revocation_addr: FromSqlIpAddr = row.get_checked(10)?;
+    let last_use_addr: FromSqlIpAddr = row.get_checked(15)?;
+    Ok(Session {
+        user_id: row.get_checked(0)?,
+        flags: row.get_checked(1)?,
+        domain: row.get_checked(2)?,
+        description: row.get_checked(3)?,
+        creation_password_id: row.get_checked(4)?,
+        creation: Request {
+            when_sec: row.get_checked(5)?,
+            user_agent: row.get_checked(6)?,
+            addr: creation_addr.0,
+        },
+        revocation: Request {
+            when_sec: row.get_checked(8)?,
+            user_agent: row.get_checked(9)?,
+            addr: revocation_addr.0,
+        },
+        revocation_reason: row.get_checked(11)?,
+        revocation_reason_detail: row.get_checked(12)?,
+        last_use: Request {
+            when_sec: row.get_checked(13)?,
+            user_agent: row.get_checked(14)?,
+            addr: last_use_addr.0,
+        },
+        use_count: row.get_checked(16)?,
+        dirty: false,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use db;
+    use rusqlite::Connection;
+    use super::*;
+    use testutil;
+
+    #[test]
+    fn open_empty_db() {
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        State::init(&conn).unwrap();
+    }
+
+    #[test]
+    fn create_login_use_logout() {
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        let mut state = State::init(&conn).unwrap();
+        let req = Request {
+            when_sec: Some(42),
+            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(127, 0, 0, 1))),
+            user_agent: Some(b"some ua".to_vec()),
+        };
+        let (uid, mut c) = {
+            let u = state.apply(&conn, UserChange::add_user("slamb".to_owned())).unwrap();
+            (u.id, u.change())
+        };
+        let e = state.login_by_password(&conn, req.clone(), "slamb", "hunter2".to_owned(),
+                                        b"nvr.example.com".to_vec(), 0).unwrap_err();
+        assert_eq!(format!("{}", e), "no password set for user \"slamb\"");
+        c.set_password("hunter2".to_owned());
+        state.apply(&conn, c).unwrap();
+        let e = state.login_by_password(&conn, req.clone(), "slamb",
+                                       "hunter3".to_owned(),
+                                       b"nvr.example.com".to_vec(), 0).unwrap_err();
+        assert_eq!(format!("{}", e), "incorrect password for user \"slamb\"");
+        let sid = {
+            let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
+                                                  "hunter2".to_owned(),
+                                                  b"nvr.example.com".to_vec(), 0).unwrap();
+            assert_eq!(s.user_id, uid);
+            sid
+        };
+        let sid_hash = {
+            let (sid_hash, u) = state.authenticate_session(&conn, req.clone(), &sid).unwrap();
+            assert_eq!(u.id, uid);
+            sid_hash
+        };
+        state.revoke_session(&conn, RevocationReason::LoggedOut, None, req.clone(),
+                             sid_hash).unwrap();
+        let e = state.authenticate_session(&conn, req.clone(), &sid).unwrap_err();
+        assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
+
+        // Everything should persist across reload.
+        drop(state);
+        let mut state = State::init(&conn).unwrap();
+        let e = state.authenticate_session(&conn, req, &sid).unwrap_err();
+        assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
+    }
+
+    #[test]
+    fn revoke_not_in_cache() {
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        let mut state = State::init(&conn).unwrap();
+        let req = Request {
+            when_sec: Some(42),
+            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(127, 0, 0, 1))),
+            user_agent: Some(b"some ua".to_vec()),
+        };
+        {
+            let mut c = UserChange::add_user("slamb".to_owned());
+            c.set_password("hunter2".to_owned());
+            state.apply(&conn, c).unwrap();
+        };
+        let sid = {
+            let (sid, _s) = state.login_by_password(&conn, req.clone(), "slamb",
+                                                    "hunter2".to_owned(),
+                                                    b"nvr.example.com".to_vec(), 0).unwrap();
+            sid
+        };
+        state.authenticate_session(&conn, req.clone(), &sid).unwrap();
+
+        // Reload.
+        drop(state);
+        let mut state = State::init(&conn).unwrap();
+        state.revoke_session(&conn, RevocationReason::LoggedOut, None, req.clone(),
+                             sid.hash()).unwrap();
+        let e = state.authenticate_session(&conn, req, &sid).unwrap_err();
+        assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
+    }
+
+    #[test]
+    fn upgrade_hash() {
+        // This hash is generated with cost=1 vs the cost=2 of PASTA_CONFIG.
+        let insecure_hash =
+            libpasta::Config::with_primitive(libpasta::primitives::Bcrypt::new(1))
+            .hash_password("hunter2");
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        let mut state = State::init(&conn).unwrap();
+        let mut change = UserChange::add_user("slamb".to_owned());
+
+        // hunter2, in insecure MD5.
+        change.set_password_hash = Some(Some(insecure_hash.clone()));
+        let uid = {
+            let u = state.apply(&conn, change).unwrap();
+            assert_eq!(&insecure_hash, u.password_hash.as_ref().unwrap());
+            u.id
+        };
+
+        let req = Request {
+            when_sec: Some(42),
+            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(127, 0, 0, 1))),
+            user_agent: Some(b"some ua".to_vec()),
+        };
+        state.login_by_password(&conn, req.clone(), "slamb", "hunter2".to_owned(),
+                                b"nvr.example.com".to_vec(), 0).unwrap();
+        let new_hash = {
+            // Password should have been automatically upgraded.
+            let u = state.users_by_id().get(&uid).unwrap();
+            assert!(u.dirty);
+            assert_ne!(u.password_hash.as_ref().unwrap(), &insecure_hash);
+            u.password_hash.as_ref().unwrap().clone()
+        };
+
+        {
+            let tx = conn.transaction().unwrap();
+            state.flush(&tx).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // On reload, the new hash should still be visible.
+        drop(state);
+        let mut state = State::init(&conn).unwrap();
+        {
+            let u = state.users_by_id().get(&uid).unwrap();
+            assert!(!u.dirty);
+            assert_eq!(u.password_hash.as_ref().unwrap(), &new_hash);
+        }
+
+        // Login should still work.
+        state.login_by_password(&conn, req.clone(), "slamb", "hunter2".to_owned(),
+                                b"nvr.example.com".to_vec(), 0).unwrap();
+    }
+
+    #[test]
+    fn disable() {
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        let mut state = State::init(&conn).unwrap();
+        let req = Request {
+            when_sec: Some(42),
+            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(127, 0, 0, 1))),
+            user_agent: Some(b"some ua".to_vec()),
+        };
+        let uid = {
+            let mut c = UserChange::add_user("slamb".to_owned());
+            c.set_password("hunter2".to_owned());
+            state.apply(&conn, c).unwrap().id
+        };
+
+        // Get a session for later.
+        let sid = state.login_by_password(&conn, req.clone(), "slamb",
+                                          "hunter2".to_owned(),
+                                          b"nvr.example.com".to_vec(), 0).unwrap().0;
+
+        // Disable the user.
+        {
+            let mut c = state.users_by_id().get(&uid).unwrap().change();
+            c.disable();
+            state.apply(&conn, c).unwrap();
+        }
+
+        // Fresh logins shouldn't work.
+        let e = state.login_by_password(&conn, req.clone(), "slamb",
+                                       "hunter2".to_owned(),
+                                       b"nvr.example.com".to_vec(), 0).unwrap_err();
+        assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
+
+        // Authenticating existing sessions shouldn't work either.
+        let e = state.authenticate_session(&conn, req.clone(), &sid).unwrap_err();
+        assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
+
+        // The user should still be disabled after reload.
+        drop(state);
+        let mut state = State::init(&conn).unwrap();
+        let e = state.authenticate_session(&conn, req, &sid).unwrap_err();
+        assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
+    }
+
+    #[test]
+    fn delete() {
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        let mut state = State::init(&conn).unwrap();
+        let req = Request {
+            when_sec: Some(42),
+            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(127, 0, 0, 1))),
+            user_agent: Some(b"some ua".to_vec()),
+        };
+        let uid = {
+            let mut c = UserChange::add_user("slamb".to_owned());
+            c.set_password("hunter2".to_owned());
+            state.apply(&conn, c).unwrap().id
+        };
+
+        // Get a session for later.
+        let sid = state.login_by_password(&conn, req.clone(), "slamb",
+                                          "hunter2".to_owned(),
+                                          b"nvr.example.com".to_vec(), 0).unwrap().0;
+
+        state.delete_user(&mut conn, uid).unwrap();
+        assert!(state.users_by_id().get(&uid).is_none());
+        let e = state.authenticate_session(&conn, req.clone(), &sid).unwrap_err();
+        assert_eq!(format!("{}", e), "no such session");
+
+        // The user should still be deleted after reload.
+        drop(state);
+        let mut state = State::init(&conn).unwrap();
+        assert!(state.users_by_id().get(&uid).is_none());
+        let e = state.authenticate_session(&conn, req.clone(), &sid).unwrap_err();
+        assert_eq!(format!("{}", e), "no such session");
+    }
+}

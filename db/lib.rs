@@ -30,10 +30,12 @@
 
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
+extern crate blake2_rfc;
 #[macro_use] extern crate failure;
 extern crate fnv;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
+extern crate libpasta;
 #[macro_use] extern crate log;
 extern crate lru_cache;
 extern crate moonfire_base as base;
@@ -47,6 +49,7 @@ extern crate tempdir;
 extern crate time;
 extern crate uuid;
 
+pub mod auth;
 pub mod check;
 mod coding;
 pub mod db;

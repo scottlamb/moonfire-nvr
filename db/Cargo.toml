@@ -11,10 +11,12 @@ nightly = []
 path = "lib.rs"
 
 [dependencies]
+blake2-rfc = "0.2.18"
 failure = "0.1.1"
 fnv = "1.0"
 lazy_static = "1.0"
 libc = "0.2"
+libpasta = { git = "https://github.com/scottlamb/libpasta", branch = "pr-default-ring" }
 log = "0.4"
 lru-cache = "0.1"
 moonfire-base = { path = "../base" }

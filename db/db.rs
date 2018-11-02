@@ -52,6 +52,7 @@
 //!     A list of mutations is built up in-memory and occasionally flushed to reduce SSD write
 //!     cycles.
 
+use auth;
 use base::clock::{self, Clocks};
 use dir;
 use failure::Error;
@@ -300,6 +301,12 @@ impl SampleFileDir {
         meta
     }
 }
+
+pub use auth::Request;
+pub use auth::RawSessionId;
+pub use auth::Session;
+pub use auth::User;
+pub use auth::UserChange;
 
 /// In-memory state about a camera.
 #[derive(Debug)]
@@ -558,6 +565,8 @@ pub struct LockedDatabase {
     /// The monotonic time when the database was opened (whether in read-write mode or read-only
     /// mode).
     open_monotonic: recording::Time,
+
+    auth: auth::State,
 
     sample_file_dirs_by_id: BTreeMap<i32, SampleFileDir>,
     cameras_by_id: BTreeMap<i32, Camera>,
@@ -855,6 +864,7 @@ impl LockedDatabase {
                 bail!("unable to find current open {}", o.id);
             }
         }
+        self.auth.flush(&tx)?;
         tx.commit()?;
 
         // Process delete_garbage.
@@ -898,6 +908,7 @@ impl LockedDatabase {
             // Fix the range.
             s.range = new_range;
         }
+        self.auth.post_flush();
         info!("Flush (why: {}): added {} recordings, deleted {}, marked {} files GCed.",
               reason, added, deleted, gced);
         for cb in &self.on_flush {
@@ -1663,12 +1674,41 @@ impl LockedDatabase {
         }
         Ok(())
     }
+
+    // ---- auth ----
+
+    pub fn users_by_id(&self) -> &BTreeMap<i32, User> { self.auth.users_by_id() }
+
+    pub fn apply_user_change(&mut self, change: UserChange) -> Result<&User, Error> {
+        self.auth.apply(&self.conn, change)
+    }
+
+    pub fn delete_user(&mut self, id: i32) -> Result<(), Error> {
+        self.auth.delete_user(&mut self.conn, id)
+    }
+
+    pub fn login_by_password(&mut self, req: auth::Request, username: &str, password: String,
+                             domain: Vec<u8>, session_flags: i32)
+                             -> Result<(RawSessionId, &Session), Error> {
+        self.auth.login_by_password(&self.conn, req, username, password, domain, session_flags)
+    }
+
+    pub fn authenticate_session(&mut self, req: auth::Request, sid: &auth::RawSessionId)
+                                -> Result<(auth::SessionHash, &User), Error> {
+        self.auth.authenticate_session(&self.conn, req, sid)
+    }
+
+    pub fn revoke_session(&mut self, reason: auth::RevocationReason, detail: Option<String>,
+                          req: auth::Request, hash: auth::SessionHash) -> Result<(), Error> {
+        self.auth.revoke_session(&self.conn, reason, detail, req, hash)
+    }
 }
 
 /// Initializes a database.
 /// Note this doesn't set journal options, so that it can be used on in-memory databases for
 /// test code.
 pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
+    conn.execute("pragma foreign_keys = on", &[])?;
     let tx = conn.transaction()?;
     tx.execute_batch(include_str!("schema.sql"))?;
     {
@@ -1764,12 +1804,14 @@ impl<C: Clocks + Clone> Database<C> {
                 uuid,
             })
         } else { None };
+        let auth = auth::State::init(&conn)?;
         let db = Database {
             db: Some(Mutex::new(LockedDatabase {
                 conn,
                 uuid,
                 open,
                 open_monotonic,
+                auth,
                 sample_file_dirs_by_id: BTreeMap::new(),
                 cameras_by_id: BTreeMap::new(),
                 cameras_by_uuid: BTreeMap::new(),
