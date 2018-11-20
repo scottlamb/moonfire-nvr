@@ -34,6 +34,12 @@ matrix:
       script:
         - ci/script-rust.sh
     - language: node_js
+      node_js: "node"
+      script:
+        - yarn
+        - yarn build
+        - node_modules/eslint/bin/eslint.js ui-src
+    - language: node_js
       node_js: "8"
       script:
         - yarn
