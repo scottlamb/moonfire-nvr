@@ -1456,7 +1456,7 @@ impl FileInner {
         let start = s.s.sample_file_range().start + r.start;
         let mmap = Box::new(unsafe {
             memmap::MmapOptions::new()
-                .offset(start as usize)
+                .offset(start)
                 .len((r.end - r.start) as usize)
                 .map(&f)?
             });
@@ -2204,6 +2204,7 @@ mod bench {
     use db::testutil::{self, TestDb};
     use futures::{Future, future};
     use hyper;
+    use http::header;
     use http_serve;
     use self::test::Bencher;
     use std::error::Error as StdError;
@@ -2298,10 +2299,9 @@ mod bench {
         b.bytes = p;
         let client = reqwest::Client::new();
         let mut run = || {
-            use self::reqwest::header::{Range, ByteRangeSpec};
             let mut resp =
                 client.get(server.url.clone())
-                      .header(Range::Bytes(vec![ByteRangeSpec::FromTo(0, p - 1)]))
+                      .header(header::RANGE, format!("bytes=0-{}", p - 1))
                       .send()
                       .unwrap();
             buf.clear();
