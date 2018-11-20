@@ -30,14 +30,14 @@ hyper = "0.12.9"
 lazy_static = "1.0"
 libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }
-memmap = "0.6"
+memmap = "0.7"
 moonfire-base = { path = "base" }
 moonfire-db = { path = "db" }
 moonfire-ffmpeg = { path = "ffmpeg" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.10"
 parking_lot = { version = "0.6", features = [] }
-reffers = { git = "https://github.com/diwic/reffers-rs" }
+reffers = "0.5.1"
 regex = "1.0"
 rusqlite = "0.14"
 serde = "1.0"
@@ -51,7 +51,7 @@ url = "1.4"
 uuid = { version = "0.6", features = ["serde", "std", "v4"] }
 
 [dev-dependencies]
-reqwest = "0.8"
+reqwest = "0.9.5"
 tempdir = "0.3"
 
 [dependencies.cursive]

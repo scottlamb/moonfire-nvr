@@ -621,7 +621,7 @@ mod bench {
         let client = reqwest::Client::new();
         let mut f = || {
             let mut resp = client.get(url.clone()).send().unwrap();
-            assert_eq!(resp.status(), reqwest::StatusCode::Ok);
+            assert_eq!(resp.status(), reqwest::StatusCode::OK);
             buf.clear();
             use std::io::Read;
             resp.read_to_end(&mut buf).unwrap();
