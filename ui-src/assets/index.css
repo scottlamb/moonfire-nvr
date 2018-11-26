@@ -4,6 +4,9 @@ body {
 #nav {
     float: left;
 }
+#session {
+    float: right;
+}
 
 #datetime .ui-datepicker {
     width: 100%;

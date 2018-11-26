@@ -66,9 +66,8 @@ Options:
     --http-addr=ADDR       Set the bind address for the unencrypted HTTP server.
                            [default: 0.0.0.0:8080]
     --read-only            Forces read-only mode / disables recording.
-    --allow-origin=ORIGIN  If present, adds a Access-Control-Allow-Origin:
-                           header to HTTP responses. This may be useful for
-                           Javascript development.
+    --require-auth=BOOL    Requires authentication to access the web interface.
+                           [default: true]
 "#;
 
 #[derive(Debug, Deserialize)]
@@ -77,7 +76,7 @@ struct Args {
     flag_http_addr: String,
     flag_ui_dir: String,
     flag_read_only: bool,
-    flag_allow_origin: Option<String>,
+    flag_require_auth: bool,
 }
 
 fn setup_shutdown() -> impl Future<Item = (), Error = ()> + Send {
@@ -180,7 +179,7 @@ pub fn run() -> Result<(), Error> {
 
     let zone = resolve_zone()?;
     info!("Resolved timezone: {}", &zone);
-    let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), args.flag_allow_origin, zone)?;
+    let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), args.flag_require_auth, zone)?;
 
     // Start a streamer for each stream.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));

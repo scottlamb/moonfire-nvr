@@ -30,6 +30,7 @@
 
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
+extern crate base64;
 extern crate blake2_rfc;
 #[macro_use] extern crate failure;
 extern crate fnv;

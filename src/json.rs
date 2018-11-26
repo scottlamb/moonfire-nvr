@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use db;
+use db::{self, auth::SessionHash};
 use failure::Error;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
@@ -44,6 +44,26 @@ pub struct TopLevel<'a> {
     // "days" attribute or not, according to the bool in the tuple.
     #[serde(serialize_with = "TopLevel::serialize_cameras")]
     pub cameras: (&'a db::LockedDatabase, bool),
+
+    pub session: Option<Session>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct Session {
+    pub username: String,
+
+    #[serde(serialize_with = "Session::serialize_csrf")]
+    pub csrf: SessionHash,
+}
+
+impl Session {
+    fn serialize_csrf<S>(csrf: &SessionHash, serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        let mut tmp = [0u8; 32];
+        csrf.encode_base64(&mut tmp);
+        serializer.serialize_str(::std::str::from_utf8(&tmp[..]).expect("base64 is UTF-8"))
+    }
 }
 
 /// JSON serialization wrapper for a single camera when processing `/api/` and

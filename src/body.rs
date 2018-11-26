@@ -54,6 +54,14 @@ impl From<&'static [u8]> for Chunk {
     fn from(r: &'static [u8]) -> Self { Chunk(ARefs::new(r)) }
 }
 
+impl From<&'static str> for Chunk {
+    fn from(r: &'static str) -> Self { Chunk(ARefs::new(r.as_bytes())) }
+}
+
+impl From<String> for Chunk {
+    fn from(r: String) -> Self { Chunk(ARefs::new(r.into_bytes()).map(|v| &v[..])) }
+}
+
 impl From<Vec<u8>> for Chunk {
     fn from(r: Vec<u8>) -> Self { Chunk(ARefs::new(r).map(|v| &v[..])) }
 }
@@ -81,8 +89,8 @@ impl From<BodyStream> for Body {
     fn from(b: BodyStream) -> Self { Body(b) }
 }
 
-impl From<&'static [u8]> for Body {
-    fn from(c: &'static [u8]) -> Self {
+impl<C: Into<Chunk>> From<C> for Body {
+    fn from(c: C) -> Self {
         Body(Box::new(stream::once(Ok(c.into()))))
     }
 }

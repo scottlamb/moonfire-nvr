@@ -332,35 +332,28 @@ create table user (
 );
 
 -- A single session, whether for browser or robot use.
--- These map at the HTTP layer to two cookies (exact format described
--- elsewhere):
---
--- * "s" holds the session id and an encrypted sequence number for replay
---   protection. To decrease chance of leaks, it's normally marked as
---   HttpOnly, preventing client-side Javascript from accessing it.
---
--- * "sc" holds state needed by client Javascript, such as a CSRF token (which
---   should be copied into POST request bodies) and username (which should be
---   presented in the UI). It should never be marked HttpOnly.
+-- These map at the HTTP layer to an "s" cookie (exact format described
+-- elsewhere), which holds the session id and an encrypted sequence number for
+-- replay protection.
 create table user_session (
-  -- The session id is a 20-byte blob. This is the unencoded, unsalted Blake2b-160
-  -- (also 20 bytes) of the unencoded session id. Much like `password_hash`, a
+  -- The session id is a 48-byte blob. This is the unencoded, unsalted Blake2b-192
+  -- (24 bytes) of the unencoded session id. Much like `password_hash`, a
   -- hash is used here so that a leaked database backup can't be trivially used
   -- to steal credentials.
   session_id_hash blob primary key not null,
 
   user_id integer references user (id) not null,
 
-  -- A TBD-byte random number. Used to derive keys for the replay protection
+  -- A 32-byte random number. Used to derive keys for the replay protection
   -- and CSRF tokens.
   seed blob not null,
 
-  -- A bitwise mask of flags, currently all properties of the HTTP cookies
+  -- A bitwise mask of flags, currently all properties of the HTTP cookie
   -- used to hold the session:
-  -- 1: HttpOnly ("s" cookie only)
-  -- 2: Secure (both cookies)
-  -- 4: SameSite=Lax (both cookies)
-  -- 8: SameSite=Strict ("s" cookie only) - 4 must also be set.
+  -- 1: HttpOnly
+  -- 2: Secure
+  -- 4: SameSite=Lax
+  -- 8: SameSite=Strict - 4 must also be set.
   flags integer not null,
 
   -- The domain of the HTTP cookie used to store this session. The outbound

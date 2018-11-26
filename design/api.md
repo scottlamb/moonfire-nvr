@@ -15,11 +15,30 @@ In the future, this is likely to be expanded:
 
 ## Detailed design
 
-All requests for JSON data should be sent with the header `Accept:
-application/json` (exactly). Without this header, replies will generally be in
-HTML rather than JSON.
+All requests for JSON data should be sent with the header
+`Accept: application/json` (exactly).
 
-TODO(slamb): authentication.
+### `/api/login`
+
+A `POST` request on this URL should have an `application/x-www-form-urlencoded`
+body containing `username` and `password` parameters.
+
+On successful authentication, the server will return an HTTP 204 (no content)
+with a `Set-Cookie` header for the `s` cookie, which is an opaque, HttpOnly
+(unavailable to Javascript) session identifier.
+
+If authentication or authorization fails, the server will return a HTTP 403
+(forbidden) response. Currently the body will be a `text/plain` error message;
+future versions will likely be more sophisticated.
+
+### `/api/logout`
+
+A `POST` request on this URL should have an `application/x-www-form-urlencoded`
+body containing a `csrf` parameter copied from the `session.csrf` of the
+top-level API request.
+
+On success, returns an HTTP 204 (no content) responses. On failure, returns a
+4xx response with `text/plain` error message.
 
 ### `/api/`
 
@@ -69,6 +88,9 @@ The `application/json` response will have a dict as follows:
                 time zone.  It is usually 24 hours after the start time. It
                 might be 23 hours or 25 hours during spring forward or fall
                 back, respectively.
+*   `session`: if logged in, a dict with the following properties:
+    *   `username`
+    *   `csrf`: a cross-site request forgery token for use in `POST` requests.
 
 Example response:
 
@@ -104,6 +126,10 @@ Example response:
     },
     ...
   ],
+  "session": {
+    "username": "slamb",
+    "csrf": "2DivvlnKUQ9JD4ao6YACBJm8XK4bFmOc",
+  }
 }
 ```
 

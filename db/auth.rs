@@ -33,20 +33,24 @@ use blake2_rfc::blake2b::blake2b;
 use failure::Error;
 use fnv::FnvHashMap;
 use libpasta;
+use parking_lot::Mutex;
 use rusqlite::{self, Connection, Transaction};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 lazy_static! {
-    static ref PASTA_CONFIG: libpasta::Config = if cfg!(test) {
-        // In test builds, use bcrypt with the cost turned down. Password hash functions are
-        // designed to be slow; when run un-optimized, they're unpleasantly slow with default
-        // settings. Security doesn't matter for cfg(test).
-        libpasta::Config::with_primitive(libpasta::primitives::Bcrypt::new(2))
-    } else {
-        libpasta::Config::default()
-    };
+    static ref PASTA_CONFIG: Mutex<Arc<libpasta::Config>> =
+        Mutex::new(Arc::new(libpasta::Config::default()));
+}
+
+/// For testing only: use a fast but insecure libpasta config.
+/// See also <https://github.com/libpasta/libpasta/issues/9>.
+/// Call via `testutil::init()`.
+pub(crate) fn set_test_config() {
+    *PASTA_CONFIG.lock() =
+        Arc::new(libpasta::Config::with_primitive(libpasta::primitives::Bcrypt::new(2)));
 }
 
 enum UserFlags {
@@ -111,7 +115,8 @@ impl UserChange {
     }
 
     pub fn set_password(&mut self, pwd: String) {
-        self.set_password_hash = Some(Some(PASTA_CONFIG.hash_password(&pwd)));
+        let c = Arc::clone(&PASTA_CONFIG.lock());
+        self.set_password_hash = Some(Some(c.hash_password(&pwd)));
     }
 
     pub fn clear_password(&mut self) {
@@ -198,6 +203,7 @@ pub struct Session {
     flags: i32,  // bitmask of SessionFlags enum values
     domain: Vec<u8>,
     description: Option<String>,
+    seed: Seed,
 
     creation_password_id: Option<i32>,
     creation: Request,
@@ -211,15 +217,33 @@ pub struct Session {
     dirty: bool,
 }
 
+impl Session {
+    pub fn csrf(&self) -> SessionHash {
+        let r = blake2b(24, b"csrf", &self.seed.0[..]);
+        let mut h = SessionHash([0u8; 24]);
+        h.0.copy_from_slice(r.as_bytes());
+        h
+    }
+}
+
 /// A raw session id (not base64-encoded). Sensitive. Never stored in the database.
 pub struct RawSessionId([u8; 48]);
 
 impl RawSessionId {
     pub fn new() -> Self { RawSessionId([0u8; 48]) }
 
-    fn hash(&self) -> SessionHash {
-        let r = blake2b(32, &[], &self.0[..]);
-        let mut h = SessionHash([0u8; 32]);
+    pub fn decode_base64(input: &[u8]) -> Result<Self, Error> {
+        let mut s = RawSessionId::new();
+        let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut s.0[..])?;
+        if l != 48 {
+            bail!("session id must be 48 bytes");
+        }
+        Ok(s)
+    }
+
+    pub fn hash(&self) -> SessionHash {
+        let r = blake2b(24, &[], &self.0[..]);
+        let mut h = SessionHash([0u8; 24]);
         h.0.copy_from_slice(r.as_bytes());
         h
     }
@@ -239,13 +263,50 @@ impl fmt::Debug for RawSessionId {
     }
 }
 
-/// Blake2b-256 of the raw (not base64-encoded) 48-byte session id.
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub struct SessionHash([u8; 32]);
+/// A Blake2b-256 (48 bytes) of data associated with the session.
+/// This is currently used in two ways:
+/// *   the csrf token is a blake2b drived from the session's seed. This is put into the `sc`
+///     cookie.
+/// *   the 48-byte session id is hashed to be used as a database key.
+#[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
+pub struct SessionHash(pub [u8; 24]);
+
+impl SessionHash {
+    pub fn encode_base64(&self, output: &mut [u8; 32]) {
+        ::base64::encode_config_slice(&self.0, ::base64::STANDARD_NO_PAD, output);
+    }
+
+    pub fn decode_base64(input: &[u8]) -> Result<Self, Error> {
+        let mut h = SessionHash([0u8; 24]);
+        let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut h.0[..])?;
+        if l != 24 {
+            bail!("session hash must be 24 bytes");
+        }
+        Ok(h)
+    }
+}
 
 impl fmt::Debug for SessionHash {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "SessionHash(\"{}\")", &strutil::hex(&self.0[..]))
+        let mut buf = [0; 32];
+        self.encode_base64(&mut buf);
+        write!(f, "SessionHash(\"{}\")", ::std::str::from_utf8(&buf[..]).expect("base64 is UTF-8"))
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+struct Seed([u8; 32]);
+
+impl rusqlite::types::FromSql for Seed {
+    fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
+        let b = value.as_blob()?;
+        if b.len() != 32 {
+            return Err(rusqlite::types::FromSqlError::Other(
+                Box::new(format_err!("expected a 32-byte seed").compat())));
+        }
+        let mut s = Seed::default();
+        s.0.copy_from_slice(b);
+        Ok(s)
     }
 }
 
@@ -424,7 +485,8 @@ impl State {
                 None => bail!("no password set for user {:?}", username),
                 Some(h) => h,
             };
-            match PASTA_CONFIG.verify_password_update_hash(hash, &password) {
+            let c = Arc::clone(&PASTA_CONFIG.lock());
+            match c.verify_password_update_hash(hash, &password) {
                 libpasta::HashUpdate::Failed => {
                     u.dirty = true;
                     u.password_failure_count += 1;
@@ -482,15 +544,15 @@ impl State {
             domain,
             creation_password_id,
             creation,
+            seed: Seed(seed),
             ..Default::default()
         });
         Ok((session_id, session))
     }
 
-    pub fn authenticate_session(&mut self, conn: &Connection, req: Request,
-                                session: &RawSessionId) -> Result<(SessionHash, &User), Error> {
-        let hash = session.hash();
-        let s = match self.sessions.entry(hash) {
+    pub fn authenticate_session(&mut self, conn: &Connection, req: Request, hash: &SessionHash)
+                                -> Result<(&Session, &User), Error> {
+        let s = match self.sessions.entry(*hash) {
             ::std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             ::std::collections::hash_map::Entry::Vacant(e) => e.insert(lookup_session(conn, hash)?),
         };
@@ -507,13 +569,13 @@ impl State {
         if u.disabled() {
             bail!("user {:?} is disabled", &u.username);
         }
-        Ok((hash, u))
+        Ok((s, u))
     }
 
     pub fn revoke_session(&mut self, conn: &Connection, reason: RevocationReason,
-                          detail: Option<String>, req: Request, hash: SessionHash)
+                          detail: Option<String>, req: Request, hash: &SessionHash)
                           -> Result<(), Error> {
-        let s = match self.sessions.entry(hash) {
+        let s = match self.sessions.entry(*hash) {
             ::std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             ::std::collections::hash_map::Entry::Vacant(e) => e.insert(lookup_session(conn, hash)?),
         };
@@ -601,10 +663,11 @@ impl State {
     }
 }
 
-fn lookup_session(conn: &Connection, hash: SessionHash) -> Result<Session, Error> {
+fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Error> {
     let mut stmt = conn.prepare_cached(r#"
         select
             user_id,
+            seed,
             flags,
             domain,
             description,
@@ -632,33 +695,34 @@ fn lookup_session(conn: &Connection, hash: SessionHash) -> Result<Session, Error
         Some(Err(e)) => return Err(e.into()),
         Some(Ok(r)) => r,
     };
-    let creation_addr: FromSqlIpAddr = row.get_checked(7)?;
-    let revocation_addr: FromSqlIpAddr = row.get_checked(10)?;
-    let last_use_addr: FromSqlIpAddr = row.get_checked(15)?;
+    let creation_addr: FromSqlIpAddr = row.get_checked(8)?;
+    let revocation_addr: FromSqlIpAddr = row.get_checked(11)?;
+    let last_use_addr: FromSqlIpAddr = row.get_checked(16)?;
     Ok(Session {
         user_id: row.get_checked(0)?,
-        flags: row.get_checked(1)?,
-        domain: row.get_checked(2)?,
-        description: row.get_checked(3)?,
-        creation_password_id: row.get_checked(4)?,
+        seed: row.get_checked(1)?,
+        flags: row.get_checked(2)?,
+        domain: row.get_checked(3)?,
+        description: row.get_checked(4)?,
+        creation_password_id: row.get_checked(5)?,
         creation: Request {
-            when_sec: row.get_checked(5)?,
-            user_agent: row.get_checked(6)?,
+            when_sec: row.get_checked(6)?,
+            user_agent: row.get_checked(7)?,
             addr: creation_addr.0,
         },
         revocation: Request {
-            when_sec: row.get_checked(8)?,
-            user_agent: row.get_checked(9)?,
+            when_sec: row.get_checked(9)?,
+            user_agent: row.get_checked(10)?,
             addr: revocation_addr.0,
         },
-        revocation_reason: row.get_checked(11)?,
-        revocation_reason_detail: row.get_checked(12)?,
+        revocation_reason: row.get_checked(12)?,
+        revocation_reason_detail: row.get_checked(13)?,
         last_use: Request {
-            when_sec: row.get_checked(13)?,
-            user_agent: row.get_checked(14)?,
+            when_sec: row.get_checked(14)?,
+            user_agent: row.get_checked(15)?,
             addr: last_use_addr.0,
         },
-        use_count: row.get_checked(16)?,
+        use_count: row.get_checked(17)?,
         dirty: false,
     })
 }
@@ -673,6 +737,7 @@ mod tests {
     #[test]
     fn open_empty_db() {
         testutil::init();
+        set_test_config();
         let mut conn = Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
         State::init(&conn).unwrap();
@@ -702,27 +767,32 @@ mod tests {
                                        "hunter3".to_owned(),
                                        b"nvr.example.com".to_vec(), 0).unwrap_err();
         assert_eq!(format!("{}", e), "incorrect password for user \"slamb\"");
-        let sid = {
+        let (sid, csrf) = {
             let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
                                                   "hunter2".to_owned(),
                                                   b"nvr.example.com".to_vec(), 0).unwrap();
             assert_eq!(s.user_id, uid);
-            sid
+            (sid, s.csrf())
         };
+
+        let e = state.authenticate_session(&conn, req.clone(), &sid,
+                                           &SessionHash::default()).unwrap_err();
+        assert_eq!(format!("{}", e), "s and sc cookies are inconsistent");
+
         let sid_hash = {
-            let (sid_hash, u) = state.authenticate_session(&conn, req.clone(), &sid).unwrap();
+            let (hash, u) = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap();
             assert_eq!(u.id, uid);
-            sid_hash
+            hash
         };
         state.revoke_session(&conn, RevocationReason::LoggedOut, None, req.clone(),
                              sid_hash).unwrap();
-        let e = state.authenticate_session(&conn, req.clone(), &sid).unwrap_err();
+        let e = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap_err();
         assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
 
         // Everything should persist across reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
-        let e = state.authenticate_session(&conn, req, &sid).unwrap_err();
+        let e = state.authenticate_session(&conn, req, &sid, &csrf).unwrap_err();
         assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
     }
 
@@ -742,20 +812,20 @@ mod tests {
             c.set_password("hunter2".to_owned());
             state.apply(&conn, c).unwrap();
         };
-        let sid = {
-            let (sid, _s) = state.login_by_password(&conn, req.clone(), "slamb",
+        let (sid, csrf) = {
+            let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
                                                     "hunter2".to_owned(),
                                                     b"nvr.example.com".to_vec(), 0).unwrap();
-            sid
+            (sid, s.csrf())
         };
-        state.authenticate_session(&conn, req.clone(), &sid).unwrap();
+        state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap();
 
         // Reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
         state.revoke_session(&conn, RevocationReason::LoggedOut, None, req.clone(),
                              sid.hash()).unwrap();
-        let e = state.authenticate_session(&conn, req, &sid).unwrap_err();
+        let e = state.authenticate_session(&conn, req, &sid, &csrf).unwrap_err();
         assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
     }
 
@@ -832,9 +902,12 @@ mod tests {
         };
 
         // Get a session for later.
-        let sid = state.login_by_password(&conn, req.clone(), "slamb",
-                                          "hunter2".to_owned(),
-                                          b"nvr.example.com".to_vec(), 0).unwrap().0;
+        let (sid, csrf) = {
+            let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
+                                                   "hunter2".to_owned(),
+                                                   b"nvr.example.com".to_vec(), 0).unwrap();
+            (sid, s.csrf())
+        };
 
         // Disable the user.
         {
@@ -850,13 +923,13 @@ mod tests {
         assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
 
         // Authenticating existing sessions shouldn't work either.
-        let e = state.authenticate_session(&conn, req.clone(), &sid).unwrap_err();
+        let e = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap_err();
         assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
 
         // The user should still be disabled after reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
-        let e = state.authenticate_session(&conn, req, &sid).unwrap_err();
+        let e = state.authenticate_session(&conn, req, &sid, &csrf).unwrap_err();
         assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
     }
 
@@ -878,20 +951,23 @@ mod tests {
         };
 
         // Get a session for later.
-        let sid = state.login_by_password(&conn, req.clone(), "slamb",
-                                          "hunter2".to_owned(),
-                                          b"nvr.example.com".to_vec(), 0).unwrap().0;
+        let (sid, csrf) = {
+            let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
+                                                  "hunter2".to_owned(),
+                                                  b"nvr.example.com".to_vec(), 0).unwrap();
+            (sid, s.csrf())
+        };
 
         state.delete_user(&mut conn, uid).unwrap();
         assert!(state.users_by_id().get(&uid).is_none());
-        let e = state.authenticate_session(&conn, req.clone(), &sid).unwrap_err();
+        let e = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap_err();
         assert_eq!(format!("{}", e), "no such session");
 
         // The user should still be deleted after reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
         assert!(state.users_by_id().get(&uid).is_none());
-        let e = state.authenticate_session(&conn, req.clone(), &sid).unwrap_err();
+        let e = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap_err();
         assert_eq!(format!("{}", e), "no such session");
     }
 }

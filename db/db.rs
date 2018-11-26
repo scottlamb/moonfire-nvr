@@ -1693,13 +1693,13 @@ impl LockedDatabase {
         self.auth.login_by_password(&self.conn, req, username, password, domain, session_flags)
     }
 
-    pub fn authenticate_session(&mut self, req: auth::Request, sid: &auth::RawSessionId)
-                                -> Result<(auth::SessionHash, &User), Error> {
+    pub fn authenticate_session(&mut self, req: auth::Request, sid: &auth::SessionHash)
+                                -> Result<(&auth::Session, &User), Error> {
         self.auth.authenticate_session(&self.conn, req, sid)
     }
 
     pub fn revoke_session(&mut self, reason: auth::RevocationReason, detail: Option<String>,
-                          req: auth::Request, hash: auth::SessionHash) -> Result<(), Error> {
+                          req: auth::Request, hash: &auth::SessionHash) -> Result<(), Error> {
         self.auth.revoke_session(&self.conn, reason, detail, req, hash)
     }
 }

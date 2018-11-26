@@ -17,6 +17,5 @@
       "no-shadow-restricted-names": ["error"],
       "no-undef": ["error", {"typeof": true}],
       "no-unused-vars": ["error", { "vars": "all", "args": "after-used", "ignoreRestSiblings": false }],
-      "no-use-before-define": ["error", { "functions": true, "classes": true }]
     }
 }

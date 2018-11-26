@@ -68,3 +68,9 @@ In the short term, you can use either of two workarounds:
 This happens if your machine is configured to a non-UTF-8 locale, due to
 gyscos/Cursive#13. As a workaround, type `export LC_ALL=en_US.UTF-8` prior to
 running `moonfire-nvr config`.
+
+### Logging in is very very slow
+
+Ensure you're using a build compiled with the `--release` flag. See
+[libpasta/libpasta#9](https://github.com/libpasta/libpasta/issues/9) for more
+background.

@@ -30,6 +30,7 @@
 
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
+extern crate base64;
 extern crate bytes;
 extern crate byteorder;
 extern crate core;
@@ -46,6 +47,7 @@ extern crate libc;
 #[macro_use] extern crate log;
 extern crate reffers;
 extern crate rusqlite;
+extern crate memchr;
 extern crate memmap;
 extern crate moonfire_base as base;
 extern crate moonfire_db as db;
@@ -54,6 +56,7 @@ extern crate mylog;
 extern crate openssl;
 extern crate parking_lot;
 extern crate regex;
+extern crate ring;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;

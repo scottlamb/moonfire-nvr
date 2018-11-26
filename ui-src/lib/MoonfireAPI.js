@@ -158,4 +158,37 @@ export default class MoonfireAPI {
       cache: cacheOk,
     });
   }
+
+  /**
+   * Start a new AJAX request to log in.
+   *
+   * @param  {String} username
+   * @param  {String} password
+   * @return {Request}
+   */
+  login(username, password) {
+    return $.ajax(this._builder.makeUrl('login'), {
+      data: {
+        username: username,
+        password: password,
+      },
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Start a new AJAX request to log out.
+   *
+   * @param  {String} csrf: the csrf request token as returned in
+   *         <tt>/api/</tt> response JSON.
+   * @return {Request}
+   */
+  logout(csrf) {
+    return $.ajax(this._builder.makeUrl('logout'), {
+      data: {
+        csrf: csrf,
+      },
+      method: 'POST',
+    });
+  }
 }

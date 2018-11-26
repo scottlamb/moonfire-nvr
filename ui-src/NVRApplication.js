@@ -65,6 +65,7 @@ import MoonfireAPI from './lib/MoonfireAPI';
 const api = new MoonfireAPI();
 let streamViews = null; // StreamView objects
 let calendarView = null; // CalendarView object
+let loginDialog = null;
 
 /**
  * Currently selected time format specification.
@@ -206,7 +207,34 @@ function fetch(selectedRange, videoLength) {
 }
 
 /**
- * Initialize the page after receiving camera data.
+ * Updates the session bar at the top of the page.
+ *
+ * @param  {Object} session the "session" key of the main API request's JSON,
+ *         or null.
+ */
+function updateSession(session) {
+  let sessionBar = $('#session');
+  sessionBar.empty();
+  if (session === null) {
+    sessionBar.hide();
+    return;
+  }
+  sessionBar.append($('<span id="session-username" />').text(session.username));
+  let logout = $('<a>logout</a>');
+  logout.click(() => {
+    api
+      .logout(session.csrf)
+      .done(() => {
+        onReceivedTopLevel(null);
+        loginDialog.dialog('open');
+      });
+  });
+  sessionBar.append(' | ', logout);
+  sessionBar.show();
+}
+
+/**
+ * Initialize the page after receiving top-level data.
  *
  * Sets the following globals:
  * zone - timezone from data received
@@ -215,9 +243,16 @@ function fetch(selectedRange, videoLength) {
  * Builds the dom for the left side controllers
  *
  * @param  {Object} data JSON resulting from the main API request /api/?days=
+ *         or null if the request failed.
  */
-function onReceivedCameras(data) {
-  newTimeZone(data.timeZoneName);
+function onReceivedTopLevel(data) {
+  if (data === null) {
+    data = {cameras: [], session: null};
+  } else {
+    newTimeZone(data.timeZoneName);
+  }
+
+  updateSession(data.session);
 
   // Set up controls and values
   const nvrSettingsView = new NVRSettingsView();
@@ -235,6 +270,9 @@ function onReceivedCameras(data) {
 
   const streamsParent = $('#streams');
   const videos = $('#videos');
+
+  streamsParent.empty();
+  videos.empty();
 
   streamViews = [];
   let streamSelectorCameras = [];
@@ -277,6 +315,57 @@ function onReceivedCameras(data) {
 }
 
 /**
+ * Handles the submit action on the login form.
+ */
+function sendLoginRequest() {
+  if (loginDialog.pending) {
+    return;
+  }
+
+  let username = $('#login-username').val();
+  let password = $('#login-password').val();
+  let submit = $('#login-submit');
+  let error = $('#login-error');
+
+  error.empty();
+  error.removeClass('ui-state-highlight');
+  submit.button('option', 'disabled', true);
+  loginDialog.pending = true;
+  console.info('logging in as', username);
+  api
+    .login(username, password)
+    .done(() => {
+      console.info('login successful');
+      loginDialog.dialog('close');
+      sendTopLevelRequest();
+    })
+    .catch((e) => {
+      console.info('login failed:', e);
+      error.show();
+      error.addClass('ui-state-highlight');
+      error.text(e.responseText);
+    })
+    .always(() => {
+      submit.button('option', 'disabled', false);
+      loginDialog.pending = false;
+    });
+}
+
+/** Sends the top-level api request. */
+function sendTopLevelRequest() {
+  api
+    .request(api.nvrUrl(true))
+    .done((data) => onReceivedTopLevel(data))
+    .catch((e) => {
+      console.error('NVR load exception: ', e);
+      onReceivedTopLevel(null);
+      if (e.status == 401) {
+        loginDialog.dialog('open');
+      }
+    });
+}
+
+/**
  * Class representing the entire application.
  */
 export default class NVRApplication {
@@ -289,16 +378,22 @@ export default class NVRApplication {
    * Start the application.
    */
   start() {
-    api
-      .request(api.nvrUrl(true))
-      .done((data) => onReceivedCameras(data))
-      .fail((req, status, err) => {
-        console.error('NVR load error: ', status, err);
-        onReceivedCameras({cameras: []});
-      })
-      .catch((e) => {
-        console.error('NVR load exception: ', e);
-        onReceivedCameras({cameras: []});
-      });
+    loginDialog = $('#login').dialog({
+      autoOpen: false,
+      modal: true,
+      buttons: [
+        {
+          id: 'login-submit',
+          text: 'Login',
+          click: sendLoginRequest,
+        },
+      ],
+    });
+    loginDialog.pending = false;
+    loginDialog.find('form').on('submit', function(event) {
+      event.preventDefault();
+      sendLoginRequest();
+    });
+    sendTopLevelRequest();
   }
 }

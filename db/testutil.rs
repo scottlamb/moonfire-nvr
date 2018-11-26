@@ -53,6 +53,7 @@ pub const TEST_STREAM_ID: i32 = 1;
 ///      the program's environment prior to running.)
 ///    * set `TZ=America/Los_Angeles` so that tests that care about calendar time get the expected
 ///      results regardless of machine setup.)
+///    * use a fast but insecure password hashing format.
 pub fn init() {
     INIT.call_once(|| {
         let h = mylog::Builder::new()
@@ -61,6 +62,7 @@ pub fn init() {
         h.install().unwrap();
         env::set_var("TZ", "America/Los_Angeles");
         time::tzset();
+        ::auth::set_test_config();
     });
 }
 
