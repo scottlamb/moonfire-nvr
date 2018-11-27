@@ -767,32 +767,27 @@ mod tests {
                                        "hunter3".to_owned(),
                                        b"nvr.example.com".to_vec(), 0).unwrap_err();
         assert_eq!(format!("{}", e), "incorrect password for user \"slamb\"");
-        let (sid, csrf) = {
+        let sid = {
             let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
                                                   "hunter2".to_owned(),
                                                   b"nvr.example.com".to_vec(), 0).unwrap();
             assert_eq!(s.user_id, uid);
-            (sid, s.csrf())
+            sid
         };
 
-        let e = state.authenticate_session(&conn, req.clone(), &sid,
-                                           &SessionHash::default()).unwrap_err();
-        assert_eq!(format!("{}", e), "s and sc cookies are inconsistent");
-
-        let sid_hash = {
-            let (hash, u) = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap();
+        {
+            let (_, u) = state.authenticate_session(&conn, req.clone(), &sid.hash()).unwrap();
             assert_eq!(u.id, uid);
-            hash
-        };
+        }
         state.revoke_session(&conn, RevocationReason::LoggedOut, None, req.clone(),
-                             sid_hash).unwrap();
-        let e = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap_err();
+                             &sid.hash()).unwrap();
+        let e = state.authenticate_session(&conn, req.clone(), &sid.hash()).unwrap_err();
         assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
 
         // Everything should persist across reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
-        let e = state.authenticate_session(&conn, req, &sid, &csrf).unwrap_err();
+        let e = state.authenticate_session(&conn, req, &sid.hash()).unwrap_err();
         assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
     }
 
@@ -812,20 +807,17 @@ mod tests {
             c.set_password("hunter2".to_owned());
             state.apply(&conn, c).unwrap();
         };
-        let (sid, csrf) = {
-            let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
-                                                    "hunter2".to_owned(),
-                                                    b"nvr.example.com".to_vec(), 0).unwrap();
-            (sid, s.csrf())
-        };
-        state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap();
+        let sid = state.login_by_password(&conn, req.clone(), "slamb",
+                                          "hunter2".to_owned(),
+                                          b"nvr.example.com".to_vec(), 0).unwrap().0;
+        state.authenticate_session(&conn, req.clone(), &sid.hash()).unwrap();
 
         // Reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
         state.revoke_session(&conn, RevocationReason::LoggedOut, None, req.clone(),
-                             sid.hash()).unwrap();
-        let e = state.authenticate_session(&conn, req, &sid, &csrf).unwrap_err();
+                             &sid.hash()).unwrap();
+        let e = state.authenticate_session(&conn, req, &sid.hash()).unwrap_err();
         assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
     }
 
@@ -902,12 +894,9 @@ mod tests {
         };
 
         // Get a session for later.
-        let (sid, csrf) = {
-            let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
-                                                   "hunter2".to_owned(),
-                                                   b"nvr.example.com".to_vec(), 0).unwrap();
-            (sid, s.csrf())
-        };
+        let sid = state.login_by_password(&conn, req.clone(), "slamb",
+                                          "hunter2".to_owned(),
+                                          b"nvr.example.com".to_vec(), 0).unwrap().0;
 
         // Disable the user.
         {
@@ -923,13 +912,13 @@ mod tests {
         assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
 
         // Authenticating existing sessions shouldn't work either.
-        let e = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap_err();
+        let e = state.authenticate_session(&conn, req.clone(), &sid.hash()).unwrap_err();
         assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
 
         // The user should still be disabled after reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
-        let e = state.authenticate_session(&conn, req, &sid, &csrf).unwrap_err();
+        let e = state.authenticate_session(&conn, req, &sid.hash()).unwrap_err();
         assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
     }
 
@@ -951,23 +940,20 @@ mod tests {
         };
 
         // Get a session for later.
-        let (sid, csrf) = {
-            let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
-                                                  "hunter2".to_owned(),
-                                                  b"nvr.example.com".to_vec(), 0).unwrap();
-            (sid, s.csrf())
-        };
+        let (sid, _) = state.login_by_password(&conn, req.clone(), "slamb",
+                                               "hunter2".to_owned(),
+                                               b"nvr.example.com".to_vec(), 0).unwrap();
 
         state.delete_user(&mut conn, uid).unwrap();
         assert!(state.users_by_id().get(&uid).is_none());
-        let e = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap_err();
+        let e = state.authenticate_session(&conn, req.clone(), &sid.hash()).unwrap_err();
         assert_eq!(format!("{}", e), "no such session");
 
         // The user should still be deleted after reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
         assert!(state.users_by_id().get(&uid).is_none());
-        let e = state.authenticate_session(&conn, req.clone(), &sid, &csrf).unwrap_err();
+        let e = state.authenticate_session(&conn, req.clone(), &sid.hash()).unwrap_err();
         assert_eq!(format!("{}", e), "no such session");
     }
 }
