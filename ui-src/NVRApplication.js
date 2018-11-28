@@ -247,11 +247,10 @@ function updateSession(session) {
  */
 function onReceivedTopLevel(data) {
   if (data === null) {
-    data = {cameras: [], session: null};
-  } else {
-    newTimeZone(data.timeZoneName);
+    data = {cameras: [], session: null, timeZoneName: null};
   }
 
+  newTimeZone(data.timeZoneName);
   updateSession(data.session);
 
   // Set up controls and values
