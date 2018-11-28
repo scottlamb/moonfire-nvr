@@ -53,6 +53,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::cmp;
 use std::fs;
+use std::net::IpAddr;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -223,6 +224,7 @@ struct ServiceInner {
     pool: futures_cpupool::CpuPool,
     time_zone_name: String,
     require_auth: bool,
+    trust_forward_hdrs: bool,
 }
 
 type ResponseResult = Result<Response<Body>, Response<Body>>;
@@ -471,9 +473,20 @@ impl ServiceInner {
     fn authreq(&self, req: &Request<::hyper::Body>) -> auth::Request {
         auth::Request {
             when_sec: Some(self.db.clocks().realtime().sec),
-            addr: None,  // TODO: req.remote_addr().map(|a| a.ip()),
+            addr: if self.trust_forward_hdrs {
+                req.headers().get("X-Real-IP")
+                   .and_then(|v| v.to_str().ok())
+                   .and_then(|v| IpAddr::from_str(v).ok())
+            } else { None },
             user_agent: req.headers().get(header::USER_AGENT).map(|ua| ua.as_bytes().to_vec()),
         }
+    }
+
+    fn is_secure(&self, req: &Request<::hyper::Body>) -> bool {
+        self.trust_forward_hdrs &&
+            req.headers().get("X-Forwarded-Proto")
+               .map(|v| v.as_bytes() == b"https")
+               .unwrap_or(false)
     }
 
     fn login(&self, req: &Request<::hyper::Body>, body: hyper::Chunk) -> ResponseResult {
@@ -498,11 +511,18 @@ impl ServiceInner {
             None => host,
         }.to_owned();
         let mut l = self.db.lock();
-        let flags = (auth::SessionFlags::HttpOnly as i32) | (auth::SessionFlags::SameSite as i32);
+        let is_secure = self.is_secure(req);
+        let flags = (auth::SessionFlags::HttpOnly as i32) |
+                    (auth::SessionFlags::SameSite as i32) |
+                    if is_secure { (auth::SessionFlags::Secure as i32) } else { 0 };
         let (sid, _) = l.login_by_password(authreq, &username, password.into_owned(), domain,
             flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
-        let s_suffix = "; HttpOnly; SameSite=Lax; Max-Age=2147483648; Path=/";
+        let s_suffix = if is_secure {
+            "; HttpOnly; Secure; SameSite=Lax; Max-Age=2147483648; Path=/"
+        } else {
+            "; HttpOnly; SameSite=Lax; Max-Age=2147483648; Path=/"
+        };
         let mut encoded = [0u8; 64];
         base64::encode_config_slice(&sid, base64::STANDARD_NO_PAD, &mut encoded);
         let mut cookie = BytesMut::with_capacity("s=".len() + encoded.len() + s_suffix.len());
@@ -612,19 +632,26 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
     None
 }
 
+pub struct Config<'a> {
+    pub db: Arc<db::Database>,
+    pub ui_dir: Option<&'a str>,
+    pub require_auth: bool,
+    pub trust_forward_hdrs: bool,
+    pub time_zone_name: String,
+}
+
 #[derive(Clone)]
 pub struct Service(Arc<ServiceInner>);
 
 impl Service {
-    pub fn new(db: Arc<db::Database>, ui_dir: Option<&str>, require_auth: bool,
-               time_zone_name: String) -> Result<Self, Error> {
+    pub fn new(config: Config) -> Result<Self, Error> {
         let mut ui_files = HashMap::new();
-        if let Some(d) = ui_dir {
+        if let Some(d) = config.ui_dir {
             Service::fill_ui_files(d, &mut ui_files);
         }
         debug!("UI files: {:#?}", ui_files);
         let dirs_by_stream_id = {
-            let l = db.lock();
+            let l = config.db.lock();
             let mut d =
                 FnvHashMap::with_capacity_and_hasher(l.streams_by_id().len(), Default::default());
             for (&id, s) in l.streams_by_id().iter() {
@@ -641,12 +668,13 @@ impl Service {
         };
 
         Ok(Service(Arc::new(ServiceInner {
-            db,
+            db: config.db,
             dirs_by_stream_id,
             ui_files,
             pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
-            require_auth,
-            time_zone_name,
+            require_auth: config.require_auth,
+            trust_forward_hdrs: config.trust_forward_hdrs,
+            time_zone_name: config.time_zone_name,
         })))
     }
 
@@ -806,8 +834,13 @@ mod tests {
             let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel::<()>();
             let addr = "127.0.0.1:0".parse().unwrap();
             let require_auth = true;
-            let service = super::Service::new(db.db.clone(), None, require_auth,
-                                              "".to_owned()).unwrap();
+            let service = super::Service::new(super::Config {
+                db: db.db.clone(),
+                ui_dir: None,
+                require_auth,
+                trust_forward_hdrs: true,
+                time_zone_name: "".to_owned(),
+            }).unwrap();
             let server = hyper::server::Server::bind(&addr)
                 .tcp_nodelay(true)
                 .serve(move || Ok::<_, Box<StdError + Send + Sync>>(service.clone()));
@@ -1017,8 +1050,13 @@ mod bench {
             testutil::add_dummy_recordings_to_db(&db.db, 1440);
             let addr = "127.0.0.1:0".parse().unwrap();
             let require_auth = false;
-            let service = super::Service::new(db.db.clone(), None, require_auth,
-                                              "".to_owned()).unwrap();
+            let service = super::Service::new(super::Config {
+                db: db.db.clone(),
+                ui_dir: None,
+                require_auth,
+                trust_forward_hdrs: false,
+                time_zone_name: "".to_owned(),
+            }).unwrap();
             let server = hyper::server::Server::bind(&addr)
                 .tcp_nodelay(true)
                 .serve(move || Ok::<_, Box<StdError + Send + Sync>>(service.clone()));

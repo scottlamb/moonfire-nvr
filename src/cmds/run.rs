@@ -68,6 +68,11 @@ Options:
     --read-only            Forces read-only mode / disables recording.
     --require-auth=BOOL    Requires authentication to access the web interface.
                            [default: true]
+    --trust-forward-hdrs   Trust X-Real-IP: and X-Forwarded-Proto: headers on
+                           the incoming request. Set this only after ensuring
+                           your proxy server is configured to set them and that
+                           no untrusted requests bypass the proxy server.
+                           You may want to specify --http-addr=127.0.0.1:8080.
 "#;
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +82,7 @@ struct Args {
     flag_ui_dir: String,
     flag_read_only: bool,
     flag_require_auth: bool,
+    flag_trust_forward_hdrs: bool,
 }
 
 fn setup_shutdown() -> impl Future<Item = (), Error = ()> + Send {
@@ -177,9 +183,15 @@ pub fn run() -> Result<(), Error> {
     }
     info!("Directories are opened.");
 
-    let zone = resolve_zone()?;
-    info!("Resolved timezone: {}", &zone);
-    let s = web::Service::new(db.clone(), Some(&args.flag_ui_dir), args.flag_require_auth, zone)?;
+    let time_zone_name = resolve_zone()?;
+    info!("Resolved timezone: {}", &time_zone_name);
+    let s = web::Service::new(web::Config {
+        db: db.clone(),
+        ui_dir: Some(&args.flag_ui_dir),
+        require_auth: args.flag_require_auth,
+        trust_forward_hdrs: args.flag_trust_forward_hdrs,
+        time_zone_name,
+    })?;
 
     // Start a streamer for each stream.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));
