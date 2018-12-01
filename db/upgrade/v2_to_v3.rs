@@ -40,7 +40,7 @@ use schema;
 use std::io::{self, Write};
 use std::mem;
 use std::sync::Arc;
-use rusqlite;
+use rusqlite::{self, types::ToSql};
 use uuid::Uuid;
 
 /// Opens the sample file dir.
@@ -57,7 +57,7 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
           sample_file_dir s
           join open o on (s.last_complete_open_id = o.id)
           cross join meta m
-    "#, &[], |row| {
+    "#, &[] as &[&ToSql], |row| {
       (row.get_checked(0).unwrap(),
        row.get_checked(1).unwrap(),
        row.get_checked(2).unwrap(),
@@ -84,7 +84,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         from
           recording_playback
     "#)?;
-    let mut rows = stmt.query(&[])?;
+    let mut rows = stmt.query(&[] as &[&ToSql])?;
     while let Some(row) = rows.next() {
         let row = row?;
         let id = db::CompositeId(row.get_checked(0)?);
@@ -124,7 +124,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
 /// Gets a pathname for a sample file suitable for passing to open or unlink.
 fn get_uuid_pathname(uuid: Uuid) -> [libc::c_char; 37] {
     let mut buf = [0u8; 37];
-    write!(&mut buf[..36], "{}", uuid.hyphenated()).expect("can't format uuid to pathname buf");
+    write!(&mut buf[..36], "{}", uuid.to_hyphenated_ref())
+        .expect("can't format uuid to pathname buf");
 
     // libc::c_char seems to be i8 on some platforms (Linux/arm) and u8 on others (Linux/amd64).
     unsafe { mem::transmute::<[u8; 37], [libc::c_char; 37]>(buf) }

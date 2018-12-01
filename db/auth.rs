@@ -34,7 +34,7 @@ use failure::Error;
 use fnv::FnvHashMap;
 use libpasta;
 use parking_lot::Mutex;
-use rusqlite::{self, Connection, Transaction};
+use rusqlite::{self, Connection, Transaction, types::ToSql};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -343,7 +343,7 @@ impl State {
             from
                 user
         "#)?;
-        let mut rows = stmt.query(&[])?;
+        let mut rows = stmt.query(&[] as &[&ToSql])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let id = row.get_checked(0)?;
@@ -594,7 +594,7 @@ impl State {
             let addr = req.addr_buf();
             let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
             stmt.execute(&[
-                &req.when_sec,
+                &req.when_sec as &ToSql,
                 &req.user_agent,
                 &addr,
                 &(reason as i32),

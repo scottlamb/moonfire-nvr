@@ -38,11 +38,11 @@ moonfire-db = { path = "db" }
 moonfire-ffmpeg = { path = "ffmpeg" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.10"
-parking_lot = { version = "0.6", features = [] }
+parking_lot = { version = "0.7", features = [] }
 reffers = "0.5.1"
 regex = "1.0"
 ring = "0.12.1"
-rusqlite = "0.14"
+rusqlite = "0.15"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
@@ -51,14 +51,14 @@ time = "0.1"
 tokio = "0.1.8"
 tokio-signal = "0.2"
 url = "1.4"
-uuid = { version = "0.6", features = ["serde", "std", "v4"] }
+uuid = { version = "0.7", features = ["serde", "std", "v4"] }
 
 [dev-dependencies]
 reqwest = "0.9.5"
 tempdir = "0.3"
 
 [dependencies.cursive]
-version = "0.9"
+version = "0.10"
 #default-features = false
 #features = ["termion-backend"]
 

@@ -23,10 +23,10 @@ lru-cache = "0.1"
 moonfire-base = { path = "../base" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.10"
-parking_lot = { version = "0.6", features = [] }
+parking_lot = { version = "0.7", features = [] }
 protobuf = "2.0"
 regex = "1.0"
-rusqlite = "0.14"
+rusqlite = "0.15"
 tempdir = "0.3"
 time = "0.1"
-uuid = { version = "0.6", features = ["std", "v4"] }
+uuid = { version = "0.7", features = ["std", "v4"] }
