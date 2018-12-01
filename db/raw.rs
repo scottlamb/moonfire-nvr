@@ -34,7 +34,7 @@ use db::{self, CompositeId, FromSqlUuid};
 use failure::{Error, ResultExt};
 use fnv::FnvHashSet;
 use recording;
-use rusqlite;
+use rusqlite::{self, types::ToSql};
 use std::ops::Range;
 use uuid::Uuid;
 
@@ -166,7 +166,7 @@ fn list_recordings_inner(mut rows: rusqlite::Rows,
 }
 
 pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
-    conn.query_row("select uuid from meta", &[], |row| -> Result<Uuid, Error> {
+    conn.query_row("select uuid from meta", &[] as &[&ToSql], |row| -> Result<Uuid, Error> {
         let uuid: FromSqlUuid = row.get_checked(0)?;
         Ok(uuid.0)
     })?

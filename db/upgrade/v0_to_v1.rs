@@ -33,7 +33,7 @@
 use db;
 use failure::Error;
 use recording;
-use rusqlite;
+use rusqlite::{self, types::ToSql};
 use std::collections::HashMap;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
@@ -141,7 +141,7 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
       insert into recording_playback values (:composite_id, :sample_file_uuid, :sample_file_sha1,
                                              :video_index)
     "#)?;
-    let mut rows = select.query(&[])?;
+    let mut rows = select.query(&[] as &[&ToSql])?;
     let mut camera_state: HashMap<i32, CameraState> = HashMap::new();
     while let Some(row) = rows.next() {
         let row = row?;
@@ -216,7 +216,7 @@ fn fill_camera(tx: &rusqlite::Transaction, camera_state: HashMap<i32, CameraStat
       insert into camera values (:id, :uuid, :short_name, :description, :host, :username, :password,
       :main_rtsp_path, :sub_rtsp_path, :retain_bytes, :next_recording_id)
     "#)?;
-    let mut rows = select.query(&[])?;
+    let mut rows = select.query(&[] as &[&ToSql])?;
     while let Some(row) = rows.next() {
         let row = row?;
         let id: i32 = row.get_checked(0)?;

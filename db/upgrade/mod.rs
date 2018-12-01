@@ -34,7 +34,7 @@
 
 use db;
 use failure::Error;
-use rusqlite;
+use rusqlite::{self, types::ToSql};
 
 mod v0_to_v1;
 mod v1_to_v2;
@@ -52,7 +52,7 @@ pub struct Args<'a> {
 
 fn set_journal_mode(conn: &rusqlite::Connection, requested: &str) -> Result<(), Error> {
     assert!(!requested.contains(';'));  // quick check for accidental sql injection.
-    let actual = conn.query_row(&format!("pragma journal_mode = {}", requested), &[],
+    let actual = conn.query_row(&format!("pragma journal_mode = {}", requested), &[] as &[&ToSql],
                                 |row| row.get_checked::<_, String>(0))??;
     info!("...database now in journal_mode {} (requested {}).", actual, requested);
     Ok(())
@@ -68,7 +68,8 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     {
         assert_eq!(upgraders.len(), db::EXPECTED_VERSION as usize);
         let old_ver =
-            conn.query_row("select max(id) from version", &[], |row| row.get_checked(0))??;
+            conn.query_row("select max(id) from version", &[] as &[&ToSql],
+                           |row| row.get_checked(0))??;
         if old_ver > db::EXPECTED_VERSION {
             bail!("Database is at version {}, later than expected {}",
                   old_ver, db::EXPECTED_VERSION);
@@ -84,7 +85,7 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
             tx.execute(r#"
                 insert into version (id, unix_time, notes)
                              values (?, cast(strftime('%s', 'now') as int32), ?)
-            "#, &[&(ver + 1), &UPGRADE_NOTES])?;
+            "#, &[&(ver + 1) as &ToSql, &UPGRADE_NOTES])?;
             tx.commit()?;
         }
     }
@@ -93,7 +94,7 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     // compiles the SQLite3 amalgamation with -DSQLITE_DEFAULT_FOREIGN_KEYS=1). Ensure it's
     // always on. Note that our foreign keys are immediate rather than deferred, so we have to
     // be careful about the order of operations during the upgrade.
-    conn.execute("pragma foreign_keys = on", &[])?;
+    conn.execute("pragma foreign_keys = on", &[] as &[&ToSql])?;
 
     // WAL is the preferred journal mode for normal operation; it reduces the number of syncs
     // without compromising safety.

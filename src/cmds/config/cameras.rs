@@ -142,7 +142,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
                     format!("{} stream at {}:\n\n{}", t.as_str(), url, description))
                     .title("Stream test succeeded")
                     .dismiss_button("Back"));
-        }));
+        })).unwrap();
     });
 }
 

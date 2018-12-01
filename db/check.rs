@@ -36,7 +36,7 @@ use failure::Error;
 use fnv::FnvHashMap;
 use raw;
 use recording;
-use rusqlite;
+use rusqlite::{self, types::ToSql};
 use schema;
 use std::os::unix::ffi::OsStrExt;
 use std::fs;
@@ -57,7 +57,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
         "#)?;
         let mut garbage_stmt = conn.prepare_cached(
             "select composite_id from garbage where sample_file_dir_id = ?")?;
-        let mut rows = dir_stmt.query(&[])?;
+        let mut rows = dir_stmt.query(&[] as &[&ToSql])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let mut meta = schema::DirMeta::default();
@@ -93,7 +93,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
         let mut stmt = conn.prepare(r#"
             select id, sample_file_dir_id from stream where sample_file_dir_id is not null
         "#)?;
-        let mut rows = stmt.query(&[])?;
+        let mut rows = stmt.query(&[] as &[&ToSql])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let stream_id = row.get_checked(0)?;

@@ -61,7 +61,7 @@ use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
 use raw;
 use recording::{self, TIME_UNITS_PER_SEC};
-use rusqlite;
+use rusqlite::{self, types::ToSql};
 use schema;
 use std::collections::{BTreeMap, VecDeque};
 use std::cell::RefCell;
@@ -100,7 +100,7 @@ pub struct FromSqlUuid(pub Uuid);
 
 impl rusqlite::types::FromSql for FromSqlUuid {
     fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
-        let uuid = Uuid::from_bytes(value.as_blob()?)
+        let uuid = Uuid::from_slice(value.as_blob()?)
             .map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(e)))?;
         Ok(FromSqlUuid(uuid))
     }
@@ -872,7 +872,7 @@ impl LockedDatabase {
             let mut stmt = tx.prepare_cached(
                 r"update open set duration_90k = ?, end_time_90k = ? where id = ?")?;
             let rows = stmt.execute(&[
-                &(recording::Time::new(clocks.monotonic()) - self.open_monotonic).0,
+                &(recording::Time::new(clocks.monotonic()) - self.open_monotonic).0 as &ToSql,
                 &recording::Time::new(clocks.realtime()).0,
                 &o.id,
             ])?;
@@ -991,7 +991,7 @@ impl LockedDatabase {
                 update sample_file_dir set last_complete_open_id = ? where id = ?
             "#)?;
             for &id in in_progress.keys() {
-                if stmt.execute(&[&o.id, &id])? != 1 {
+                if stmt.execute(&[&o.id as &ToSql, &id])? != 1 {
                     bail!("unable to update dir {}", id);
                 }
             }
@@ -1249,7 +1249,7 @@ impl LockedDatabase {
             from
                 video_sample_entry
         "#)?;
-        let mut rows = stmt.query(&[])?;
+        let mut rows = stmt.query(&[] as &[&ToSql])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let id = row.get_checked(0)?;
@@ -1289,7 +1289,7 @@ impl LockedDatabase {
             from
               sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
         "#)?;
-        let mut rows = stmt.query(&[])?;
+        let mut rows = stmt.query(&[] as &[&ToSql])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let id = row.get_checked(0)?;
@@ -1331,7 +1331,7 @@ impl LockedDatabase {
             from
               camera;
         "#)?;
-        let mut rows = stmt.query(&[])?;
+        let mut rows = stmt.query(&[] as &[&ToSql])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let id = row.get_checked(0)?;
@@ -1370,7 +1370,7 @@ impl LockedDatabase {
             from
               stream;
         "#)?;
-        let mut rows = stmt.query(&[])?;
+        let mut rows = stmt.query(&[] as &[&ToSql])?;
         while let Some(row) = rows.next() {
             let row = row?;
             let id = row.get_checked(0)?;
@@ -1475,7 +1475,7 @@ impl LockedDatabase {
         self.conn.execute(r#"
             insert into sample_file_dir (path, uuid, last_complete_open_id)
                                  values (?,    ?,    ?)
-        "#, &[&path, &uuid_bytes, &o.id])?;
+        "#, &[&path as &ToSql, &uuid_bytes, &o.id])?;
         let id = self.conn.last_insert_rowid() as i32;
         use ::std::collections::btree_map::Entry;
         let e = self.sample_file_dirs_by_id.entry(id);
@@ -1710,11 +1710,12 @@ pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
 pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Error> {
     let ver_tables: i32 = conn.query_row_and_then(
         "select count(*) from sqlite_master where name = 'version'",
-        &[], |row| row.get_checked(0))?;
+        &[] as &[&ToSql], |row| row.get_checked(0))?;
     if ver_tables == 0 {
         return Ok(None);
     }
-    Ok(Some(conn.query_row_and_then("select max(id) from version", &[], |row| row.get_checked(0))?))
+    Ok(Some(conn.query_row_and_then("select max(id) from version", &[] as &[&ToSql],
+                                    |row| row.get_checked(0))?))
 }
 
 /// The recording database. Abstracts away SQLite queries. Also maintains in-memory state
@@ -1751,7 +1752,7 @@ impl<C: Clocks + Clone> Database<C> {
     /// Creates the database from a caller-supplied SQLite connection.
     pub fn new(clocks: C, conn: rusqlite::Connection,
                read_write: bool) -> Result<Database<C>, Error> {
-        conn.execute("pragma foreign_keys = on", &[])?;
+        conn.execute("pragma foreign_keys = on", &[] as &[&ToSql])?;
         {
             let ver = get_schema_version(&conn)?.ok_or_else(|| format_err!(
                     "no such table: version. \
@@ -1781,7 +1782,7 @@ impl<C: Clocks + Clone> Database<C> {
             let mut stmt = conn.prepare(" insert into open (uuid, start_time_90k) values (?, ?)")?;
             let uuid = Uuid::new_v4();
             let uuid_bytes = &uuid.as_bytes()[..];
-            stmt.execute(&[&uuid_bytes, &real.0])?;
+            stmt.execute(&[&uuid_bytes as &ToSql, &real.0])?;
             Some(Open {
                 id: conn.last_insert_rowid() as u32,
                 uuid,
