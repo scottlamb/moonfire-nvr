@@ -71,6 +71,7 @@ lazy_static! {
 #[derive(Debug)]
 enum Path {
     TopLevel,                                    // "/api/"
+    Request,                                     // "/api/request"
     InitSegment([u8; 20]),                       // "/api/init/<sha1>.mp4"
     Camera(Uuid),                                // "/api/cameras/<uuid>/"
     StreamRecordings(Uuid, db::StreamType),      // "/api/cameras/<uuid>/<type>/recordings"
@@ -90,11 +91,12 @@ fn decode_path(path: &str) -> Path {
     if path == "/" {
         return Path::TopLevel;
     }
-    if path == "/login" {
-        return Path::Login;
-    } else if path == "/logout" {
-        return Path::Logout;
-    }
+    match path {
+        "/request" => return Path::Request,
+        "/login" => return Path::Login,
+        "/logout" => return Path::Logout,
+        _ => {},
+    };
     if path.starts_with("/init/") {
         if path.len() != 50 || !path.ends_with(".mp4") {
             return Path::NotFound;
@@ -482,6 +484,22 @@ impl ServiceInner {
         }
     }
 
+    fn request(&self, req: &Request<::hyper::Body>) -> ResponseResult {
+        let authreq = self.authreq(req);
+        Ok(plain_response(StatusCode::OK, format!(
+                    "when: {}\n\
+                    addr: {:?}\n\
+                    user_agent: {:?}\n\
+                    secure: {:?}",
+                    time::at(time::Timespec{sec: authreq.when_sec.unwrap(), nsec: 0})
+                             .strftime("%FT%T")
+                             .map(|f| f.to_string())
+                             .unwrap_or_else(|e| e.to_string()),
+                    &authreq.addr,
+                    authreq.user_agent.map(|u| String::from_utf8_lossy(&u[..]).into_owned()),
+                    self.is_secure(req))))
+    }
+
     fn is_secure(&self, req: &Request<::hyper::Body>) -> bool {
         self.trust_forward_hdrs &&
             req.headers().get("X-Forwarded-Proto")
@@ -769,7 +787,7 @@ impl ::hyper::service::Service for Service {
 
         let p = decode_path(req.uri().path());
         let require_auth = self.0.require_auth && match p {
-            Path::NotFound | Path::Login | Path::Logout | Path::Static => false,
+            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static => false,
             _ => true,
         };
         debug!("request on: {}: {:?}, require_auth={}", req.uri(), p, require_auth);
@@ -784,6 +802,7 @@ impl ::hyper::service::Service for Service {
         match decode_path(req.uri().path()) {
             Path::InitSegment(sha1) => wrap_r(self.0.init_segment(sha1, &req)),
             Path::TopLevel => wrap_r(self.0.top_level(&req, session)),
+            Path::Request => wrap_r(self.0.request(&req)),
             Path::Camera(uuid) => wrap_r(self.0.camera(&req, uuid)),
             Path::StreamRecordings(uuid, type_) => {
                 wrap_r(self.0.stream_recordings(&req, uuid, type_))
