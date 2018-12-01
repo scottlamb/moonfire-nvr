@@ -294,7 +294,13 @@ pub(crate) fn mark_sample_files_deleted(tx: &rusqlite::Transaction, ids: &[Compo
     for &id in ids {
         let changes = stmt.execute(&[&id.0])?;
         if changes != 1 {
-            bail!("no garbage row for {}", id);
+            // panic rather than return error. Errors get retried indefinitely, but there's no
+            // recovery from this condition.
+            //
+            // Tempting to just consider logging error and moving on, but this represents a logic
+            // flaw, so complain loudly. The freshly deleted file might still be referenced in the
+            // recording table.
+            panic!("no garbage row for {}", id);
         }
     }
     Ok(())

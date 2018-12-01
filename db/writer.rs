@@ -316,7 +316,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
         let mut garbage: Vec<_> = {
             let l = self.db.lock();
             let d = l.sample_file_dirs_by_id().get(&self.dir_id).unwrap();
-            d.garbage.iter().map(|id| *id).collect()
+            d.garbage_needs_unlink.iter().map(|id| *id).collect()
         };
         if !garbage.is_empty() {
             // Try to delete files; retain ones in `garbage` that don't exist.
@@ -352,8 +352,8 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
                     Ok(cmd) => cmd,
                 },
                 Some((t, r, flushes)) => {
-                    // Note: `flushes` will be dropped on exit from this block, which has the desired
-                    // behavior of closing the channel.
+                    // Note: `flushes` will be dropped on exit from this block, which has the
+                    // desired behavior of closing the channel.
 
                     let now = self.db.clocks().monotonic();
 
@@ -393,7 +393,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         let mut garbage: Vec<_> = {
             let l = self.db.lock();
             let d = l.sample_file_dirs_by_id().get(&self.dir_id).unwrap();
-            d.garbage.iter().map(|id| *id).collect()
+            d.garbage_needs_unlink.iter().map(|id| *id).collect()
         };
         if garbage.is_empty() {
             return;
@@ -882,6 +882,87 @@ mod tests {
 
     fn eio() -> io::Error { io::Error::new(io::ErrorKind::Other, "got EIO") }
 
+    /// Tests the database flushing while a syncer is still processing a previous flush event.
+    #[test]
+    fn double_flush() {
+        testutil::init();
+        let h = new_harness();
+        h.db.lock().update_retention(&[db::RetentionChange {
+            stream_id: testutil::TEST_STREAM_ID,
+            new_record: true,
+            new_limit: 3,
+        }]).unwrap();
+
+        // Setup: add a 3-byte recording.
+        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(
+            1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
+        {
+            let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
+                                    video_sample_entry_id);
+            let f = MockFile::new();
+            h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),
+                         Box::new({ let f = f.clone(); move |_id| Ok(f.clone()) })));
+            f.expect(MockFileAction::Write(Box::new(|buf| { assert_eq!(buf, b"123"); Ok(3) })));
+            f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
+            w.write(b"123", recording::Time(2), 0, true).unwrap();
+            h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
+            w.close(Some(1));
+            h.channel.flush();
+            f.ensure_done();
+            h.dir.ensure_done();
+
+            // Then a 1-byte recording.
+            let f = MockFile::new();
+            h.dir.expect(MockDirAction::Create(CompositeId::new(1, 2),
+                         Box::new({ let f = f.clone(); move |_id| Ok(f.clone()) })));
+            f.expect(MockFileAction::Write(Box::new(|buf| { assert_eq!(buf, b"4"); Ok(1) })));
+            f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
+            w.write(b"4", recording::Time(3), 1, true).unwrap();
+            h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
+            h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 1), Box::new({
+                let db = h.db.clone();
+                move |_| {
+                    // The drop(w) below should cause the old recording to be deleted (moved to
+                    // garbage). When the database is flushed, the syncer forces garbage collection
+                    // including this unlink.
+
+                    // Do another database flush here, as if from another syncer.
+                    db.lock().flush("another syncer running").unwrap();
+                    Ok(())
+                }
+            })));
+            let (gc_done_snd, gc_done_rcv) = mpsc::channel();
+            h.dir.expect(MockDirAction::Sync(Box::new(move || {
+                gc_done_snd.send(()).unwrap();
+                Ok(())
+            })));
+            //h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 1), Box::new(|_| Ok(()))));
+            //h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
+
+            drop(w);
+
+            gc_done_rcv.recv().unwrap();  // Wait until the successful gc sync call...
+            h.channel.flush();            // ...and the DatabaseFlush op to complete.
+            f.ensure_done();
+            h.dir.ensure_done();
+        }
+
+        // Garbage should be marked collected on the next flush.
+        {
+            let mut l = h.db.lock();
+            assert!(l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage_needs_unlink.is_empty());
+            assert!(!l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage_unlinked.is_empty());
+            l.flush("forced gc").unwrap();
+            assert!(l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage_needs_unlink.is_empty());
+            assert!(l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage_unlinked.is_empty());
+        }
+
+        // The syncer should shut down cleanly.
+        drop(h.channel);
+        h.db.lock().clear_on_flush();
+        h.join.join().unwrap();
+    }
+
     #[test]
     fn write_path_retries() {
         testutil::init();
@@ -1005,9 +1086,11 @@ mod tests {
         // Garbage should be marked collected on the next flush.
         {
             let mut l = h.db.lock();
-            assert!(!l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage.is_empty());
+            assert!(l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage_needs_unlink.is_empty());
+            assert!(!l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage_unlinked.is_empty());
             l.flush("forced gc").unwrap();
-            assert!(l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage.is_empty());
+            assert!(l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage_needs_unlink.is_empty());
+            assert!(l.sample_file_dirs_by_id().get(&h.dir_id).unwrap().garbage_unlinked.is_empty());
         }
 
         // The syncer should shut down cleanly.
