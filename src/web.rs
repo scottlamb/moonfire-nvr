@@ -775,14 +775,20 @@ impl ::hyper::service::Service for Service {
     type Future = Box<Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send + 'static>;
 
     fn call(&mut self, req: Request<::hyper::Body>) -> Self::Future {
-        fn wrap<R: Future<Item = Response<Body>, Error = Response<Body>> + Send + 'static>(r: R)
-               -> Box<Future<Item = Response<Body>, Error = BoxedError> + Send + 'static> {
-            return Box::new(r.or_else(|e| Ok(e)))
+        fn wrap<R>(is_private: bool, r: R)
+               -> Box<Future<Item = Response<Body>, Error = BoxedError> + Send + 'static>
+        where R: Future<Item = Response<Body>, Error = Response<Body>> + Send + 'static {
+            return Box::new(r.or_else(|e| Ok(e)).map(move |mut r| {
+                if is_private {
+                    r.headers_mut().insert("Cache-Control", HeaderValue::from_static("private"));
+                }
+                r
+            }))
         }
 
-        fn wrap_r(r: ResponseResult)
+        fn wrap_r(is_private: bool, r: ResponseResult)
                -> Box<Future<Item = Response<Body>, Error = BoxedError> + Send + 'static> {
-            return wrap(future::result(r))
+            return wrap(is_private, future::result(r))
         }
 
         let p = decode_path(req.uri().path());
@@ -799,30 +805,30 @@ impl ::hyper::service::Service for Service {
             return Box::new(future::ok(
                     plain_response(StatusCode::UNAUTHORIZED, "unauthorized")));
         }
-        match decode_path(req.uri().path()) {
-            Path::InitSegment(sha1) => wrap_r(self.0.init_segment(sha1, &req)),
-            Path::TopLevel => wrap_r(self.0.top_level(&req, session)),
-            Path::Request => wrap_r(self.0.request(&req)),
-            Path::Camera(uuid) => wrap_r(self.0.camera(&req, uuid)),
+        match p {
+            Path::InitSegment(sha1) => wrap_r(true, self.0.init_segment(sha1, &req)),
+            Path::TopLevel => wrap_r(true, self.0.top_level(&req, session)),
+            Path::Request => wrap_r(true, self.0.request(&req)),
+            Path::Camera(uuid) => wrap_r(true, self.0.camera(&req, uuid)),
             Path::StreamRecordings(uuid, type_) => {
-                wrap_r(self.0.stream_recordings(&req, uuid, type_))
+                wrap_r(true, self.0.stream_recordings(&req, uuid, type_))
             },
             Path::StreamViewMp4(uuid, type_) => {
-                wrap_r(self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::Normal))
+                wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::Normal))
             },
             Path::StreamViewMp4Segment(uuid, type_) => {
-                wrap_r(self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::MediaSegment))
+                wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::MediaSegment))
             },
-            Path::NotFound => wrap(future::err(not_found("path not understood"))),
-            Path::Login => wrap(self.with_form_body(req).and_then({
+            Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
+            Path::Login => wrap(true, self.with_form_body(req).and_then({
                 let s = self.clone();
                 move |(req, b)| { s.0.login(&req, b) }
             })),
-            Path::Logout => wrap(self.with_form_body(req).and_then({
+            Path::Logout => wrap(true, self.with_form_body(req).and_then({
                 let s = self.clone();
                 move |(req, b)| { s.0.logout(&req, b) }
             })),
-            Path::Static => wrap_r(self.0.static_file(&req, req.uri().path())),
+            Path::Static => wrap_r(false, self.0.static_file(&req, req.uri().path())),
         }
     }
 }
