@@ -532,14 +532,15 @@ impl ServiceInner {
         let is_secure = self.is_secure(req);
         let flags = (auth::SessionFlags::HttpOnly as i32) |
                     (auth::SessionFlags::SameSite as i32) |
+                    (auth::SessionFlags::SameSiteStrict as i32) |
                     if is_secure { (auth::SessionFlags::Secure as i32) } else { 0 };
         let (sid, _) = l.login_by_password(authreq, &username, password.into_owned(), domain,
             flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
         let s_suffix = if is_secure {
-            "; HttpOnly; Secure; SameSite=Lax; Max-Age=2147483648; Path=/"
+            "; HttpOnly; Secure; SameSite=Strict; Max-Age=2147483648; Path=/"
         } else {
-            "; HttpOnly; SameSite=Lax; Max-Age=2147483648; Path=/"
+            "; HttpOnly; SameSite=Strict; Max-Age=2147483648; Path=/"
         };
         let mut encoded = [0u8; 64];
         base64::encode_config_slice(&sid, base64::STANDARD_NO_PAD, &mut encoded);

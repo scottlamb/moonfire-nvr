@@ -190,6 +190,7 @@ pub enum SessionFlags {
     HttpOnly = 1,
     Secure = 2,
     SameSite = 4,
+    SameSiteStrict = 8,
 }
 
 #[derive(Copy, Clone)]
