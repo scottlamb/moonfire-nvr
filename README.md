@@ -13,7 +13,8 @@ less than 10% of the machine's total CPU.
 So far, the web interface is basic: a filterable list of video segments,
 with support for trimming them to arbitrary time ranges. No scrub bar yet.
 There's also no support for motion detection, no https/SSL/TLS support (you'll
-need a proxy server), and no config UI.
+need a proxy server, as described [here](guide/secure.md)), and only a
+console-based (rather than web-based) configuration UI.
 
 ![screenshot](screenshot.png)
 

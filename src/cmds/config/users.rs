@@ -194,5 +194,5 @@ pub fn top_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
                         .map(|(&id, user)| (format!("{}: {}", id, user.username), Some(id))))
             .full_width())
         .dismiss_button("Done")
-        .title("Edit cameras"));
+        .title("Edit users"));
 }

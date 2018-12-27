@@ -486,8 +486,11 @@ impl ServiceInner {
 
     fn request(&self, req: &Request<::hyper::Body>) -> ResponseResult {
         let authreq = self.authreq(req);
+        let host = req.headers().get(header::HOST).map(|h| String::from_utf8_lossy(h.as_bytes()));
+        let agent = authreq.user_agent.as_ref().map(|u| String::from_utf8_lossy(&u[..]));
         Ok(plain_response(StatusCode::OK, format!(
                     "when: {}\n\
+                    host: {:?}\n\
                     addr: {:?}\n\
                     user_agent: {:?}\n\
                     secure: {:?}",
@@ -495,8 +498,9 @@ impl ServiceInner {
                              .strftime("%FT%T")
                              .map(|f| f.to_string())
                              .unwrap_or_else(|e| e.to_string()),
+                    host.as_ref().map(|h| &*h),
                     &authreq.addr,
-                    authreq.user_agent.map(|u| String::from_utf8_lossy(&u[..]).into_owned()),
+                    agent.as_ref().map(|a| &*a),
                     self.is_secure(req))))
     }
 

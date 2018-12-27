@@ -84,7 +84,8 @@ Moonfire NVR can be run as a systemd service. Create
     [Service]
     ExecStart=/usr/local/bin/moonfire-nvr run \
         --db-dir=/var/lib/moonfire-nvr/db \
-        --http-addr=0.0.0.0:8080
+        --http-addr=0.0.0.0:8080 \
+        --require-auth=false
     Environment=TZ=:/etc/localtime
     Environment=MOONFIRE_FORMAT=google-systemd
     Environment=MOONFIRE_LOG=info

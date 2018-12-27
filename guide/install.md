@@ -56,7 +56,7 @@ In the fstab you'd add a line similar to this:
     /dev/disk/by-uuid/23d550bc-0e38-4825-acac-1cac8a7e091f    /media/nvr   ext4    defaults,noatime,nofail  0       2
 
 You'll have to lookup the correct uuid for your disk. One way to do that is
-to issue the following commands:
+via the following command:
 
     $ ls -l /dev/disk/by-uuid
 
@@ -104,6 +104,7 @@ In the user interface,
       be flushed when the first instant of a completed recording second is a
       minute old. Lower values cause less video to be lost on power loss;
       higher values reduce wear on the SSD holding the SQLite database.
+
  3. Assign disk space to your cameras back in "Directories and retention".
     Leave a little slack (at least 100 MB per camera) between the total limit
     and the filesystem capacity, even if you store nothing else on the disk.
@@ -119,17 +120,30 @@ In the user interface,
       downloading it), it stays around until the file is closed. Moonfire NVR
       currently doesn't account for this.
 
+ 4. Add a user for yourself (and optionally others) under "Users". You'll need
+    this to access the web UI once you enable authentication.
+
 ## Starting it up
 
-When finished, start the daemon and enable it for following boots:
+Note that at this stage, Moonfire NVR's web interface is **insecure**: it
+doesn't use `https` and doesn't require you to authenticate
+to it. You might be comfortable starting it in this configuration to try it
+out, particularly if the machine it's running on is behind a home router's
+firewall. You might not; in that case read through [secure the
+system](secure.md) first.
+
+The following commands will start Moonfire NVR and enable it for following
+boots, respectively:
 
     $ sudo systemctl start moonfire-nvr
     $ sudo systemctl enable moonfire-nvr
 
-You can access the HTTP interface on http://localhost:8080/ by default.
-
-Note that the HTTP port currently has no authentication, encryption, or
-logging; it should not be directly exposed to the Internet.
+The HTTP interface is accessible on port 8080; if your web browser is running
+on the same machine, you can access it at
+[http://localhost:8080/](http://localhost:8080/).
 
 If the system isn't working, see the [Troubleshooting
 guide](troubleshooting.md).
+
+Once the web interface seems to be working, read through [securing Moonfire
+NVR](secure.md).
