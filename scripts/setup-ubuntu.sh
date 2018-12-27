@@ -58,7 +58,7 @@ sudo_warn
 # Setup all apt packages we need
 #
 echo_info -x 'Preparing and downloading packages we need...'
-PKGS="build-essential pkg-config sqlite3"
+PKGS="build-essential pkg-config sqlite3 tzdata"
 #PKGS="$PKGS libavcodec-dev libavformat-dev libavutil-dev"
 PKGS="$PKGS libncurses5-dev libncursesw5-dev"
 PKGS="$PKGS libsqlite3-dev libssl-dev"
