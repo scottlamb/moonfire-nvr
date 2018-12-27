@@ -79,17 +79,17 @@ Noobs](https://ipcamtalk.com/threads/vpn-primer-for-noobs.14601/).
   7. Configure the webserver
   8. Verify it works
 
-## 1. Install a webserver.
+## 1. Install a webserver
 
 Moonfire NVR's builtin webserver doesn't yet support `https` (see [issue
-\#27](https://github.com/scottlamb/moonfire-nvr/issues/27), so you'll need to
+\#27](https://github.com/scottlamb/moonfire-nvr/issues/27)), so you'll need to
 proxy through a webserver that does. If Moonfire NVR will be sharing an
 `https` port with anything else, you'll need to set up the webserver to proxy
 to all of these interfaces as well.
 
 I use [nginx](https://https://nginx.com/) as the proxy server. Some folks may
-prefer [Apache httpd](https://httpd.apache.org/) or some other webserver. Any
-of these will work. I include snippets of a `nginx` config below, so stick
+prefer [Apache httpd](https://httpd.apache.org/) or some other webserver.
+Anything will work. I include snippets of a `nginx` config below, so stick
 with that if you're not comfortable adapting it to some other server.
 
 I run the proxying webserver on the same machine as Moonfire NVR itself. You
@@ -109,9 +109,9 @@ The easiest way to ensure your setup keeps working is to use the "static DHCP
 lease" option on your home router to give your webserver machine the same
 address every time it asks for a new lease.
 
-Alternatively, you can configure your webserver to use a static IP address
+(Alternatively, you can configure your webserver to use a static IP address
 instead of asking for a DHCP lease. Ensure the address you choose is outside
-the range assigned by the DHCP server, so that there are no conflicts.
+the range assigned by the DHCP server, so that there are no conflicts.)
 
 Reboot the webserver machine now and ensure it uses the IP address you choose on
 startup, so you don't have a confusing experience after your next power
@@ -122,7 +122,7 @@ failure.
 In your router's setup, go to the "Port Forwarding" section and tell it to
 forward TCP requests on the `http` port (80) and the `https` port (443) to
 your webserver. The `https` port is necessary for secure access, and the
-`http` port is necessary for the Let's Encrypt `http` challenge during the
+`http` port is necessary for the Let's Encrypt `http-01` challenge during the
 setup process.
 
 Now if you go to your external IP address in a web browser, you should reach
@@ -134,11 +134,11 @@ Also in your router's setup, look for "Dynamic DNS" or "DDNS". Configure it to
 update some DNS name with your home's external IP address. You should then be
 able to go to this address in a web browser and reach your webserver again.
 
-It's possible to instead set up a dynamic DNS client on the Moonfire NVR
+(It's possible to instead set up a dynamic DNS client on the Moonfire NVR
 machine instead. See [this Ubuntu
 guide](https://help.ubuntu.com/community/DynamicDNS). One disadvantage is that
 it may be slower to recognize IP address changes, so there may be a longer
-period in which the address is incorrect.
+period in which the address is incorrect.)
 
 ## 5. Install a TLS certificate
 
@@ -158,8 +158,8 @@ ExecStart=/usr/local/bin/moonfire-nvr run \
     --require-auth=false
 ```
 
-Change `--require-auth=false` to `--require-auth=true --trust-forward-hdrs`
-which has two effects:
+Change `--require-auth=false` to `--require-auth=true --trust-forward-hdrs`.
+This change has two effects:
 
    * `--require-auth=true` means that web users must authenticate.
    * `--trust-forward-hdrs` means that Moonfire NVR will look for `X-Real-IP`
@@ -185,9 +185,10 @@ desired DNS name. Now finalize its configuration:
 
    * redirect all `http` traffic to `https`
    * proxy `https` traffic to Moonfire NVR
-   * add a `X-Real-IP` header with the original IP address
-   * add a `X-Forwarded-Proto` header with the original protocol (which should
-     be `https` if you've configured everything correctly).
+   * when proxying, add a `X-Real-IP` header with the original IP address
+   * when proxying, add a `X-Forwarded-Proto` header with the original
+     protocol (which should be `https` if you've configured everything
+     correctly).
 
 The author's system does this via the following
 `/etc/nginx/sites-available/nvr.home.slamb.org` file:
@@ -245,12 +246,15 @@ Go to `http://your.domain.here/api/request` and verify the following:
 
    * the browser redirects from `http` to `https`
    * the address shown here matches your web browser's public IP address.
-     (Compare to [https://whatsmyip.com/].)
+     (Compare to [https://whatsmyip.com/](https://whatsmyip.com/).)
    * the page says `secure: true` indicating you are using `https`.
 
 Then go to `https://your.domain.here/` and you should see the web interface,
-including a login form. If you login, you should see your username and
-"logout" in the upper-right corner of the web interface.
+including a login form.
 
-If it doesn't work as expected, re-read the guide, or open an issue on github
-for help.
+Login with the credentials you added through `moonfire-nvr config` in the
+[previous guide](install.md). You should see your username and "logout" in the
+upper-right corner of the web interface.
+
+If it doesn't work as expected, re-read this guide, then open an issue on
+github for help.
