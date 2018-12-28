@@ -106,8 +106,7 @@ After=network-online.target
 ExecStart=${SERVICE_BIN} run \\
     --db-dir=${DB_DIR} \\
     --ui-dir=${LIB_DIR}/ui \\
-    --http-addr=0.0.0.0:${NVR_PORT} \
-    --require=auth=false
+    --http-addr=0.0.0.0:${NVR_PORT}
 Environment=TZ=:/etc/localtime
 Environment=MOONFIRE_FORMAT=google-systemd
 Environment=MOONFIRE_LOG=info

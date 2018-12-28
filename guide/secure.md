@@ -153,15 +153,13 @@ In your `/etc/systemd/system/moonfire-nvr.service` file, look for these lines:
 
 ```
 ExecStart=/usr/local/bin/moonfire-nvr run \
-    ...
-    --http-addr=0.0.0.0:8080 \
-    --require-auth=false
+    --db-dir=/var/lib/moonfire-nvr/db \
+    --http-addr=0.0.0.0:8080
 ```
 
-Change `--require-auth=false` to `--require-auth=true --trust-forward-hdrs`.
-This change has two effects:
+Add `--require-auth --trust-forward-hdrs`. This change has two effects:
 
-   * `--require-auth=true` means that web users must authenticate.
+   * `--require-auth` means that web users must authenticate.
    * `--trust-forward-hdrs` means that Moonfire NVR will look for `X-Real-IP`
      and `X-Forwarded-Proto` headers as added by the webserver configuration
      in the next section.

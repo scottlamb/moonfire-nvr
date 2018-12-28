@@ -66,8 +66,7 @@ Options:
     --http-addr=ADDR       Set the bind address for the unencrypted HTTP server.
                            [default: 0.0.0.0:8080]
     --read-only            Forces read-only mode / disables recording.
-    --require-auth=BOOL    Requires authentication to access the web interface.
-                           [default: true]
+    --require-auth         Requires authentication to access the web interface.
     --trust-forward-hdrs   Trust X-Real-IP: and X-Forwarded-Proto: headers on
                            the incoming request. Set this only after ensuring
                            your proxy server is configured to set them and that
