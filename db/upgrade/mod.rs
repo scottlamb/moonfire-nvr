@@ -32,7 +32,7 @@
 ///
 /// See `guide/schema.md` for more information.
 
-use db;
+use crate::db;
 use failure::Error;
 use rusqlite::{self, types::ToSql};
 

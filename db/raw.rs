@@ -30,10 +30,10 @@
 
 //! Raw database access: SQLite statements which do not touch any cached state.
 
-use db::{self, CompositeId, FromSqlUuid};
+use crate::db::{self, CompositeId, FromSqlUuid};
 use failure::{Error, ResultExt};
 use fnv::FnvHashSet;
-use recording;
+use crate::recording;
 use rusqlite::{self, types::ToSql};
 use std::ops::Range;
 use uuid::Uuid;

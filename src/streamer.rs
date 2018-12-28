@@ -28,14 +28,14 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use clock::{Clocks, TimerGuard};
-use db::{Camera, Database, Stream, dir, recording, writer};
+use crate::clock::{Clocks, TimerGuard};
+use crate::db::{Camera, Database, Stream, dir, recording, writer};
 use failure::Error;
-use h264;
+use crate::h264;
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use stream;
+use crate::stream;
 use time;
 
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
@@ -186,18 +186,18 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
 
 #[cfg(test)]
 mod tests {
-    use clock::{self, Clocks};
-    use db::{self, CompositeId};
-    use db::recording;
-    use db::testutil;
+    use crate::clock::{self, Clocks};
+    use crate::db::{self, CompositeId};
+    use crate::db::recording;
+    use crate::db::testutil;
     use failure::Error;
-    use h264;
+    use crate::h264;
     use moonfire_ffmpeg;
     use parking_lot::Mutex;
     use std::cmp;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use stream::{self, Opener, Stream};
+    use crate::stream::{self, Opener, Stream};
     use time;
 
     struct ProxyingStream<'a> {

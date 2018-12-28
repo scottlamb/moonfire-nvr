@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use failure::Error;
-use h264;
+use crate::h264;
 use moonfire_ffmpeg;
 use std::os::raw::c_char;
 use std::ffi::{CStr, CString};

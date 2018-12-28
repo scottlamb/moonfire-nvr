@@ -32,11 +32,11 @@
 /// Note that a version 2 schema is never actually used; so we know the upgrade from version 1 was
 /// completed, and possibly an upgrade from 2 to 3 is half-finished.
 
-use db::{self, FromSqlUuid};
-use dir;
+use crate::db::{self, FromSqlUuid};
+use crate::dir;
 use failure::Error;
 use libc;
-use schema;
+use crate::schema;
 use std::io::{self, Write};
 use std::mem;
 use std::sync::Arc;

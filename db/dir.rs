@@ -32,11 +32,11 @@
 //!
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
-use db::CompositeId;
+use crate::db::CompositeId;
 use failure::{Error, Fail};
 use libc::{self, c_char};
 use protobuf::{self, Message};
-use schema;
+use crate::schema;
 use std::ffi;
 use std::fs;
 use std::io::{self, Read, Write};

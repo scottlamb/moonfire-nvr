@@ -33,7 +33,7 @@ extern crate cursive;
 use self::cursive::Cursive;
 use self::cursive::traits::{Boxable, Identifiable};
 use self::cursive::views;
-use db::{self, writer};
+use crate::db::{self, writer};
 use failure::Error;
 use std::cell::RefCell;
 use std::collections::BTreeMap;

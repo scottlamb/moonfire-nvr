@@ -52,18 +52,18 @@
 //!     A list of mutations is built up in-memory and occasionally flushed to reduce SSD write
 //!     cycles.
 
-use auth;
-use base::clock::{self, Clocks};
-use dir;
+use crate::auth;
+use crate::base::clock::{self, Clocks};
+use crate::dir;
 use failure::Error;
 use fnv::{self, FnvHashMap, FnvHashSet};
 use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
-use raw;
-use recording::{self, TIME_UNITS_PER_SEC};
+use crate::raw;
+use crate::recording::{self, TIME_UNITS_PER_SEC};
 use rusqlite::{self, types::ToSql};
-use schema;
+use crate::schema;
 use std::collections::{BTreeMap, VecDeque};
 use std::cell::RefCell;
 use std::cmp;
@@ -309,11 +309,11 @@ impl SampleFileDir {
     }
 }
 
-pub use auth::Request;
-pub use auth::RawSessionId;
-pub use auth::Session;
-pub use auth::User;
-pub use auth::UserChange;
+pub use crate::auth::Request;
+pub use crate::auth::RawSessionId;
+pub use crate::auth::Session;
+pub use crate::auth::User;
+pub use crate::auth::UserChange;
 
 /// In-memory state about a camera.
 #[derive(Debug)]
@@ -735,13 +735,13 @@ impl StreamStateChanger {
     /// Applies the change to the given `streams_by_id`. The caller is expected to set
     /// `Camera::streams` to the return value.
     fn apply(mut self, streams_by_id: &mut BTreeMap<i32, Stream>) -> [Option<i32>; 2] {
-        for (id, mut stream) in self.streams.drain(..) {
+        for (id, stream) in self.streams.drain(..) {
             use ::std::collections::btree_map::Entry;
             match (streams_by_id.entry(id), stream) {
-                (Entry::Vacant(mut e), Some(new)) => { e.insert(new); },
+                (Entry::Vacant(e), Some(new)) => { e.insert(new); },
                 (Entry::Vacant(_), None) => {},
                 (Entry::Occupied(mut e), Some(new)) => { e.insert(new); },
-                (Entry::Occupied(mut e), None) => { e.remove(); },
+                (Entry::Occupied(e), None) => { e.remove(); },
             };
         }
         self.sids
@@ -874,7 +874,7 @@ impl LockedDatabase {
         for dir in self.sample_file_dirs_by_id.values() {
             raw::mark_sample_files_deleted(&tx, &dir.garbage_unlinked)?;
         }
-        for (&stream_id, mut r) in &mut new_ranges {
+        for (&stream_id, r) in &mut new_ranges {
             *r = raw::get_range(&tx, stream_id)?;
         }
         {
@@ -1921,11 +1921,11 @@ impl<'db, C: Clocks + Clone> ::std::ops::DerefMut for DatabaseGuard<'db, C> {
 mod tests {
     extern crate tempdir;
 
-    use base::clock;
-    use recording::{self, TIME_UNITS_PER_SEC};
+    use crate::base::clock;
+    use crate::recording::{self, TIME_UNITS_PER_SEC};
     use rusqlite::Connection;
     use std::collections::BTreeMap;
-    use testutil;
+    use crate::testutil;
     use super::*;
     use super::adjust_days;  // non-public.
     use uuid::Uuid;

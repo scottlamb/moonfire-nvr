@@ -30,24 +30,24 @@
 
 extern crate hyper;
 
-use base::clock::Clocks;
-use base::strutil;
-use body::{Body, BoxedError};
+use crate::base::clock::Clocks;
+use crate::base::strutil;
+use crate::body::{Body, BoxedError};
 use base64;
 use bytes::{BufMut, BytesMut};
 use core::borrow::Borrow;
 use core::str::FromStr;
-use db::{self, auth, recording};
-use db::dir::SampleFileDir;
+use crate::db::{self, auth, recording};
+use crate::db::dir::SampleFileDir;
 use failure::Error;
 use fnv::FnvHashMap;
 use futures::{Future, Stream, future};
 use futures_cpupool;
-use json;
+use crate::json;
 use http::{self, Request, Response, status::StatusCode};
 use http_serve;
 use http::header::{self, HeaderValue};
-use mp4;
+use crate::mp4;
 use regex::Regex;
 use serde_json;
 use std::collections::HashMap;
@@ -842,8 +842,8 @@ impl ::hyper::service::Service for Service {
 mod tests {
     extern crate reqwest;
 
-    use db;
-    use db::testutil::{self, TestDb};
+    use crate::db;
+    use crate::db::testutil::{self, TestDb};
     use futures::Future;
     use http::{self, header};
     use std::collections::HashMap;
@@ -851,7 +851,7 @@ mod tests {
     use super::Segments;
 
     struct Server {
-        db: TestDb<::base::clock::RealClocks>,
+        db: TestDb<crate::base::clock::RealClocks>,
         base_url: String,
         //test_camera_uuid: Uuid,
         handle: Option<::std::thread::JoinHandle<()>>,
@@ -860,7 +860,7 @@ mod tests {
 
     impl Server {
         fn new() -> Server {
-            let db = TestDb::new(::base::clock::RealClocks {});
+            let db = TestDb::new(crate::base::clock::RealClocks {});
             let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel::<()>();
             let addr = "127.0.0.1:0".parse().unwrap();
             let require_auth = true;

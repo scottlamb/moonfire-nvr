@@ -33,7 +33,7 @@ extern crate cursive;
 use self::cursive::Cursive;
 use self::cursive::traits::{Boxable, Identifiable};
 use self::cursive::views;
-use db;
+use crate::db;
 use std::sync::Arc;
 
 /// Builds a `UserChange` from an active `edit_user_dialog`.

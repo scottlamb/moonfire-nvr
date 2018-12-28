@@ -28,8 +28,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use clock;
-use db::{self, dir, writer};
+use crate::clock;
+use crate::db::{self, dir, writer};
 use failure::Error;
 use fnv::FnvHashMap;
 use futures::{Future, Stream};
@@ -37,11 +37,11 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use stream;
-use streamer;
+use crate::stream;
+use crate::streamer;
 use tokio;
 use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
-use web;
+use crate::web;
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
 // They seem to be correct for Linux and macOS at least.

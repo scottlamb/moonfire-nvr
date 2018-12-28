@@ -30,9 +30,9 @@
 
 /// Upgrades a version 0 schema to a version 1 schema.
 
-use db;
+use crate::db;
 use failure::Error;
-use recording;
+use crate::recording;
 use rusqlite::{self, types::ToSql};
 use std::collections::HashMap;
 

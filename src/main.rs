@@ -67,7 +67,7 @@ extern crate tokio_signal;
 extern crate url;
 extern crate uuid;
 
-use base::clock as clock;
+use crate::base::clock as clock;
 
 mod body;
 mod cmds;
@@ -141,7 +141,7 @@ fn main() {
         .build();
     h.clone().install().unwrap();
 
-    if let Err(e) = { let _a = h.async(); args.arg_command.unwrap().run() } {
+    if let Err(e) = { let _a = h.r#async(); args.arg_command.unwrap().run() } {
         error!("{:?}", e);
         ::std::process::exit(1);
     }

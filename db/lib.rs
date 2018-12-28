@@ -65,4 +65,4 @@ pub mod writer;
 // #[cfg(test)] is not passed on to dependencies.
 pub mod testutil;
 
-pub use db::*;
+pub use crate::db::*;

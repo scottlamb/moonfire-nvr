@@ -30,11 +30,11 @@
 
 /// Upgrades a version 1 schema to a version 2 schema.
 
-use dir;
+use crate::dir;
 use failure::Error;
 use libc;
 use rusqlite::{self, types::ToSql};
-use schema::DirMeta;
+use crate::schema::DirMeta;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use uuid::Uuid;
@@ -332,7 +332,7 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
         let mut rows = stmt.query(&[] as &[&ToSql])?;
         while let Some(row) = rows.next() {
             let row = row?;
-            let uuid: ::db::FromSqlUuid = row.get_checked(0)?;
+            let uuid: crate::db::FromSqlUuid = row.get_checked(0)?;
             if !files.remove(&uuid.0) {
                 bail!("{} is missing from dir {}!", uuid.0, sample_file_path);
             }
@@ -343,7 +343,7 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
     let mut rows = stmt.query(&[] as &[&ToSql])?;
     while let Some(row) = rows.next() {
         let row = row?;
-        let uuid: ::db::FromSqlUuid = row.get_checked(0)?;
+        let uuid: crate::db::FromSqlUuid = row.get_checked(0)?;
         files.remove(&uuid.0);
     }
 

@@ -32,13 +32,13 @@
 //!
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
-use base::clock::{self, Clocks};
-use db::{self, CompositeId};
-use dir;
+use crate::base::clock::{self, Clocks};
+use crate::db::{self, CompositeId};
+use crate::dir;
 use failure::Error;
 use fnv::FnvHashMap;
 use parking_lot::Mutex;
-use recording;
+use crate::recording;
 use openssl::hash;
 use std::cmp;
 use std::io;
@@ -588,12 +588,13 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
     }
 
     /// Opens a new writer.
-    /// This returns a writer that violates the invariant that `unflushed_sample` is `Some`.
-    /// The caller (`write`) is responsible for correcting this.
-    fn open(&mut self) -> Result<&mut InnerWriter<D::File>, Error> {
+    /// On successful return, `self.state` will be `WriterState::Open(w)` with `w` violating the
+    /// invariant that `unflushed_sample` is `Some`. The caller (`write`) is responsible for
+    /// correcting this.
+    fn open(&mut self) -> Result<(), Error> {
         let prev = match self.state {
             WriterState::Unopened => None,
-            WriterState::Open(ref mut w) => return Ok(w),
+            WriterState::Open(_) => return Ok(()),
             WriterState::Closed(prev) => Some(prev),
         };
         let (id, r) = self.db.lock().add_recording(self.stream_id, db::RecordingToInsert {
@@ -614,12 +615,9 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             local_start: recording::Time(i64::max_value()),
             adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
             unflushed_sample: None,
-        });
-        match self.state {
-            WriterState::Open(ref mut w) => Ok(w),
-            _ => unreachable!(),
-        }
-    }
+         });
+        Ok(())
+     }
 
     pub fn previously_opened(&self) -> Result<bool, Error> {
         Ok(match self.state {
@@ -633,7 +631,11 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
     /// `local_time` should be the local clock's time as of when this packet was received.
     pub fn write(&mut self, pkt: &[u8], local_time: recording::Time, pts_90k: i64,
                  is_key: bool) -> Result<(), Error> {
-        let w = self.open()?;
+        self.open()?;
+        let w = match self.state {
+            WriterState::Open(ref mut w) => w,
+            _ => unreachable!(),
+        };
 
         // Note w's invariant that `unflushed_sample` is `None` may currently be violated.
         // We must restore it on all success or error paths.
@@ -739,16 +741,16 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Drop for Writer<'a, C, D> {
 
 #[cfg(test)]
 mod tests {
-    use base::clock::SimulatedClocks;
-    use db::{self, CompositeId};
+    use crate::base::clock::SimulatedClocks;
+    use crate::db::{self, CompositeId};
     use parking_lot::Mutex;
-    use recording;
+    use crate::recording;
     use std::collections::VecDeque;
     use std::io;
     use std::sync::Arc;
     use std::sync::mpsc;
     use super::{ClockAdjuster, Writer};
-    use testutil;
+    use crate::testutil;
 
     #[derive(Clone)]
     struct MockDir(Arc<Mutex<VecDeque<MockDirAction>>>);

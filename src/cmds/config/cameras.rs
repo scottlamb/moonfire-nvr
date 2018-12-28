@@ -33,12 +33,12 @@ extern crate cursive;
 use self::cursive::Cursive;
 use self::cursive::traits::{Boxable, Identifiable, Finder};
 use self::cursive::views;
-use db::{self, writer};
+use crate::db::{self, writer};
 use failure::Error;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use stream::{self, Opener, Stream};
+use crate::stream::{self, Opener, Stream};
 use super::{decode_size, encode_size};
 
 /// Builds a `CameraChange` from an active `edit_camera_dialog`.

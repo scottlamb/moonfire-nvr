@@ -3,6 +3,7 @@ name = "moonfire-ffmpeg"
 version = "0.0.1"
 authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
+edition = "2018"
 #links = "ffmpeg"
 
 [lib]

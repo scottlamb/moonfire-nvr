@@ -28,8 +28,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
-use db;
+use crate::coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
+use crate::db;
 use failure::Error;
 use regex::Regex;
 use std::ops;
@@ -492,8 +492,8 @@ impl Segment {
             // Note: this inner loop uses try! rather than ? for performance. Don't change these
             // lines without reading https://github.com/rust-lang/rust/issues/37939 and running
             // mp4::bench::build_index.
-            try!(f(&it));
-            have_frame = try!(it.next(data));
+            r#try!(f(&it));
+            have_frame = r#try!(it.next(data));
         }
         if key_frame < self.key_frames {
             bail!("recording {}: expected {} key frames, found only {}",
@@ -505,9 +505,9 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use base::clock::RealClocks;
+    use crate::base::clock::RealClocks;
     use super::*;
-    use testutil::{self, TestDb};
+    use crate::testutil::{self, TestDb};
 
     #[test]
     fn test_parse_time() {

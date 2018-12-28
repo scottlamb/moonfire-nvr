@@ -78,12 +78,12 @@
 
 extern crate time;
 
-use base::strutil;
+use crate::base::strutil;
 use bytes::{Buf, BytesMut};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use body::{Chunk, BoxedError, wrap_error};
-use db::recording::{self, TIME_UNITS_PER_SEC};
-use db::{self, dir};
+use crate::body::{Chunk, BoxedError, wrap_error};
+use crate::db::recording::{self, TIME_UNITS_PER_SEC};
+use crate::db::{self, dir};
 use failure::Error;
 use futures::Stream;
 use futures::stream;
@@ -94,7 +94,7 @@ use memmap;
 use openssl::hash;
 use parking_lot::{Once, ONCE_INIT};
 use reffers::ARefs;
-use slices::{self, Slices};
+use crate::slices::{self, Slices};
 use smallvec::SmallVec;
 use std::cell::UnsafeCell;
 use std::cmp;
@@ -1530,13 +1530,13 @@ impl http_serve::Entity for File {
 ///      to verify the output is byte-for-byte as expected.
 #[cfg(test)]
 mod tests {
-    use base::strutil;
+    use crate::base::strutil;
     use bytes::Buf;
     use byteorder::{BigEndian, ByteOrder};
-    use clock::RealClocks;
-    use db::recording::{self, TIME_UNITS_PER_SEC};
-    use db::testutil::{self, TestDb, TEST_STREAM_ID};
-    use db::writer;
+    use crate::clock::RealClocks;
+    use crate::db::recording::{self, TIME_UNITS_PER_SEC};
+    use crate::db::testutil::{self, TestDb, TEST_STREAM_ID};
+    use crate::db::writer;
     use futures::Future;
     use futures::Stream as FuturesStream;
     use openssl::hash;
@@ -1546,7 +1546,7 @@ mod tests {
     use std::path::Path;
     use std::str;
     use super::*;
-    use stream::{self, Opener, Stream};
+    use crate::stream::{self, Opener, Stream};
 
     fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64)
     where E::Error : ::std::fmt::Debug {

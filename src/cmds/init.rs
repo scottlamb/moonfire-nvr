@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use db;
+use crate::db;
 use failure::Error;
 
 static USAGE: &'static str = r#"

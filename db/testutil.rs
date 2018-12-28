@@ -28,9 +28,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use base::clock::Clocks;
-use db;
-use dir;
+use crate::base::clock::Clocks;
+use crate::db;
+use crate::dir;
 use fnv::FnvHashMap;
 use mylog;
 use rusqlite;
@@ -40,7 +40,7 @@ use std::thread;
 use tempdir::TempDir;
 use time;
 use uuid::Uuid;
-use writer;
+use crate::writer;
 
 static INIT: sync::Once = sync::ONCE_INIT;
 
@@ -62,7 +62,7 @@ pub fn init() {
         h.install().unwrap();
         env::set_var("TZ", "America/Los_Angeles");
         time::tzset();
-        ::auth::set_test_config();
+        crate::auth::set_test_config();
     });
 }
 
@@ -132,7 +132,7 @@ impl<C: Clocks + Clone> TestDb<C> {
     /// There will no backing sample file, so it won't be possible to generate a full `.mp4`.
     pub fn insert_recording_from_encoder(&self, r: db::RecordingToInsert)
                                                 -> db::ListRecordingsRow {
-        use recording::{self, TIME_UNITS_PER_SEC};
+        use crate::recording::{self, TIME_UNITS_PER_SEC};
         let mut db = self.db.lock();
         let video_sample_entry_id = db.insert_video_sample_entry(
             1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
@@ -153,7 +153,7 @@ impl<C: Clocks + Clone> TestDb<C> {
 // For benchmarking
 #[cfg(feature="nightly")]
 pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
-    use recording::{self, TIME_UNITS_PER_SEC};
+    use crate::recording::{self, TIME_UNITS_PER_SEC};
     let mut data = Vec::new();
     data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
     let mut db = db.lock();

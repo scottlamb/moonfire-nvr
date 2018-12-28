@@ -37,8 +37,8 @@ extern crate cursive;
 
 use self::cursive::Cursive;
 use self::cursive::views;
-use clock;
-use db;
+use crate::clock;
+use crate::db;
 use failure::Error;
 use regex::Regex;
 use std::sync::Arc;

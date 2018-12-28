@@ -28,7 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use base::strutil;
+use crate::base::strutil;
 use blake2_rfc::blake2b::blake2b;
 use failure::Error;
 use fnv::FnvHashMap;
@@ -730,10 +730,10 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Erro
 
 #[cfg(test)]
 mod tests {
-    use db;
+    use crate::db;
     use rusqlite::Connection;
     use super::*;
-    use testutil;
+    use crate::testutil;
 
     #[test]
     fn open_empty_db() {

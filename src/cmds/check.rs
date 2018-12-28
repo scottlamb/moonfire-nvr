@@ -30,7 +30,7 @@
 
 //! Subcommand to check the database and sample file dir for errors.
 
-use db::check;
+use crate::db::check;
 use failure::Error;
 
 static USAGE: &'static str = r#"
