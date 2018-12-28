@@ -1045,8 +1045,13 @@ impl FileBuilder {
             self.body.append_u32(0);  // reserved
             self.body.append_u32(self.duration_90k);
             self.body.append_static(StaticBytestring::TkhdJunk)?;
-            let width = self.video_sample_entries.iter().map(|e| e.width).max().unwrap();
-            let height = self.video_sample_entries.iter().map(|e| e.height).max().unwrap();
+
+            let (width, height) = self.video_sample_entries.iter().fold(None, |m, e| {
+                match m {
+                    None => Some((e.width, e.height)),
+                    Some((w, h)) => Some((cmp::max(w, e.width), cmp::max(h, e.height))),
+                }
+            }).ok_or_else(|| format_err!("No video_sample_entries"))?;
             self.body.append_u32((width as u32) << 16);
             self.body.append_u32((height as u32) << 16);
         })
@@ -1870,7 +1875,7 @@ mod tests {
     /// sample tables that match the supplied encoder.
     fn make_mp4_from_encoders(type_: Type, db: &TestDb<RealClocks>,
                               mut recordings: Vec<db::RecordingToInsert>,
-                              desired_range_90k: Range<i32>) -> File {
+                              desired_range_90k: Range<i32>) -> Result<File, Error> {
         let mut builder = FileBuilder::new(type_);
         let mut duration_so_far = 0;
         for r in recordings.drain(..) {
@@ -1882,7 +1887,7 @@ mod tests {
             duration_so_far += row.duration_90k;
             builder.append(&db.db.lock(), row, d_start .. d_end).unwrap();
         }
-        builder.build(db.db.clone(), db.dirs_by_stream_id.clone()).unwrap()
+        builder.build(db.db.clone(), db.dirs_by_stream_id.clone())
     }
 
     /// Tests sample table for a simple video index of all sync frames.
@@ -1899,7 +1904,7 @@ mod tests {
         }
 
         // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2 .. 2+4+6+8);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2 .. 2+4+6+8).unwrap();
         let track = find_track(mp4, 1);
         assert!(track.edts_cursor.is_none());
         let mut cursor = track.stbl_cursor;
@@ -1954,7 +1959,7 @@ mod tests {
 
         // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2+4+6 .. 2+4+6+8);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2+4+6 .. 2+4+6+8).unwrap();
         let track = find_track(mp4, 1);
 
         // Examine edts. It should skip the 3rd frame.
@@ -2004,6 +2009,14 @@ mod tests {
     }
 
     #[test]
+    fn test_no_segments() {
+        testutil::init();
+        let db = TestDb::new(RealClocks {});
+        let e = make_mp4_from_encoders(Type::Normal, &db, vec![], 0 .. 0).err().unwrap();
+        assert_eq!(e.to_string(), "No video_sample_entries");
+    }
+
+    #[test]
     fn test_multi_segment() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
@@ -2021,7 +2034,7 @@ mod tests {
         encoders.push(r);
 
         // This should include samples 3 and 4 only, both sync frames.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1+2 .. 1+2+3+4);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1+2 .. 1+2+3+4).unwrap();
         let mut cursor = BoxCursor::new(mp4);
         cursor.down();
         assert!(cursor.find(b"moov"));
@@ -2056,7 +2069,7 @@ mod tests {
         encoders.push(r);
 
         // Multi-segment recording with an edit list, encoding with a zero-duration recording.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1 .. 2+3);
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1 .. 2+3).unwrap();
         let track = find_track(mp4, 1);
         let mut cursor = track.edts_cursor.unwrap();
         cursor.down();
@@ -2081,7 +2094,7 @@ mod tests {
         // Time range [2+4+6, 2+4+6+8+1) means the 4th sample and part of the 5th are included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
         let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![r],
-                                         2+4+6 .. 2+4+6+8+1);
+                                         2+4+6 .. 2+4+6+8+1).unwrap();
         let mut cursor = BoxCursor::new(mp4);
         cursor.down();
 
