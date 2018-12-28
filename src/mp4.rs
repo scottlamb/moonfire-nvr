@@ -78,13 +78,12 @@
 
 extern crate time;
 
-use crate::base::strutil;
+use crate::base::{strutil, Error, ErrorKind, ResultExt, bail_t, format_err_t};
 use bytes::{Buf, BytesMut};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use crate::body::{Chunk, BoxedError, wrap_error};
 use crate::db::recording::{self, TIME_UNITS_PER_SEC};
 use crate::db::{self, dir};
-use failure::Error;
 use futures::Stream;
 use futures::stream;
 use http;
@@ -372,7 +371,7 @@ impl Segment {
     fn new(db: &db::LockedDatabase, row: &db::ListRecordingsRow, rel_range_90k: Range<i32>,
            first_frame_num: u32) -> Result<Self, Error> {
         Ok(Segment{
-            s: recording::Segment::new(db, row, rel_range_90k)?,
+            s: recording::Segment::new(db, row, rel_range_90k).err_kind(ErrorKind::Unknown)?,
             index: UnsafeCell::new(Err(())),
             index_once: ONCE_INIT,
             first_frame_num,
@@ -391,7 +390,7 @@ impl Segment {
         let index: &'a _ = unsafe { &*self.index.get() };
         match *index {
             Ok(ref b) => return Ok(f(&b[..], self.lens())),
-            Err(()) => bail!("Unable to build index; see previous error."),
+            Err(()) => bail_t!(Unknown, "Unable to build index; see previous error."),
         }
     }
 
@@ -407,7 +406,7 @@ impl Segment {
     fn stsz(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[lens.stts .. lens.stts + lens.stsz] }
     fn stss(buf: &[u8], lens: SegmentLengths) -> &[u8] { &buf[lens.stts + lens.stsz ..] }
 
-    fn build_index(&self, playback: &db::RecordingPlayback) -> Result<Box<[u8]>, Error> {
+    fn build_index(&self, playback: &db::RecordingPlayback) -> Result<Box<[u8]>, failure::Error> {
         let s = &self.s;
         let lens = self.lens();
         let len = lens.stts + lens.stsz + lens.stss;
@@ -456,7 +455,7 @@ impl Segment {
 
     // TrackRunBox / trun (8.8.8).
     fn truns(&self, playback: &db::RecordingPlayback, initial_pos: u64, len: usize)
-             -> Result<Vec<u8>, Error> {
+             -> Result<Vec<u8>, failure::Error> {
         let mut v = Vec::with_capacity(len);
 
         struct RunInfo {
@@ -521,7 +520,7 @@ impl Segment {
             v.write_u32::<BigEndian>(it.bytes as u32)?;
             data_pos += it.bytes as u64;
             Ok(())
-        })?;
+        }).err_kind(ErrorKind::Internal)?;
         if let Some(r) = run_info.take() {
             // Finish the run as in the non-terminal case above.
             let p = v.len();
@@ -600,7 +599,7 @@ enum SliceType {
 impl Slice {
     fn new(end: u64, t: SliceType, p: usize) -> Result<Self, Error> {
         if end >= (1<<40) || p >= (1<<20) {
-            bail!("end={} p={} too large for Slice", end, p);
+            bail_t!(InvalidArgument, "end={} p={} too large for {:?} Slice", end, p, t);
         }
 
         Ok(Slice(end | ((t as u64) << 40) | ((p as u64) << 44)))
@@ -630,7 +629,8 @@ impl Slice {
         }
         let truns =
             mp4.0.db.lock()
-               .with_recording_playback(s.s.id, &mut |playback| s.truns(playback, pos, len))?;
+               .with_recording_playback(s.s.id, &mut |playback| s.truns(playback, pos, len))
+               .err_kind(ErrorKind::Unknown)?;
         let truns = ARefs::new(truns);
         Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]).into())
     }
@@ -672,7 +672,8 @@ impl slices::Slice for Slice {
             .map_err(|e| wrap_error(e))
             .and_then(move |c| {
                 if c.remaining() != (range.end - range.start) as usize {
-                    return Err(wrap_error(format_err!(
+                    return Err(wrap_error(format_err_t!(
+                        Internal,
                         "Error producing {:?}: range {:?} produced incorrect len {}.",
                         self, range, c.remaining())));
                 }
@@ -757,8 +758,9 @@ impl FileBuilder {
                   rel_range_90k: Range<i32>) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero() {
-                bail!("unable to append recording {} after recording {} with trailing zero",
-                      row.id, prev.s.id);
+                bail_t!(InvalidArgument,
+                        "unable to append recording {} after recording {} with trailing zero",
+                        row.id, prev.s.id);
             }
         }
         let s = Segment::new(db, &row, rel_range_90k, self.next_frame_num)?;
@@ -777,15 +779,16 @@ impl FileBuilder {
                  dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>)
                  -> Result<File, Error> {
         let mut max_end = None;
-        let mut etag = hash::Hasher::new(hash::MessageDigest::sha1())?;
-        etag.update(&FORMAT_VERSION[..])?;
+        let mut etag = hash::Hasher::new(hash::MessageDigest::sha1())
+            .err_kind(ErrorKind::Internal)?;
+        etag.update(&FORMAT_VERSION[..]).err_kind(ErrorKind::Internal)?;
         if self.include_timestamp_subtitle_track {
-            etag.update(b":ts:")?;
+            etag.update(b":ts:").err_kind(ErrorKind::Internal)?;
         }
         match self.type_ {
             Type::Normal => {},
-            Type::InitSegment => etag.update(b":init:")?,
-            Type::MediaSegment => etag.update(b":media:")?,
+            Type::InitSegment => etag.update(b":init:").err_kind(ErrorKind::Internal)?,
+            Type::MediaSegment => etag.update(b":media:").err_kind(ErrorKind::Internal)?,
         };
         for s in &mut self.segments {
             let d = &s.s.desired_range_90k;
@@ -809,12 +812,12 @@ impl FileBuilder {
             // Update the etag to reflect this segment.
             let mut data = [0_u8; 28];
             let mut cursor = io::Cursor::new(&mut data[..]);
-            cursor.write_i64::<BigEndian>(s.s.id.0)?;
-            cursor.write_i64::<BigEndian>(s.s.start.0)?;
-            cursor.write_u32::<BigEndian>(s.s.open_id)?;
-            cursor.write_i32::<BigEndian>(d.start)?;
-            cursor.write_i32::<BigEndian>(d.end)?;
-            etag.update(cursor.into_inner())?;
+            cursor.write_i64::<BigEndian>(s.s.id.0).err_kind(ErrorKind::Internal)?;
+            cursor.write_i64::<BigEndian>(s.s.start.0).err_kind(ErrorKind::Internal)?;
+            cursor.write_u32::<BigEndian>(s.s.open_id).err_kind(ErrorKind::Internal)?;
+            cursor.write_i32::<BigEndian>(d.start).err_kind(ErrorKind::Internal)?;
+            cursor.write_i32::<BigEndian>(d.end).err_kind(ErrorKind::Internal)?;
+            etag.update(cursor.into_inner()).err_kind(ErrorKind::Internal)?;
         }
         let max_end = match max_end {
             None => 0,
@@ -836,8 +839,9 @@ impl FileBuilder {
                 // If the segment is > 4 GiB, the 32-bit trun data offsets are untrustworthy.
                 // We'd need multiple moof+mdat sequences to support large media segments properly.
                 if self.body.slices.len() > u32::max_value() as u64 {
-                    bail!("media segment has length {}, greater than allowed 4 GiB",
-                          self.body.slices.len());
+                    bail_t!(InvalidArgument,
+                            "media segment has length {}, greater than allowed 4 GiB",
+                            self.body.slices.len());
                 }
 
                 p
@@ -871,6 +875,7 @@ impl FileBuilder {
         debug!("slices: {:?}", self.body.slices);
         let last_modified = ::std::time::UNIX_EPOCH +
                             ::std::time::Duration::from_secs(max_end as u64);
+        let etag = etag.finish().err_kind(ErrorKind::Internal)?;
         Ok(File(Arc::new(FileInner {
             db,
             dirs_by_stream_id,
@@ -880,7 +885,7 @@ impl FileBuilder {
             video_sample_entries: self.video_sample_entries,
             initial_sample_byte_pos,
             last_modified,
-            etag: HeaderValue::from_str(&format!("\"{}\"", &strutil::hex(&etag.finish()?)))
+            etag: HeaderValue::from_str(&format!("\"{}\"", &strutil::hex(&etag)))
                   .expect("hex string should be valid UTF-8"),
         })))
     }
@@ -1051,7 +1056,7 @@ impl FileBuilder {
                     None => Some((e.width, e.height)),
                     Some((w, h)) => Some((cmp::max(w, e.width), cmp::max(h, e.height))),
                 }
-            }).ok_or_else(|| format_err!("No video_sample_entries"))?;
+            }).ok_or_else(|| format_err_t!(InvalidArgument, "no video_sample_entries"))?;
             self.body.append_u32((width as u32) << 16);
             self.body.append_u32((height as u32) << 16);
         })
@@ -1091,7 +1096,7 @@ impl FileBuilder {
             let skip = s.s.desired_range_90k.start - actual_start_90k;
             let keep = s.s.desired_range_90k.end - s.s.desired_range_90k.start;
             if skip < 0 || keep < 0 {
-                bail!("skip={} keep={} on segment {:#?}", skip, keep, s);
+                bail_t!(Internal, "skip={} keep={} on segment {:#?}", skip, keep, s);
             }
             cur_media_time += skip as u64;
             if unflushed.segment_duration + unflushed.media_time == cur_media_time {
@@ -1408,7 +1413,7 @@ impl BodyState {
 
     fn append_slice(&mut self, len: u64, t: SliceType, p: usize) -> Result<(), Error> {
         let l = self.slices.len();
-        self.slices.append(Slice::new(l + len, t, p)?)
+        self.slices.append(Slice::new(l + len, t, p)?).err_kind(ErrorKind::Internal)
     }
 
     /// Appends a static bytestring, flushing the buffer if necessary.
@@ -1436,7 +1441,7 @@ impl FileInner {
         let mut v = Vec::with_capacity(l as usize);
         let mut pos = self.initial_sample_byte_pos;
         for s in &self.segments {
-            v.write_u64::<BigEndian>(pos)?;
+            v.write_u64::<BigEndian>(pos).err_kind(ErrorKind::Internal)?;
             let r = s.s.sample_file_range();
             pos += r.end - r.start;
         }
@@ -1456,14 +1461,14 @@ impl FileInner {
         let s = &self.segments[i];
         let f = self.dirs_by_stream_id
                     .get(&s.s.id.stream())
-                    .ok_or_else(|| format_err!("{}: stream not found", s.s.id))?
-                    .open_file(s.s.id)?;
+                    .ok_or_else(|| format_err_t!(NotFound, "{}: stream not found", s.s.id))?
+                    .open_file(s.s.id).err_kind(ErrorKind::Unknown)?;
         let start = s.s.sample_file_range().start + r.start;
         let mmap = Box::new(unsafe {
             memmap::MmapOptions::new()
                 .offset(start)
                 .len((r.end - r.start) as usize)
-                .map(&f)?
+                .map(&f).err_kind(ErrorKind::Internal)?
             });
         use core::ops::Deref;
         Ok(ARefs::new(mmap).map(|m| m.deref()).into())
@@ -1477,10 +1482,11 @@ impl FileInner {
                       .unix_seconds();
         let mut v = Vec::with_capacity(l as usize);
         for ts in start_sec .. end_sec {
-            v.write_u16::<BigEndian>(SUBTITLE_LENGTH as u16)?;
+            v.write_u16::<BigEndian>(SUBTITLE_LENGTH as u16).expect("Vec write shouldn't fail");
             let tm = time::at(time::Timespec{sec: ts, nsec: 0});
             use std::io::Write;
-            write!(v, "{}", tm.strftime(SUBTITLE_TEMPLATE)?)?;
+            write!(v, "{}", tm.strftime(SUBTITLE_TEMPLATE).err_kind(ErrorKind::Internal)?)
+                .expect("Vec write shouldn't fail");
         }
         Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]).into())
     }
@@ -2013,7 +2019,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let e = make_mp4_from_encoders(Type::Normal, &db, vec![], 0 .. 0).err().unwrap();
-        assert_eq!(e.to_string(), "No video_sample_entries");
+        assert_eq!(e.to_string(), "Invalid argument: no video_sample_entries");
     }
 
     #[test]

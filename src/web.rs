@@ -31,7 +31,7 @@
 extern crate hyper;
 
 use crate::base::clock::Clocks;
-use crate::base::strutil;
+use crate::base::{ErrorKind, strutil};
 use crate::body::{Body, BoxedError};
 use base64;
 use bytes::{BufMut, BytesMut};
@@ -162,6 +162,15 @@ fn bad_req<B: Into<Body>>(body: B) -> Response<Body> {
 
 fn internal_server_err<E: Into<Error>>(err: E) -> Response<Body> {
     plain_response(StatusCode::INTERNAL_SERVER_ERROR, err.into().to_string())
+}
+
+fn from_base_error(err: base::Error) -> Response<Body> {
+    let status_code = match err.kind() {
+        ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
+        ErrorKind::NotFound => StatusCode::NOT_FOUND,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    plain_response(status_code, err.to_string())
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -347,7 +356,7 @@ impl ServiceInner {
             if ent.sha1 == sha1 {
                 builder.append_video_sample_entry(ent.clone());
                 let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())
-                    .map_err(internal_server_err)?;
+                    .map_err(from_base_error)?;
                 return Ok(http_serve::serve(mp4, req));
             }
         }
@@ -458,7 +467,7 @@ impl ServiceInner {
             };
         }
         let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())
-                         .map_err(internal_server_err)?;
+                         .map_err(from_base_error)?;
         Ok(http_serve::serve(mp4, req))
     }
 
@@ -859,11 +868,10 @@ mod tests {
     }
 
     impl Server {
-        fn new() -> Server {
+        fn new(require_auth: bool) -> Server {
             let db = TestDb::new(crate::base::clock::RealClocks {});
             let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel::<()>();
             let addr = "127.0.0.1:0".parse().unwrap();
-            let require_auth = true;
             let service = super::Service::new(super::Config {
                 db: db.db.clone(),
                 ui_dir: None,
@@ -961,7 +969,7 @@ mod tests {
     #[test]
     fn unauthorized_without_cookie() {
         testutil::init();
-        let s = Server::new();
+        let s = Server::new(true);
         let cli = reqwest::Client::new();
         let resp = cli.get(&format!("{}/api/", &s.base_url)).send().unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
@@ -970,7 +978,7 @@ mod tests {
     #[test]
     fn login() {
         testutil::init();
-        let s = Server::new();
+        let s = Server::new(true);
         let cli = reqwest::Client::new();
         let login_url = format!("{}/api/login", &s.base_url);
 
@@ -1003,7 +1011,7 @@ mod tests {
     #[test]
     fn logout() {
         testutil::init();
-        let s = Server::new();
+        let s = Server::new(true);
         let cli = reqwest::Client::new();
         let mut p = HashMap::new();
         p.insert("username", "slamb");
@@ -1053,6 +1061,17 @@ mod tests {
                       .send()
                       .unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn view_without_segments() {
+        testutil::init();
+        let s = Server::new(false);
+        let cli = reqwest::Client::new();
+        let resp = cli.get(
+            &format!("{}/api/cameras/{}/main/view.mp4", &s.base_url, s.db.test_camera_uuid))
+            .send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
     }
 }
 

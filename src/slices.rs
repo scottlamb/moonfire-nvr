@@ -30,6 +30,7 @@
 
 //! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
+use crate::base::format_err_t;
 use crate::body::{BoxedError, wrap_error};
 use failure::Error;
 use futures::stream;
@@ -113,8 +114,8 @@ impl<S> Slices<S> where S: Slice {
     pub fn get_range(&self, ctx: &S::Ctx, range: Range<u64>)
                      -> Box<Stream<Item = S::Chunk, Error = BoxedError> + Send> {
         if range.start > range.end || range.end > self.len {
-            return Box::new(stream::once(Err(wrap_error(format_err!(
-                        "Bad range {:?} for slice of length {}", range, self.len)))));
+            return Box::new(stream::once(Err(wrap_error(format_err_t!(
+                        Internal, "Bad range {:?} for slice of length {}", range, self.len)))));
         }
 
         // Binary search for the first slice of the range to write, determining its index and

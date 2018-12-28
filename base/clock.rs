@@ -32,6 +32,7 @@
 
 use failure::Error;
 use libc;
+use log::warn;
 use parking_lot::Mutex;
 use std::mem;
 use std::sync::{Arc, mpsc};

@@ -28,11 +28,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate failure;
-extern crate libc;
-#[macro_use] extern crate log;
-extern crate parking_lot;
-extern crate time;
-
 pub mod clock;
+#[macro_use] mod error;
 pub mod strutil;
+
+pub use crate::error::{Error, ErrorKind, ResultExt};
