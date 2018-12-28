@@ -37,17 +37,18 @@ use futures::Stream;
 use std::fmt;
 use std::ops::Range;
 
-/// Writes a byte range to the given `io::Write` given a context argument; meant for use with
-/// `Slices`.
+/// Gets a byte range given a context argument.
+/// Each `Slice` instance belongs to a single `Slices`.
 pub trait Slice : fmt::Debug + Sized + Sync + 'static {
     type Ctx: Send + Clone;
     type Chunk: Send;
 
-    /// The byte position (relative to the start of the `Slices`) beyond the end of this slice.
-    /// Note the starting position (and thus length) are inferred from the previous slice.
+    /// The byte position (relative to the start of the `Slices`) of the end of this slice,
+    /// exclusive. Note the starting position (and thus length) are inferred from the previous
+    /// slice. Must remain the same for the lifetime of the `Slice`.
     fn end(&self) -> u64;
 
-    /// Writes `r` to `out`, as in `http_serve::Entity::write_to`.
+    /// Gets the body bytes indicated by `r`, which is relative to this slice's start.
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
     fn get_range(&self, ctx: &Self::Ctx, r: Range<u64>, len: u64)
@@ -57,7 +58,7 @@ pub trait Slice : fmt::Debug + Sized + Sync + 'static {
 }
 
 /// Helper to serve byte ranges from a body which is broken down into many "slices".
-/// This is used to implement `.mp4` serving in `mp4::Mp4File` from `mp4::Slice` enums.
+/// This is used to implement `.mp4` serving in `mp4::File` from `mp4::Slice` enums.
 pub struct Slices<S> where S: Slice {
     /// The total byte length of the `Slices`.
     /// Equivalent to `self.slices.back().map(|s| s.end()).unwrap_or(0)`; kept for convenience and
@@ -90,7 +91,7 @@ impl<S> Slices<S> where S: Slice {
         self.slices.reserve(additional)
     }
 
-    /// Appends the given slice, which must have end > the Slice's current len.
+    /// Appends the given slice, which must have end > the Slices's current len.
     pub fn append(&mut self, slice: S) -> Result<(), Error> {
         if slice.end() <= self.len {
             bail!("end {} <= len {} while adding slice {:?} to slices:\n{:?}",
