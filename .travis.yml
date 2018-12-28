@@ -27,7 +27,7 @@ matrix:
       script:
         - ci/script-rust.sh
     - language: rust
-      rust: 1.30.0
+      rust: 1.31.0
       env: FFMPEG_VERSION=3.4.4
       install:
         - ci/install-ffmpeg.sh

@@ -45,7 +45,7 @@ all non-Rust dependencies:
                    pkgconf \
                    tzdata
 
-Next, you need Rust 1.30+ and Cargo. The easiest way to install them is by
+Next, you need Rust 1.31+ and Cargo. The easiest way to install them is by
 following the instructions at [rustup.rs](https://www.rustup.rs/).
 
 Finally, building the UI requires [yarn](https://yarnpkg.com/en/).
