@@ -1529,6 +1529,7 @@ impl fmt::Debug for File {
             .field("last_modified", &self.0.last_modified)
             .field("etag", &self.0.etag)
             .field("slices", &self.0.slices)
+            .field("segments", &self.0.segments)
             .finish()
     }
 }
