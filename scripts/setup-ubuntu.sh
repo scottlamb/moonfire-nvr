@@ -58,10 +58,13 @@ sudo_warn
 # Setup all apt packages we need
 #
 echo_info -x 'Preparing and downloading packages we need...'
-PKGS="build-essential pkg-config sqlite3 tzdata"
-#PKGS="$PKGS libavcodec-dev libavformat-dev libavutil-dev"
-PKGS="$PKGS libncurses5-dev libncursesw5-dev"
-PKGS="$PKGS libsqlite3-dev libssl-dev"
+PKGS="build-essential \
+      libncurses5-dev \
+      libncursesw5-dev \
+      libsqlite3-dev \
+      libssl-dev \
+      pkgconf \
+      tzdata"
 
 # Add yarn before NodeSource so it can all go in one update
 #
@@ -93,7 +96,7 @@ fi
 #
 if [ ${DO_UPDATE:-1} ]; then sudo apt-get update -y; fi
 
-# Install necessary pakackes
+# Install necessary packages
 #
 sudo apt-get install -y $PKGS
 sudo apt-get autoremove -y

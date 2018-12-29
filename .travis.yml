@@ -1,36 +1,29 @@
-dist: trusty
-sudo: required
+dist: xenial
 addons:
   apt:
     packages:
       - build-essential
+      - libavcodec-dev
+      - libavformat-dev
+      - libavutil-dev
       - libncurses5-dev
       - libncursesw5-dev
       - libsqlite3-dev
       - libssl-dev
-      - pkg-config
+      - pkgconf
       - yasm
 matrix:
   include:
     - language: rust
       rust: stable
-      env: FFMPEG_VERSION=3.4.4
-      install:
-        - ci/install-ffmpeg.sh
       script:
         - ci/script-rust.sh
     - language: rust
       rust: nightly
-      env: FFMPEG_VERSION=3.4.4
-      install:
-        - ci/install-ffmpeg.sh
       script:
         - ci/script-rust.sh
     - language: rust
       rust: 1.31.0
-      env: FFMPEG_VERSION=3.4.4
-      install:
-        - ci/install-ffmpeg.sh
       script:
         - ci/script-rust.sh
     - language: node_js
@@ -50,6 +43,4 @@ matrix:
 cache:
   cargo: true
   yarn: true
-  directories:
-    - ffmpeg-3.4.4
   timeout: 600
