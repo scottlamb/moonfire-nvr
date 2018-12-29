@@ -68,80 +68,89 @@ lazy_static! {
         Regex::new(r"^(\d+)(-\d+)?(@\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 enum Path {
-    TopLevel,                                    // "/api/"
-    Request,                                     // "/api/request"
-    InitSegment([u8; 20]),                       // "/api/init/<sha1>.mp4"
-    Camera(Uuid),                                // "/api/cameras/<uuid>/"
-    StreamRecordings(Uuid, db::StreamType),      // "/api/cameras/<uuid>/<type>/recordings"
-    StreamViewMp4(Uuid, db::StreamType),         // "/api/cameras/<uuid>/<type>/view.mp4"
-    StreamViewMp4Segment(Uuid, db::StreamType),  // "/api/cameras/<uuid>/<type>/view.m4s"
-    Login,                                       // "/api/login"
-    Logout,                                      // "/api/logout"
-    Static,                                      // (anything that doesn't start with "/api/")
+    TopLevel,                                         // "/api/"
+    Request,                                          // "/api/request"
+    InitSegment([u8; 20], bool),                      // "/api/init/<sha1>.mp4{.txt}"
+    Camera(Uuid),                                     // "/api/cameras/<uuid>/"
+    StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
+    StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
+    StreamViewMp4Segment(Uuid, db::StreamType, bool), // "/api/cameras/<uuid>/<type>/view.m4s{.txt}"
+    Login,                                            // "/api/login"
+    Logout,                                           // "/api/logout"
+    Static,                                           // (anything that doesn't start with "/api/")
     NotFound,
 }
 
-fn decode_path(path: &str) -> Path {
-    if !path.starts_with("/api/") {
-        return Path::Static;
-    }
-    let path = &path["/api".len()..];
-    if path == "/" {
-        return Path::TopLevel;
-    }
-    match path {
-        "/request" => return Path::Request,
-        "/login" => return Path::Login,
-        "/logout" => return Path::Logout,
-        _ => {},
-    };
-    if path.starts_with("/init/") {
-        if path.len() != 50 || !path.ends_with(".mp4") {
+impl Path {
+    fn decode(path: &str) -> Self {
+        if !path.starts_with("/api/") {
+            return Path::Static;
+        }
+        let path = &path["/api".len()..];
+        if path == "/" {
+            return Path::TopLevel;
+        }
+        match path {
+            "/request" => return Path::Request,
+            "/login" => return Path::Login,
+            "/logout" => return Path::Logout,
+            _ => {},
+        };
+        if path.starts_with("/init/") {
+            let (debug, path) = if path.ends_with(".txt") {
+                (true, &path[0 .. path.len() - 4])
+            } else {
+                (false, path)
+            };
+            if path.len() != 50 || !path.ends_with(".mp4") {
+                return Path::NotFound;
+            }
+            if let Ok(sha1) = strutil::dehex(&path.as_bytes()[6..46]) {
+                return Path::InitSegment(sha1, debug);
+            }
             return Path::NotFound;
         }
-        if let Ok(sha1) = strutil::dehex(&path.as_bytes()[6..46]) {
-            return Path::InitSegment(sha1);
+        if !path.starts_with("/cameras/") {
+            return Path::NotFound;
         }
-        return Path::NotFound;
-    }
-    if !path.starts_with("/cameras/") {
-        return Path::NotFound;
-    }
-    let path = &path["/cameras/".len()..];
-    let slash = match path.find('/') {
-        None => { return Path::NotFound; },
-        Some(s) => s,
-    };
-    let uuid = &path[0 .. slash];
-    let path = &path[slash+1 .. ];
+        let path = &path["/cameras/".len()..];
+        let slash = match path.find('/') {
+            None => { return Path::NotFound; },
+            Some(s) => s,
+        };
+        let uuid = &path[0 .. slash];
+        let path = &path[slash+1 .. ];
 
-    // TODO(slamb): require uuid to be in canonical format.
-    let uuid = match Uuid::parse_str(uuid) {
-        Ok(u) => u,
-        Err(_) => { return Path::NotFound },
-    };
+        // TODO(slamb): require uuid to be in canonical format.
+        let uuid = match Uuid::parse_str(uuid) {
+            Ok(u) => u,
+            Err(_) => { return Path::NotFound },
+        };
 
-    if path.is_empty() {
-        return Path::Camera(uuid);
-    }
+        if path.is_empty() {
+            return Path::Camera(uuid);
+        }
 
-    let slash = match path.find('/') {
-        None => { return Path::NotFound; },
-        Some(s) => s,
-    };
-    let (type_, path) = path.split_at(slash);
+        let slash = match path.find('/') {
+            None => { return Path::NotFound; },
+            Some(s) => s,
+        };
+        let (type_, path) = path.split_at(slash);
 
-    let type_ = match db::StreamType::parse(type_) {
-        None => { return Path::NotFound; },
-        Some(t) => t,
-    };
-    match path {
-        "/recordings" => Path::StreamRecordings(uuid, type_),
-        "/view.mp4" => Path::StreamViewMp4(uuid, type_),
-        "/view.m4s" => Path::StreamViewMp4Segment(uuid, type_),
-        _ => Path::NotFound,
+        let type_ = match db::StreamType::parse(type_) {
+            None => { return Path::NotFound; },
+            Some(t) => t,
+        };
+        match path {
+            "/recordings" => Path::StreamRecordings(uuid, type_),
+            "/view.mp4" => Path::StreamViewMp4(uuid, type_, false),
+            "/view.mp4.txt" => Path::StreamViewMp4(uuid, type_, true),
+            "/view.m4s" => Path::StreamViewMp4Segment(uuid, type_, false),
+            "/view.m4s.txt" => Path::StreamViewMp4Segment(uuid, type_, true),
+            _ => Path::NotFound,
+        }
     }
 }
 
@@ -349,7 +358,8 @@ impl ServiceInner {
         Ok(resp)
     }
 
-    fn init_segment(&self, sha1: [u8; 20], req: &Request<::hyper::Body>) -> ResponseResult {
+    fn init_segment(&self, sha1: [u8; 20], debug: bool, req: &Request<::hyper::Body>)
+                    -> ResponseResult {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
         let db = self.db.lock();
         for ent in db.video_sample_entries_by_id().values() {
@@ -357,14 +367,18 @@ impl ServiceInner {
                 builder.append_video_sample_entry(ent.clone());
                 let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())
                     .map_err(from_base_error)?;
-                return Ok(http_serve::serve(mp4, req));
+                if debug {
+                    return Ok(plain_response(StatusCode::OK, format!("{:#?}", mp4)));
+                } else {
+                    return Ok(http_serve::serve(mp4, req));
+                }
             }
         }
         Err(not_found("no such init segment"))
     }
 
     fn stream_view_mp4(&self, req: &Request<::hyper::Body>, uuid: Uuid,
-                       stream_type_: db::StreamType, mp4_type_: mp4::Type)
+                       stream_type_: db::StreamType, mp4_type_: mp4::Type, debug: bool)
                        -> ResponseResult {
         let stream_id = {
             let db = self.db.lock();
@@ -468,6 +482,9 @@ impl ServiceInner {
         }
         let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())
                          .map_err(from_base_error)?;
+        if debug {
+            return Ok(plain_response(StatusCode::OK, format!("{:#?}", mp4)));
+        }
         Ok(http_serve::serve(mp4, req))
     }
 
@@ -805,7 +822,7 @@ impl ::hyper::service::Service for Service {
             return wrap(is_private, future::result(r))
         }
 
-        let p = decode_path(req.uri().path());
+        let p = Path::decode(req.uri().path());
         let require_auth = self.0.require_auth && match p {
             Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static => false,
             _ => true,
@@ -820,18 +837,19 @@ impl ::hyper::service::Service for Service {
                     plain_response(StatusCode::UNAUTHORIZED, "unauthorized")));
         }
         match p {
-            Path::InitSegment(sha1) => wrap_r(true, self.0.init_segment(sha1, &req)),
+            Path::InitSegment(sha1, debug) => wrap_r(true, self.0.init_segment(sha1, debug, &req)),
             Path::TopLevel => wrap_r(true, self.0.top_level(&req, session)),
             Path::Request => wrap_r(true, self.0.request(&req)),
             Path::Camera(uuid) => wrap_r(true, self.0.camera(&req, uuid)),
             Path::StreamRecordings(uuid, type_) => {
                 wrap_r(true, self.0.stream_recordings(&req, uuid, type_))
             },
-            Path::StreamViewMp4(uuid, type_) => {
-                wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::Normal))
+            Path::StreamViewMp4(uuid, type_, debug) => {
+                wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::Normal, debug))
             },
-            Path::StreamViewMp4Segment(uuid, type_) => {
-                wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::MediaSegment))
+            Path::StreamViewMp4Segment(uuid, type_, debug) => {
+                wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::MediaSegment,
+                                                    debug))
             },
             Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
             Path::Login => wrap(true, self.with_form_body(req).and_then({
@@ -937,6 +955,57 @@ mod tests {
         pub fn header(&self) -> String {
             self.0.as_ref().map(|s| s.as_str()).unwrap_or("").to_owned()
         }
+    }
+
+    #[test]
+    fn paths() {
+        use super::Path;
+        use uuid::Uuid;
+        let cam_uuid = Uuid::parse_str("35144640-ff1e-4619-b0d5-4c74c185741c").unwrap();
+        assert_eq!(Path::decode("/foo"), Path::Static);
+        assert_eq!(Path::decode("/api/"), Path::TopLevel);
+        assert_eq!(Path::decode("/api/init/07cec464126825088ea86a07eddd6a00afa71559.mp4"),
+                   Path::InitSegment([0x07, 0xce, 0xc4, 0x64, 0x12, 0x68, 0x25, 0x08, 0x8e, 0xa8,
+                                      0x6a, 0x07, 0xed, 0xdd, 0x6a, 0x00, 0xaf, 0xa7, 0x15, 0x59],
+                                     false));
+        assert_eq!(Path::decode("/api/init/07cec464126825088ea86a07eddd6a00afa71559.mp4.txt"),
+                   Path::InitSegment([0x07, 0xce, 0xc4, 0x64, 0x12, 0x68, 0x25, 0x08, 0x8e, 0xa8,
+                                      0x6a, 0x07, 0xed, 0xdd, 0x6a, 0x00, 0xaf, 0xa7, 0x15, 0x59],
+                                     true));
+        assert_eq!(Path::decode("/api/init/000000000000000000000000000000000000000x.mp4"),
+                   Path::NotFound);  // non-hexadigit
+        assert_eq!(Path::decode("/api/init/000000000000000000000000000000000000000.mp4"),
+                   Path::NotFound);  // too short
+        assert_eq!(Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/"),
+                   Path::Camera(cam_uuid));
+        assert_eq!(Path::decode("/api/cameras/asdf/"), Path::NotFound);
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/recordings"),
+            Path::StreamRecordings(cam_uuid, db::StreamType::MAIN));
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/sub/recordings"),
+            Path::StreamRecordings(cam_uuid, db::StreamType::SUB));
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/junk/recordings"),
+            Path::NotFound);
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.mp4"),
+            Path::StreamViewMp4(cam_uuid, db::StreamType::MAIN, false));
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.mp4.txt"),
+            Path::StreamViewMp4(cam_uuid, db::StreamType::MAIN, true));
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.m4s"),
+            Path::StreamViewMp4Segment(cam_uuid, db::StreamType::MAIN, false));
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.m4s.txt"),
+            Path::StreamViewMp4Segment(cam_uuid, db::StreamType::MAIN, true));
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/junk"),
+            Path::NotFound);
+        assert_eq!(Path::decode("/api/login"), Path::Login);
+        assert_eq!(Path::decode("/api/logout"), Path::Logout);
+        assert_eq!(Path::decode("/api/junk"), Path::NotFound);
     }
 
     #[test]

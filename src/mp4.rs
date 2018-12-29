@@ -683,8 +683,8 @@ impl slices::Slice for Slice {
     fn get_slices(ctx: &File) -> &Slices<Self> { &ctx.0.slices }
 }
 
-impl ::std::fmt::Debug for Slice {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
+impl fmt::Debug for Slice {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         // Write an unpacked representation. Omit end(); Slices writes that part.
         write!(f, "{:?} {}", self.t(), self.p())
     }
@@ -1520,6 +1520,16 @@ impl http_serve::Entity for File {
     fn get_range(&self, range: Range<u64>)
                  -> Box<Stream<Item = Self::Data, Error = Self::Error> + Send> {
         self.0.slices.get_range(self, range)
+    }
+}
+
+impl fmt::Debug for File {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("mp4::File")
+            .field("last_modified", &self.0.last_modified)
+            .field("etag", &self.0.etag)
+            .field("slices", &self.0.slices)
+            .finish()
     }
 }
 

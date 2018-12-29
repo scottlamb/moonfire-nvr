@@ -350,7 +350,7 @@ pub struct Camera {
     pub streams: [Option<i32>; 2],
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StreamType { MAIN, SUB }
 
 impl StreamType {
