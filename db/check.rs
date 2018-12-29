@@ -32,11 +32,12 @@
 
 use crate::db::{self, CompositeId, FromSqlUuid};
 use crate::dir;
-use failure::Error;
-use fnv::FnvHashMap;
 use crate::raw;
 use crate::recording;
-use rusqlite::{self, types::ToSql};
+use failure::Error;
+use fnv::FnvHashMap;
+use log::error;
+use rusqlite::types::ToSql;
 use crate::schema;
 use std::os::unix::ffi::OsStrExt;
 use std::fs;

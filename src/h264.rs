@@ -41,7 +41,8 @@
 //! would be more trouble than it's worth.
 
 use byteorder::{BigEndian, WriteBytesExt};
-use failure::Error;
+use failure::{Error, bail};
+use lazy_static::lazy_static;
 use regex::bytes::Regex;
 
 // See ISO/IEC 14496-10 table 7-1 - NAL unit type codes, syntax element categories, and NAL unit
@@ -248,7 +249,7 @@ pub fn transform_sample_data(annexb_sample: &[u8], avc_sample: &mut Vec<u8>) -> 
 
 #[cfg(test)]
 mod tests {
-    use crate::db::testutil;
+    use db::testutil;
 
     const ANNEX_B_TEST_INPUT: [u8; 35] = [
         0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x00, 0x1f,

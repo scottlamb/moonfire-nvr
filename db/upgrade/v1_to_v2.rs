@@ -31,9 +31,9 @@
 /// Upgrades a version 1 schema to a version 2 schema.
 
 use crate::dir;
-use failure::Error;
+use failure::{Error, bail, format_err};
 use libc;
-use rusqlite::{self, types::ToSql};
+use rusqlite::types::ToSql;
 use crate::schema::DirMeta;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;

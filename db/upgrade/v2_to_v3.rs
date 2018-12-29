@@ -40,7 +40,7 @@ use crate::schema;
 use std::io::{self, Write};
 use std::mem;
 use std::sync::Arc;
-use rusqlite::{self, types::ToSql};
+use rusqlite::types::ToSql;
 use uuid::Uuid;
 
 /// Opens the sample file dir.

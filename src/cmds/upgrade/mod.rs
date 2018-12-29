@@ -32,8 +32,8 @@
 ///
 /// See `guide/schema.md` for more information.
 
-use crate::db;
 use failure::Error;
+use serde::Deserialize;
 
 const USAGE: &'static str = r#"
 Upgrade to the latest database schema.

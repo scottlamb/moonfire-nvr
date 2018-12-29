@@ -28,13 +28,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate cursive;
-
-use self::cursive::Cursive;
-use self::cursive::traits::{Boxable, Identifiable};
-use self::cursive::views;
-use crate::db::{self, writer};
+use cursive::Cursive;
+use cursive::traits::{Boxable, Identifiable};
+use cursive::views;
+use db::writer;
 use failure::Error;
+use log::{debug, trace};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;

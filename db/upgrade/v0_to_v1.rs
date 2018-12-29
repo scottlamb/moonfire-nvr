@@ -31,9 +31,10 @@
 /// Upgrades a version 0 schema to a version 1 schema.
 
 use crate::db;
-use failure::Error;
 use crate::recording;
-use rusqlite::{self, types::ToSql};
+use failure::Error;
+use log::warn;
+use rusqlite::types::ToSql;
 use std::collections::HashMap;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {

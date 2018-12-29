@@ -12,6 +12,7 @@ nightly = []
 path = "lib.rs"
 
 [dependencies]
+base = { package = "moonfire-base", path = "../base" }
 base64 = "0.10.0"
 blake2-rfc = "0.2.18"
 failure = "0.1.1"
@@ -21,7 +22,6 @@ libc = "0.2"
 libpasta = "0.1.0-rc2"
 log = "0.4"
 lru-cache = "0.1"
-moonfire-base = { path = "../base" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.10"
 parking_lot = { version = "0.7", features = [] }

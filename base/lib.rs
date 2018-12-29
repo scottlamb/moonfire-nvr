@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 pub mod clock;
-#[macro_use] mod error;
+mod error;
 pub mod strutil;
 
 pub use crate::error::{Error, ErrorKind, ResultExt};

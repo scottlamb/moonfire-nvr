@@ -28,9 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate libc;
-#[macro_use] extern crate log;
-
+use log::info;
 use std::cell::{Ref, RefCell};
 use std::ffi::CStr;
 use std::fmt::{self, Write};

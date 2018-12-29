@@ -28,14 +28,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::clock::{Clocks, TimerGuard};
-use crate::db::{Camera, Database, Stream, dir, recording, writer};
-use failure::Error;
+use base::clock::{Clocks, TimerGuard};
 use crate::h264;
+use crate::stream;
+use db::{Camera, Database, Stream, dir, recording, writer};
+use failure::{Error, bail, format_err};
+use log::{debug, info, trace, warn};
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use crate::stream;
 use time;
 
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
@@ -186,18 +187,16 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
 
 #[cfg(test)]
 mod tests {
-    use crate::clock::{self, Clocks};
-    use crate::db::{self, CompositeId};
-    use crate::db::recording;
-    use crate::db::testutil;
-    use failure::Error;
+    use base::clock::{self, Clocks};
     use crate::h264;
-    use moonfire_ffmpeg;
+    use crate::stream::{self, Opener, Stream};
+    use db::{CompositeId, recording, testutil};
+    use failure::{Error, bail};
+    use log::trace;
     use parking_lot::Mutex;
     use std::cmp;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use crate::stream::{self, Opener, Stream};
     use time;
 
     struct ProxyingStream<'a> {
@@ -227,9 +226,9 @@ mod tests {
     }
 
     impl<'a> Stream for ProxyingStream<'a> {
-        fn get_next(&mut self) -> Result<moonfire_ffmpeg::Packet, moonfire_ffmpeg::Error> {
+        fn get_next(&mut self) -> Result<ffmpeg::Packet, ffmpeg::Error> {
             if self.pkts_left == 0 {
-                return Err(moonfire_ffmpeg::Error::eof());
+                return Err(ffmpeg::Error::eof());
             }
             self.pkts_left -= 1;
 

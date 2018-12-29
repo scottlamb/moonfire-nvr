@@ -30,7 +30,7 @@
 
 //! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
-use crate::base::Error;
+use base::Error;
 use failure::Fail;
 use futures::{Stream, stream};
 use hyper::body::Payload;

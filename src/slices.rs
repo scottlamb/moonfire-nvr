@@ -30,11 +30,10 @@
 
 //! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
-use crate::base::format_err_t;
+use base::format_err_t;
 use crate::body::{BoxedError, wrap_error};
-use failure::Error;
-use futures::stream;
-use futures::Stream;
+use failure::{Error, bail};
+use futures::{Stream, stream};
 use std::fmt;
 use std::ops::Range;
 
@@ -151,9 +150,10 @@ impl<S> Slices<S> where S: Slice {
 #[cfg(test)]
 mod tests {
     use crate::body::BoxedError;
-    use crate::db::testutil;
+    use db::testutil;
     use futures::{Future, Stream};
     use futures::stream;
+    use lazy_static::lazy_static;
     use std::ops::Range;
     use super::{Slice, Slices};
 

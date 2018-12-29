@@ -28,8 +28,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::db::{self, auth::SessionHash};
-use failure::Error;
+use db::auth::SessionHash;
+use failure::{Error, format_err};
+use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
 use std::ops::Not;

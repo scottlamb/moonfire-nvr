@@ -28,11 +28,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::db::dir;
+use db::dir;
 use docopt;
 use failure::{Error, Fail};
 use libc;
 use rusqlite;
+use serde::Deserialize;
 use std::path::Path;
 
 mod check;

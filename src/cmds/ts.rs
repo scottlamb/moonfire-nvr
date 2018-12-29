@@ -28,8 +28,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::db::recording;
 use failure::Error;
+use serde::Deserialize;
 
 const USAGE: &'static str = r#"
 Usage: moonfire-nvr ts <ts>...
@@ -44,7 +44,7 @@ struct Args {
 pub fn run() -> Result<(), Error> {
     let arg: Args = super::parse_args(&USAGE)?;
     for timestamp in &arg.arg_ts {
-        let t = recording::Time::parse(timestamp)?;
+        let t = db::recording::Time::parse(timestamp)?;
         println!("{} == {}", t, t.0);
     }
     Ok(())

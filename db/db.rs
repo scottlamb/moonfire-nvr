@@ -52,18 +52,19 @@
 //!     A list of mutations is built up in-memory and occasionally flushed to reduce SSD write
 //!     cycles.
 
+use base::clock::{self, Clocks};
 use crate::auth;
-use crate::base::clock::{self, Clocks};
 use crate::dir;
-use failure::Error;
-use fnv::{self, FnvHashMap, FnvHashSet};
+use crate::raw;
+use crate::recording::{self, TIME_UNITS_PER_SEC};
+use crate::schema;
+use failure::{Error, bail, format_err};
+use fnv::{FnvHashMap, FnvHashSet};
+use log::{error, info, trace};
 use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
-use crate::raw;
-use crate::recording::{self, TIME_UNITS_PER_SEC};
-use rusqlite::{self, types::ToSql};
-use crate::schema;
+use rusqlite::types::ToSql;
 use std::collections::{BTreeMap, VecDeque};
 use std::cell::RefCell;
 use std::cmp;
@@ -1922,9 +1923,7 @@ impl<'db, C: Clocks + Clone> ::std::ops::DerefMut for DatabaseGuard<'db, C> {
 
 #[cfg(test)]
 mod tests {
-    extern crate tempdir;
-
-    use crate::base::clock;
+    use base::clock;
     use crate::recording::{self, TIME_UNITS_PER_SEC};
     use rusqlite::Connection;
     use std::collections::BTreeMap;

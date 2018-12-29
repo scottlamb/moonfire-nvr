@@ -33,8 +33,9 @@
 /// See `guide/schema.md` for more information.
 
 use crate::db;
-use failure::Error;
-use rusqlite::{self, types::ToSql};
+use failure::{Error, bail};
+use log::info;
+use rusqlite::types::ToSql;
 
 mod v0_to_v1;
 mod v1_to_v2;

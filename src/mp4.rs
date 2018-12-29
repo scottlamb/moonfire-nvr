@@ -76,19 +76,18 @@
 //! * mdat (media data container)
 //! ```
 
-extern crate time;
-
-use crate::base::{strutil, Error, ErrorKind, ResultExt, bail_t, format_err_t};
+use base::{strutil, Error, ErrorKind, ResultExt, bail_t, format_err_t};
 use bytes::{Buf, BytesMut};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use crate::body::{Chunk, BoxedError, wrap_error};
-use crate::db::recording::{self, TIME_UNITS_PER_SEC};
-use crate::db::{self, dir};
+use db::dir;
+use db::recording::{self, TIME_UNITS_PER_SEC};
 use futures::Stream;
 use futures::stream;
 use http;
 use http::header::HeaderValue;
 use http_serve;
+use log::{debug, error, trace, warn};
 use memmap;
 use openssl::hash;
 use parking_lot::{Once, ONCE_INIT};
@@ -1536,15 +1535,16 @@ impl http_serve::Entity for File {
 ///      to verify the output is byte-for-byte as expected.
 #[cfg(test)]
 mod tests {
-    use crate::base::strutil;
+    use base::{clock::RealClocks, strutil};
     use bytes::Buf;
     use byteorder::{BigEndian, ByteOrder};
-    use crate::clock::RealClocks;
-    use crate::db::recording::{self, TIME_UNITS_PER_SEC};
-    use crate::db::testutil::{self, TestDb, TEST_STREAM_ID};
-    use crate::db::writer;
+    use crate::stream::{self, Opener, Stream};
+    use db::recording::{self, TIME_UNITS_PER_SEC};
+    use db::testutil::{self, TestDb, TEST_STREAM_ID};
+    use db::writer;
     use futures::Future;
     use futures::Stream as FuturesStream;
+    use log::info;
     use openssl::hash;
     use http_serve::{self, Entity};
     use std::fs;
@@ -1552,7 +1552,6 @@ mod tests {
     use std::path::Path;
     use std::str;
     use super::*;
-    use crate::stream::{self, Opener, Stream};
 
     fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64)
     where E::Error : ::std::fmt::Debug {
@@ -2215,7 +2214,6 @@ mod tests {
 
 #[cfg(all(test, feature="nightly"))]
 mod bench {
-    extern crate reqwest;
     extern crate test;
 
     use base::clock::RealClocks;
@@ -2225,7 +2223,7 @@ mod bench {
     use hyper;
     use http::header;
     use http_serve;
-    use self::test::Bencher;
+    use lazy_static::lazy_static;
     use std::error::Error as StdError;
     use super::tests::create_mp4_from_db;
     use url::Url;
@@ -2268,9 +2266,9 @@ mod bench {
     struct MyService(super::File);
 
     impl hyper::service::Service for MyService {
-        type ReqBody = ::hyper::Body;
-        type ResBody = ::body::Body;
-        type Error = ::body::BoxedError;
+        type ReqBody = hyper::Body;
+        type ResBody = crate::body::Body;
+        type Error = crate::body::BoxedError;
         type Future = future::FutureResult<::http::Response<Self::ResBody>, Self::Error>;
 
         fn call(&mut self, req: ::http::Request<Self::ReqBody>) -> Self::Future {
@@ -2283,7 +2281,7 @@ mod bench {
     }
 
     #[bench]
-    fn build_index(b: &mut Bencher) {
+    fn build_index(b: &mut test::Bencher) {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         testutil::add_dummy_recordings_to_db(&db.db, 1);
@@ -2310,7 +2308,7 @@ mod bench {
 
     /// Benchmarks serving the generated part of a `.mp4` file (up to the first byte from disk).
     #[bench]
-    fn serve_generated_bytes(b: &mut Bencher) {
+    fn serve_generated_bytes(b: &mut test::Bencher) {
         testutil::init();
         let server = &*SERVER;
         let p = server.generated_len;
@@ -2333,7 +2331,7 @@ mod bench {
     }
 
     #[bench]
-    fn mp4_construction(b: &mut Bencher) {
+    fn mp4_construction(b: &mut test::Bencher) {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         testutil::add_dummy_recordings_to_db(&db.db, 60);

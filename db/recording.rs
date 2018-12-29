@@ -30,7 +30,9 @@
 
 use crate::coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
 use crate::db;
-use failure::Error;
+use failure::{Error, bail, format_err};
+use lazy_static::lazy_static;
+use log::trace;
 use regex::Regex;
 use std::ops;
 use std::fmt;
@@ -505,7 +507,7 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use crate::base::clock::RealClocks;
+    use base::clock::RealClocks;
     use super::*;
     use crate::testutil::{self, TestDb};
 
@@ -743,12 +745,12 @@ mod tests {
 #[cfg(all(test, feature="nightly"))]
 mod bench {
     extern crate test;
-    use self::test::Bencher;
+
     use super::*;
 
     /// Benchmarks the decoder, which is performance-critical for .mp4 serving.
     #[bench]
-    fn bench_decoder(b: &mut Bencher) {
+    fn bench_decoder(b: &mut test::Bencher) {
         let data = include_bytes!("testdata/video_sample_index.bin");
         b.bytes = data.len() as u64;
         b.iter(|| {

@@ -2,12 +2,13 @@
 name = "moonfire-nvr"
 version = "0.1.0"
 authors = ["Scott Lamb <slamb@slamb.org>"]
+edition = "2018"
 
 [features]
 
 # The nightly feature is used within moonfire-nvr itself to gate the
 # benchmarks. Also pass it along to crates that can benefit from it.
-nightly = ["moonfire-db/nightly", "parking_lot/nightly"]
+nightly = ["db/nightly", "parking_lot/nightly"]
 
 # The bundled feature includes bundled (aka statically linked) versions of
 # native libraries where possible.
@@ -17,11 +18,14 @@ bundled = ["rusqlite/bundled"]
 members = ["base", "db", "ffmpeg"]
 
 [dependencies]
+base = { package = "moonfire-base", path = "base" }
 base64 = "0.10.0"
 bytes = "0.4.6"
 byteorder = "1.0"
+db = { package = "moonfire-db", path = "db" }
 docopt = "1.0"
 failure = "0.1.1"
+ffmpeg = { package = "moonfire-ffmpeg", path = "ffmpeg" }
 futures = "0.1"
 futures-cpupool = "0.1"
 fnv = "1.0"
@@ -33,9 +37,6 @@ libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }
 memchr = "2.0.2"
 memmap = "0.7"
-moonfire-base = { path = "base" }
-moonfire-db = { path = "db" }
-moonfire-ffmpeg = { path = "ffmpeg" }
 mylog = { git = "https://github.com/scottlamb/mylog" }
 openssl = "0.10"
 parking_lot = { version = "0.7", features = [] }
@@ -43,8 +44,7 @@ reffers = "0.5.1"
 regex = "1.0"
 ring = "0.12.1"
 rusqlite = "0.16"
-serde = "1.0"
-serde_derive = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = "0.6"
 time = "0.1"

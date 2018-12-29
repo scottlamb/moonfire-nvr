@@ -33,14 +33,14 @@
 //! This code is a bit messy, but it's essentially a prototype. Eventually Moonfire NVR's
 //! configuration will likely be almost entirely done through a web-based UI.
 
-extern crate cursive;
-
-use self::cursive::Cursive;
-use self::cursive::views;
-use crate::clock;
-use crate::db;
+use base::clock;
+use cursive::Cursive;
+use cursive::views;
+use db;
 use failure::Error;
+use lazy_static::lazy_static;
 use regex::Regex;
+use serde::Deserialize;
 use std::sync::Arc;
 use std::fmt::Write;
 use std::str::FromStr;

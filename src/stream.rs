@@ -28,9 +28,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use failure::Error;
 use crate::h264;
-use moonfire_ffmpeg;
+use failure::{Error, bail};
+use ffmpeg;
+use lazy_static::lazy_static;
+use log::{debug, info, warn};
 use std::os::raw::c_char;
 use std::ffi::{CStr, CString};
 use std::result::Result;
@@ -55,7 +57,7 @@ pub trait Opener<S : Stream> : Sync {
 
 pub trait Stream {
     fn get_extra_data(&self) -> Result<h264::ExtraData, Error>;
-    fn get_next<'p>(&'p mut self) -> Result<moonfire_ffmpeg::Packet<'p>, moonfire_ffmpeg::Error>;
+    fn get_next<'p>(&'p mut self) -> Result<ffmpeg::Packet<'p>, ffmpeg::Error>;
 }
 
 pub struct Ffmpeg {}
@@ -63,7 +65,7 @@ pub struct Ffmpeg {}
 impl Ffmpeg {
     fn new() -> Ffmpeg {
         START.call_once(|| {
-            moonfire_ffmpeg::Ffmpeg::new();
+            ffmpeg::Ffmpeg::new();
             //ffmpeg::init().unwrap();
             //ffmpeg::format::network::init();
         });
@@ -79,11 +81,11 @@ macro_rules! c_str {
 
 impl Opener<FfmpegStream> for Ffmpeg {
     fn open(&self, src: Source) -> Result<FfmpegStream, Error> {
-        use moonfire_ffmpeg::InputFormatContext;
+        use ffmpeg::InputFormatContext;
         let (mut input, discard_first) = match src {
             #[cfg(test)]
             Source::File(filename) => {
-                let mut open_options = moonfire_ffmpeg::Dictionary::new();
+                let mut open_options = ffmpeg::Dictionary::new();
 
                 // Work around https://github.com/scottlamb/moonfire-nvr/issues/10
                 open_options.set(c_str!("advanced_editlist"), c_str!("false")).unwrap();
@@ -97,7 +99,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
                 (i, false)
             }
             Source::Rtsp(url) => {
-                let mut open_options = moonfire_ffmpeg::Dictionary::new();
+                let mut open_options = ffmpeg::Dictionary::new();
                 open_options.set(c_str!("rtsp_transport"), c_str!("tcp")).unwrap();
                 // https://trac.ffmpeg.org/ticket/5018 workaround attempt.
                 open_options.set(c_str!("probesize"), c_str!("262144")).unwrap();
@@ -147,7 +149,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
 }
 
 pub struct FfmpegStream {
-    input: moonfire_ffmpeg::InputFormatContext,
+    input: ffmpeg::InputFormatContext,
     video_i: usize,
 }
 
@@ -166,7 +168,7 @@ impl Stream for FfmpegStream {
         h264::ExtraData::parse(codec.extradata(), codec.width() as u16, codec.height() as u16)
     }
 
-    fn get_next<'i>(&'i mut self) -> Result<moonfire_ffmpeg::Packet<'i>, moonfire_ffmpeg::Error> {
+    fn get_next<'i>(&'i mut self) -> Result<ffmpeg::Packet<'i>, ffmpeg::Error> {
         loop {
             let p = self.input.read_frame()?;
             if p.stream_index() == self.video_i {

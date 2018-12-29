@@ -28,13 +28,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::base::strutil;
+use log::info;
+use base::strutil;
 use blake2_rfc::blake2b::blake2b;
-use failure::Error;
+use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
+use lazy_static::lazy_static;
 use libpasta;
 use parking_lot::Mutex;
-use rusqlite::{self, Connection, Transaction, types::ToSql};
+use rusqlite::{Connection, Transaction, types::ToSql};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;

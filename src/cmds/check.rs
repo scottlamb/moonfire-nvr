@@ -30,8 +30,9 @@
 
 //! Subcommand to check the database and sample file dir for errors.
 
-use crate::db::check;
+use db::check;
 use failure::Error;
+use serde::Deserialize;
 
 static USAGE: &'static str = r#"
 Checks database integrity.

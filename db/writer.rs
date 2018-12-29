@@ -32,13 +32,14 @@
 //!
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
-use crate::base::clock::{self, Clocks};
+use base::clock::{self, Clocks};
 use crate::db::{self, CompositeId};
 use crate::dir;
-use failure::Error;
+use crate::recording;
+use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use parking_lot::Mutex;
-use crate::recording;
+use log::{debug, info, trace, warn};
 use openssl::hash;
 use std::cmp;
 use std::io;
@@ -741,10 +742,11 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Drop for Writer<'a, C, D> {
 
 #[cfg(test)]
 mod tests {
-    use crate::base::clock::SimulatedClocks;
+    use base::clock::SimulatedClocks;
     use crate::db::{self, CompositeId};
-    use parking_lot::Mutex;
     use crate::recording;
+    use parking_lot::Mutex;
+    use log::warn;
     use std::collections::VecDeque;
     use std::io;
     use std::sync::Arc;

@@ -28,26 +28,26 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate hyper;
-
-use crate::base::clock::Clocks;
-use crate::base::{ErrorKind, strutil};
+use base::clock::Clocks;
+use base::{ErrorKind, strutil};
 use crate::body::{Body, BoxedError};
+use crate::json;
+use crate::mp4;
 use base64;
 use bytes::{BufMut, BytesMut};
 use core::borrow::Borrow;
 use core::str::FromStr;
-use crate::db::{self, auth, recording};
-use crate::db::dir::SampleFileDir;
-use failure::Error;
+use db::{auth, recording};
+use db::dir::SampleFileDir;
+use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use futures::{Future, Stream, future};
 use futures_cpupool;
-use crate::json;
-use http::{self, Request, Response, status::StatusCode};
+use http::{Request, Response, status::StatusCode};
 use http_serve;
 use http::header::{self, HeaderValue};
-use crate::mp4;
+use lazy_static::lazy_static;
+use log::{debug, info, warn};
 use regex::Regex;
 use serde_json;
 use std::collections::HashMap;
@@ -849,18 +849,16 @@ impl ::hyper::service::Service for Service {
 
 #[cfg(test)]
 mod tests {
-    extern crate reqwest;
-
-    use crate::db;
-    use crate::db::testutil::{self, TestDb};
+    use db::testutil::{self, TestDb};
     use futures::Future;
-    use http::{self, header};
+    use http::header;
+    use log::info;
     use std::collections::HashMap;
     use std::error::Error as StdError;
     use super::Segments;
 
     struct Server {
-        db: TestDb<crate::base::clock::RealClocks>,
+        db: TestDb<base::clock::RealClocks>,
         base_url: String,
         //test_camera_uuid: Uuid,
         handle: Option<::std::thread::JoinHandle<()>>,
@@ -869,7 +867,7 @@ mod tests {
 
     impl Server {
         fn new(require_auth: bool) -> Server {
-            let db = TestDb::new(crate::base::clock::RealClocks {});
+            let db = TestDb::new(base::clock::RealClocks {});
             let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel::<()>();
             let addr = "127.0.0.1:0".parse().unwrap();
             let service = super::Service::new(super::Config {
@@ -1077,13 +1075,12 @@ mod tests {
 
 #[cfg(all(test, feature="nightly"))]
 mod bench {
-    extern crate reqwest;
     extern crate test;
 
     use db::testutil::{self, TestDb};
     use futures::Future;
     use hyper;
-    use self::test::Bencher;
+    use lazy_static::lazy_static;
     use std::error::Error as StdError;
     use uuid::Uuid;
 
@@ -1125,7 +1122,7 @@ mod bench {
     }
 
     #[bench]
-    fn serve_stream_recordings(b: &mut Bencher) {
+    fn serve_stream_recordings(b: &mut test::Bencher) {
         testutil::init();
         let server = &*SERVER;
         let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/main/recordings", server.base_url,

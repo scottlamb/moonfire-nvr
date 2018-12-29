@@ -28,12 +28,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate cursive;
-
-use self::cursive::Cursive;
-use self::cursive::traits::{Boxable, Identifiable};
-use self::cursive::views;
-use crate::db;
+use cursive::Cursive;
+use cursive::traits::{Boxable, Identifiable};
+use cursive::views;
 use std::sync::Arc;
 
 /// Builds a `UserChange` from an active `edit_user_dialog`.

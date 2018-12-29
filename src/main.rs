@@ -30,44 +30,8 @@
 
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
-extern crate base64;
-extern crate bytes;
-extern crate byteorder;
-extern crate core;
-extern crate docopt;
-extern crate futures;
-extern crate futures_cpupool;
-#[macro_use] extern crate failure;
-extern crate fnv;
-extern crate http;
-extern crate http_serve;
-extern crate hyper;
-#[macro_use] extern crate lazy_static;
-extern crate libc;
-#[macro_use] extern crate log;
-extern crate reffers;
-extern crate rusqlite;
-extern crate memchr;
-extern crate memmap;
-extern crate moonfire_base as base;
-extern crate moonfire_db as db;
-extern crate moonfire_ffmpeg;
-extern crate mylog;
-extern crate openssl;
-extern crate parking_lot;
-extern crate regex;
-extern crate ring;
-extern crate serde;
-#[macro_use] extern crate serde_derive;
-extern crate serde_json;
-extern crate smallvec;
-extern crate time;
-extern crate tokio;
-extern crate tokio_signal;
-extern crate url;
-extern crate uuid;
-
-use crate::base::clock as clock;
+use log::{error, info};
+use serde::Deserialize;
 
 mod body;
 mod cmds;
