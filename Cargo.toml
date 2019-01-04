@@ -8,7 +8,7 @@ edition = "2018"
 
 # The nightly feature is used within moonfire-nvr itself to gate the
 # benchmarks. Also pass it along to crates that can benefit from it.
-nightly = ["db/nightly", "parking_lot/nightly"]
+nightly = ["db/nightly", "parking_lot/nightly", "smallvec/union"]
 
 # The bundled feature includes bundled (aka statically linked) versions of
 # native libraries where possible.

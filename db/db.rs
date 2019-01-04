@@ -60,11 +60,13 @@ use crate::recording::{self, TIME_UNITS_PER_SEC};
 use crate::schema;
 use failure::{Error, bail, format_err};
 use fnv::{FnvHashMap, FnvHashSet};
+use itertools::Itertools;
 use log::{error, info, trace};
 use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
 use rusqlite::types::ToSql;
+use smallvec::SmallVec;
 use std::collections::{BTreeMap, VecDeque};
 use std::cell::RefCell;
 use std::cmp;
@@ -912,23 +914,23 @@ impl LockedDatabase {
         tx.commit()?;
 
         // Process delete_garbage.
-        let mut gced = 0;
+        let mut gced = SmallVec::<[CompositeId; 8]>::new();
         for dir in self.sample_file_dirs_by_id.values_mut() {
-            gced += dir.garbage_unlinked.len();
-            dir.garbage_unlinked.clear();
+            gced.extend(dir.garbage_unlinked.drain(..));
         }
 
-        let mut added = 0;
-        let mut deleted = 0;
+        let mut added = SmallVec::<[CompositeId; 8]>::new();
+        let mut deleted = SmallVec::<[CompositeId; 8]>::new();
         for (stream_id, new_range) in new_ranges.drain() {
             let s = self.streams_by_id.get_mut(&stream_id).unwrap();
             let d = self.sample_file_dirs_by_id.get_mut(&s.sample_file_dir_id.unwrap()).unwrap();
 
             // Process delete_oldest_recordings.
-            deleted += s.to_delete.len();
             s.sample_file_bytes -= s.bytes_to_delete;
             s.bytes_to_delete = 0;
+            deleted.reserve(s.to_delete.len());
             for row in s.to_delete.drain(..) {
+                deleted.push(row.id);
                 d.garbage_needs_unlink.insert(row.id);
                 let d = recording::Duration(row.duration as i64);
                 s.duration -= d;
@@ -936,11 +938,12 @@ impl LockedDatabase {
             }
 
             // Process add_recordings.
-            s.next_recording_id += s.synced_recordings as i32;
-            added += s.synced_recordings;
             s.bytes_to_add = 0;
+            added.reserve(s.synced_recordings);
             for _ in 0..s.synced_recordings {
                 let u = s.uncommitted.pop_front().unwrap();
+                added.push(CompositeId::new(stream_id, s.next_recording_id));
+                s.next_recording_id += 1;
                 let l = u.lock();
                 let end = l.start + recording::Duration(l.duration_90k as i64);
                 s.add_recording(l.start .. end, l.sample_file_bytes);
@@ -951,8 +954,9 @@ impl LockedDatabase {
             s.range = new_range;
         }
         self.auth.post_flush();
-        info!("Flush (why: {}): added {} recordings, deleted {}, marked {} files GCed.",
-              reason, added, deleted, gced);
+        info!("Flush (why: {}): added {} recordings ({}), deleted {} ({}), marked {} ({}) GCed.",
+              reason, added.len(), added.iter().join(", "), deleted.len(),
+              deleted.iter().join(", "), gced.len(), gced.iter().join(", "));
         for cb in &self.on_flush {
             cb();
         }

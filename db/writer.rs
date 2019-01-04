@@ -41,6 +41,7 @@ use fnv::FnvHashMap;
 use parking_lot::Mutex;
 use log::{debug, info, trace, warn};
 use openssl::hash;
+use std::cmp::Ordering;
 use std::cmp;
 use std::io;
 use std::mem;
@@ -104,13 +105,46 @@ struct Syncer<C: Clocks + Clone, D: DirWriter> {
     dir_id: i32,
     dir: D,
     db: Arc<db::Database<C>>,
-
-    /// Information about the next scheduled flush:
-    ///    * monotonic time
-    ///    * reason (for logging)
-    ///    * senders to drop when this time is reached (for testing; see SyncerChannel::flush).
-    next_flush: Option<(Timespec, String, Vec<mpsc::SyncSender<()>>)>,
+    planned_flushes: std::collections::BinaryHeap<PlannedFlush>,
 }
+
+struct PlannedFlush {
+    /// Monotonic time at which this flush should happen.
+    when: Timespec,
+
+    /// Recording which prompts this flush. If this recording is already flushed at the planned
+    /// time, it can be skipped.
+    recording: CompositeId,
+
+    /// A human-readable reason for the flush, for logs.
+    reason: String,
+
+    /// Senders to drop when this time is reached. This is for test instrumentation; see
+    /// `SyncerChannel::flush`.
+    senders: Vec<mpsc::SyncSender<()>>,
+}
+
+// PlannedFlush is meant for placement in a max-heap which should return the soonest flush. This
+// PlannedFlush is greater than other if its when is _less_ than the other's.
+impl Ord for PlannedFlush {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.when.cmp(&self.when)
+    }
+}
+
+impl PartialOrd for PlannedFlush {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for PlannedFlush {
+    fn eq(&self, other: &Self) -> bool {
+        self.when == other.when
+    }
+}
+
+impl Eq for PlannedFlush {}
 
 /// Starts a syncer for the given sample file directory.
 ///
@@ -218,7 +252,7 @@ impl<F: FileWriter> SyncerChannel<F> {
     }
 
     /// For testing: flushes the syncer, waiting for all currently-queued commands to complete,
-    /// including a scheduled database flush if any. Note this doesn't wait for any
+    /// including the next scheduled database flush (if any). Note this doesn't wait for any
     /// post-database flush garbage collection.
     pub fn flush(&self) {
         let (snd, rcv) = mpsc::sync_channel(0);
@@ -290,7 +324,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
             dir_id,
             dir,
             db,
-            next_flush: None,
+            planned_flushes: std::collections::BinaryHeap::new(),
         }, d.path.clone()))
     }
 
@@ -345,18 +379,14 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
 impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
     fn run(&mut self, cmds: mpsc::Receiver<SyncerCommand<D::File>>) {
         loop {
-            // Wait for a command, the next_flush timeout (if specified), or channel disconnect.
-            let next_flush = self.next_flush.take();
+            // Wait for a command, the next flush timeout (if specified), or channel disconnect.
+            let next_flush = self.planned_flushes.peek().map(|f| f.when);
             let cmd = match next_flush {
                 None => match cmds.recv() {
                     Err(_) => return,  // all cmd senders are gone.
                     Ok(cmd) => cmd,
                 },
-                Some((t, r, flush_senders)) => {
-                    // Note: `flush_senders` will be dropped on exit from this block if left
-                    // unmoved, which has the desired behavior of closing the channels and
-                    // notifying the receivers the flush occurred.
-
+                Some(t) => {
                     let now = self.db.clocks().monotonic();
 
                     // Calculate the timeout to use, mapping negative durations to 0.
@@ -364,13 +394,10 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
                     match cmds.recv_timeout(timeout) {
                         Err(mpsc::RecvTimeoutError::Disconnected) => return,  // cmd senders gone.
                         Err(mpsc::RecvTimeoutError::Timeout) => {
-                            self.flush(&r);
+                            self.flush();
                             continue
                         },
-                        Ok(cmd) => {
-                            self.next_flush = Some((t, r, flush_senders));
-                            cmd
-                        },
+                        Ok(cmd) => cmd,
                     }
                 },
             };
@@ -382,8 +409,8 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
                 SyncerCommand::Flush(flush) => {
                     // The sender is waiting for the supplied writer to be dropped. If there's no
                     // timeout, do so immediately; otherwise wait for that timeout then drop it.
-                    if let Some((_, _, ref mut flushes)) = self.next_flush {
-                        flushes.push(flush);
+                    if let Some(mut f) = self.planned_flushes.peek_mut() {
+                        f.senders.push(flush);
                     }
                 },
             };
@@ -438,27 +465,65 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         // Schedule a flush.
         let how_soon = Duration::seconds(s.flush_if_sec) - duration.to_tm_duration();
         let now = self.db.clocks().monotonic();
-        let t = now + how_soon;
-        if let Some((nft, ref r, _)) = self.next_flush {
-            if nft <= t {
-                trace!("{}-{}: not scheduling flush in {}; there's already one in {}: {}",
-                       c.short_name, s.type_.as_str(), how_soon, nft - now, &r);
-                return;
-            }
-        }
-        let reason = format!("{} sec after start of {} {}-{} recording",
-                             s.flush_if_sec, duration, c.short_name, s.type_.as_str());
+        let when = now + how_soon;
+        let reason = format!("{} sec after start of {} {}-{} recording {}",
+                             s.flush_if_sec, duration, c.short_name, s.type_.as_str(), id);
         trace!("scheduling flush in {} because {}", how_soon, &reason);
-        self.next_flush = Some((t, reason, Vec::new()));
+        self.planned_flushes.push(PlannedFlush {
+            when,
+            reason,
+            recording: id,
+            senders: Vec::new(),
+        });
     }
 
-    fn flush(&mut self, reason: &str) {
-        if let Err(e) = self.db.lock().flush(reason) {
-            let d = Duration::minutes(1);
-            warn!("flush failure on save for reason {}; will retry after {}: {:?}", reason, d, e);
-            let t = self.db.clocks().monotonic() + Duration::minutes(1);
-            self.next_flush = Some((t, "retry after flush failure".to_owned(), Vec::new()));
+    fn flush(&mut self) {
+        let mut l = self.db.lock();
+
+        // Look through the planned flushes and see if any are still relevant. It's possible
+        // they're not because something else (e.g., a syncer for a different sample file dir)
+        // has flushed the database in the meantime.
+        use std::collections::binary_heap::PeekMut;
+        while let Some(f) = self.planned_flushes.peek_mut() {
+            let s = match l.streams_by_id().get(&f.recording.stream()) {
+                Some(s) => s,
+                None => {
+                    // Removing streams while running hasn't been implemented yet, so this should
+                    // be impossible.
+                    warn!("bug: no stream for {} which was scheduled to be flushed", f.recording);
+                    PeekMut::pop(f);
+                    continue;
+                }
+            };
+
+            if s.next_recording_id <= f.recording.recording() { // not yet committed.
+                break;
+            }
+
+            trace!("planned flush ({}) no longer needed", &f.reason);
+            PeekMut::pop(f);
         }
+
+        // If there's anything left to do now, try to flush.
+        let f = match self.planned_flushes.peek() {
+            None => return,
+            Some(f) => f,
+        };
+        let now = self.db.clocks().monotonic();
+        if f.when > now {
+            return;
+        }
+        if let Err(e) = l.flush(&f.reason) {
+            let d = Duration::minutes(1);
+            warn!("flush failure on save for reason {}; will retry after {}: {:?}",
+                  f.reason, d, e);
+            self.planned_flushes.peek_mut().expect("planned_flushes is non-empty").when =
+                self.db.clocks().monotonic() + Duration::minutes(1);
+            return;
+        }
+
+        // A successful flush should take care of everything planned.
+        self.planned_flushes.clear();
     }
 }
 
@@ -861,7 +926,7 @@ mod tests {
             dir_id: *tdb.db.lock().sample_file_dirs_by_id().keys().next().unwrap(),
             dir: dir.clone(),
             db: tdb.db.clone(),
-            next_flush: None,
+            planned_flushes: std::collections::BinaryHeap::new(),
         };
         let (snd, rcv) = mpsc::channel();
         tdb.db.lock().on_flush(Box::new({
@@ -875,7 +940,6 @@ mod tests {
             .spawn(move || syncer.run(rcv)).unwrap();
 
         Harness {
-            //clocks,
             dir_id,
             dir,
             db: tdb.db,
@@ -941,8 +1005,6 @@ mod tests {
                 gc_done_snd.send(()).unwrap();
                 Ok(())
             })));
-            //h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 1), Box::new(|_| Ok(()))));
-            //h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
 
             drop(w);
 
