@@ -349,25 +349,26 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
             let next_flush = self.next_flush.take();
             let cmd = match next_flush {
                 None => match cmds.recv() {
-                    Err(_) => return,  // all senders are gone.
+                    Err(_) => return,  // all cmd senders are gone.
                     Ok(cmd) => cmd,
                 },
-                Some((t, r, flushes)) => {
-                    // Note: `flushes` will be dropped on exit from this block, which has the
-                    // desired behavior of closing the channel.
+                Some((t, r, flush_senders)) => {
+                    // Note: `flush_senders` will be dropped on exit from this block if left
+                    // unmoved, which has the desired behavior of closing the channels and
+                    // notifying the receivers the flush occurred.
 
                     let now = self.db.clocks().monotonic();
 
                     // Calculate the timeout to use, mapping negative durations to 0.
                     let timeout = (t - now).to_std().unwrap_or(StdDuration::new(0, 0));
                     match cmds.recv_timeout(timeout) {
-                        Err(mpsc::RecvTimeoutError::Disconnected) => return,  // all senders gone.
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,  // cmd senders gone.
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             self.flush(&r);
                             continue
                         },
                         Ok(cmd) => {
-                            self.next_flush = Some((t, r, flushes));
+                            self.next_flush = Some((t, r, flush_senders));
                             cmd
                         },
                     }
