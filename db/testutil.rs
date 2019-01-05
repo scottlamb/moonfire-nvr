@@ -78,6 +78,10 @@ pub struct TestDb<C: Clocks + Clone> {
 impl<C: Clocks + Clone> TestDb<C> {
     /// Creates a test database with one camera.
     pub fn new(clocks: C) -> Self {
+        Self::new_with_flush_if_sec(clocks, 0)
+    }
+
+    pub(crate) fn new_with_flush_if_sec(clocks: C, flush_if_sec: i64) -> Self {
         let tmpdir = TempDir::new("moonfire-nvr-test").unwrap();
 
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -100,7 +104,7 @@ impl<C: Clocks + Clone> TestDb<C> {
                         sample_file_dir_id: Some(sample_file_dir_id),
                         rtsp_path: "/main".to_owned(),
                         record: true,
-                        flush_if_sec: 0,
+                        flush_if_sec,
                     },
                     Default::default(),
                 ],

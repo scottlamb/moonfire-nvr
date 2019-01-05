@@ -589,6 +589,7 @@ fn init_recordings(conn: &mut rusqlite::Connection, stream_id: i32, camera: &Cam
 pub struct LockedDatabase {
     conn: rusqlite::Connection,
     uuid: Uuid,
+    flush_count: usize,
 
     /// If the database is open in read-write mode, the information about the current Open row.
     open: Option<Open>,
@@ -783,6 +784,9 @@ impl LockedDatabase {
         &self.sample_file_dirs_by_id
     }
 
+    /// Returns the number of completed database flushes since startup.
+    pub fn flushes(&self) -> usize { self.flush_count }
+
     /// Adds a placeholder for an uncommitted recording.
     /// The caller should write samples and fill the returned `RecordingToInsert` as it goes
     /// (noting that while holding the lock, it should not perform I/O or acquire the database
@@ -954,8 +958,9 @@ impl LockedDatabase {
             s.range = new_range;
         }
         self.auth.post_flush();
-        info!("Flush (why: {}): added {} recordings ({}), deleted {} ({}), marked {} ({}) GCed.",
-              reason, added.len(), added.iter().join(", "), deleted.len(),
+        self.flush_count += 1;
+        info!("Flush {} (why: {}): added {} recordings ({}), deleted {} ({}), marked {} ({}) GCed.",
+              self.flush_count, reason, added.len(), added.iter().join(", "), deleted.len(),
               deleted.iter().join(", "), gced.len(), gced.iter().join(", "));
         for cb in &self.on_flush {
             cb();
@@ -1841,6 +1846,7 @@ impl<C: Clocks + Clone> Database<C> {
             db: Some(Mutex::new(LockedDatabase {
                 conn,
                 uuid,
+                flush_count: 0,
                 open,
                 open_monotonic,
                 auth,

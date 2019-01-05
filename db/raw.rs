@@ -196,7 +196,8 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
         (":video_samples", &r.video_samples),
         (":video_sync_samples", &r.video_sync_samples),
         (":video_sample_entry_id", &r.video_sample_entry_id),
-    ]).with_context(|e| format!("unable to insert recording for {:#?}: {}", r, e))?;
+    ]).with_context(|e| format!("unable to insert recording for recording {} {:#?}: {}",
+                                id, r, e))?;
 
     let mut stmt = tx.prepare_cached(r#"
         insert into recording_integrity (composite_id,  local_time_delta_90k,  sample_file_sha1)
