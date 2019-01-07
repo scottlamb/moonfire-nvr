@@ -106,7 +106,7 @@ use std::time::SystemTime;
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
 /// cause the etag to change as well.
-const FORMAT_VERSION: [u8; 1] = [0x05];
+const FORMAT_VERSION: [u8; 1] = [0x06];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
 const NORMAL_FTYP_BOX: &'static [u8] = &[
@@ -545,7 +545,7 @@ pub struct FileBuilder {
     segments: Vec<Segment>,
     video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
     next_frame_num: u32,
-    duration_90k: u32,
+    duration_90k: u64,
     num_subtitle_samples: u32,
     subtitle_co64_pos: Option<usize>,
     body: BodyState,
@@ -791,7 +791,7 @@ impl FileBuilder {
         };
         for s in &mut self.segments {
             let d = &s.s.desired_range_90k;
-            self.duration_90k += (d.end - d.start) as u32;
+            self.duration_90k += (d.end - d.start) as u64;
             let end = s.s.start + recording::Duration(d.end as i64);
             max_end = match max_end {
                 None => Some(end),
@@ -1004,15 +1004,15 @@ impl FileBuilder {
         Ok(())
     }
 
-    /// Appends a `MovieHeaderBox` version 0 (ISO/IEC 14496-12 section 8.2.2).
+    /// Appends a `MovieHeaderBox` version 1 (ISO/IEC 14496-12 section 8.2.2).
     fn append_mvhd(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
-            self.body.buf.extend_from_slice(b"mvhd\x00\x00\x00\x00");
-            self.body.append_u32(creation_ts);
-            self.body.append_u32(creation_ts);
+            self.body.buf.extend_from_slice(b"mvhd\x01\x00\x00\x00");
+            self.body.append_u64(creation_ts as u64);
+            self.body.append_u64(creation_ts as u64);
             self.body.append_u32(TIME_UNITS_PER_SEC as u32);
             let d = self.duration_90k;
-            self.body.append_u32(d);
+            self.body.append_u64(d);
             self.body.append_static(StaticBytestring::MvhdJunk)?;
             let next_track_id = if self.include_timestamp_subtitle_track { 3 } else { 2 };
             self.body.append_u32(next_track_id);
@@ -1047,7 +1047,7 @@ impl FileBuilder {
             self.body.append_u32(creation_ts);
             self.body.append_u32(1);  // track_id
             self.body.append_u32(0);  // reserved
-            self.body.append_u32(self.duration_90k);
+            self.body.append_u32(self.duration_90k as u32);
             self.body.append_static(StaticBytestring::TkhdJunk)?;
 
             let (width, height) = self.video_sample_entries.iter().fold(None, |m, e| {
@@ -1065,12 +1065,12 @@ impl FileBuilder {
     fn append_subtitle_tkhd(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             // flags 7: track_enabled | track_in_movie | track_in_preview
-            self.body.buf.extend_from_slice(b"tkhd\x00\x00\x00\x07");
-            self.body.append_u32(creation_ts);
-            self.body.append_u32(creation_ts);
+            self.body.buf.extend_from_slice(b"tkhd\x01\x00\x00\x07");
+            self.body.append_u64(creation_ts as u64);
+            self.body.append_u64(creation_ts as u64);
             self.body.append_u32(2);  // track_id
             self.body.append_u32(0);  // reserved
-            self.body.append_u32(self.duration_90k);
+            self.body.append_u64(self.duration_90k);
             self.body.append_static(StaticBytestring::TkhdJunk)?;
             self.body.append_u32(0);  // width, unused.
             self.body.append_u32(0);  // height, unused.
@@ -1160,11 +1160,11 @@ impl FileBuilder {
     /// or subtitle track.
     fn append_mdhd(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
-            self.body.buf.extend_from_slice(b"mdhd\x00\x00\x00\x00");
-            self.body.append_u32(creation_ts);
-            self.body.append_u32(creation_ts);
+            self.body.buf.extend_from_slice(b"mdhd\x01\x00\x00\x00");
+            self.body.append_u64(creation_ts as u64);
+            self.body.append_u64(creation_ts as u64);
             self.body.append_u32(TIME_UNITS_PER_SEC as u32);
-            self.body.append_u32(self.duration_90k);
+            self.body.append_u64(self.duration_90k);
             self.body.append_u32(0x55c40000);  // language=und + pre_defined
         })
     }
@@ -2151,8 +2151,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("1e5331e8371bd97ac3158b3a86494abc87cdc70e", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"04298efb2df0cc45a6cea65dfdf2e817a3b42ca8\"";
+        assert_eq!("17376879bcf872dd4ad1197225a32d5473fb0dc6", strutil::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "\"953dcf1a61debe785d5dec3ae2d3992a819b68ae\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2172,8 +2172,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("de382684a471f178e4e3a163762711b0653bfd83", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"16a4f6348560c3de0d149675dccba21ef7906be3\"";
+        assert_eq!("1cd90e0b49747cc54c953153d6709f2fb5df6b14", strutil::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "\"736655313f10747528a663190517620cdffea6d0\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2193,8 +2193,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("d655945f94e18e6ed88a2322d27522aff6f76403", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"80e418b029e81aa195f90aa6b806015a5030e5be\"";
+        assert_eq!("49893e3997da6bc625a04b09abf4b1ddbe0bc85d", strutil::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "\"e87ed99dea31b7c4d1e9186045abaf5ac3c2d2f8\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2214,8 +2214,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4);
-        assert_eq!("e0d28ddf08e24575a82657b1ce0b2da73f32fd88", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"5bfea0f20108a7c5b77ef1e21d82ef2abc29540f\"";
+        assert_eq!("0615feaa3c50a7889fb0e6842de3bd3d3143bc78", strutil::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "\"6f0d21a6027b0e444f404a68527dbf5c9a5c1a26\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
