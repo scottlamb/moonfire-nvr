@@ -563,6 +563,11 @@ struct InnerWriter<F: FileWriter> {
     r: Arc<Mutex<db::RecordingToInsert>>,
     e: recording::SampleIndexEncoder,
     id: CompositeId,
+
+    /// The pts, relative to the start of this segment and in 90kHz units, up until which live
+    /// segments have been sent out. Initially 0.
+    completed_live_segment_off_90k: i32,
+
     hasher: hash::Hasher,
 
     /// The start time of this segment, based solely on examining the local clock after frames in
@@ -636,7 +641,7 @@ impl ClockAdjuster {
 #[derive(Copy, Clone)]
 struct UnflushedSample {
     local_time: recording::Time,
-    pts_90k: i64,
+    pts_90k: i64, // relative to the start of the stream, not a single recording.
     len: i32,
     is_key: bool,
 }
@@ -650,6 +655,7 @@ struct PreviousWriter {
 }
 
 impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
+    /// `db` must not be locked.
     pub fn new(dir: &'a D, db: &'a db::Database<C>, channel: &'a SyncerChannel<D::File>,
                stream_id: i32, video_sample_entry_id: i32) -> Self {
         Writer {
@@ -686,6 +692,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             r,
             e: recording::SampleIndexEncoder::new(),
             id,
+            completed_live_segment_off_90k: 0,
             hasher: hash::Hasher::new(hash::MessageDigest::sha1())?,
             local_start: recording::Time(i64::max_value()),
             adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
@@ -716,7 +723,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
         // We must restore it on all success or error paths.
 
         if let Some(unflushed) = w.unflushed_sample.take() {
-            let duration = (pts_90k - unflushed.pts_90k) as i32;
+            let duration = (pts_90k - unflushed.pts_90k as i64) as i32;
             if duration <= 0 {
                 // Restore invariant.
                 w.unflushed_sample = Some(unflushed);
@@ -724,7 +731,17 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
                       unflushed.pts_90k, pts_90k);
             }
             let duration = w.adjuster.adjust(duration);
-            w.add_sample(duration, unflushed.len, unflushed.is_key, unflushed.local_time);
+            let d = w.add_sample(duration, unflushed.len, unflushed.is_key, unflushed.local_time);
+
+            // If the sample `write` was called on is a key frame, then the prior frames (including
+            // the one we just flushed) represent a live segment. Send it out.
+            if is_key {
+                self.db.lock().send_live_segment(self.stream_id, db::LiveSegment {
+                    recording: w.id.recording(),
+                    off_90k: w.completed_live_segment_off_90k .. d,
+                }).unwrap();
+                w.completed_live_segment_off_90k = d;
+            }
         }
         let mut remaining = pkt;
         while !remaining.is_empty() {
@@ -747,7 +764,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
     pub fn close(&mut self, next_pts: Option<i64>) {
         self.state = match mem::replace(&mut self.state, WriterState::Unopened) {
             WriterState::Open(w) => {
-                let prev = w.close(self.channel, next_pts);
+                let prev = w.close(self.channel, next_pts, self.db, self.stream_id);
                 WriterState::Closed(prev)
             },
             s => s,
@@ -756,8 +773,9 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
 }
 
 impl<F: FileWriter> InnerWriter<F> {
+    /// Returns the total duration of the `RecordingToInsert` (needed for live view path).
     fn add_sample(&mut self, duration_90k: i32, bytes: i32, is_key: bool,
-                  pkt_local_time: recording::Time) {
+                  pkt_local_time: recording::Time) -> i32 {
         let mut l = self.r.lock();
         self.e.add_sample(duration_90k, bytes, is_key, &mut l);
         let new = pkt_local_time - recording::Duration(l.duration_90k as i64);
@@ -765,9 +783,11 @@ impl<F: FileWriter> InnerWriter<F> {
         if l.run_offset == 0 {  // start time isn't anchored to previous recording's end; adjust.
             l.start = self.local_start;
         }
+        l.duration_90k
     }
 
-    fn close(mut self, channel: &SyncerChannel<F>, next_pts: Option<i64>) -> PreviousWriter {
+    fn close<C: Clocks + Clone>(mut self, channel: &SyncerChannel<F>, next_pts: Option<i64>,
+             db: &db::Database<C>, stream_id: i32) -> PreviousWriter {
         let unflushed = self.unflushed_sample.take().expect("should always be an unflushed sample");
         let (last_sample_duration, flags) = match next_pts {
             None => (self.adjuster.adjust(0), db::RecordingFlags::TrailingZero as i32),
@@ -776,8 +796,14 @@ impl<F: FileWriter> InnerWriter<F> {
         let mut sha1_bytes = [0u8; 20];
         sha1_bytes.copy_from_slice(&self.hasher.finish().unwrap()[..]);
         let (local_time_delta, run_offset, end);
-        self.add_sample(last_sample_duration, unflushed.len, unflushed.is_key,
-                        unflushed.local_time);
+        let d = self.add_sample(last_sample_duration, unflushed.len, unflushed.is_key,
+                                unflushed.local_time);
+
+        // This always ends a live segment.
+        db.lock().send_live_segment(stream_id, db::LiveSegment {
+            recording: self.id.recording(),
+            off_90k: self.completed_live_segment_off_90k .. d,
+        }).unwrap();
         let total_duration;
         {
             let mut l = self.r.lock();
@@ -809,7 +835,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Drop for Writer<'a, C, D> {
             // Swallow any error. The caller should only drop the Writer without calling close()
             // if there's already been an error. The caller should report that. No point in
             // complaining again.
-            let _ = w.close(self.channel, None);
+            let _ = w.close(self.channel, None, self.db, self.stream_id);
         }
     }
 }

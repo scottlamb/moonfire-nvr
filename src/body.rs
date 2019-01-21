@@ -31,7 +31,6 @@
 //! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
 use base::Error;
-use failure::Fail;
 use futures::{Stream, stream};
 use hyper::body::Payload;
 use reffers::ARefs;

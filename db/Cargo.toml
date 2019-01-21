@@ -23,6 +23,7 @@ libpasta = "0.1.0-rc2"
 log = "0.4"
 lru-cache = "0.1"
 mylog = { git = "https://github.com/scottlamb/mylog" }
+odds = { version = "0.3.1", features = ["std-vec"] }
 openssl = "0.10"
 parking_lot = { version = "0.7", features = [] }
 protobuf = "2.0"

@@ -395,7 +395,6 @@ impl ::std::fmt::Display for StreamType {
 
 pub const ALL_STREAM_TYPES: [StreamType; 2] = [StreamType::MAIN, StreamType::SUB];
 
-#[derive(Clone, Debug)]
 pub struct Stream {
     pub id: i32,
     pub camera_id: i32,
@@ -445,6 +444,20 @@ pub struct Stream {
 
     /// The number of recordings in `uncommitted` which are synced and ready to commit.
     synced_recordings: usize,
+
+    on_live_segment: Vec<Box<FnMut(LiveSegment) -> bool + Send>>,
+}
+
+/// Bounds of a single keyframe and the frames dependent on it.
+/// This is used for live stream recordings. The stream id should already be known to the
+/// subscriber.
+#[derive(Clone, Debug)]
+pub struct LiveSegment {
+    pub recording: i32,
+
+    /// The pts, relative to the start of the recording, of the start and end of this live segment,
+    /// in 90kHz units.
+    pub off_90k: Range<i32>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -592,7 +605,7 @@ pub struct LockedDatabase {
     flush_count: usize,
 
     /// If the database is open in read-write mode, the information about the current Open row.
-    open: Option<Open>,
+    pub open: Option<Open>,
 
     /// The monotonic time when the database was opened (whether in read-write mode or read-only
     /// mode).
@@ -611,8 +624,8 @@ pub struct LockedDatabase {
 
 /// Represents a row of the `open` database table.
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct Open {
-    pub(crate) id: u32,
+pub struct Open {
+    pub id: u32,
     pub(crate) uuid: Uuid,
 }
 
@@ -638,7 +651,7 @@ impl ::std::fmt::Display for CompositeId {
 /// structs.
 struct StreamStateChanger {
     sids: [Option<i32>; 2],
-    streams: Vec<(i32, Option<Stream>)>,
+    streams: Vec<(i32, Option<(i32, StreamType, StreamChange)>)>,
 }
 
 impl StreamStateChanger {
@@ -651,6 +664,7 @@ impl StreamStateChanger {
         let mut streams = Vec::with_capacity(2);
         let existing_streams = existing.map(|e| e.streams).unwrap_or_default();
         for (i, ref mut sc) in change.streams.iter_mut().enumerate() {
+            let type_ = StreamType::from_index(i).unwrap();
             let mut have_data = false;
             if let Some(sid) = existing_streams[i] {
                 let s = streams_by_id.get(&sid).unwrap();
@@ -694,14 +708,8 @@ impl StreamStateChanger {
                         bail!("missing stream {}", sid);
                     }
                     sids[i] = Some(sid);
-                    let s = (*s).clone();
-                    streams.push((sid, Some(Stream {
-                        sample_file_dir_id: sc.sample_file_dir_id,
-                        rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
-                        record: sc.record,
-                        flush_if_sec: sc.flush_if_sec,
-                        ..s
-                    })));
+                    let sc = mem::replace(*sc, StreamChange::default());
+                    streams.push((sid, Some((camera_id, type_, sc))));
                 }
             } else {
                 if sc.rtsp_path.is_empty() && sc.sample_file_dir_id.is_none() && !sc.record {
@@ -715,7 +723,6 @@ impl StreamStateChanger {
                                 values (:camera_id, :sample_file_dir_id, :type, :rtsp_path, :record,
                                         0,            :flush_if_sec, 1)
                 "#)?;
-                let type_ = StreamType::from_index(i).unwrap();
                 stmt.execute_named(&[
                     (":camera_id", &camera_id),
                     (":sample_file_dir_id", &sc.sample_file_dir_id),
@@ -726,26 +733,8 @@ impl StreamStateChanger {
                 ])?;
                 let id = tx.last_insert_rowid() as i32;
                 sids[i] = Some(id);
-                streams.push((id, Some(Stream {
-                    id,
-                    type_,
-                    camera_id,
-                    sample_file_dir_id: sc.sample_file_dir_id,
-                    rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
-                    retain_bytes: 0,
-                    flush_if_sec: sc.flush_if_sec,
-                    range: None,
-                    sample_file_bytes: 0,
-                    to_delete: Vec::new(),
-                    bytes_to_delete: 0,
-                    bytes_to_add: 0,
-                    duration: recording::Duration(0),
-                    days: BTreeMap::new(),
-                    record: sc.record,
-                    next_recording_id: 1,
-                    uncommitted: VecDeque::new(),
-                    synced_recordings: 0,
-                })));
+                let sc = mem::replace(*sc, StreamChange::default());
+                streams.push((id, Some((camera_id, type_, sc))));
             }
         }
         Ok(StreamStateChanger {
@@ -760,9 +749,37 @@ impl StreamStateChanger {
         for (id, stream) in self.streams.drain(..) {
             use ::std::collections::btree_map::Entry;
             match (streams_by_id.entry(id), stream) {
-                (Entry::Vacant(e), Some(new)) => { e.insert(new); },
+                (Entry::Vacant(e), Some((camera_id, type_, mut sc))) => {
+                    e.insert(Stream {
+                        id,
+                        type_,
+                        camera_id,
+                        sample_file_dir_id: sc.sample_file_dir_id,
+                        rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
+                        retain_bytes: 0,
+                        flush_if_sec: sc.flush_if_sec,
+                        range: None,
+                        sample_file_bytes: 0,
+                        to_delete: Vec::new(),
+                        bytes_to_delete: 0,
+                        bytes_to_add: 0,
+                        duration: recording::Duration(0),
+                        days: BTreeMap::new(),
+                        record: sc.record,
+                        next_recording_id: 1,
+                        uncommitted: VecDeque::new(),
+                        synced_recordings: 0,
+                        on_live_segment: Vec::new(),
+                    });
+                },
                 (Entry::Vacant(_), None) => {},
-                (Entry::Occupied(mut e), Some(new)) => { e.insert(new); },
+                (Entry::Occupied(e), Some((_, _, sc))) => {
+                    let e = e.into_mut();
+                    e.sample_file_dir_id = sc.sample_file_dir_id;
+                    e.rtsp_path = sc.rtsp_path;
+                    e.record = sc.record;
+                    e.flush_if_sec = sc.flush_if_sec;
+                },
                 (Entry::Occupied(e), None) => { e.remove(); },
             };
         }
@@ -843,6 +860,40 @@ impl LockedDatabase {
         if !ids.is_empty() {
             bail!("delete_garbage with non-garbage ids {:?}", &ids[..]);
         }
+        Ok(())
+    }
+
+    /// Registers a callback to run on every live segment immediately after it's recorded.
+    /// The callback is run with the database lock held, so it must not call back into the database
+    /// or block. The callback should return false to unregister.
+    pub fn watch_live(&mut self, stream_id: i32, cb: Box<FnMut(LiveSegment) -> bool + Send>)
+                      -> Result<(), Error> {
+        let s = match self.streams_by_id.get_mut(&stream_id) {
+            None => bail!("no such stream {}", stream_id),
+            Some(s) => s,
+        };
+        s.on_live_segment.push(cb);
+        Ok(())
+    }
+
+    /// Clears all watches on all streams.
+    /// Normally watches are self-cleaning: when a segment is sent, the callback returns false if
+    /// it is no longer interested (typically because hyper has just noticed the client is no
+    /// longer connected). This doesn't work when the system is shutting down and nothing more is
+    /// sent, though.
+    pub fn clear_watches(&mut self) {
+        for (_, s) in &mut self.streams_by_id {
+            s.on_live_segment.clear();
+        }
+    }
+
+    pub(crate) fn send_live_segment(&mut self, stream: i32, l: LiveSegment) -> Result<(), Error> {
+        let s = match self.streams_by_id.get_mut(&stream) {
+            None => bail!("no such stream {}", stream),
+            Some(s) => s,
+        };
+        use odds::vec::VecExt;
+        s.on_live_segment.retain_mut(|cb| cb(l.clone()));
         Ok(())
     }
 
@@ -978,7 +1029,7 @@ impl LockedDatabase {
     // handlers given that it didn't add them.
     pub fn clear_on_flush(&mut self) {
         self.on_flush.clear();
-    }
+     }
 
     /// Opens the given sample file directories.
     ///
@@ -1427,6 +1478,7 @@ impl LockedDatabase {
                 record: row.get_checked(8)?,
                 uncommitted: VecDeque::new(),
                 synced_recordings: 0,
+                on_live_segment: Vec::new(),
             });
             c.streams[type_.index()] = Some(id);
         }

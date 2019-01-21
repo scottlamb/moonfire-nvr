@@ -40,6 +40,10 @@ impl Error {
     pub fn kind(&self) -> ErrorKind {
         *self.inner.get_context()
     }
+
+    pub fn compat(self) -> failure::Compat<Context<ErrorKind>> {
+        self.inner.compat()
+    }
 }
 
 impl Fail for Error {

@@ -293,6 +293,8 @@ pub fn run() -> Result<(), Error> {
         }
     }
 
+    db.lock().clear_watches();
+
     info!("Waiting for HTTP requests to finish.");
     reactor.join().unwrap();
     info!("Exiting.");

@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use base::clock::Clocks;
-use base::{ErrorKind, strutil};
+use base::{ErrorKind, ResultExt, bail_t, strutil};
 use crate::body::{Body, BoxedError};
 use crate::json;
 use crate::mp4;
@@ -77,6 +77,7 @@ enum Path {
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
     StreamViewMp4Segment(Uuid, db::StreamType, bool), // "/api/cameras/<uuid>/<type>/view.m4s{.txt}"
+    StreamLiveMp4Segments(Uuid, db::StreamType),      // "/api/cameras/<uuid>/<type>/live.m4s"
     Login,                                            // "/api/login"
     Logout,                                           // "/api/logout"
     Static,                                           // (anything that doesn't start with "/api/")
@@ -149,6 +150,7 @@ impl Path {
             "/view.mp4.txt" => Path::StreamViewMp4(uuid, type_, true),
             "/view.m4s" => Path::StreamViewMp4Segment(uuid, type_, false),
             "/view.m4s.txt" => Path::StreamViewMp4Segment(uuid, type_, true),
+            "/live.m4s" => Path::StreamLiveMp4Segments(uuid, type_),
             _ => Path::NotFound,
         }
     }
@@ -378,19 +380,19 @@ impl ServiceInner {
     }
 
     fn stream_view_mp4(&self, req: &Request<::hyper::Body>, uuid: Uuid,
-                       stream_type_: db::StreamType, mp4_type_: mp4::Type, debug: bool)
+                       stream_type: db::StreamType, mp4_type: mp4::Type, debug: bool)
                        -> ResponseResult {
         let stream_id = {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
                                                          format!("no such camera {}", uuid)))?;
-            camera.streams[stream_type_.index()]
+            camera.streams[stream_type.index()]
                 .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
                                               format!("no such stream {}/{}", uuid,
-                                                      stream_type_)))?
+                                                      stream_type)))?
         };
-        let mut builder = mp4::FileBuilder::new(mp4_type_);
+        let mut builder = mp4::FileBuilder::new(mp4_type);
         if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value) = (key.borrow(), value.borrow());
@@ -797,6 +799,91 @@ impl Service {
                   .map_err(|e| internal_server_err(format_err!("unable to read request body: {}",
                                                                  e))))
     }
+
+    fn stream_live_m4s(&self, _req: &Request<::hyper::Body>, uuid: Uuid,
+                       stream_type: db::StreamType) -> ResponseResult {
+        let stream_id;
+        let open_id;
+        let (sub_tx, sub_rx) = futures::sync::mpsc::unbounded();
+        {
+            let mut db = self.0.db.lock();
+            open_id = match db.open {
+                None => return Err(plain_response(
+                        StatusCode::PRECONDITION_FAILED,
+                        "database is read-only; there are no live streams")),
+                Some(o) => o.id,
+            };
+            let camera = db.get_camera(uuid)
+                           .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
+                                                         format!("no such camera {}", uuid)))?;
+            stream_id = camera.streams[stream_type.index()]
+                .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
+                                              format!("no such stream {}/{}", uuid,
+                                                      stream_type)))?;
+            db.watch_live(stream_id, Box::new(move |l| sub_tx.unbounded_send(l).is_ok()))
+                .expect("stream_id refed by camera");
+        }
+        let inner = self.0.clone();
+        let body: crate::body::BodyStream = Box::new(sub_rx
+            .map_err(|()| unreachable!())
+            .and_then(move |live| -> Result<_, base::Error> {
+                let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
+                let mut vse_id = None;
+                {
+                    let db = inner.db.lock();
+                    let mut rows = 0;
+                    db.list_recordings_by_id(stream_id, live.recording .. live.recording+1,
+                                             &mut |r| {
+                        rows += 1;
+                        let vse = db.video_sample_entries_by_id().get(&r.video_sample_entry_id)
+                                    .unwrap();
+                        vse_id = Some(strutil::hex(&vse.sha1));
+                        builder.append(&db, r, live.off_90k.clone())?;
+                        Ok(())
+                    }).err_kind(base::ErrorKind::Unknown)?;
+                    if rows != 1 {
+                        bail_t!(Internal, "unable to find {:?}", live);
+                    }
+                }
+                let vse_id = vse_id.unwrap();
+                use http_serve::Entity;
+                let mp4 = builder.build(inner.db.clone(), inner.dirs_by_stream_id.clone())?;
+                let mut hdrs = http::header::HeaderMap::new();
+                mp4.add_headers(&mut hdrs);
+                //Ok(format!("{:?}\n\n", mp4).into())
+                let mime_type = hdrs.get(http::header::CONTENT_TYPE).unwrap();
+                let len = mp4.len();
+                use futures::stream::once;
+                let hdr = format!(
+                    "--B\r\n\
+                    Content-Length: {}\r\n\
+                    Content-Type: {}\r\n\
+                    X-Recording-Id: {}\r\n\
+                    X-Time-Range: {}-{}\r\n\
+                    X-Video-Sample-Entry-Sha1: {}\r\n\r\n",
+                    len,
+                    mime_type.to_str().unwrap(),
+                    live.recording,
+                    live.off_90k.start,
+                    live.off_90k.end,
+                    &vse_id);
+                let v: Vec<crate::body::BodyStream> = vec![
+                    Box::new(once(Ok(hdr.into()))),
+                    mp4.get_range(0 .. len),
+                    Box::new(once(Ok("\r\n\r\n".into())))
+                ];
+                Ok(futures::stream::iter_ok::<_, crate::body::BoxedError>(v))
+            })
+            .map_err(|e| Box::new(e.compat()))
+            .flatten()
+            .flatten());
+        let body: Body = body.into();
+        Ok(http::Response::builder()
+            .header("X-Open-Id", open_id.to_string())
+            .header("Content-Type", "multipart/mixed; boundary=B")
+            .body(body)
+            .unwrap())
+    }
 }
 
 impl ::hyper::service::Service for Service {
@@ -850,6 +937,9 @@ impl ::hyper::service::Service for Service {
             Path::StreamViewMp4Segment(uuid, type_, debug) => {
                 wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::MediaSegment,
                                                     debug))
+            },
+            Path::StreamLiveMp4Segments(uuid, type_) => {
+                wrap_r(true, self.stream_live_m4s(&req, uuid, type_))
             },
             Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
             Path::Login => wrap(true, self.with_form_body(req).and_then({
@@ -1000,6 +1090,9 @@ mod tests {
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.m4s.txt"),
             Path::StreamViewMp4Segment(cam_uuid, db::StreamType::MAIN, true));
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/live.m4s"),
+            Path::StreamLiveMp4Segments(cam_uuid, db::StreamType::MAIN));
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/junk"),
             Path::NotFound);
