@@ -313,9 +313,13 @@ impl SampleIndexEncoder {
     }
 
     pub fn add_sample(&mut self, duration_90k: i32, bytes: i32, is_key: bool,
-                      r: &mut db::RecordingToInsert) {
+                      r: &mut db::RecordingToInsert) -> Result<(), Error> {
         let duration_delta = duration_90k - self.prev_duration_90k;
         self.prev_duration_90k = duration_90k;
+        let new_duration_90k = r.duration_90k + duration_90k;
+        if new_duration_90k as i64 > MAX_RECORDING_DURATION {
+            bail!("Duration {} exceeds maximum {}", new_duration_90k, MAX_RECORDING_DURATION);
+        }
         r.duration_90k += duration_90k;
         r.sample_file_bytes += bytes;
         r.video_samples += 1;
@@ -331,6 +335,7 @@ impl SampleIndexEncoder {
         };
         append_varint32((zigzag32(duration_delta) << 1) | (is_key as u32), &mut r.video_index);
         append_varint32(zigzag32(bytes_delta), &mut r.video_index);
+        Ok(())
     }
 }
 
@@ -563,11 +568,11 @@ mod tests {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut e = SampleIndexEncoder::new();
-        e.add_sample(10, 1000, true, &mut r);
-        e.add_sample(9, 10, false, &mut r);
-        e.add_sample(11, 15, false, &mut r);
-        e.add_sample(10, 12, false, &mut r);
-        e.add_sample(10, 1050, true, &mut r);
+        e.add_sample(10, 1000, true, &mut r).unwrap();
+        e.add_sample(9, 10, false, &mut r).unwrap();
+        e.add_sample(11, 15, false, &mut r).unwrap();
+        e.add_sample(10, 12, false, &mut r).unwrap();
+        e.add_sample(10, 1050, true, &mut r).unwrap();
         assert_eq!(r.video_index, b"\x29\xd0\x0f\x02\x14\x08\x0a\x02\x05\x01\x64");
         assert_eq!(10 + 9 + 11 + 10 + 10, r.duration_90k);
         assert_eq!(5, r.video_samples);
@@ -594,7 +599,7 @@ mod tests {
         let mut r = db::RecordingToInsert::default();
         let mut e = SampleIndexEncoder::new();
         for sample in &samples {
-            e.add_sample(sample.duration_90k, sample.bytes, sample.is_key, &mut r);
+            e.add_sample(sample.duration_90k, sample.bytes, sample.is_key, &mut r).unwrap();
         }
         let mut it = SampleIndexIterator::new();
         for sample in &samples {
@@ -651,7 +656,7 @@ mod tests {
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, true, &mut r);
+            encoder.add_sample(duration_90k, bytes, true, &mut r).unwrap();
         }
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
@@ -670,7 +675,7 @@ mod tests {
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r).unwrap();
         }
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
@@ -685,9 +690,9 @@ mod tests {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::new();
-        encoder.add_sample(1, 1, true, &mut r);
-        encoder.add_sample(1, 2, true, &mut r);
-        encoder.add_sample(0, 3, true, &mut r);
+        encoder.add_sample(1, 1, true, &mut r).unwrap();
+        encoder.add_sample(1, 2, true, &mut r).unwrap();
+        encoder.add_sample(0, 3, true, &mut r).unwrap();
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 1 .. 2).unwrap();
@@ -700,7 +705,7 @@ mod tests {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::new();
-        encoder.add_sample(1, 1, true, &mut r);
+        encoder.add_sample(1, 1, true, &mut r).unwrap();
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 0 .. 0).unwrap();
@@ -717,7 +722,7 @@ mod tests {
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r).unwrap();
         }
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
@@ -730,9 +735,9 @@ mod tests {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::new();
-        encoder.add_sample(1, 1, true, &mut r);
-        encoder.add_sample(1, 2, true, &mut r);
-        encoder.add_sample(0, 3, true, &mut r);
+        encoder.add_sample(1, 1, true, &mut r).unwrap();
+        encoder.add_sample(1, 2, true, &mut r).unwrap();
+        encoder.add_sample(0, 3, true, &mut r).unwrap();
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 0 .. 2).unwrap();

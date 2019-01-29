@@ -1916,7 +1916,7 @@ mod tests {
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, true, &mut r);
+            encoder.add_sample(duration_90k, bytes, true, &mut r).unwrap();
         }
 
         // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
@@ -1970,7 +1970,7 @@ mod tests {
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r).unwrap();
         }
 
         // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
@@ -2039,14 +2039,14 @@ mod tests {
         let mut encoders = Vec::new();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(1, 1, true, &mut r);
-        encoder.add_sample(2, 2, false, &mut r);
-        encoder.add_sample(3, 3, true, &mut r);
+        encoder.add_sample(1, 1, true, &mut r).unwrap();
+        encoder.add_sample(2, 2, false, &mut r).unwrap();
+        encoder.add_sample(3, 3, true, &mut r).unwrap();
         encoders.push(r);
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(4, 4, true, &mut r);
-        encoder.add_sample(5, 5, false, &mut r);
+        encoder.add_sample(4, 4, true, &mut r).unwrap();
+        encoder.add_sample(5, 5, false, &mut r).unwrap();
         encoders.push(r);
 
         // This should include samples 3 and 4 only, both sync frames.
@@ -2076,12 +2076,12 @@ mod tests {
         let mut encoders = Vec::new();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(2, 1, true, &mut r);
-        encoder.add_sample(3, 2, false, &mut r);
+        encoder.add_sample(2, 1, true, &mut r).unwrap();
+        encoder.add_sample(3, 2, false, &mut r).unwrap();
         encoders.push(r);
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::new();
-        encoder.add_sample(0, 3, true, &mut r);
+        encoder.add_sample(0, 3, true, &mut r).unwrap();
         encoders.push(r);
 
         // Multi-segment recording with an edit list, encoding with a zero-duration recording.
@@ -2104,7 +2104,7 @@ mod tests {
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
-            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r).unwrap();
         }
 
         // Time range [2+4+6, 2+4+6+8+1) means the 4th sample and part of the 5th are included.

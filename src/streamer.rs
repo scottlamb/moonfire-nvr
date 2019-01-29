@@ -140,7 +140,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
                 if frame_realtime.sec > r && pkt.is_key() {
                     trace!("{}: write on normal rotation", self.short_name);
                     let _t = TimerGuard::new(&clocks, || "closing writer");
-                    w.close(Some(pts));
+                    w.close(Some(pts))?;
                     None
                 } else {
                     Some(r)
@@ -179,7 +179,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
         }
         if rotate.is_some() {
             let _t = TimerGuard::new(&clocks, || "closing writer");
-            w.close(None);
+            w.close(None)?;
         }
         Ok(())
     }

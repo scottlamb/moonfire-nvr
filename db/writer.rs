@@ -731,7 +731,15 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
                       unflushed.pts_90k, pts_90k);
             }
             let duration = w.adjuster.adjust(duration);
-            let d = w.add_sample(duration, unflushed.len, unflushed.is_key, unflushed.local_time);
+            let d = match w.add_sample(duration, unflushed.len, unflushed.is_key,
+                                       unflushed.local_time) {
+                Ok(d) => d,
+                Err(e) => {
+                    // Restore invariant.
+                    w.unflushed_sample = Some(unflushed);
+                    return Err(e);
+                },
+            };
 
             // If the sample `write` was called on is a key frame, then the prior frames (including
             // the one we just flushed) represent a live segment. Send it out.
@@ -761,33 +769,34 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
     /// Cleanly closes the writer, using a supplied pts of the next sample for the last sample's
     /// duration (if known). If `close` is not called, the `Drop` trait impl will close the trait,
     /// swallowing errors and using a zero duration for the last sample.
-    pub fn close(&mut self, next_pts: Option<i64>) {
+    pub fn close(&mut self, next_pts: Option<i64>) -> Result<(), Error> {
         self.state = match mem::replace(&mut self.state, WriterState::Unopened) {
             WriterState::Open(w) => {
-                let prev = w.close(self.channel, next_pts, self.db, self.stream_id);
+                let prev = w.close(self.channel, next_pts, self.db, self.stream_id)?;
                 WriterState::Closed(prev)
             },
             s => s,
         };
+        Ok(())
     }
 }
 
 impl<F: FileWriter> InnerWriter<F> {
     /// Returns the total duration of the `RecordingToInsert` (needed for live view path).
     fn add_sample(&mut self, duration_90k: i32, bytes: i32, is_key: bool,
-                  pkt_local_time: recording::Time) -> i32 {
+                  pkt_local_time: recording::Time) -> Result<i32, Error> {
         let mut l = self.r.lock();
-        self.e.add_sample(duration_90k, bytes, is_key, &mut l);
+        self.e.add_sample(duration_90k, bytes, is_key, &mut l)?;
         let new = pkt_local_time - recording::Duration(l.duration_90k as i64);
         self.local_start = cmp::min(self.local_start, new);
         if l.run_offset == 0 {  // start time isn't anchored to previous recording's end; adjust.
             l.start = self.local_start;
         }
-        l.duration_90k
+        Ok(l.duration_90k)
     }
 
     fn close<C: Clocks + Clone>(mut self, channel: &SyncerChannel<F>, next_pts: Option<i64>,
-             db: &db::Database<C>, stream_id: i32) -> PreviousWriter {
+             db: &db::Database<C>, stream_id: i32) -> Result<PreviousWriter, Error> {
         let unflushed = self.unflushed_sample.take().expect("should always be an unflushed sample");
         let (last_sample_duration, flags) = match next_pts {
             None => (self.adjuster.adjust(0), db::RecordingFlags::TrailingZero as i32),
@@ -797,7 +806,7 @@ impl<F: FileWriter> InnerWriter<F> {
         sha1_bytes.copy_from_slice(&self.hasher.finish().unwrap()[..]);
         let (local_time_delta, run_offset, end);
         let d = self.add_sample(last_sample_duration, unflushed.len, unflushed.is_key,
-                                unflushed.local_time);
+                                unflushed.local_time)?;
 
         // This always ends a live segment.
         db.lock().send_live_segment(stream_id, db::LiveSegment {
@@ -817,11 +826,11 @@ impl<F: FileWriter> InnerWriter<F> {
         }
         drop(self.r);
         channel.async_save_recording(self.id, total_duration, self.f);
-        PreviousWriter {
+        Ok(PreviousWriter {
             end,
             local_time_delta,
             run_offset,
-        }
+        })
     }
 }
 
@@ -1006,7 +1015,7 @@ mod tests {
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
         w.write(b"123", recording::Time(2), 0, true).unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
-        w.close(Some(1));
+        w.close(Some(1)).unwrap();
         assert!(h.syncer.iter(&h.syncer_rcv)); // AsyncSave
         assert_eq!(h.syncer.planned_flushes.len(), 1);
         assert!(h.syncer.iter(&h.syncer_rcv)); // planned flush
@@ -1153,7 +1162,7 @@ mod tests {
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
         w.write(b"123", recording::Time(2), 0, true).unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
-        w.close(Some(1));
+        w.close(Some(1)).unwrap();
 
         assert!(h.syncer.iter(&h.syncer_rcv)); // AsyncSave
         assert_eq!(h.syncer.planned_flushes.len(), 1);
