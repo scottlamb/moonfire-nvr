@@ -101,11 +101,14 @@ impl Opener<FfmpegStream> for Ffmpeg {
             Source::Rtsp(url) => {
                 let mut open_options = ffmpeg::Dictionary::new();
                 open_options.set(c_str!("rtsp_transport"), c_str!("tcp")).unwrap();
-                // https://trac.ffmpeg.org/ticket/5018 workaround attempt.
-                open_options.set(c_str!("probesize"), c_str!("262144")).unwrap();
                 open_options.set(c_str!("user-agent"), c_str!("moonfire-nvr")).unwrap();
                 // 10-second socket timeout, in microseconds.
                 open_options.set(c_str!("stimeout"), c_str!("10000000")).unwrap();
+
+                // Moonfire NVR currently only supports video, so receiving audio is wasteful.
+                // It also triggers <https://github.com/scottlamb/moonfire-nvr/issues/36>.
+                open_options.set(c_str!("allowed_media_types"), c_str!("video")).unwrap();
+
                 let i = InputFormatContext::open(&CString::new(url).unwrap(), &mut open_options)?;
                 if !open_options.empty() {
                     warn!("While opening URL {}, some options were not understood: {}",
