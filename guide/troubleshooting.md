@@ -29,39 +29,12 @@ Logging options are controlled by environmental variables:
 
 ### `Error: pts not monotonically increasing; got 26615520 then 26539470`
 
-If your streams cut out with an error message like this one, there are a
-couple possibilities.
-
-One is that your camera outputs [B
+If your streams cut out with an error message like this one, it might mean
+that your camera outputs [B
 frames](https://en.wikipedia.org/wiki/Video_compression_picture_types#Bi-directional_predicted_.28B.29_frames.2Fslices_.28macroblocks.29).
 If you believe this is the case, file a feature request; Moonfire NVR
 currently doesn't support B frames. You may be able to configure your camera
 to disable B frames in the meantime.
-
-A more subtle problem occurs in cameras such as the Dahua Starlight series
-when the following is true:
-
-   * Audio is enabled (thus a single RTSP session has two streams).
-   * The camera's clock changes abruptly. Note that many cameras use SNTP
-     rather than NTP to adjust time, so they consistently step time rather
-     than slew it.
-   * They send RTCP Sender Reports (these include the NTP time).
-
-Moonfire NVR currently uses the ffmpeg library to talk to the cameras. ffmpeg
-doesn't properly support this situation. It uses the NTP time to adjust the
-PTS and DTS, and thus experiences jumps forward and backward. The forward
-jumps cause one frame to be artificially lengthened. The backward jumps create
-an impossible situation which causes Moonfire NVR to abort the session and
-retry.
-
-In the long term, Moonfire NVR will likely implement its own RTSP support.
-
-In the short term, you can use either of two workarounds:
-
-   * Disable audio in the camera settings. Note that Moonfire NVR doesn't
-     yet support recording audio anyway.
-   * Disable time adjustment. You'll likely want to disable in-picture
-     timestamps as well as they will become untrustworthy.
 
 ### `moonfire-nvr config` displays garbage
 
