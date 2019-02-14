@@ -45,10 +45,15 @@ lazy_static! {
 }
 
 pub enum Source<'a> {
+    /// A filename, for testing.
     #[cfg(test)]
-    File(&'a str),  // filename, for testing.
+    File(&'a str),
 
-    Rtsp(&'a str),  // url, for production use.
+    /// An RTSP stream, for production use.
+    Rtsp {
+        url: &'a str,
+        redacted_url: &'a str
+    },
 }
 
 pub trait Opener<S : Stream> : Sync {
@@ -98,7 +103,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
                 }
                 (i, false)
             }
-            Source::Rtsp(url) => {
+            Source::Rtsp{url, redacted_url} => {
                 let mut open_options = ffmpeg::Dictionary::new();
                 open_options.set(c_str!("rtsp_transport"), c_str!("tcp")).unwrap();
                 open_options.set(c_str!("user-agent"), c_str!("moonfire-nvr")).unwrap();
@@ -112,7 +117,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
                 let i = InputFormatContext::open(&CString::new(url).unwrap(), &mut open_options)?;
                 if !open_options.empty() {
                     warn!("While opening URL {}, some options were not understood: {}",
-                          url, open_options);
+                          redacted_url, open_options);
                 }
                 (i, true)
             },

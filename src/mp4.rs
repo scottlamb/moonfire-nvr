@@ -1812,7 +1812,7 @@ mod tests {
                          pkt.is_key()).unwrap();
             end_pts = Some(pts + pkt.duration() as i64);
         }
-        output.close(end_pts);
+        output.close(end_pts).unwrap();
         db.syncer_channel.flush();
     }
 

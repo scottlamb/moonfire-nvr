@@ -102,7 +102,10 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
 }
 
 fn press_test_inner(url: &str) -> Result<String, Error> {
-    let stream = stream::FFMPEG.open(stream::Source::Rtsp(url))?;
+    let stream = stream::FFMPEG.open(stream::Source::Rtsp {
+        url,
+        redacted_url: url,
+    })?;
     let extra_data = stream.get_extra_data()?;
     Ok(format!("{}x{} video stream", extra_data.width, extra_data.height))
 }

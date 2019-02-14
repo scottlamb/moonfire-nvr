@@ -103,7 +103,10 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
 
         let mut stream = {
             let _t = TimerGuard::new(&clocks, || format!("opening {}", self.redacted_url));
-            self.opener.open(stream::Source::Rtsp(&self.url))?
+            self.opener.open(stream::Source::Rtsp {
+                url: &self.url,
+                redacted_url: &self.redacted_url,
+            })?
         };
         let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();
         // TODO: verify width/height.
@@ -275,7 +278,7 @@ mod tests {
     impl<'a> stream::Opener<ProxyingStream<'a>> for MockOpener<'a> {
         fn open(&self, src: stream::Source) -> Result<ProxyingStream<'a>, Error> {
             match src {
-                stream::Source::Rtsp(url) => assert_eq!(url, &self.expected_url),
+                stream::Source::Rtsp{url, ..} => assert_eq!(url, &self.expected_url),
                 stream::Source::File(_) => panic!("expected rtsp url"),
             };
             let mut l = self.streams.lock();
