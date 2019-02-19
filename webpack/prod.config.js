@@ -76,7 +76,6 @@ module.exports = (env, args) => {
                   )),
               uglifyOptions: {
                 compress: {
-                  drop_console: true, // Remove all console.log etc.
                   keep_infinity: true, // Do not change to 1/0
                   warnings: false, // Do not warn when dropping
                 },

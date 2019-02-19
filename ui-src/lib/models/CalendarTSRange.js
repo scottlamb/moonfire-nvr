@@ -149,16 +149,16 @@ export default class CalendarTSRange {
    * Strings are parsed to check if they are valid. Update only takes place
    * if they are. Parsing is in accordance with the installed Time90kParser
    * which means:
-   * - HH:MM:ss:FFFFFZ format, where each componet may be empty to indicate 0
+   * - HH:MM:ss:FFFFFZ format, where each component may be empty to indicate 0
    * - YYYY-MM-DD format for the date
    *
    * NOTE: This function potentially modifies the content of the range
    * argument. This is on purpose and should reflect the new range values
-   * upon succesful parsing!
+   * upon successful parsing!
    *
    * @param {object} range   A range component
-   * @param {String} dateStr Date string, if null range's value is re-used
-   * @param {String} timeStr Time string, if null range's value is re-used
+   * @param {String} dateStr Date string
+   * @param {String} timeStr Time string
    * @param {Boolean} dateOnlyThenEndOfDay  True if one should be added to date
    *                                        which is only meaningful if there
    *                                        is no time specified here, and also
@@ -166,8 +166,6 @@ export default class CalendarTSRange {
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   _setRangeTime(range, dateStr, timeStr, dateOnlyThenEndOfDay) {
-    dateStr = dateStr || range.dateStr;
-    timeStr = timeStr || range.timeStr;
     const newTs90k = this._timeParser.parseDateTime90k(
       dateStr,
       timeStr,
@@ -188,11 +186,10 @@ export default class CalendarTSRange {
    * Uses _setRangeTime with appropriate dateOnlyThenEndOfDay value.
    *
    * @param {String} dateStr Date string
-   * @param {String} timeStr Time string
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
-  setStartDate(dateStr, timeStr = null) {
-    return this._setRangeTime(this._start, dateStr, timeStr, false);
+  setStartDate(dateStr) {
+    return this._setRangeTime(this._start, dateStr, this._start.timeStr, false);
   }
 
   /**
@@ -204,7 +201,7 @@ export default class CalendarTSRange {
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setStartTime(timeStr) {
-    return this._setRangeTime(this._start, null, timeStr, false);
+    return this._setRangeTime(this._start, this._start.dateStr, timeStr, false);
   }
 
   /**
@@ -213,11 +210,10 @@ export default class CalendarTSRange {
    * Uses _setRangeTime with appropriate addOne value.
    *
    * @param {String} dateStr Date string
-   * @param {String} timeStr Time string
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
-  setEndDate(dateStr, timeStr = null) {
-    return this._setRangeTime(this._end, dateStr, timeStr, true);
+  setEndDate(dateStr) {
+    return this._setRangeTime(this._end, dateStr, this._end.timeStr, true);
   }
 
   /**
@@ -229,7 +225,7 @@ export default class CalendarTSRange {
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setEndTime(timeStr) {
-    return this._setRangeTime(this._end, null, timeStr, true);
+    return this._setRangeTime(this._end, this._end.dateStr, timeStr, true);
   }
 
   /**
