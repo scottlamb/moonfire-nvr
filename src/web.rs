@@ -37,7 +37,7 @@ use base64;
 use bytes::{BufMut, BytesMut};
 use core::borrow::Borrow;
 use core::str::FromStr;
-use db::{auth, recording};
+use db::{auth, recording, CameraChange};
 use db::dir::SampleFileDir;
 use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
@@ -73,7 +73,8 @@ enum Path {
     TopLevel,                                         // "/api/"
     Request,                                          // "/api/request"
     InitSegment([u8; 20], bool),                      // "/api/init/<sha1>.mp4{.txt}"
-    Camera(Uuid),                                     // "/api/cameras/<uuid>/"
+    SaveCamera,                                       // "/api/cameras"
+    GetCamera(Uuid),                                  // "/api/cameras/<uuid>/"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
     StreamViewMp4Segment(Uuid, db::StreamType, bool), // "/api/cameras/<uuid>/<type>/view.m4s{.txt}"
@@ -97,6 +98,7 @@ impl Path {
             "/request" => return Path::Request,
             "/login" => return Path::Login,
             "/logout" => return Path::Logout,
+            "/cameras" => return Path::SaveCamera,
             _ => {},
         };
         if path.starts_with("/init/") {
@@ -131,7 +133,7 @@ impl Path {
         };
 
         if path.is_empty() {
-            return Path::Camera(uuid);
+            return Path::GetCamera(uuid);
         }
 
         let slash = match path.find('/') {
@@ -292,6 +294,32 @@ impl ServiceInner {
                 &json::Camera::wrap(camera, &db, true).map_err(internal_server_err)?
             ).map_err(internal_server_err)?
         };
+        Ok(resp)
+    }
+
+    fn save_camera(&self, req: &Request<::hyper::Body>, body: serde_json::Value) -> ResponseResult {
+         let (mut resp, writer) = http_serve::streaming_body(&req).build();
+        resp.headers_mut().insert(header::CONTENT_TYPE,
+                                  HeaderValue::from_static("application/json"));
+
+        let c: CameraChange = serde_json::from_value(body).map_err(|_| bad_req("missing fields"))?;
+        let mut db = self.db.lock();
+        let result = db.add_camera(c);
+        match result {
+            Ok(camera_id) => {
+                *resp.status_mut() = StatusCode::OK;
+                if let Some(mut w) = writer {
+                    serde_json::to_writer(
+                        &mut w,
+                        &serde_json::json!({ "camera_id": camera_id })
+                    ).map_err(internal_server_err)?
+                };
+            }
+            Err(e) => {
+                *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            }
+        }
+
         Ok(resp)
     }
 
@@ -800,6 +828,40 @@ impl Service {
                                                                  e))))
     }
 
+    /// Returns a future separating the request from its form body.
+    ///
+    /// If this is not a `POST` or the body's `Content-Type` is not
+    /// `application/json`, returns an appropriate error response instead.
+    ///
+    /// Use with `and_then` to chain logic which consumes the json body.
+    fn with_json_body(&self, mut req: Request<hyper::Body>)
+                      -> Box<Future<Item = (Request<hyper::Body>, serde_json::Value),
+                                    Error = Response<Body>> +
+                             Send + 'static> {
+        if *req.method() != http::method::Method::POST {
+            return Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
+                                                       "POST expected")));
+        }
+        let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
+            Some(t) if t == "application/json" => true,
+            _ => false,
+        };
+        if !correct_mime_type {
+            return Box::new(future::err(bad_req(
+                        "expected application/json request body")));
+        }
+        let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
+        Box::new(b.concat2()
+                  .map(|b| {
+                      let body_vec = b.into_bytes().to_vec();
+                      let json_str = String::from_utf8(body_vec).unwrap();
+                      let json_obj = serde_json::from_str(&json_str).unwrap();
+                      (req, json_obj)
+                  }).map_err(|e| {
+                      internal_server_err(format_err!("unable to read request body: {}", e))
+                  }))
+    }
+
     fn stream_live_m4s(&self, _req: &Request<::hyper::Body>, uuid: Uuid,
                        stream_type: db::StreamType) -> ResponseResult {
         let stream_id;
@@ -908,7 +970,6 @@ impl ::hyper::service::Service for Service {
                -> Box<Future<Item = Response<Body>, Error = BoxedError> + Send + 'static> {
             return wrap(is_private, future::result(r))
         }
-
         let p = Path::decode(req.uri().path());
         let require_auth = self.0.require_auth && match p {
             Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static => false,
@@ -927,7 +988,11 @@ impl ::hyper::service::Service for Service {
             Path::InitSegment(sha1, debug) => wrap_r(true, self.0.init_segment(sha1, debug, &req)),
             Path::TopLevel => wrap_r(true, self.0.top_level(&req, session)),
             Path::Request => wrap_r(true, self.0.request(&req)),
-            Path::Camera(uuid) => wrap_r(true, self.0.camera(&req, uuid)),
+            Path::SaveCamera => wrap(true, self.with_json_body(req).and_then({
+                let s = self.clone();
+                move |(req, b)| { s.0.save_camera(&req, b) }
+            })),
+            Path::GetCamera(uuid) => wrap_r(true, self.0.camera(&req, uuid)),
             Path::StreamRecordings(uuid, type_) => {
                 wrap_r(true, self.0.stream_recordings(&req, uuid, type_))
             },
@@ -1067,7 +1132,7 @@ mod tests {
         assert_eq!(Path::decode("/api/init/000000000000000000000000000000000000000.mp4"),
                    Path::NotFound);  // too short
         assert_eq!(Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/"),
-                   Path::Camera(cam_uuid));
+                   Path::GetCamera(cam_uuid));
         assert_eq!(Path::decode("/api/cameras/asdf/"), Path::NotFound);
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/recordings"),
@@ -1222,6 +1287,72 @@ mod tests {
                       .unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
     }
+
+    #[test]
+    fn save_camera() {
+        testutil::init();
+        let s = Server::new(true);
+        let cli = reqwest::Client::new();
+
+        // first login before adding cameras
+        let login_url = format!("{}/api/login", &s.base_url);
+        let mut p = HashMap::new();
+        p.insert("username", "slamb");
+        p.insert("password", "hunter2");
+        let resp = cli.post(&login_url).form(&p).send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+
+        // should reutrn 405 when sending a get
+        let cookie = SessionCookie::new(resp.headers());
+        let resp = cli.get(&format!("{}/api/cameras", &s.base_url))
+                      .header(header::COOKIE, cookie.header())
+                      .send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::METHOD_NOT_ALLOWED);
+
+        // should reutrn 400 when content-type is not application/json
+        let mut resp = cli.post(&format!("{}/api/cameras", &s.base_url))
+                      .header(header::CONTENT_TYPE, "NOT-application/json")
+                      .header(header::COOKIE, cookie.header())
+                      .body("{}").send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(&resp.text().unwrap(), "expected application/json request body");
+
+        // should reutrn 400 when content-type is not application/json
+        /*let mut resp = cli.post(&format!("{}/api/cameras", &s.base_url))
+                      .header(header::CONTENT_TYPE, "application/json")
+                      .header(header::COOKIE, cookie.header())
+                      .body("BAD JSON").send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(&resp.text().unwrap(), "expected application/json request body");
+        */
+        // should reutrn 400 when required fields are not present
+        let mut resp = cli.post(&format!("{}/api/cameras", &s.base_url))
+                      .header(header::CONTENT_TYPE, "application/json")
+                      .header(header::COOKIE, cookie.header())
+                      .body("{}").send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(&resp.text().unwrap(), "missing fields");
+
+        // should return 200 when required fields are present
+        // should also return the camera_id that was just created
+        let cam = db::CameraChange {
+            short_name: String::from("Test Camera"),
+            description: String::from("Test Camera"),
+            host: String::from("testhost:443"),
+            username: String::from("slamb"),
+            password: String::from("hunter2"),
+            streams: Default::default()
+        };
+
+        let mut resp = cli.post(&format!("{}/api/cameras", &s.base_url))
+                      .header(header::CONTENT_TYPE, "application/json")
+                      .header(header::COOKIE, cookie.header())
+                      .body(serde_json::to_string(&cam).unwrap()).send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        let res_obj: serde_json::Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+        assert_eq!(res_obj["camera_id"].is_u64(), true);
+    }
+
 
     #[test]
     fn view_without_segments() {

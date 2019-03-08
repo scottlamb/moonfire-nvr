@@ -58,6 +58,7 @@ use crate::dir;
 use crate::raw;
 use crate::recording::{self, TIME_UNITS_PER_SEC};
 use crate::schema;
+use serde::{Serialize, Deserialize};
 use failure::{Error, bail, format_err};
 use fnv::{FnvHashMap, FnvHashSet};
 use itertools::Itertools;
@@ -460,7 +461,7 @@ pub struct LiveSegment {
     pub off_90k: Range<i32>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct StreamChange {
     pub sample_file_dir_id: Option<i32>,
     pub rtsp_path: String,
@@ -469,7 +470,7 @@ pub struct StreamChange {
 }
 
 /// Information about a camera, used by `add_camera` and `update_camera`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CameraChange {
     pub short_name: String,
     pub description: String,
