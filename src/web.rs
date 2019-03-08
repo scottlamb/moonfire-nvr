@@ -852,13 +852,23 @@ impl Service {
         }
         let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
         Box::new(b.concat2()
-                  .map(|b| {
+                  .map_err(|e| {
+                      internal_server_err(format_err!("unable to read request body: {}", e))
+                  })
+                  .and_then(|b| {
                       let body_vec = b.into_bytes().to_vec();
                       let json_str = String::from_utf8(body_vec).unwrap();
-                      let json_obj = serde_json::from_str(&json_str).unwrap();
-                      (req, json_obj)
-                  }).map_err(|e| {
-                      internal_server_err(format_err!("unable to read request body: {}", e))
+                      let json_obj = match serde_json::from_str(&json_str) {
+                          Ok(json) => json,
+                          Err(e) => return Err(bad_req(format!("error parsing json: {}", e))),
+                      };
+                      Ok((req, json_obj))
+                  })
+                  .map(|ret| {
+                      ret
+                  }).
+                  map_err(|e| {
+                      e
                   }))
     }
 
@@ -1318,13 +1328,12 @@ mod tests {
         assert_eq!(&resp.text().unwrap(), "expected application/json request body");
 
         // should reutrn 400 when content-type is not application/json
-        /*let mut resp = cli.post(&format!("{}/api/cameras", &s.base_url))
+        let resp = cli.post(&format!("{}/api/cameras", &s.base_url))
                       .header(header::CONTENT_TYPE, "application/json")
                       .header(header::COOKIE, cookie.header())
                       .body("BAD JSON").send().unwrap();
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
-        assert_eq!(&resp.text().unwrap(), "expected application/json request body");
-        */
+
         // should reutrn 400 when required fields are not present
         let mut resp = cli.post(&format!("{}/api/cameras", &s.base_url))
                       .header(header::CONTENT_TYPE, "application/json")
