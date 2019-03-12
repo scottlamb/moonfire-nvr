@@ -79,6 +79,7 @@ enum Path {
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
     StreamViewMp4Segment(Uuid, db::StreamType, bool), // "/api/cameras/<uuid>/<type>/view.m4s{.txt}"
     StreamLiveMp4Segments(Uuid, db::StreamType),      // "/api/cameras/<uuid>/<type>/live.m4s"
+    SaveSampleFileDir,                                // "/api/dirs"
     Login,                                            // "/api/login"
     Logout,                                           // "/api/logout"
     Static,                                           // (anything that doesn't start with "/api/")
@@ -99,6 +100,7 @@ impl Path {
             "/login" => return Path::Login,
             "/logout" => return Path::Logout,
             "/cameras" => return Path::SaveCamera,
+            "/dirs" => return Path::SaveSampleFileDir,
             _ => {},
         };
         if path.starts_with("/init/") {
@@ -683,6 +685,36 @@ impl ServiceInner {
         }
         Ok(None)
     }
+    fn save_sample_file_dir(&self, req: &Request<::hyper::Body>, body: serde_json::Value) -> ResponseResult {
+        let (mut resp, writer) = http_serve::streaming_body(&req).build();
+        resp.headers_mut().insert(header::CONTENT_TYPE,
+                                  HeaderValue::from_static("application/json"));
+        let mut db = self.db.lock();
+        let path = body["path"].is_string();
+        match body["path"].is_string() {
+            true => {
+                let id = db.add_sample_file_dir(body["path"].as_str().unwrap().to_string());
+                match id {
+                    Ok(id) => {
+                        if let Some(mut w) = writer {
+                            serde_json::to_writer(
+                                &mut w,
+                                &serde_json::json!({ "id": id })
+                            ).map_err(internal_server_err)?
+                        };
+                    },
+                    Err(e) => {
+                        return Err(internal_server_err(e));
+                    }
+                }
+
+            }
+            _ => {
+                *resp.status_mut() = StatusCode::BAD_REQUEST;
+            }
+        }
+        Ok(resp)
+    }
 }
 
 fn csrf_matches(csrf: &str, session: auth::SessionHash) -> bool {
@@ -1016,6 +1048,10 @@ impl ::hyper::service::Service for Service {
             Path::StreamLiveMp4Segments(uuid, type_) => {
                 wrap_r(true, self.stream_live_m4s(&req, uuid, type_))
             },
+            Path::SaveSampleFileDir => wrap(true, self.with_json_body(req).and_then({
+                let s = self.clone();
+                move |(req, b)| { s.0.save_sample_file_dir(&req, b) }
+            })),
             Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
             Path::Login => wrap(true, self.with_form_body(req).and_then({
                 let s = self.clone();
@@ -1372,6 +1408,44 @@ mod tests {
             &format!("{}/api/cameras/{}/main/view.mp4", &s.base_url, s.db.test_camera_uuid))
             .send().unwrap();
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+    }
+    #[test]
+    fn save_sample_file_dir(){
+        testutil::init();
+        let s = Server::new(true);
+        let cli = reqwest::Client::new();
+
+        // first login before adding cameras
+        let login_url = format!("{}/api/login", &s.base_url);
+        let mut p = HashMap::new();
+        p.insert("username", "slamb");
+        p.insert("password", "hunter2");
+        let resp = cli.post(&login_url).form(&p).send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+
+        // should return a 400 if no path is sent
+        let cookie = SessionCookie::new(resp.headers());
+        let resp = cli.post(&format!("{}/api/dirs", &s.base_url))
+                      .header(header::CONTENT_TYPE, "application/json")
+                      .header(header::COOKIE, cookie.header())
+                      .body("{}")
+                      .send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
+        let path = tmpdir.path();
+        let path_str = path.to_str();
+        let path_final = path_str.unwrap();
+        let json_body = serde_json::json!({ "path": tmpdir.path().to_str().unwrap() }).to_string();
+        // should return 200 with id if success
+        let mut resp = cli.post(&format!("{}/api/dirs", &s.base_url))
+                      .header(header::COOKIE, cookie.header())
+                      .header(header::CONTENT_TYPE, "application/json")
+                      .body(json_body)
+                      .send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        let res_obj: serde_json::Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+        assert_eq!(res_obj["id"].is_u64(), true);
     }
 }
 
