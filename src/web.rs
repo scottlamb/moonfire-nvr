@@ -305,7 +305,31 @@ impl ServiceInner {
                                   HeaderValue::from_static("application/json"));
 
         let c: CameraChange = serde_json::from_value(body).map_err(|_| bad_req("missing fields"))?;
+        if c.streams.len() == 0 {
+            *resp.status_mut() = StatusCode::BAD_REQUEST;
+            return Ok(resp);
+        }
         let mut db = self.db.lock();
+        for stream in &c.streams {
+            let id = match stream.sample_file_dir_id {
+                Some(id) => {
+                    id
+                },
+                None => {
+                    continue;
+                }
+            };
+            let dir = db.sample_file_dirs_by_id().get(&id);
+            match dir {
+                None => {
+                    *resp.status_mut() = StatusCode::BAD_REQUEST;
+                    return Ok(resp);
+                },
+                Some(_) => {
+                    // dir exists ignore
+                }
+            }
+        }
         let result = db.add_camera(c);
         match result {
             Ok(camera_id) => {
@@ -317,7 +341,7 @@ impl ServiceInner {
                     ).map_err(internal_server_err)?
                 };
             }
-            Err(e) => {
+            Err(_e) => {
                 *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
             }
         }
@@ -690,7 +714,6 @@ impl ServiceInner {
         resp.headers_mut().insert(header::CONTENT_TYPE,
                                   HeaderValue::from_static("application/json"));
         let mut db = self.db.lock();
-        let path = body["path"].is_string();
         match body["path"].is_string() {
             true => {
                 let id = db.add_sample_file_dir(body["path"].as_str().unwrap().to_string());
@@ -1378,17 +1401,55 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
         assert_eq!(&resp.text().unwrap(), "missing fields");
 
-        // should return 200 when required fields are present
-        // should also return the camera_id that was just created
+        // should return 400 when invalid stream changes are sent
+               // should return 200 when valid stream changes are sent
         let cam = db::CameraChange {
             short_name: String::from("Test Camera"),
             description: String::from("Test Camera"),
             host: String::from("testhost:443"),
             username: String::from("slamb"),
             password: String::from("hunter2"),
-            streams: Default::default()
+            streams: [db::StreamChange {
+                rtsp_path: String::from("/test/path"),
+                flush_if_sec: 10000,
+                record: true,
+                sample_file_dir_id: Some(1337) // purposely fake id
+            },Default::default()]
         };
 
+        let resp = cli.post(&format!("{}/api/cameras", &s.base_url))
+                      .header(header::CONTENT_TYPE, "application/json")
+                      .header(header::COOKIE, cookie.header())
+                      .body(serde_json::to_string(&cam).unwrap()).send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+
+        // create a sample dir
+        let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
+        let json_body = serde_json::json!({ "path": tmpdir.path().to_str().unwrap() }).to_string();
+        // should return 200 with id if success
+        let mut resp = cli.post(&format!("{}/api/dirs", &s.base_url))
+                      .header(header::COOKIE, cookie.header())
+                      .header(header::CONTENT_TYPE, "application/json")
+                      .body(json_body)
+                      .send().unwrap();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        let res_obj: serde_json::Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+        assert_eq!(res_obj["id"].is_i64(), true);
+
+        // should return 200 when valid stream changes are sent
+        let cam = db::CameraChange {
+            short_name: String::from("Test Camera"),
+            description: String::from("Test Camera"),
+            host: String::from("testhost:443"),
+            username: String::from("slamb"),
+            password: String::from("hunter2"),
+            streams: [db::StreamChange {
+                rtsp_path: String::from("/test/path"),
+                flush_if_sec: 10000,
+                record: true,
+                sample_file_dir_id: Some(res_obj["id"].as_i64().unwrap() as i32)
+            },Default::default()]
+        };
         let mut resp = cli.post(&format!("{}/api/cameras", &s.base_url))
                       .header(header::CONTENT_TYPE, "application/json")
                       .header(header::COOKIE, cookie.header())
@@ -1433,9 +1494,6 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
 
         let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
-        let path = tmpdir.path();
-        let path_str = path.to_str();
-        let path_final = path_str.unwrap();
         let json_body = serde_json::json!({ "path": tmpdir.path().to_str().unwrap() }).to_string();
         // should return 200 with id if success
         let mut resp = cli.post(&format!("{}/api/dirs", &s.base_url))
