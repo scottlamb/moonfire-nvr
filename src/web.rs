@@ -299,12 +299,12 @@ impl ServiceInner {
         Ok(resp)
     }
 
-    fn save_camera(&self, req: &Request<::hyper::Body>, body: serde_json::Value) -> ResponseResult {
+    fn save_camera(&self, req: &Request<::hyper::Body>, body: String) -> ResponseResult {
          let (mut resp, writer) = http_serve::streaming_body(&req).build();
         resp.headers_mut().insert(header::CONTENT_TYPE,
                                   HeaderValue::from_static("application/json"));
 
-        let c: CameraChange = serde_json::from_value(body).map_err(|_| bad_req("missing fields"))?;
+        let c: CameraChange = serde_json::from_str(&body).map_err(|_| bad_req("missing fields"))?;
         if c.streams.len() == 0 {
             return Err(bad_req("missing streams"))
         }
@@ -692,11 +692,11 @@ impl ServiceInner {
         }
         Ok(None)
     }
-    fn save_sample_file_dir(&self, req: &Request<::hyper::Body>, body: serde_json::Value) -> ResponseResult {
+    fn save_sample_file_dir(&self, req: &Request<::hyper::Body>, body: String) -> ResponseResult {
         let (mut resp, writer) = http_serve::streaming_body(&req).build();
         resp.headers_mut().insert(header::CONTENT_TYPE,
                                   HeaderValue::from_static("application/json"));
-        let sample_file_path: json::SampleFileDirPath = serde_json::from_value(body).map_err(|_| bad_req("missing fields"))?;
+        let sample_file_path: json::SampleFileDirPath = serde_json::from_str(&body).map_err(|_| bad_req("missing fields"))?;
         let mut db = self.db.lock();
         db.add_sample_file_dir(sample_file_path.path.to_string()).map(|id| {
             if let Some(mut w) = writer {
@@ -860,7 +860,7 @@ impl Service {
     ///
     /// Use with `and_then` to chain logic which consumes the json body.
     fn with_json_body(&self, mut req: Request<hyper::Body>)
-                      -> Box<Future<Item = (Request<hyper::Body>, serde_json::Value),
+                      -> Box<Future<Item = (Request<hyper::Body>, String),
                                     Error = Response<Body>> +
                              Send + 'static> {
         if *req.method() != http::method::Method::POST {
@@ -886,11 +886,7 @@ impl Service {
                           Ok(string) => string,
                           Err(e) => return Err(bad_req(format!("invalid utf8: {}", e))),
                       };
-                      let json_obj = match serde_json::from_str(&json_str) {
-                          Ok(json) => json,
-                          Err(e) => return Err(bad_req(format!("error parsing json: {}", e))),
-                      };
-                      Ok((req, json_obj))
+                      Ok((req, json_str))
                   }))
     }
 
