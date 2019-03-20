@@ -905,7 +905,10 @@ impl Service {
                   })
                   .and_then(|b| {
                       let body_vec = b.into_bytes().to_vec();
-                      let json_str = String::from_utf8(body_vec).unwrap();
+                      let json_str = match String::from_utf8(body_vec) {
+                          Ok(string) => string,
+                          Err(e) => return Err(bad_req(format!("invalid utf8: {}", e))),
+                      };
                       let json_obj = match serde_json::from_str(&json_str) {
                           Ok(json) => json,
                           Err(e) => return Err(bad_req(format!("error parsing json: {}", e))),
