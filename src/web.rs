@@ -914,12 +914,6 @@ impl Service {
                           Err(e) => return Err(bad_req(format!("error parsing json: {}", e))),
                       };
                       Ok((req, json_obj))
-                  })
-                  .map(|ret| {
-                      ret
-                  }).
-                  map_err(|e| {
-                      e
                   }))
     }
 
