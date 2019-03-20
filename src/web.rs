@@ -330,23 +330,16 @@ impl ServiceInner {
                 }
             }
         }
-        let result = db.add_camera(c);
-        match result {
-            Ok(camera_id) => {
-                *resp.status_mut() = StatusCode::OK;
-                if let Some(mut w) = writer {
-                    serde_json::to_writer(
-                        &mut w,
-                        &serde_json::json!({ "camera_id": camera_id })
-                    ).map_err(internal_server_err)?
-                };
+        db.add_camera(c).map(|camera_id| {
+            *resp.status_mut() = StatusCode::OK;
+            if let Some(mut w) = writer {
+                serde_json::to_writer(
+                    &mut w,
+                    &serde_json::json!({ "camera_id": camera_id })
+                ).map_err(internal_server_err)?
             }
-            Err(_e) => {
-                *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            }
-        }
-
-        Ok(resp)
+            Ok(resp)
+        }).map_err(internal_server_err)?
     }
 
     fn stream_recordings(&self, req: &Request<::hyper::Body>, uuid: Uuid, type_: db::StreamType)
