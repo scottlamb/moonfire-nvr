@@ -306,28 +306,18 @@ impl ServiceInner {
 
         let c: CameraChange = serde_json::from_value(body).map_err(|_| bad_req("missing fields"))?;
         if c.streams.len() == 0 {
-            *resp.status_mut() = StatusCode::BAD_REQUEST;
-            return Ok(resp);
+            return Err(bad_req("missing streams"))
         }
         let mut db = self.db.lock();
         for stream in &c.streams {
             let id = match stream.sample_file_dir_id {
-                Some(id) => {
-                    id
-                },
-                None => {
-                    continue;
-                }
+                Some(id) => id,
+                None => continue,
             };
             let dir = db.sample_file_dirs_by_id().get(&id);
             match dir {
-                None => {
-                    *resp.status_mut() = StatusCode::BAD_REQUEST;
-                    return Ok(resp);
-                },
-                Some(_) => {
-                    // dir exists ignore
-                }
+                None => return Err(bad_req("no such sample file dir")),
+                Some(_) => { /* dir exists ignore */ }
             }
         }
         db.add_camera(c).map(|camera_id| {
