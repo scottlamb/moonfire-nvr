@@ -1222,6 +1222,8 @@ mod tests {
             Path::NotFound);
         assert_eq!(Path::decode("/api/login"), Path::Login);
         assert_eq!(Path::decode("/api/logout"), Path::Logout);
+        assert_eq!(Path::decode("/api/cameras"), Path::SaveCamera);
+        assert_eq!(Path::decode("/api/dirs"), Path::SaveSampleFileDir);
         assert_eq!(Path::decode("/api/junk"), Path::NotFound);
     }
 
