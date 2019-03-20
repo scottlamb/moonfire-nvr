@@ -1336,7 +1336,7 @@ mod tests {
         let resp = cli.post(&login_url).form(&p).send().unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
 
-        // should reutrn 405 when sending a get
+        // should return 405 when sending a get
         let cookie = SessionCookie::new(resp.headers());
         let resp = cli.get(&format!("{}/api/cameras", &s.base_url))
                       .header(header::COOKIE, cookie.header())
@@ -1436,7 +1436,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
     }
     #[test]
-    fn save_sample_file_dir(){
+    fn save_sample_file_dir() {
         testutil::init();
         let s = Server::new(true);
         let cli = reqwest::Client::new();
