@@ -30,7 +30,7 @@
 
 use db::auth::SessionHash;
 use failure::{Error, format_err};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
 use std::ops::Not;
@@ -207,4 +207,9 @@ pub struct Recording {
 
     #[serde(skip_serializing_if = "Not::not")]
     pub growing: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SampleFileDirPath {
+    pub path: String
 }

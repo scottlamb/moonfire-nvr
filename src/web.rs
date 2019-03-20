@@ -696,30 +696,17 @@ impl ServiceInner {
         let (mut resp, writer) = http_serve::streaming_body(&req).build();
         resp.headers_mut().insert(header::CONTENT_TYPE,
                                   HeaderValue::from_static("application/json"));
+        let sample_file_path: json::SampleFileDirPath = serde_json::from_value(body).map_err(|_| bad_req("missing fields"))?;
         let mut db = self.db.lock();
-        match body["path"].is_string() {
-            true => {
-                let id = db.add_sample_file_dir(body["path"].as_str().unwrap().to_string());
-                match id {
-                    Ok(id) => {
-                        if let Some(mut w) = writer {
-                            serde_json::to_writer(
-                                &mut w,
-                                &serde_json::json!({ "id": id })
-                            ).map_err(internal_server_err)?
-                        };
-                    },
-                    Err(e) => {
-                        return Err(internal_server_err(e));
-                    }
-                }
-
-            }
-            _ => {
-                *resp.status_mut() = StatusCode::BAD_REQUEST;
-            }
-        }
-        Ok(resp)
+        db.add_sample_file_dir(sample_file_path.path.to_string()).map(|id| {
+            if let Some(mut w) = writer {
+                serde_json::to_writer(
+                    &mut w,
+                    &serde_json::json!({ "id": id })
+                ).map_err(internal_server_err)?
+            };
+            Ok(resp)
+        }).map_err(internal_server_err)?
     }
 }
 
