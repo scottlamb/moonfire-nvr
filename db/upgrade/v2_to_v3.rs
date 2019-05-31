@@ -58,11 +58,11 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
           join open o on (s.last_complete_open_id = o.id)
           cross join meta m
     "#, &[] as &[&ToSql], |row| {
-      (row.get_checked(0).unwrap(),
-       row.get_checked(1).unwrap(),
-       row.get_checked(2).unwrap(),
-       row.get_checked(3).unwrap(),
-       row.get_checked(4).unwrap())
+      Ok((row.get(0)?,
+          row.get(1)?,
+          row.get(2)?,
+          row.get(3)?,
+          row.get(4)?))
     })?;
     let mut meta = schema::DirMeta::default();
     meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
@@ -85,10 +85,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           recording_playback
     "#)?;
     let mut rows = stmt.query(&[] as &[&ToSql])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let id = db::CompositeId(row.get_checked(0)?);
-        let sample_file_uuid: FromSqlUuid = row.get_checked(1)?;
+    while let Some(row) = rows.next()? {
+        let id = db::CompositeId(row.get(0)?);
+        let sample_file_uuid: FromSqlUuid = row.get(1)?;
         let from_path = get_uuid_pathname(sample_file_uuid.0);
         let to_path = get_id_pathname(id);
         let r = unsafe { dir::renameat(&d.fd, from_path.as_ptr(), &d.fd, to_path.as_ptr()) };

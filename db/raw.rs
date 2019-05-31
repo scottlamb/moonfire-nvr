@@ -147,29 +147,28 @@ pub(crate) fn list_recordings_by_id(
 fn list_recordings_inner(mut rows: rusqlite::Rows,
                          f: &mut FnMut(db::ListRecordingsRow) -> Result<(), Error>)
                          -> Result<(), Error> {
-    while let Some(row) = rows.next() {
-        let row = row?;
+    while let Some(row) = rows.next()? {
         f(db::ListRecordingsRow {
-            id: CompositeId(row.get_checked(0)?),
-            run_offset: row.get_checked(1)?,
-            flags: row.get_checked(2)?,
-            start: recording::Time(row.get_checked(3)?),
-            duration_90k: row.get_checked(4)?,
-            sample_file_bytes: row.get_checked(5)?,
-            video_samples: row.get_checked(6)?,
-            video_sync_samples: row.get_checked(7)?,
-            video_sample_entry_id: row.get_checked(8)?,
-            open_id: row.get_checked(9)?,
+            id: CompositeId(row.get(0)?),
+            run_offset: row.get(1)?,
+            flags: row.get(2)?,
+            start: recording::Time(row.get(3)?),
+            duration_90k: row.get(4)?,
+            sample_file_bytes: row.get(5)?,
+            video_samples: row.get(6)?,
+            video_sync_samples: row.get(7)?,
+            video_sample_entry_id: row.get(8)?,
+            open_id: row.get(9)?,
         })?;
     }
     Ok(())
 }
 
 pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
-    conn.query_row("select uuid from meta", &[] as &[&ToSql], |row| -> Result<Uuid, Error> {
-        let uuid: FromSqlUuid = row.get_checked(0)?;
+    Ok(conn.query_row("select uuid from meta", &[] as &[&ToSql], |row| -> rusqlite::Result<Uuid> {
+        let uuid: FromSqlUuid = row.get(0)?;
         Ok(uuid.0)
-    })?
+    })?)
 }
 
 /// Inserts the specified recording (for from `try_flush` only).
@@ -313,8 +312,8 @@ pub(crate) fn get_range(conn: &rusqlite::Connection, stream_id: i32)
     // The minimum is straightforward, taking advantage of the start_time_90k index.
     let mut stmt = conn.prepare_cached(STREAM_MIN_START_SQL)?;
     let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
-    let min_start = match rows.next() {
-        Some(row) => recording::Time(row?.get_checked(0)?),
+    let min_start = match rows.next()? {
+        Some(row) => recording::Time(row.get(0)?),
         None => return Ok(None),
     };
 
@@ -325,10 +324,9 @@ pub(crate) fn get_range(conn: &rusqlite::Connection, stream_id: i32)
     let mut stmt = conn.prepare_cached(STREAM_MAX_START_SQL)?;
     let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
     let mut maxes_opt = None;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let row_start = recording::Time(row.get_checked(0)?);
-        let row_duration: i64 = row.get_checked(1)?;
+    while let Some(row) = rows.next()? {
+        let row_start = recording::Time(row.get(0)?);
+        let row_duration: i64 = row.get(1)?;
         let row_end = recording::Time(row_start.0 + row_duration);
         let maxes = match maxes_opt {
             None => row_start .. row_end,
@@ -353,9 +351,8 @@ pub(crate) fn list_garbage(conn: &rusqlite::Connection, dir_id: i32)
     let mut stmt = conn.prepare_cached(
         "select composite_id from garbage where sample_file_dir_id = ?")?;
     let mut rows = stmt.query(&[&dir_id])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        garbage.insert(CompositeId(row.get_checked(0)?));
+    while let Some(row) = rows.next()? {
+        garbage.insert(CompositeId(row.get(0)?));
     }
     Ok(garbage)
 }
@@ -370,13 +367,12 @@ pub(crate) fn list_oldest_recordings(conn: &rusqlite::Connection, start: Composi
         (":start", &start.0),
         (":end", &CompositeId::new(start.stream() + 1, 0).0),
     ])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
+    while let Some(row) = rows.next()? {
         let should_continue = f(db::ListOldestRecordingsRow {
-            id: CompositeId(row.get_checked(0)?),
-            start: recording::Time(row.get_checked(1)?),
-            duration: row.get_checked(2)?,
-            sample_file_bytes: row.get_checked(3)?,
+            id: CompositeId(row.get(0)?),
+            start: recording::Time(row.get(1)?),
+            duration: row.get(2)?,
+            sample_file_bytes: row.get(3)?,
         });
         if !should_continue {
             break;

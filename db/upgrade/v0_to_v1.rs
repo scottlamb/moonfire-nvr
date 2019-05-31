@@ -144,9 +144,8 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
     "#)?;
     let mut rows = select.query(&[] as &[&ToSql])?;
     let mut camera_state: HashMap<i32, CameraState> = HashMap::new();
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let camera_id: i32 = row.get_checked(0)?;
+    while let Some(row) = rows.next()? {
+        let camera_id: i32 = row.get(0)?;
         let camera_state = camera_state.entry(camera_id).or_insert_with(|| {
             CameraState{
                 current_run: None,
@@ -155,17 +154,17 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
         });
         let composite_id = ((camera_id as i64) << 32) | (camera_state.next_recording_id as i64);
         camera_state.next_recording_id += 1;
-        let sample_file_bytes: i32 = row.get_checked(1)?;
-        let start_time_90k: i64 = row.get_checked(2)?;
-        let duration_90k: i32 = row.get_checked(3)?;
-        let local_time_delta_90k: i64 = row.get_checked(4)?;
-        let video_samples: i32 = row.get_checked(5)?;
-        let video_sync_samples: i32 = row.get_checked(6)?;
-        let video_sample_entry_id: i32 = row.get_checked(7)?;
-        let sample_file_uuid: db::FromSqlUuid = row.get_checked(8)?;
-        let sample_file_sha1: Vec<u8> = row.get_checked(9)?;
-        let video_index: Vec<u8> = row.get_checked(10)?;
-        let old_id: i32 = row.get_checked(11)?;
+        let sample_file_bytes: i32 = row.get(1)?;
+        let start_time_90k: i64 = row.get(2)?;
+        let duration_90k: i32 = row.get(3)?;
+        let local_time_delta_90k: i64 = row.get(4)?;
+        let video_samples: i32 = row.get(5)?;
+        let video_sync_samples: i32 = row.get(6)?;
+        let video_sample_entry_id: i32 = row.get(7)?;
+        let sample_file_uuid: db::FromSqlUuid = row.get(8)?;
+        let sample_file_sha1: Vec<u8> = row.get(9)?;
+        let video_index: Vec<u8> = row.get(10)?;
+        let old_id: i32 = row.get(11)?;
         let trailing_zero = has_trailing_zero(&video_index).unwrap_or_else(|e| {
             warn!("recording {}/{} (sample file {}, formerly recording {}) has corrupt \
                   video_index: {}",
@@ -218,18 +217,17 @@ fn fill_camera(tx: &rusqlite::Transaction, camera_state: HashMap<i32, CameraStat
       :main_rtsp_path, :sub_rtsp_path, :retain_bytes, :next_recording_id)
     "#)?;
     let mut rows = select.query(&[] as &[&ToSql])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let id: i32 = row.get_checked(0)?;
-        let uuid: Vec<u8> = row.get_checked(1)?;
-        let short_name: String = row.get_checked(2)?;
-        let description: String = row.get_checked(3)?;
-        let host: String = row.get_checked(4)?;
-        let username: String = row.get_checked(5)?;
-        let password: String = row.get_checked(6)?;
-        let main_rtsp_path: String = row.get_checked(7)?;
-        let sub_rtsp_path: String = row.get_checked(8)?;
-        let retain_bytes: i64 = row.get_checked(9)?;
+    while let Some(row) = rows.next()? {
+        let id: i32 = row.get(0)?;
+        let uuid: Vec<u8> = row.get(1)?;
+        let short_name: String = row.get(2)?;
+        let description: String = row.get(3)?;
+        let host: String = row.get(4)?;
+        let username: String = row.get(5)?;
+        let password: String = row.get(6)?;
+        let main_rtsp_path: String = row.get(7)?;
+        let sub_rtsp_path: String = row.get(8)?;
+        let retain_bytes: i64 = row.get(9)?;
         insert.execute_named(&[
             (":id", &id),
             (":uuid", &uuid),

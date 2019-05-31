@@ -587,11 +587,10 @@ fn init_recordings(conn: &mut rusqlite::Connection, stream_id: i32, camera: &Cam
     "#)?;
     let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
     let mut i = 0;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let start = recording::Time(row.get_checked(0)?);
-        let duration = recording::Duration(row.get_checked(1)?);
-        let bytes = row.get_checked(2)?;
+    while let Some(row) = rows.next()? {
+        let start = recording::Time(row.get(0)?);
+        let duration = recording::Duration(row.get(1)?);
+        let bytes = row.get(2)?;
         stream.add_recording(start .. start + duration, bytes);
         i += 1;
     }
@@ -1277,9 +1276,8 @@ impl LockedDatabase {
         trace!("cache miss for recording {}", id);
         let mut stmt = self.conn.prepare_cached(GET_RECORDING_PLAYBACK_SQL)?;
         let mut rows = stmt.query_named(&[(":composite_id", &id.0)])?;
-        if let Some(row) = rows.next() {
-            let row = row?;
-            let video_index: VideoIndex = row.get_checked(0)?;
+        if let Some(row) = rows.next()? {
+            let video_index: VideoIndex = row.get(0)?;
             let result = f(&RecordingPlayback { video_index: &video_index.0[..] });
             cache.insert(id.0, video_index.0);
             return result;
@@ -1325,24 +1323,23 @@ impl LockedDatabase {
                 video_sample_entry
         "#)?;
         let mut rows = stmt.query(&[] as &[&ToSql])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let id = row.get_checked(0)?;
+        while let Some(row) = rows.next()? {
+            let id = row.get(0)?;
             let mut sha1 = [0u8; 20];
-            let sha1_vec: Vec<u8> = row.get_checked(1)?;
+            let sha1_vec: Vec<u8> = row.get(1)?;
             if sha1_vec.len() != 20 {
                 bail!("video sample entry id {} has sha1 {} of wrong length", id, sha1_vec.len());
             }
             sha1.copy_from_slice(&sha1_vec);
-            let data: Vec<u8> = row.get_checked(5)?;
+            let data: Vec<u8> = row.get(5)?;
 
             self.video_sample_entries_by_id.insert(id, Arc::new(VideoSampleEntry {
                 id: id as i32,
-                width: row.get_checked::<_, i32>(2)? as u16,
-                height: row.get_checked::<_, i32>(3)? as u16,
+                width: row.get::<_, i32>(2)? as u16,
+                height: row.get::<_, i32>(3)? as u16,
                 sha1,
                 data,
-                rfc6381_codec: row.get_checked(4)?,
+                rfc6381_codec: row.get(4)?,
             }));
         }
         info!("Loaded {} video sample entries",
@@ -1365,12 +1362,11 @@ impl LockedDatabase {
               sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
         "#)?;
         let mut rows = stmt.query(&[] as &[&ToSql])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let id = row.get_checked(0)?;
-            let dir_uuid: FromSqlUuid = row.get_checked(2)?;
-            let open_id: Option<u32> = row.get_checked(3)?;
-            let open_uuid: Option<FromSqlUuid> = row.get_checked(4)?;
+        while let Some(row) = rows.next()? {
+            let id = row.get(0)?;
+            let dir_uuid: FromSqlUuid = row.get(2)?;
+            let open_id: Option<u32> = row.get(3)?;
+            let open_uuid: Option<FromSqlUuid> = row.get(4)?;
             let last_complete_open = match (open_id, open_uuid) {
                 (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0, }),
                 (None, None) => None,
@@ -1379,7 +1375,7 @@ impl LockedDatabase {
             self.sample_file_dirs_by_id.insert(id, SampleFileDir {
                 id,
                 uuid: dir_uuid.0,
-                path: row.get_checked(1)?,
+                path: row.get(1)?,
                 dir: None,
                 last_complete_open,
                 garbage_needs_unlink: raw::list_garbage(&self.conn, id)?,
@@ -1407,18 +1403,17 @@ impl LockedDatabase {
               camera;
         "#)?;
         let mut rows = stmt.query(&[] as &[&ToSql])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let id = row.get_checked(0)?;
-            let uuid: FromSqlUuid = row.get_checked(1)?;
+        while let Some(row) = rows.next()? {
+            let id = row.get(0)?;
+            let uuid: FromSqlUuid = row.get(1)?;
             self.cameras_by_id.insert(id, Camera {
                 id: id,
                 uuid: uuid.0,
-                short_name: row.get_checked(2)?,
-                description: row.get_checked(3)?,
-                host: row.get_checked(4)?,
-                username: row.get_checked(5)?,
-                password: row.get_checked(6)?,
+                short_name: row.get(2)?,
+                description: row.get(3)?,
+                host: row.get(4)?,
+                username: row.get(5)?,
+                password: row.get(6)?,
                 streams: Default::default(),
             });
             self.cameras_by_uuid.insert(uuid.0, id);
@@ -1446,26 +1441,25 @@ impl LockedDatabase {
               stream;
         "#)?;
         let mut rows = stmt.query(&[] as &[&ToSql])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let id = row.get_checked(0)?;
-            let type_: String = row.get_checked(1)?;
+        while let Some(row) = rows.next()? {
+            let id = row.get(0)?;
+            let type_: String = row.get(1)?;
             let type_ = StreamType::parse(&type_).ok_or_else(
                 || format_err!("no such stream type {}", type_))?;
-            let camera_id = row.get_checked(2)?;
+            let camera_id = row.get(2)?;
             let c = self
                         .cameras_by_id
                         .get_mut(&camera_id)
                         .ok_or_else(|| format_err!("missing camera {} for stream {}",
                                                    camera_id, id))?;
-            let flush_if_sec = row.get_checked(6)?;
+            let flush_if_sec = row.get(6)?;
             self.streams_by_id.insert(id, Stream {
                 id,
                 type_,
                 camera_id,
-                sample_file_dir_id: row.get_checked(3)?,
-                rtsp_path: row.get_checked(4)?,
-                retain_bytes: row.get_checked(5)?,
+                sample_file_dir_id: row.get(3)?,
+                rtsp_path: row.get(4)?,
+                retain_bytes: row.get(5)?,
                 flush_if_sec,
                 range: None,
                 sample_file_bytes: 0,
@@ -1474,8 +1468,8 @@ impl LockedDatabase {
                 bytes_to_add: 0,
                 duration: recording::Duration(0),
                 days: BTreeMap::new(),
-                next_recording_id: row.get_checked(7)?,
-                record: row.get_checked(8)?,
+                next_recording_id: row.get(7)?,
+                record: row.get(8)?,
                 uncommitted: VecDeque::new(),
                 synced_recordings: 0,
                 on_live_segment: Vec::new(),
@@ -1815,12 +1809,12 @@ pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
 pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Error> {
     let ver_tables: i32 = conn.query_row_and_then(
         "select count(*) from sqlite_master where name = 'version'",
-        &[] as &[&ToSql], |row| row.get_checked(0))?;
+        &[] as &[&ToSql], |row| row.get(0))?;
     if ver_tables == 0 {
         return Ok(None);
     }
     Ok(Some(conn.query_row_and_then("select max(id) from version", &[] as &[&ToSql],
-                                    |row| row.get_checked(0))?))
+                                    |row| row.get(0))?))
 }
 
 /// The recording database. Abstracts away SQLite queries. Also maintains in-memory state

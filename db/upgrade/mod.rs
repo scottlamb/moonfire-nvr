@@ -54,7 +54,7 @@ pub struct Args<'a> {
 fn set_journal_mode(conn: &rusqlite::Connection, requested: &str) -> Result<(), Error> {
     assert!(!requested.contains(';'));  // quick check for accidental sql injection.
     let actual = conn.query_row(&format!("pragma journal_mode = {}", requested), &[] as &[&ToSql],
-                                |row| row.get_checked::<_, String>(0))??;
+                                |row| row.get::<_, String>(0))?;
     info!("...database now in journal_mode {} (requested {}).", actual, requested);
     Ok(())
 }
@@ -70,7 +70,7 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
         assert_eq!(upgraders.len(), db::EXPECTED_VERSION as usize);
         let old_ver =
             conn.query_row("select max(id) from version", &[] as &[&ToSql],
-                           |row| row.get_checked(0))??;
+                           |row| row.get(0))?;
         if old_ver > db::EXPECTED_VERSION {
             bail!("Database is at version {}, later than expected {}",
                   old_ver, db::EXPECTED_VERSION);

@@ -347,18 +347,17 @@ impl State {
                 user
         "#)?;
         let mut rows = stmt.query(&[] as &[&ToSql])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let id = row.get_checked(0)?;
-            let name: String = row.get_checked(1)?;
+        while let Some(row) = rows.next()? {
+            let id = row.get(0)?;
+            let name: String = row.get(1)?;
             state.users_by_id.insert(id, User {
                 id,
                 username: name.clone(),
-                flags: row.get_checked(2)?,
-                password_hash: row.get_checked(3)?,
-                password_id: row.get_checked(4)?,
-                password_failure_count: row.get_checked(5)?,
-                unix_uid: row.get_checked(6)?,
+                flags: row.get(2)?,
+                password_hash: row.get(3)?,
+                password_id: row.get(4)?,
+                password_failure_count: row.get(5)?,
+                unix_uid: row.get(6)?,
                 dirty: false,
             });
             state.users_by_name.insert(name, id);
@@ -693,39 +692,35 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Erro
             session_id_hash = ?
     "#)?;
     let mut rows = stmt.query(&[&&hash.0[..]])?;
-    let row = match rows.next() {
-        None => bail!("no such session"),
-        Some(Err(e)) => return Err(e.into()),
-        Some(Ok(r)) => r,
-    };
-    let creation_addr: FromSqlIpAddr = row.get_checked(8)?;
-    let revocation_addr: FromSqlIpAddr = row.get_checked(11)?;
-    let last_use_addr: FromSqlIpAddr = row.get_checked(16)?;
+    let row = rows.next()?.ok_or_else(|| format_err!("no such session"))?;
+    let creation_addr: FromSqlIpAddr = row.get(8)?;
+    let revocation_addr: FromSqlIpAddr = row.get(11)?;
+    let last_use_addr: FromSqlIpAddr = row.get(16)?;
     Ok(Session {
-        user_id: row.get_checked(0)?,
-        seed: row.get_checked(1)?,
-        flags: row.get_checked(2)?,
-        domain: row.get_checked(3)?,
-        description: row.get_checked(4)?,
-        creation_password_id: row.get_checked(5)?,
+        user_id: row.get(0)?,
+        seed: row.get(1)?,
+        flags: row.get(2)?,
+        domain: row.get(3)?,
+        description: row.get(4)?,
+        creation_password_id: row.get(5)?,
         creation: Request {
-            when_sec: row.get_checked(6)?,
-            user_agent: row.get_checked(7)?,
+            when_sec: row.get(6)?,
+            user_agent: row.get(7)?,
             addr: creation_addr.0,
         },
         revocation: Request {
-            when_sec: row.get_checked(9)?,
-            user_agent: row.get_checked(10)?,
+            when_sec: row.get(9)?,
+            user_agent: row.get(10)?,
             addr: revocation_addr.0,
         },
-        revocation_reason: row.get_checked(12)?,
-        revocation_reason_detail: row.get_checked(13)?,
+        revocation_reason: row.get(12)?,
+        revocation_reason_detail: row.get(13)?,
         last_use: Request {
-            when_sec: row.get_checked(14)?,
-            user_agent: row.get_checked(15)?,
+            when_sec: row.get(14)?,
+            user_agent: row.get(15)?,
             addr: last_use_addr.0,
         },
-        use_count: row.get_checked(17)?,
+        use_count: row.get(17)?,
         dirty: false,
     })
 }

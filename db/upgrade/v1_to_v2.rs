@@ -298,7 +298,7 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
         from
           (select count(*) as c from recording) a,
           (select count(*) as c from reserved_sample_files) b;
-    "#, &[] as &[&ToSql], |r| r.get_checked(0))??;
+    "#, &[] as &[&ToSql], |r| r.get(0))?;
     let mut files = ::fnv::FnvHashSet::with_capacity_and_hasher(n as usize, Default::default());
     for e in fs::read_dir(sample_file_path)? {
         let e = e?;
@@ -330,9 +330,8 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
     {
         let mut stmt = tx.prepare(r"select sample_file_uuid from recording_playback")?;
         let mut rows = stmt.query(&[] as &[&ToSql])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let uuid: crate::db::FromSqlUuid = row.get_checked(0)?;
+        while let Some(row) = rows.next()? {
+            let uuid: crate::db::FromSqlUuid = row.get(0)?;
             if !files.remove(&uuid.0) {
                 bail!("{} is missing from dir {}!", uuid.0, sample_file_path);
             }
@@ -341,9 +340,8 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
 
     let mut stmt = tx.prepare(r"select uuid from reserved_sample_files")?;
     let mut rows = stmt.query(&[] as &[&ToSql])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let uuid: crate::db::FromSqlUuid = row.get_checked(0)?;
+    while let Some(row) = rows.next()? {
+        let uuid: crate::db::FromSqlUuid = row.get(0)?;
         files.remove(&uuid.0);
     }
 
@@ -369,14 +367,13 @@ fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
         insert into video_sample_entry values (:id, :sha1, :width, :height, :rfc6381_codec, :data)
     "#)?;
     let mut rows = select.query(&[] as &[&ToSql])?;
-    while let Some(row) = rows.next() {
-        let row = row?;
-        let data: Vec<u8> = row.get_checked(4)?;
+    while let Some(row) = rows.next()? {
+        let data: Vec<u8> = row.get(4)?;
         insert.execute_named(&[
-            (":id", &row.get_checked::<_, i32>(0)?),
-            (":sha1", &row.get_checked::<_, Vec<u8>>(1)?),
-            (":width", &row.get_checked::<_, i32>(2)?),
-            (":height", &row.get_checked::<_, i32>(3)?),
+            (":id", &row.get::<_, i32>(0)?),
+            (":sha1", &row.get::<_, Vec<u8>>(1)?),
+            (":width", &row.get::<_, i32>(2)?),
+            (":height", &row.get::<_, i32>(3)?),
             (":rfc6381_codec", &rfc6381_codec_from_sample_entry(&data)?),
             (":data", &data),
         ])?;

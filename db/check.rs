@@ -59,14 +59,13 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
         let mut garbage_stmt = conn.prepare_cached(
             "select composite_id from garbage where sample_file_dir_id = ?")?;
         let mut rows = dir_stmt.query(&[] as &[&ToSql])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
+        while let Some(row) = rows.next()? {
             let mut meta = schema::DirMeta::default();
-            let dir_id: i32 = row.get_checked(0)?;
-            let dir_path: String = row.get_checked(1)?;
-            let dir_uuid: FromSqlUuid = row.get_checked(2)?;
-            let open_id = row.get_checked(3)?;
-            let open_uuid: FromSqlUuid = row.get_checked(4)?;
+            let dir_id: i32 = row.get(0)?;
+            let dir_path: String = row.get(1)?;
+            let dir_uuid: FromSqlUuid = row.get(2)?;
+            let open_id = row.get(3)?;
+            let open_uuid: FromSqlUuid = row.get(4)?;
             meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
             meta.dir_uuid.extend_from_slice(&dir_uuid.0.as_bytes()[..]);
             {
@@ -79,9 +78,8 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
             let _dir = dir::SampleFileDir::open(&dir_path, &meta)?;
             let mut streams = read_dir(&dir_path, opts)?;
             let mut rows = garbage_stmt.query(&[&dir_id])?;
-            while let Some(row) = rows.next() {
-                let row = row?;
-                let id = CompositeId(row.get_checked(0)?);
+            while let Some(row) = rows.next()? {
+                let id = CompositeId(row.get(0)?);
                 let s = streams.entry(id.stream()).or_insert_with(Stream::default);
                 s.entry(id.recording()).or_insert_with(Recording::default).garbage_row = true;
             }
@@ -95,10 +93,9 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
             select id, sample_file_dir_id from stream where sample_file_dir_id is not null
         "#)?;
         let mut rows = stmt.query(&[] as &[&ToSql])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let stream_id = row.get_checked(0)?;
-            let dir_id = row.get_checked(1)?;
+        while let Some(row) = rows.next()? {
+            let stream_id = row.get(0)?;
+            let dir_id = row.get(1)?;
             let stream = match streams_by_dir.get_mut(&dir_id) {
                 None => Stream::default(),
                 Some(d) => d.remove(&stream_id).unwrap_or_else(Stream::default),
@@ -224,15 +221,14 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
               composite_id between ? and ?
         "#)?;
         let mut rows = stmt.query(&[&start.0, &end.0])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let id = CompositeId(row.get_checked(0)?);
+        while let Some(row) = rows.next()? {
+            let id = CompositeId(row.get(0)?);
             let s = RecordingSummary {
-                flags: row.get_checked(1)?,
-                bytes: row.get_checked::<_, i64>(2)? as u64,
-                duration: row.get_checked(3)?,
-                video_samples: row.get_checked(4)?,
-                video_sync_samples: row.get_checked(5)?,
+                flags: row.get(1)?,
+                bytes: row.get::<_, i64>(2)? as u64,
+                duration: row.get(3)?,
+                video_samples: row.get(4)?,
+                video_sync_samples: row.get(5)?,
             };
             stream.entry(id.recording())
                   .or_insert_with(Recording::default)
@@ -252,10 +248,9 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
               composite_id between ? and ?
         "#)?;
         let mut rows = stmt.query(&[&start.0, &end.0])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let id = CompositeId(row.get_checked(0)?);
-            let video_index: Vec<u8> = row.get_checked(1)?;
+        while let Some(row) = rows.next()? {
+            let id = CompositeId(row.get(0)?);
+            let video_index: Vec<u8> = row.get(1)?;
             let s = match summarize_index(&video_index) {
                 Ok(s) => s,
                 Err(e) => {
@@ -280,9 +275,8 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
               composite_id between ? and ?
         "#)?;
         let mut rows = stmt.query(&[&start.0, &end.0])?;
-        while let Some(row) = rows.next() {
-            let row = row?;
-            let id = CompositeId(row.get_checked(0)?);
+        while let Some(row) = rows.next()? {
+            let id = CompositeId(row.get(0)?);
             stream.entry(id.recording())
                   .or_insert_with(Recording::default)
                   .integrity_row = true;
