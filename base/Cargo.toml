@@ -15,5 +15,5 @@ path = "lib.rs"
 failure = "0.1.1"
 libc = "0.2"
 log = "0.4"
-parking_lot = { version = "0.7", features = [] }
+parking_lot = { version = "0.8", features = [] }
 time = "0.1"

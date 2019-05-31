@@ -90,7 +90,7 @@ use http_serve;
 use log::{debug, error, trace, warn};
 use memmap;
 use openssl::hash;
-use parking_lot::{Once, ONCE_INIT};
+use parking_lot::Once;
 use reffers::ARefs;
 use crate::slices::{self, Slices};
 use smallvec::SmallVec;
@@ -372,7 +372,7 @@ impl Segment {
         Ok(Segment{
             s: recording::Segment::new(db, row, rel_range_90k).err_kind(ErrorKind::Unknown)?,
             index: UnsafeCell::new(Err(())),
-            index_once: ONCE_INIT,
+            index_once: Once::new(),
             first_frame_num,
             num_subtitle_samples: 0,
         })
