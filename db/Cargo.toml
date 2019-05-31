@@ -25,7 +25,7 @@ lru-cache = "0.1"
 mylog = { git = "https://github.com/scottlamb/mylog" }
 odds = { version = "0.3.1", features = ["std-vec"] }
 openssl = "0.10"
-parking_lot = { version = "0.7", features = [] }
+parking_lot = { version = "0.8", features = [] }
 protobuf = "2.0"
 regex = "1.0"
 rusqlite = "0.18"
