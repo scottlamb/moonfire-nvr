@@ -22,6 +22,7 @@ base = { package = "moonfire-base", path = "base" }
 base64 = "0.10.0"
 bytes = "0.4.6"
 byteorder = "1.0"
+cursive = "0.12"
 db = { package = "moonfire-db", path = "db" }
 docopt = "1.0"
 failure = "0.1.1"
@@ -56,11 +57,6 @@ uuid = { version = "0.7", features = ["serde", "std", "v4"] }
 [dev-dependencies]
 reqwest = "0.9.5"
 tempdir = "0.3"
-
-[dependencies.cursive]
-version = "0.10"
-#default-features = false
-#features = ["termion-backend"]
 
 [profile.release]
 debug = true

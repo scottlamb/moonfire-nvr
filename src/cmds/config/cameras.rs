@@ -290,7 +290,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
     let dialog = if let Some(camera_id) = *item {
         let l = db.lock();
         let camera = l.cameras_by_id().get(&camera_id).expect("missing camera");
-        dialog.find_id("uuid", |v: &mut views::TextView| v.set_content(camera.uuid.to_string()))
+        dialog.call_on_id("uuid", |v: &mut views::TextView| v.set_content(camera.uuid.to_string()))
               .expect("missing TextView");
 
         let mut bytes = 0;
@@ -315,28 +315,30 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                     format!("{} / {} ({:.1}%)", s.sample_file_bytes, s.retain_bytes,
                                 100. * s.sample_file_bytes as f32 / s.retain_bytes as f32)
                 };
-                dialog.find_id(&format!("{}_rtsp_path", t.as_str()),
-                               |v: &mut views::EditView| v.set_content(s.rtsp_path.to_owned()));
-                dialog.find_id(&format!("{}_usage_cap", t.as_str()),
-                               |v: &mut views::TextView| v.set_content(u));
-                dialog.find_id(&format!("{}_record", t.as_str()),
-                               |v: &mut views::Checkbox| v.set_checked(s.record));
-                dialog.find_id(&format!("{}_flush_if_sec", t.as_str()),
-                               |v: &mut views::EditView| v.set_content(s.flush_if_sec.to_string()));
+                dialog.call_on_id(&format!("{}_rtsp_path", t.as_str()),
+                                  |v: &mut views::EditView| v.set_content(s.rtsp_path.to_owned()));
+                dialog.call_on_id(&format!("{}_usage_cap", t.as_str()),
+                                  |v: &mut views::TextView| v.set_content(u));
+                dialog.call_on_id(&format!("{}_record", t.as_str()),
+                                  |v: &mut views::Checkbox| v.set_checked(s.record));
+                dialog.call_on_id(
+                    &format!("{}_flush_if_sec", t.as_str()),
+                    |v: &mut views::EditView| v.set_content(s.flush_if_sec.to_string()));
             }
-            dialog.find_id(&format!("{}_sample_file_dir", t.as_str()),
-                           |v: &mut views::SelectView<Option<i32>>| v.set_selection(selected_dir));
+            dialog.call_on_id(
+                &format!("{}_sample_file_dir", t.as_str()),
+                |v: &mut views::SelectView<Option<i32>>| v.set_selection(selected_dir));
         }
         let name = camera.short_name.clone();
         for &(view_id, content) in &[("short_name", &*camera.short_name),
                                      ("host", &*camera.host),
                                      ("username", &*camera.username),
                                      ("password", &*camera.password)] {
-            dialog.find_id(view_id, |v: &mut views::EditView| v.set_content(content.to_string()))
+            dialog.call_on_id(view_id, |v: &mut views::EditView| v.set_content(content.to_string()))
                   .expect("missing EditView");
         }
-        dialog.find_id("description",
-                       |v: &mut views::TextArea| v.set_content(camera.description.to_string()))
+        dialog.call_on_id("description",
+                          |v: &mut views::TextArea| v.set_content(camera.description.to_string()))
               .expect("missing TextArea");
         dialog.title("Edit camera")
               .button("Edit", {
@@ -349,8 +351,8 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
               })
     } else {
         for t in &db::ALL_STREAM_TYPES {
-            dialog.find_id(&format!("{}_usage_cap", t.as_str()),
-                           |v: &mut views::TextView| v.set_content("<new>"));
+            dialog.call_on_id(&format!("{}_usage_cap", t.as_str()),
+                              |v: &mut views::TextView| v.set_content("<new>"));
         }
         dialog.title("Add camera")
               .button("Add", {

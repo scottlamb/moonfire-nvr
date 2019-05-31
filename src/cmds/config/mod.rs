@@ -129,7 +129,7 @@ pub fn run() -> Result<(), Error> {
     let clocks = clock::RealClocks {};
     let db = Arc::new(db::Database::new(clocks, conn, true)?);
 
-    let mut siv = Cursive::ncurses();
+    let mut siv = Cursive::ncurses()?;
     //siv.add_global_callback('q', |s| s.quit());
 
     siv.add_layer(views::Dialog::around(
