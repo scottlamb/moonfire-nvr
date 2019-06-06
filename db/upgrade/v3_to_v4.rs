@@ -28,23 +28,40 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#![cfg_attr(all(feature="nightly", test), feature(test))]
+/// Upgrades a version 3 schema to a version 4 schema.
 
-pub mod auth;
-pub mod check;
-mod coding;
-pub mod db;
-pub mod dir;
-mod raw;
-pub mod recording;
-mod schema;
-pub mod signal;
-pub mod upgrade;
-pub mod writer;
+use failure::Error;
 
-// This is only for #[cfg(test)], but it's also used by the dependent crate, and it appears that
-// #[cfg(test)] is not passed on to dependencies.
-pub mod testutil;
+pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
+    // These create statements match the schema.sql when version 4 was the latest.
+    tx.execute_batch(r#"
+        create table signal (
+          id integer primary key,
+          source_uuid blob not null check (length(source_uuid) = 16),
+          type_uuid blob not null check (length(type_uuid) = 16),
+          short_name not null,
+          unique (source_uuid, type_uuid)
+        );
 
-pub use crate::db::*;
-pub use crate::signal::Signal;
+        create table signal_type_enum (
+          type_uuid blob not null check (length(type_uuid) = 16),
+          value integer not null check (value > 0 and value < 16),
+          name text not null,
+          motion int not null check (motion in (0, 1)) default 0,
+          color text
+        );
+
+        create table signal_camera (
+          signal_id integer references signal (id),
+          camera_id integer references camera (id),
+          type integer not null,
+          primary key (signal_id, camera_id)
+        ) without rowid;
+
+        create table signal_state (
+          time_sec integer primary key,
+          changes blob
+        );
+    "#)?;
+    Ok(())
+}

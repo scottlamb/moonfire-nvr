@@ -58,6 +58,7 @@ use crate::dir;
 use crate::raw;
 use crate::recording::{self, TIME_UNITS_PER_SEC};
 use crate::schema;
+use crate::signal;
 use failure::{Error, bail, format_err};
 use fnv::{FnvHashMap, FnvHashSet};
 use itertools::Itertools;
@@ -81,7 +82,7 @@ use time;
 use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
-pub const EXPECTED_VERSION: i32 = 3;
+pub const EXPECTED_VERSION: i32 = 4;
 
 const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
     select
@@ -530,7 +531,7 @@ fn adjust_days(r: Range<recording::Time>, sign: i64,
     let boundary_90k = boundary.sec * TIME_UNITS_PER_SEC;
 
     // Adjust the first day.
-    let first_day_delta = StreamDayValue{
+    let first_day_delta = StreamDayValue {
         recordings: sign,
         duration: recording::Duration(sign * (cmp::min(r.end.0, boundary_90k) - r.start.0)),
     };
@@ -550,7 +551,7 @@ fn adjust_days(r: Range<recording::Time>, sign: i64,
             return;
         }
     };
-    let second_day_delta = StreamDayValue{
+    let second_day_delta = StreamDayValue {
         recordings: sign,
         duration: recording::Duration(sign * (r.end.0 - boundary_90k)),
     };
@@ -611,6 +612,7 @@ pub struct LockedDatabase {
     open_monotonic: recording::Time,
 
     auth: auth::State,
+    signal: signal::State,
 
     sample_file_dirs_by_id: BTreeMap<i32, SampleFileDir>,
     cameras_by_id: BTreeMap<i32, Camera>,
@@ -1784,6 +1786,18 @@ impl LockedDatabase {
                           req: auth::Request, hash: &auth::SessionHash) -> Result<(), Error> {
         self.auth.revoke_session(&self.conn, reason, detail, req, hash)
     }
+
+    // ---- signal ----
+
+    pub fn signals_by_id(&self) -> &BTreeMap<u32, signal::Signal> { self.signal.signals_by_id() }
+    pub fn signal_types_by_uuid(&self) -> &FnvHashMap<Uuid, signal::Type> {
+        self.signal.types_by_uuid()
+    }
+    pub fn list_changes_by_time(
+        &self, desired_time: Range<recording::Time>, f: &mut FnMut(&signal::ListStateChangesRow))
+        -> Result<(), Error> {
+        self.signal.list_changes_by_time(desired_time, f)
+    }
 }
 
 /// Initializes a database.
@@ -1888,6 +1902,7 @@ impl<C: Clocks + Clone> Database<C> {
             })
         } else { None };
         let auth = auth::State::init(&conn)?;
+        let signal = signal::State::init(&conn)?;
         let db = Database {
             db: Some(Mutex::new(LockedDatabase {
                 conn,
@@ -1896,6 +1911,7 @@ impl<C: Clocks + Clone> Database<C> {
                 open,
                 open_monotonic,
                 auth,
+                signal,
                 sample_file_dirs_by_id: BTreeMap::new(),
                 cameras_by_id: BTreeMap::new(),
                 cameras_by_uuid: BTreeMap::new(),
@@ -2154,20 +2170,20 @@ mod tests {
     fn test_version_too_old() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (2, 0, '');").unwrap();
+        c.execute_batch("delete from version; insert into version values (3, 0, '');").unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(e.to_string().starts_with(
-                "Database schema version 2 is too old (expected 3)"), "got: {:?}", e);
+                "Database schema version 3 is too old (expected 4)"), "got: {:?}", e);
     }
 
     #[test]
     fn test_version_too_new() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (4, 0, '');").unwrap();
+        c.execute_batch("delete from version; insert into version values (5, 0, '');").unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(e.to_string().starts_with(
-                "Database schema version 4 is too new (expected 3)"), "got: {:?}", e);
+                "Database schema version 5 is too new (expected 4)"), "got: {:?}", e);
     }
 
     /// Basic test of running some queries on a fresh database.

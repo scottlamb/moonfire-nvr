@@ -74,6 +74,7 @@ enum Path {
     Request,                                          // "/api/request"
     InitSegment([u8; 20], bool),                      // "/api/init/<sha1>.mp4{.txt}"
     Camera(Uuid),                                     // "/api/cameras/<uuid>/"
+    Signals,                                          // "/api/signals"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
     StreamViewMp4Segment(Uuid, db::StreamType, bool), // "/api/cameras/<uuid>/<type>/view.m4s{.txt}"
@@ -94,9 +95,10 @@ impl Path {
             return Path::TopLevel;
         }
         match path {
-            "/request" => return Path::Request,
             "/login" => return Path::Login,
             "/logout" => return Path::Logout,
+            "/request" => return Path::Request,
+            "/signals" => return Path::Signals,
             _ => {},
         };
         if path.starts_with("/init/") {
@@ -251,6 +253,16 @@ struct ServiceInner {
 
 type ResponseResult = Result<Response<Body>, Response<Body>>;
 
+fn serve_json<T: serde::ser::Serialize>(req: &Request<hyper::Body>, out: &T) -> ResponseResult {
+    let (mut resp, writer) = http_serve::streaming_body(&req).build();
+    resp.headers_mut().insert(header::CONTENT_TYPE,
+                              HeaderValue::from_static("application/json"));
+    if let Some(mut w) = writer {
+        serde_json::to_writer(&mut w, out).map_err(internal_server_err)?;
+    }
+    Ok(resp)
+}
+
 impl ServiceInner {
     fn top_level(&self, req: &Request<::hyper::Body>, session: Option<json::Session>)
                  -> ResponseResult {
@@ -265,34 +277,21 @@ impl ServiceInner {
             }
         }
 
-        let (mut resp, writer) = http_serve::streaming_body(&req).build();
-        resp.headers_mut().insert(header::CONTENT_TYPE,
-                                  HeaderValue::from_static("application/json"));
-        if let Some(mut w) = writer {
-            let db = self.db.lock();
-            serde_json::to_writer(&mut w, &json::TopLevel {
-                    time_zone_name: &self.time_zone_name,
-                    cameras: (&db, days),
-                    session,
-            }).map_err(internal_server_err)?;
-        }
-        Ok(resp)
+        let db = self.db.lock();
+        serve_json(req, &json::TopLevel {
+            time_zone_name: &self.time_zone_name,
+            cameras: (&db, days),
+            session,
+            signals: (&db, days),
+            signal_types: &db,
+        })
     }
 
     fn camera(&self, req: &Request<::hyper::Body>, uuid: Uuid) -> ResponseResult {
-        let (mut resp, writer) = http_serve::streaming_body(&req).build();
-        resp.headers_mut().insert(header::CONTENT_TYPE,
-                                  HeaderValue::from_static("application/json"));
-        if let Some(mut w) = writer {
-            let db = self.db.lock();
-            let camera = db.get_camera(uuid)
-                           .ok_or_else(|| not_found(format!("no such camera {}", uuid)))?;
-            serde_json::to_writer(
-                &mut w,
-                &json::Camera::wrap(camera, &db, true).map_err(internal_server_err)?
-            ).map_err(internal_server_err)?
-        };
-        Ok(resp)
+        let db = self.db.lock();
+        let camera = db.get_camera(uuid)
+                       .ok_or_else(|| not_found(format!("no such camera {}", uuid)))?;
+        serve_json(req, &json::Camera::wrap(camera, &db, true).map_err(internal_server_err)?)
     }
 
     fn stream_recordings(&self, req: &Request<::hyper::Body>, uuid: Uuid, type_: db::StreamType)
@@ -351,13 +350,7 @@ impl ServiceInner {
                 Ok(())
             }).map_err(internal_server_err)?;
         }
-        let (mut resp, writer) = http_serve::streaming_body(&req).build();
-        resp.headers_mut().insert(header::CONTENT_TYPE,
-                                  HeaderValue::from_static("application/json"));
-        if let Some(mut w) = writer {
-            serde_json::to_writer(&mut w, &out).map_err(internal_server_err)?
-        };
-        Ok(resp)
+        serve_json(req, &out)
     }
 
     fn init_segment(&self, sha1: [u8; 20], debug: bool, req: &Request<::hyper::Body>)
@@ -634,6 +627,34 @@ impl ServiceInner {
         }
         *res.status_mut() = StatusCode::NO_CONTENT;
         Ok(res)
+    }
+
+    fn signals(&self, req: &Request<hyper::Body>) -> ResponseResult {
+        let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
+        if let Some(q) = req.uri().query() {
+            for (key, value) in form_urlencoded::parse(q.as_bytes()) {
+                let (key, value) = (key.borrow(), value.borrow());
+                match key {
+                    "startTime90k" => {
+                        time.start = recording::Time::parse(value)
+                            .map_err(|_| bad_req("unparseable startTime90k"))?
+                    },
+                    "endTime90k" => {
+                        time.end = recording::Time::parse(value)
+                            .map_err(|_| bad_req("unparseable endTime90k"))?
+                    },
+                    _ => {},
+                }
+            }
+        }
+
+        let mut signals = json::Signals::default();
+        self.db.lock().list_changes_by_time(time, &mut |c: &db::signal::ListStateChangesRow| {
+            signals.times_90k.push(c.when.0);
+            signals.signal_ids.push(c.signal);
+            signals.states.push(c.state);
+        }).map_err(internal_server_err)?;
+        serve_json(req, &signals)
     }
 
     fn authenticated(&self, req: &Request<hyper::Body>) -> Result<Option<json::Session>, Error> {
@@ -950,6 +971,7 @@ impl ::hyper::service::Service for Service {
                 let s = self.clone();
                 move |(req, b)| { s.0.logout(&req, b) }
             })),
+            Path::Signals => wrap_r(true, self.0.signals(&req)),
             Path::Static => wrap_r(false, self.0.static_file(&req, req.uri().path())),
         }
     }
@@ -1098,6 +1120,7 @@ mod tests {
             Path::NotFound);
         assert_eq!(Path::decode("/api/login"), Path::Login);
         assert_eq!(Path::decode("/api/logout"), Path::Logout);
+        assert_eq!(Path::decode("/api/signals"), Path::Signals);
         assert_eq!(Path::decode("/api/junk"), Path::NotFound);
     }
 

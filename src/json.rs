@@ -31,7 +31,7 @@
 use db::auth::SessionHash;
 use failure::{Error, format_err};
 use serde::Serialize;
-use serde::ser::{SerializeMap, SerializeSeq, Serializer};
+use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
 use std::ops::Not;
 use uuid::Uuid;
@@ -46,7 +46,14 @@ pub struct TopLevel<'a> {
     #[serde(serialize_with = "TopLevel::serialize_cameras")]
     pub cameras: (&'a db::LockedDatabase, bool),
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<Session>,
+
+    #[serde(serialize_with = "TopLevel::serialize_signals")]
+    pub signals: (&'a db::LockedDatabase, bool),
+
+    #[serde(serialize_with = "TopLevel::serialize_signal_types")]
+    pub signal_types: &'a db::LockedDatabase,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,6 +99,44 @@ pub struct Stream<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
     pub days: Option<&'a BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct Signal<'a> {
+    #[serde(serialize_with = "Signal::serialize_cameras")]
+    pub cameras: (&'a db::Signal, &'a db::LockedDatabase),
+    pub source: Uuid,
+    pub type_: Uuid,
+    pub short_name: &'a str,
+}
+
+#[derive(Default, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct Signals {
+    pub times_90k: Vec<i64>,
+    pub signal_ids: Vec<u32>,
+    pub states: Vec<u16>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct SignalType<'a> {
+    pub uuid: Uuid,
+
+    #[serde(serialize_with = "SignalType::serialize_states")]
+    pub states: &'a db::signal::Type,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct SignalTypeState<'a> {
+    value: u16,
+    name: &'a str,
+
+    #[serde(skip_serializing_if = "Not::not")]
+    motion: bool,
+    color: &'a str,
 }
 
 impl<'a> Camera<'a> {
@@ -158,6 +203,66 @@ impl<'a> Stream<'a> {
     }
 }
 
+impl<'a> Signal<'a> {
+    pub fn wrap(s: &'a db::Signal, db: &'a db::LockedDatabase, _include_days: bool) -> Self {
+        Signal {
+            cameras: (s, db),
+            source: s.source,
+            type_: s.type_,
+            short_name: &s.short_name,
+        }
+    }
+
+    fn serialize_cameras<S>(cameras: &(&db::Signal, &db::LockedDatabase),
+                         serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        let (s, db) = cameras;
+        let mut map = serializer.serialize_map(Some(s.cameras.len()))?;
+        for sc in &s.cameras {
+            let c = db.cameras_by_id()
+                      .get(&sc.camera_id)
+                      .ok_or_else(|| S::Error::custom(format!("signal has missing camera id {}",
+                                                              sc.camera_id)))?;
+            map.serialize_key(&c.uuid)?;
+            map.serialize_value(match sc.type_ {
+                db::signal::SignalCameraType::Direct => "direct",
+                db::signal::SignalCameraType::Indirect => "indirect",
+            })?;
+        }
+        map.end()
+    }
+}
+
+impl<'a> SignalType<'a> {
+    pub fn wrap(uuid: Uuid, type_: &'a db::signal::Type) -> Self {
+        SignalType {
+            uuid,
+            states: type_,
+        }
+    }
+
+    fn serialize_states<S>(type_: &db::signal::Type,
+                            serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        let mut seq = serializer.serialize_seq(Some(type_.states.len()))?;
+        for s in &type_.states {
+            seq.serialize_element(&SignalTypeState::wrap(s))?;
+        }
+        seq.end()
+    }
+}
+
+impl<'a> SignalTypeState<'a> {
+    pub fn wrap(s: &'a db::signal::TypeState) -> Self {
+        SignalTypeState {
+            value: s.value,
+            name: &s.name,
+            motion: s.motion,
+            color: &s.color,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all="camelCase")]
 struct StreamDayValue {
@@ -175,7 +280,33 @@ impl<'a> TopLevel<'a> {
         let cs = db.cameras_by_id();
         let mut seq = serializer.serialize_seq(Some(cs.len()))?;
         for (_, c) in cs {
-            seq.serialize_element(&Camera::wrap(c, db, include_days).unwrap())?;  // TODO: no unwrap.
+            seq.serialize_element(
+                &Camera::wrap(c, db, include_days).map_err(|e| S::Error::custom(e))?)?;
+        }
+        seq.end()
+    }
+
+    /// Serializes signals as a list (rather than a map), optionally including the `days` field.
+    fn serialize_signals<S>(signals: &(&db::LockedDatabase, bool),
+                            serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer {
+        let (db, include_days) = *signals;
+        let ss = db.signals_by_id();
+        let mut seq = serializer.serialize_seq(Some(ss.len()))?;
+        for (_, s) in ss {
+            seq.serialize_element(&Signal::wrap(s, db, include_days))?;
+        }
+        seq.end()
+    }
+
+    /// Serializes signals as a list (rather than a map), optionally including the `days` field.
+    fn serialize_signal_types<S>(db: &db::LockedDatabase,
+                                 serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer {
+        let ss = db.signal_types_by_uuid();
+        let mut seq = serializer.serialize_seq(Some(ss.len()))?;
+        for (u, t) in ss {
+            seq.serialize_element(&SignalType::wrap(*u, t))?;
         }
         seq.end()
     }

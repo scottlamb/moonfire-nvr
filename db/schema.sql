@@ -396,5 +396,88 @@ create table user_session (
 
 create index user_session_uid on user_session (user_id);
 
+create table signal (
+  id integer primary key,
+
+  -- a uuid describing the originating object, such as the uuid of the camera
+  -- for built-in motion detection. There will be a JSON interface for adding
+  -- events; it will require this UUID to be supplied. An external uuid might
+  -- indicate "my house security system's zone 23".
+  source_uuid blob not null check (length(source_uuid) = 16),
+
+  -- a uuid describing the type of event. A registry (TBD) will list built-in
+  -- supported types, such as "Hikvision on-camera motion detection", or
+  -- "ONVIF on-camera motion detection". External programs can use their own
+  -- uuids, such as "Elk security system watcher".
+  type_uuid blob not null check (length(type_uuid) = 16),
+
+  -- a short human-readable description of the event to use in mouseovers or event
+  -- lists, such as "driveway motion" or "front door open".
+  short_name not null,
+
+  unique (source_uuid, type_uuid)
+);
+
+-- e.g. "moving/still", "disarmed/away/stay", etc.
+-- TODO: just do a protobuf for each type? might be simpler, more flexible.
+create table signal_type_enum (
+  type_uuid blob not null check (length(type_uuid) = 16),
+  value integer not null check (value > 0 and value < 16),
+  name text not null,
+
+  -- true/1 iff this signal value should be considered "motion" for directly associated cameras.
+  motion int not null check (motion in (0, 1)) default 0,
+
+  color text
+);
+
+-- Associations between event sources and cameras.
+-- For example, if two cameras have overlapping fields of view, they might be
+-- configured such that each camera is associated with both its own motion and
+-- the other camera's motion.
+create table signal_camera (
+  signal_id integer references signal (id),
+  camera_id integer references camera (id),
+
+  -- type:
+  --
+  -- 0 means direct association, as if the event source if the camera's own
+  -- motion detection. Here are a couple ways this could be used:
+  --
+  -- * when viewing the camera, hotkeys to go to the start of the next or
+  --   previous event should respect this event.
+  -- * a list of events might include the recordings associated with the
+  --   camera in the same timespan.
+  --
+  -- 1 means indirect association. A screen associated with the camera should
+  -- given some indication of this event, but there should be no assumption
+  -- that the camera will have a direct view of the event. For example, all
+  -- cameras might be indirectly associated with a doorknob press. Cameras at
+  -- the back of the house shouldn't be expected to have a direct view of this
+  -- event, but motion events shortly afterward might warrant extra scrutiny.
+  type integer not null,
+
+  primary key (signal_id, camera_id)
+) without rowid;
+
+-- State of signals as of a given timestamp.
+create table signal_state (
+  -- seconds since 1970-01-01 00:00:00 UTC.
+  time_sec integer primary key,
+
+  -- Changes at this timestamp.
+  --
+  -- It's possible for a single signal to have multiple states; this means
+  -- that the signal held a state only momentarily.
+  --
+  -- A blob of varints representing a list of (signal number delta, state)
+  -- pairs. For example,
+  -- input signals: 1         3         3         200 (must be sorted)
+  -- deltas:        1         2         0         197 (must be non-negative)
+  -- states:             1         1         0              2
+  -- varint:        \x01 \x01 \x02 \x01 \x00 \x00 \xc5 \x01 \x02
+  changes blob
+);
+
 insert into version (id, unix_time,                           notes)
-             values (3,  cast(strftime('%s', 'now') as int), 'db creation');
+             values (4,  cast(strftime('%s', 'now') as int), 'db creation');
