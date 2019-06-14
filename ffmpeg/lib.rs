@@ -88,7 +88,7 @@ extern "C" {
     static moonfire_ffmpeg_compiled_libavformat_version: libc::c_int;
     static moonfire_ffmpeg_compiled_libavutil_version: libc::c_int;
     static moonfire_ffmpeg_av_dict_ignore_suffix: libc::c_int;
-    static moonfire_ffmpeg_av_nopts_value: libc::int64_t;
+    static moonfire_ffmpeg_av_nopts_value: i64;
 
     static moonfire_ffmpeg_av_codec_id_h264: libc::c_int;
     static moonfire_ffmpeg_avmedia_type_video: libc::c_int;
@@ -100,11 +100,11 @@ extern "C" {
     fn moonfire_ffmpeg_packet_alloc() -> *mut AVPacket;
     fn moonfire_ffmpeg_packet_free(p: *mut AVPacket);
     fn moonfire_ffmpeg_packet_is_key(p: *const AVPacket) -> bool;
-    fn moonfire_ffmpeg_packet_pts(p: *const AVPacket) -> libc::int64_t;
-    fn moonfire_ffmpeg_packet_dts(p: *const AVPacket) -> libc::int64_t;
+    fn moonfire_ffmpeg_packet_pts(p: *const AVPacket) -> i64;
+    fn moonfire_ffmpeg_packet_dts(p: *const AVPacket) -> i64;
     fn moonfire_ffmpeg_packet_duration(p: *const AVPacket) -> libc::c_int;
-    fn moonfire_ffmpeg_packet_set_pts(p: *mut AVPacket, pts: libc::int64_t);
-    fn moonfire_ffmpeg_packet_set_dts(p: *mut AVPacket, dts: libc::int64_t);
+    fn moonfire_ffmpeg_packet_set_pts(p: *mut AVPacket, pts: i64);
+    fn moonfire_ffmpeg_packet_set_dts(p: *mut AVPacket, dts: i64);
     fn moonfire_ffmpeg_packet_set_duration(p: *mut AVPacket, dur: libc::c_int);
     fn moonfire_ffmpeg_packet_data(p: *const AVPacket) -> DataLen;
     fn moonfire_ffmpeg_packet_stream_index(p: *const AVPacket) -> libc::c_uint;
