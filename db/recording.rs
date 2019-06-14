@@ -45,13 +45,16 @@ pub const DESIRED_RECORDING_DURATION: i64 = 60 * TIME_UNITS_PER_SEC;
 pub const MAX_RECORDING_DURATION: i64 = 5 * 60 * TIME_UNITS_PER_SEC;
 
 /// A time specified as 90,000ths of a second since 1970-01-01 00:00:00 UTC.
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Time(pub i64);
 
 impl Time {
     pub fn new(tm: time::Timespec) -> Self {
         Time(tm.sec * TIME_UNITS_PER_SEC + tm.nsec as i64 * TIME_UNITS_PER_SEC / 1_000_000_000)
     }
+
+    pub const fn min_value() -> Self { Time(i64::min_value()) }
+    pub const fn max_value() -> Self { Time(i64::max_value()) }
 
     /// Parses a time as either 90,000ths of a second since epoch or a RFC 3339-like string.
     ///
@@ -121,6 +124,7 @@ impl Time {
         Ok(Time(sec * TIME_UNITS_PER_SEC + fraction))
     }
 
+    /// Convert to unix seconds by floor method (rounding down).
     pub fn unix_seconds(&self) -> i64 { self.0 / TIME_UNITS_PER_SEC }
 }
 
@@ -141,6 +145,13 @@ impl ops::Add<Duration> for Time {
 impl ops::Sub<Duration> for Time {
     type Output = Time;
     fn sub(self, rhs: Duration) -> Time { Time(self.0 - rhs.0) }
+}
+
+impl fmt::Debug for Time {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Write both the raw and display forms.
+        write!(f, "{} /* {} */", self.0, self)
+    }
 }
 
 impl fmt::Display for Time {

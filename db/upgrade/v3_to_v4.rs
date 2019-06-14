@@ -59,7 +59,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         ) without rowid;
 
         create table signal_state (
-          time_sec integer primary key,
+          time_90k integer primary key,
           changes blob
         );
     "#)?;

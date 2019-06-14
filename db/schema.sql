@@ -460,22 +460,20 @@ create table signal_camera (
   primary key (signal_id, camera_id)
 ) without rowid;
 
--- State of signals as of a given timestamp.
-create table signal_state (
-  -- seconds since 1970-01-01 00:00:00 UTC.
-  time_sec integer primary key,
+-- Changes to signals as of a given timestamp.
+create table signal_change (
+  -- Event time, in 90 kHz units since 1970-01-01 00:00:00Z excluding leap seconds.
+  time_90k integer primary key,
 
   -- Changes at this timestamp.
   --
-  -- It's possible for a single signal to have multiple states; this means
-  -- that the signal held a state only momentarily.
-  --
-  -- A blob of varints representing a list of (signal number delta, state)
-  -- pairs. For example,
-  -- input signals: 1         3         3         200 (must be sorted)
-  -- deltas:        1         2         0         197 (must be non-negative)
-  -- states:             1         1         0              2
-  -- varint:        \x01 \x01 \x02 \x01 \x00 \x00 \xc5 \x01 \x02
+  -- A blob of varints representing a list of
+  -- (signal number - next allowed, state) pairs, where signal number is
+  -- non-decreasing. For example,
+  -- input signals: 1         3         200 (must be sorted)
+  -- delta:         1         1         196 (must be non-negative)
+  -- states:             1         1              2
+  -- varint:        \x01 \x01 \x01 \x01 \xc4 \x01 \x02
   changes blob
 );
 

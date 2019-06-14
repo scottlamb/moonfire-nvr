@@ -967,6 +967,7 @@ impl LockedDatabase {
             }
         }
         self.auth.flush(&tx)?;
+        self.signal.flush(&tx)?;
         tx.commit()?;
 
         // Process delete_garbage.
@@ -1010,6 +1011,7 @@ impl LockedDatabase {
             s.range = new_range;
         }
         self.auth.post_flush();
+        self.signal.post_flush();
         self.flush_count += 1;
         info!("Flush {} (why: {}): added {} recordings ({}), deleted {} ({}), marked {} ({}) GCed.",
               self.flush_count, reason, added.len(), added.iter().join(", "), deleted.len(),
@@ -1794,9 +1796,13 @@ impl LockedDatabase {
         self.signal.types_by_uuid()
     }
     pub fn list_changes_by_time(
-        &self, desired_time: Range<recording::Time>, f: &mut FnMut(&signal::ListStateChangesRow))
-        -> Result<(), Error> {
+        &self, desired_time: Range<recording::Time>, f: &mut FnMut(&signal::ListStateChangesRow)) {
         self.signal.list_changes_by_time(desired_time, f)
+    }
+    pub fn update_signals(
+        &mut self, when: Range<recording::Time>, signals: &[u32], states: &[u16])
+        -> Result<(), Error> {
+        self.signal.update_signals(when, signals, states)
     }
 }
 

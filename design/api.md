@@ -525,52 +525,38 @@ This represents the following observations:
 
 ### `POST /api/signals`
 
-**status: unimplemented**
-
 Alters the state of a signal.
 
-Signal state can be broken into two parts: observed history and predicted
-future. Observed history is written to the database on next flush.
-Predicted future is only retained in RAM and returned on `GET` requests on the
-near future. This avoids having to display the "unknown" state when it's very
-likely that the state has not changed since the most recent update.
-
-A typical request will add observed history from the time of a recent previous
-prediction until now, and add another prediction. Following `GET /api/signals`
-requests will return the new prediction until a pre-determined expiration
-time. The client typically will send a following request before this
-expiration time so that history is recorded and the UI never displays
-`unknown` when the signal is being actively managed.
+A typical client might be a subscriber of a camera's built-in motion
+detection event stream or of a security system's zone status event stream.
+It makes a request on every event or on every 30 second timeout, predicting
+that the state will last for a minute. This prediction may be changed later.
+Writing to the near future in this way ensures that the UI never displays
+`unknown` when the client is actively managing the signal.
 
 Some requests may instead backfill earlier history, such as when a video
 analytics client starts up and analyzes all video segments recorded since it
-last ran. These will specify beginning and end times for the observed history
-and not make a prediction.
+last ran. These will specify beginning and end times.
 
 The request should have an `application/json` body describing the change to
 make. It should be a dict with these attributes:
 
-*   `signalIds`: a list of signal ids to change.
-*   `observedStates`: (optional) a list (one entry per `signalIds` entry) of
-    observed states to set.
-*   `predictedStates`: (optional) a list (one entry per `signalIds` entry)
-    of predictions to make. If absent, assumed to match `observedStates`.
-    Only used if `predictedDur90k` is non-zero.
-*   `observedStartTime90k` (optional): if absent, assumed to be now. Otherwise
-    is typically a time from an earlier response.
-*   `observedEndTime90k` (optional): if absent, assumed to be now.
-*   `predictionDur90k` (optional): (only allowed when `endTime90k` is absent)
-    additional time in which the current state should seem to "linger" if no
-    further updates are received. a `GET /api/signals` request until this time
-    will reflect the curent
-    between the time this request
+*   `signalIds`: a list of signal ids to change. Must be sorted.
+*   `states`: a list (one per `signalIds` entry) of states to set.
+*   `startTime90k`: (optional) The start of the observation in 90 kHz units
+    since 1970-01-01 00:00:00 UTC; commonly taken from an earlier response. If
+    absent, assumed to be now.
+*   `endBase`: if `epoch`, `relEndTime90k` is relative to 1970-01-01 00:00:00
+    UTC. If `now`, epoch is relative to the current time.
+*   `relEndTime90k` (optional): The end of the observation, relative to the
+    specified base. Note this time is allowed to be in the future.
 
 The response will be an `application/json` body dict with the following
 attributes:
 
-*   `time90k`: the current time. When the request's `observedStartTime90k`
-    and/or `observedEndTime90k` were absent, this is needed to later upgrade
-    predictions to history seamlessly.
+*   `time90k`: the current time. When the request's `startTime90k` is absent
+    and/or its `endBase` is `now`, this is needed to know the effect of the
+    earlier request.
 
 Example request sequence:
 
@@ -584,9 +570,10 @@ Request:
 
 ```json
 {
-  'signalIds': [1],
-  'predictedStates': [2],
-  'predictionDur90k': 5400000
+  "signalIds": [1],
+  "states": [2],
+  "endBase": "now",
+  "relEndTime90k": 5400000
 }
 ```
 
@@ -594,23 +581,23 @@ Response:
 
 ```json
 {
-  'time90k': 140067468000000
+  "time90k": 140067468000000
 }
 ```
 
 #### Request 2
 
 30 seconds later (half the prediction interval), the client still observes
-motion. It records the previous prediction and predicts the motion will continue.
+motion. It leaves the prior data alone and predicts the motion will continue.
 
 Request:
 
 ```json
 {
-  'signalIds': [1],
-  'observedStates': [2],
-  'observedStartTime90k': 140067468000000,
-  'predictionDur90k': 5400000
+  "signalIds": [1],
+  "states": [2],
+  "endBase": "now",
+  "relEndTime90k": 5400000
 }
 ```
 
@@ -618,24 +605,24 @@ Response:
 
 ```json
 {
-  'time90k': 140067470700000
+  "time90k": 140067470700000
 }
 ```
 
 ### Request 3
 
-5 seconds later, the client observes motion has ended. It records the history
-and predicts no more motion.
+5 seconds later, the client observes motion has ended. It leaves the prior
+data alone and predicts no more motion.
 
 Request:
 
 ```json
 {
-  'signalIds': [1],
-  'observedStates': [2],
-  'predictedStates': [1],
-  'observedStartTime90k': 140067470700000,
-  'predictionDur90k': 5400000
+  "signalIds": [1],
+  "states": [2],
+  "endBase": "now",
+  "relEndTime90k": 5400000
+  }
 }
 ```
 
@@ -643,7 +630,7 @@ Response:
 
 ```json
 {
-  'time90k': 140067471150000
+  "time90k": 140067471150000
 }
 ```
 

@@ -609,7 +609,11 @@ impl State {
         Ok(())
     }
 
-    pub fn flush(&mut self, tx: &Transaction) -> Result<(), Error> {
+    /// Flushes all pending database changes to the given transaction.
+    ///
+    /// The caller is expected to call `post_flush` afterward if the transaction is
+    /// successfully committed.
+    pub fn flush(&self, tx: &Transaction) -> Result<(), Error> {
         let mut u_stmt = tx.prepare(r#"
             update user
             set
@@ -655,6 +659,9 @@ impl State {
         Ok(())
     }
 
+    /// Marks that the previous `flush` was completed successfully.
+    ///
+    /// See notes there.
     pub fn post_flush(&mut self) {
         for (_, u) in &mut self.users_by_id {
             u.dirty = false;

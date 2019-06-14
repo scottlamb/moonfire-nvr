@@ -297,7 +297,7 @@ impl ServiceInner {
     fn stream_recordings(&self, req: &Request<::hyper::Body>, uuid: Uuid, type_: db::StreamType)
                          -> ResponseResult {
         let (r, split) = {
-            let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
+            let mut time = recording::Time::min_value() .. recording::Time::max_value();
             let mut split = recording::Duration(i64::max_value());
             if let Some(q) = req.uri().query() {
                 for (key, value) in form_urlencoded::parse(q.as_bytes()) {
@@ -630,7 +630,7 @@ impl ServiceInner {
     }
 
     fn signals(&self, req: &Request<hyper::Body>) -> ResponseResult {
-        let mut time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
+        let mut time = recording::Time::min_value() .. recording::Time::max_value();
         if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value) = (key.borrow(), value.borrow());
@@ -653,7 +653,7 @@ impl ServiceInner {
             signals.times_90k.push(c.when.0);
             signals.signal_ids.push(c.signal);
             signals.states.push(c.state);
-        }).map_err(internal_server_err)?;
+        });
         serve_json(req, &signals)
     }
 
