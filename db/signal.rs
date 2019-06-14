@@ -290,7 +290,7 @@ impl State {
                     let states = self.types_by_uuid.get(&s.type_)
                                                    .map(|t| &t.states)
                                                    .unwrap_or(&empty);
-                    if signal != 0 && states.binary_search_by_key(&state, |s| s.value).is_err() {
+                    if state != 0 && states.binary_search_by_key(&state, |s| s.value).is_err() {
                         bail_t!(FailedPrecondition, "signal {} specifies unknown state {}",
                                 signal, state);
                     }
