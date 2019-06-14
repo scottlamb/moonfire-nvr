@@ -122,7 +122,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
     tx.execute(r#"
         insert into sample_file_dir (path,  uuid, last_complete_open_id)
                              values (?,     ?,    ?)
-    "#, &[&sample_file_path as &ToSql, &dir_uuid_bytes, &open_id])?;
+    "#, &[&sample_file_path as &dyn ToSql, &dir_uuid_bytes, &open_id])?;
 
     tx.execute_batch(r#"
         drop table reserved_sample_files;
@@ -298,7 +298,7 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
         from
           (select count(*) as c from recording) a,
           (select count(*) as c from reserved_sample_files) b;
-    "#, &[] as &[&ToSql], |r| r.get(0))?;
+    "#, &[] as &[&dyn ToSql], |r| r.get(0))?;
     let mut files = ::fnv::FnvHashSet::with_capacity_and_hasher(n as usize, Default::default());
     for e in fs::read_dir(sample_file_path)? {
         let e = e?;
@@ -329,7 +329,7 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
     // Iterate through the database and check that everything has a matching file.
     {
         let mut stmt = tx.prepare(r"select sample_file_uuid from recording_playback")?;
-        let mut rows = stmt.query(&[] as &[&ToSql])?;
+        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
         while let Some(row) = rows.next()? {
             let uuid: crate::db::FromSqlUuid = row.get(0)?;
             if !files.remove(&uuid.0) {
@@ -339,7 +339,7 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
     }
 
     let mut stmt = tx.prepare(r"select uuid from reserved_sample_files")?;
-    let mut rows = stmt.query(&[] as &[&ToSql])?;
+    let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
     while let Some(row) = rows.next()? {
         let uuid: crate::db::FromSqlUuid = row.get(0)?;
         files.remove(&uuid.0);
@@ -366,7 +366,7 @@ fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
     let mut insert = tx.prepare(r#"
         insert into video_sample_entry values (:id, :sha1, :width, :height, :rfc6381_codec, :data)
     "#)?;
-    let mut rows = select.query(&[] as &[&ToSql])?;
+    let mut rows = select.query(&[] as &[&dyn ToSql])?;
     while let Some(row) = rows.next()? {
         let data: Vec<u8> = row.get(4)?;
         insert.execute_named(&[

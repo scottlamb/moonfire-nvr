@@ -39,8 +39,8 @@ use std::error::Error as StdError;
 pub struct Chunk(ARefs<'static, [u8]>);
 
 //pub type CompatError = ::failure::Compat<Error>;
-pub type BoxedError = Box<StdError + Send + Sync>;
-pub type BodyStream = Box<Stream<Item = Chunk, Error = BoxedError> + Send + 'static>;
+pub type BoxedError = Box<dyn StdError + Send + Sync>;
+pub type BodyStream = Box<dyn Stream<Item = Chunk, Error = BoxedError> + Send + 'static>;
 
 pub fn wrap_error(e: Error) -> BoxedError {
     Box::new(e.compat())

@@ -265,7 +265,7 @@ pub fn run() -> Result<(), Error> {
     // Start the web interface.
     let addr = args.flag_http_addr.parse().unwrap();
     let server = ::hyper::server::Server::bind(&addr).tcp_nodelay(true).serve(
-        move || Ok::<_, Box<StdError + Send + Sync>>(s.clone()));
+        move || Ok::<_, Box<dyn StdError + Send + Sync>>(s.clone()));
 
     let shutdown = setup_shutdown().shared();
 

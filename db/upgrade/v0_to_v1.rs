@@ -142,7 +142,7 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
       insert into recording_playback values (:composite_id, :sample_file_uuid, :sample_file_sha1,
                                              :video_index)
     "#)?;
-    let mut rows = select.query(&[] as &[&ToSql])?;
+    let mut rows = select.query(&[] as &[&dyn ToSql])?;
     let mut camera_state: HashMap<i32, CameraState> = HashMap::new();
     while let Some(row) = rows.next()? {
         let camera_id: i32 = row.get(0)?;
@@ -216,7 +216,7 @@ fn fill_camera(tx: &rusqlite::Transaction, camera_state: HashMap<i32, CameraStat
       insert into camera values (:id, :uuid, :short_name, :description, :host, :username, :password,
       :main_rtsp_path, :sub_rtsp_path, :retain_bytes, :next_recording_id)
     "#)?;
-    let mut rows = select.query(&[] as &[&ToSql])?;
+    let mut rows = select.query(&[] as &[&dyn ToSql])?;
     while let Some(row) = rows.next()? {
         let id: i32 = row.get(0)?;
         let uuid: Vec<u8> = row.get(1)?;

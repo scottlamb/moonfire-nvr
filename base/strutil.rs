@@ -44,8 +44,8 @@ pub fn hex(raw: &[u8]) -> String {
 /// Returns [0, 16) or error.
 fn dehex_byte(hex_byte: u8) -> Result<u8, ()> {
     match hex_byte {
-        b'0' ... b'9' => Ok(hex_byte - b'0'),
-        b'a' ... b'f' => Ok(hex_byte - b'a' + 10),
+        b'0' ..= b'9' => Ok(hex_byte - b'0'),
+        b'a' ..= b'f' => Ok(hex_byte - b'a' + 10),
         _ => Err(()),
     }
 }

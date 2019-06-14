@@ -123,7 +123,7 @@ const LIST_OLDEST_RECORDINGS_SQL: &'static str = r#"
 /// function. Given that the function is called with the database lock held, it should be quick.
 pub(crate) fn list_recordings_by_time(
     conn: &rusqlite::Connection, stream_id: i32, desired_time: Range<recording::Time>,
-    f: &mut FnMut(db::ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
+    f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_TIME_SQL)?;
     let rows = stmt.query_named(&[
         (":stream_id", &stream_id),
@@ -135,7 +135,7 @@ pub(crate) fn list_recordings_by_time(
 /// Lists the specified recordings in ascending order by id.
 pub(crate) fn list_recordings_by_id(
     conn: &rusqlite::Connection, stream_id: i32, desired_ids: Range<i32>,
-    f: &mut FnMut(db::ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
+    f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_ID_SQL)?;
     let rows = stmt.query_named(&[
         (":start", &CompositeId::new(stream_id, desired_ids.start).0),
@@ -145,7 +145,7 @@ pub(crate) fn list_recordings_by_id(
 }
 
 fn list_recordings_inner(mut rows: rusqlite::Rows,
-                         f: &mut FnMut(db::ListRecordingsRow) -> Result<(), Error>)
+                         f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>)
                          -> Result<(), Error> {
     while let Some(row) = rows.next()? {
         f(db::ListRecordingsRow {
@@ -165,7 +165,7 @@ fn list_recordings_inner(mut rows: rusqlite::Rows,
 }
 
 pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
-    Ok(conn.query_row("select uuid from meta", &[] as &[&ToSql], |row| -> rusqlite::Result<Uuid> {
+    Ok(conn.query_row("select uuid from meta", &[] as &[&dyn ToSql], |row| -> rusqlite::Result<Uuid> {
         let uuid: FromSqlUuid = row.get(0)?;
         Ok(uuid.0)
     })?)
@@ -266,7 +266,7 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
         (":start", &ids.start.0),
         (":end", &ids.end.0),
     ])?;
-    let p: &[(&str, &rusqlite::types::ToSql)] = &[
+    let p: &[(&str, &dyn rusqlite::types::ToSql)] = &[
         (":start", &ids.start.0),
         (":end", &ids.end.0),
     ];
@@ -360,7 +360,7 @@ pub(crate) fn list_garbage(conn: &rusqlite::Connection, dir_id: i32)
 /// Lists the oldest recordings for a stream, starting with the given id.
 /// `f` should return true as long as further rows are desired.
 pub(crate) fn list_oldest_recordings(conn: &rusqlite::Connection, start: CompositeId,
-                                     f: &mut FnMut(db::ListOldestRecordingsRow) -> bool)
+                                     f: &mut dyn FnMut(db::ListOldestRecordingsRow) -> bool)
     -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_OLDEST_RECORDINGS_SQL)?;
     let mut rows = stmt.query_named(&[

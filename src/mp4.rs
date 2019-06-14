@@ -641,7 +641,7 @@ impl slices::Slice for Slice {
 
     fn end(&self) -> u64 { return self.0 & 0xFF_FF_FF_FF_FF }
     fn get_range(&self, f: &File, range: Range<u64>, len: u64)
-                 -> Box<Stream<Item = Self::Chunk, Error = BoxedError> + Send> {
+                 -> Box<dyn Stream<Item = Self::Chunk, Error = BoxedError> + Send> {
         trace!("getting mp4 slice {:?}'s range {:?} / {}", self, range, len);
         let p = self.p();
         let res = match self.t() {
@@ -1518,7 +1518,7 @@ impl http_serve::Entity for File {
     fn etag(&self) -> Option<HeaderValue> { Some(self.0.etag.clone()) }
     fn len(&self) -> u64 { self.0.slices.len() }
     fn get_range(&self, range: Range<u64>)
-                 -> Box<Stream<Item = Self::Data, Error = Self::Error> + Send> {
+                 -> Box<dyn Stream<Item = Self::Data, Error = Self::Error> + Send> {
         self.0.slices.get_range(self, range)
     }
 }

@@ -798,7 +798,7 @@ impl Service {
     ///
     /// Use with `and_then` to chain logic which consumes the form body.
     fn with_form_body(&self, mut req: Request<hyper::Body>)
-                      -> Box<Future<Item = (Request<hyper::Body>, hyper::Chunk),
+                      -> Box<dyn Future<Item = (Request<hyper::Body>, hyper::Chunk),
                                     Error = Response<Body>> +
                              Send + 'static> {
         if *req.method() != http::method::Method::POST {
@@ -911,11 +911,11 @@ impl ::hyper::service::Service for Service {
     type ReqBody = ::hyper::Body;
     type ResBody = Body;
     type Error = BoxedError;
-    type Future = Box<Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send + 'static>;
+    type Future = Box<dyn Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send + 'static>;
 
     fn call(&mut self, req: Request<::hyper::Body>) -> Self::Future {
         fn wrap<R>(is_private: bool, r: R)
-               -> Box<Future<Item = Response<Body>, Error = BoxedError> + Send + 'static>
+               -> Box<dyn Future<Item = Response<Body>, Error = BoxedError> + Send + 'static>
         where R: Future<Item = Response<Body>, Error = Response<Body>> + Send + 'static {
             return Box::new(r.or_else(|e| Ok(e)).map(move |mut r| {
                 if is_private {
@@ -926,7 +926,7 @@ impl ::hyper::service::Service for Service {
         }
 
         fn wrap_r(is_private: bool, r: ResponseResult)
-               -> Box<Future<Item = Response<Body>, Error = BoxedError> + Send + 'static> {
+               -> Box<dyn Future<Item = Response<Body>, Error = BoxedError> + Send + 'static> {
             return wrap(is_private, future::result(r))
         }
 
@@ -1009,7 +1009,7 @@ mod tests {
             }).unwrap();
             let server = hyper::server::Server::bind(&addr)
                 .tcp_nodelay(true)
-                .serve(move || Ok::<_, Box<StdError + Send + Sync>>(service.clone()));
+                .serve(move || Ok::<_, Box<dyn StdError + Send + Sync>>(service.clone()));
             let addr = server.local_addr();  // resolve port 0 to a real ephemeral port number.
             let handle = ::std::thread::spawn(move || {
                 ::tokio::run(server.with_graceful_shutdown(shutdown_rx).map_err(|e| panic!(e)));

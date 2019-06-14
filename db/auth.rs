@@ -346,7 +346,7 @@ impl State {
             from
                 user
         "#)?;
-        let mut rows = stmt.query(&[] as &[&ToSql])?;
+        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let name: String = row.get(1)?;
@@ -596,7 +596,7 @@ impl State {
             let addr = req.addr_buf();
             let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
             stmt.execute(&[
-                &req.when_sec as &ToSql,
+                &req.when_sec as &dyn ToSql,
                 &req.user_agent,
                 &addr,
                 &(reason as i32),

@@ -43,7 +43,7 @@ pub static ROTATE_INTERVAL_SEC: i64 = 60;
 
 /// Common state that can be used by multiple `Streamer` instances.
 pub struct Environment<'a, 'b, C, S> where C: Clocks + Clone, S: 'a + stream::Stream {
-    pub opener: &'a stream::Opener<S>,
+    pub opener: &'a dyn stream::Opener<S>,
     pub db: &'b Arc<Database<C>>,
     pub shutdown: &'b Arc<AtomicBool>,
 }
@@ -57,7 +57,7 @@ pub struct Streamer<'a, C, S> where C: Clocks + Clone, S: 'a + stream::Stream {
     db: Arc<Database<C>>,
     dir: Arc<dir::SampleFileDir>,
     syncer_channel: writer::SyncerChannel<::std::fs::File>,
-    opener: &'a stream::Opener<S>,
+    opener: &'a dyn stream::Opener<S>,
     stream_id: i32,
     short_name: String,
     url: String,

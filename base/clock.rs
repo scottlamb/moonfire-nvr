@@ -56,7 +56,7 @@ pub trait Clocks : Send + Sync + 'static {
                        timeout: StdDuration) -> Result<T, mpsc::RecvTimeoutError>;
 }
 
-pub fn retry_forever<C, T, E>(clocks: &C, f: &mut FnMut() -> Result<T, E>) -> T
+pub fn retry_forever<C, T, E>(clocks: &C, f: &mut dyn FnMut() -> Result<T, E>) -> T
 where C: Clocks, E: Into<Error> {
     loop {
         let e = match f() {

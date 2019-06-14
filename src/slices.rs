@@ -52,7 +52,7 @@ pub trait Slice : fmt::Debug + Sized + Sync + 'static {
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
     fn get_range(&self, ctx: &Self::Ctx, r: Range<u64>, len: u64)
-                 -> Box<Stream<Item = Self::Chunk, Error = BoxedError> + Send>;
+                 -> Box<dyn Stream<Item = Self::Chunk, Error = BoxedError> + Send>;
 
     fn get_slices(ctx: &Self::Ctx) -> &Slices<Self>;
 }
@@ -111,7 +111,7 @@ impl<S> Slices<S> where S: Slice {
     /// Writes `range` to `out`.
     /// This interface mirrors `http_serve::Entity::write_to`, with the additional `ctx` argument.
     pub fn get_range(&self, ctx: &S::Ctx, range: Range<u64>)
-                     -> Box<Stream<Item = S::Chunk, Error = BoxedError> + Send> {
+                     -> Box<dyn Stream<Item = S::Chunk, Error = BoxedError> + Send> {
         if range.start > range.end || range.end > self.len {
             return Box::new(stream::once(Err(wrap_error(format_err_t!(
                         Internal, "Bad range {:?} for slice of length {}", range, self.len)))));
@@ -176,7 +176,7 @@ mod tests {
         fn end(&self) -> u64 { self.end }
 
         fn get_range(&self, _ctx: &&'static Slices<FakeSlice>, r: Range<u64>, _l: u64)
-                     -> Box<Stream<Item = FakeChunk, Error = BoxedError> + Send> {
+                     -> Box<dyn Stream<Item = FakeChunk, Error = BoxedError> + Send> {
             Box::new(stream::once(Ok(FakeChunk{slice: self.name, range: r})))
         }
 

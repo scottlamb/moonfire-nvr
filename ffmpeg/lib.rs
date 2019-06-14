@@ -323,7 +323,7 @@ impl std::error::Error for Error {
         "ffmpeg error"
     }
 
-    fn cause(&self) -> Option<&std::error::Error> { None }
+    fn cause(&self) -> Option<&dyn std::error::Error> { None }
 }
 
 impl fmt::Display for Error {

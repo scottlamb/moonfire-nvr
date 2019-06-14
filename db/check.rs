@@ -58,7 +58,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
         "#)?;
         let mut garbage_stmt = conn.prepare_cached(
             "select composite_id from garbage where sample_file_dir_id = ?")?;
-        let mut rows = dir_stmt.query(&[] as &[&ToSql])?;
+        let mut rows = dir_stmt.query(&[] as &[&dyn ToSql])?;
         while let Some(row) = rows.next()? {
             let mut meta = schema::DirMeta::default();
             let dir_id: i32 = row.get(0)?;
@@ -92,7 +92,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
         let mut stmt = conn.prepare(r#"
             select id, sample_file_dir_id from stream where sample_file_dir_id is not null
         "#)?;
-        let mut rows = stmt.query(&[] as &[&ToSql])?;
+        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
         while let Some(row) = rows.next()? {
             let stream_id = row.get(0)?;
             let dir_id = row.get(1)?;

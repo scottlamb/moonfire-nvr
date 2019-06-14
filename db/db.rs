@@ -446,7 +446,7 @@ pub struct Stream {
     /// The number of recordings in `uncommitted` which are synced and ready to commit.
     synced_recordings: usize,
 
-    on_live_segment: Vec<Box<FnMut(LiveSegment) -> bool + Send>>,
+    on_live_segment: Vec<Box<dyn FnMut(LiveSegment) -> bool + Send>>,
 }
 
 /// Bounds of a single keyframe and the frames dependent on it.
@@ -620,7 +620,7 @@ pub struct LockedDatabase {
     cameras_by_uuid: BTreeMap<Uuid, i32>,  // values are ids.
     video_sample_entries_by_id: BTreeMap<i32, Arc<VideoSampleEntry>>,
     video_index_cache: RefCell<LruCache<i64, Box<[u8]>, fnv::FnvBuildHasher>>,
-    on_flush: Vec<Box<Fn() + Send>>,
+    on_flush: Vec<Box<dyn Fn() + Send>>,
 }
 
 /// Represents a row of the `open` database table.
@@ -867,7 +867,7 @@ impl LockedDatabase {
     /// Registers a callback to run on every live segment immediately after it's recorded.
     /// The callback is run with the database lock held, so it must not call back into the database
     /// or block. The callback should return false to unregister.
-    pub fn watch_live(&mut self, stream_id: i32, cb: Box<FnMut(LiveSegment) -> bool + Send>)
+    pub fn watch_live(&mut self, stream_id: i32, cb: Box<dyn FnMut(LiveSegment) -> bool + Send>)
                       -> Result<(), Error> {
         let s = match self.streams_by_id.get_mut(&stream_id) {
             None => bail!("no such stream {}", stream_id),
@@ -958,7 +958,7 @@ impl LockedDatabase {
             let mut stmt = tx.prepare_cached(
                 r"update open set duration_90k = ?, end_time_90k = ? where id = ?")?;
             let rows = stmt.execute(&[
-                &(recording::Time::new(clocks.monotonic()) - self.open_monotonic).0 as &ToSql,
+                &(recording::Time::new(clocks.monotonic()) - self.open_monotonic).0 as &dyn ToSql,
                 &recording::Time::new(clocks.realtime()).0,
                 &o.id,
             ])?;
@@ -1024,7 +1024,7 @@ impl LockedDatabase {
 
     /// Sets a watcher which will receive an (empty) event on successful flush.
     /// The lock will be held while this is run, so it should not do any I/O.
-    pub(crate) fn on_flush(&mut self, run: Box<Fn() + Send>) {
+    pub(crate) fn on_flush(&mut self, run: Box<dyn Fn() + Send>) {
         self.on_flush.push(run);
     }
 
@@ -1084,7 +1084,7 @@ impl LockedDatabase {
                 update sample_file_dir set last_complete_open_id = ? where id = ?
             "#)?;
             for &id in in_progress.keys() {
-                if stmt.execute(&[&o.id as &ToSql, &id])? != 1 {
+                if stmt.execute(&[&o.id as &dyn ToSql, &id])? != 1 {
                     bail!("unable to update dir {}", id);
                 }
             }
@@ -1124,7 +1124,7 @@ impl LockedDatabase {
     /// Uncommitted recordings are returned id order after the others.
     pub fn list_recordings_by_time(
         &self, stream_id: i32, desired_time: Range<recording::Time>,
-        f: &mut FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
+        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
         let s = match self.streams_by_id.get(&stream_id) {
             None => bail!("no such stream {}", stream_id),
             Some(s) => s,
@@ -1152,7 +1152,7 @@ impl LockedDatabase {
     /// Lists the specified recordings in ascending order by id.
     pub fn list_recordings_by_id(
         &self, stream_id: i32, desired_ids: Range<i32>,
-        f: &mut FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
+        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
         let s = match self.streams_by_id.get(&stream_id) {
             None => bail!("no such stream {}", stream_id),
             Some(s) => s,
@@ -1186,7 +1186,7 @@ impl LockedDatabase {
     pub fn list_aggregated_recordings(
         &self, stream_id: i32, desired_time: Range<recording::Time>,
         forced_split: recording::Duration,
-        f: &mut FnMut(&ListAggregatedRecordingsRow) -> Result<(), Error>)
+        f: &mut dyn FnMut(&ListAggregatedRecordingsRow) -> Result<(), Error>)
         -> Result<(), Error> {
         // Iterate, maintaining a map from a recording_id to the aggregated row for the latest
         // batch of recordings from the run starting at that id. Runs can be split into multiple
@@ -1255,7 +1255,7 @@ impl LockedDatabase {
     /// Note the lock is held for the duration of `f`.
     /// This uses a LRU cache to reduce the number of retrievals from the database.
     pub fn with_recording_playback<R>(&self, id: CompositeId,
-                                      f: &mut FnMut(&RecordingPlayback) -> Result<R, Error>)
+                                      f: &mut dyn FnMut(&RecordingPlayback) -> Result<R, Error>)
                                       -> Result<R, Error> {
         // Check for uncommitted path.
         let s = self.streams_by_id
@@ -1292,7 +1292,7 @@ impl LockedDatabase {
     /// Deletes the oldest recordings that aren't already queued for deletion.
     /// `f` should return true for each row that should be deleted.
     pub(crate) fn delete_oldest_recordings(
-        &mut self, stream_id: i32, f: &mut FnMut(&ListOldestRecordingsRow) -> bool)
+        &mut self, stream_id: i32, f: &mut dyn FnMut(&ListOldestRecordingsRow) -> bool)
         -> Result<(), Error> {
         let s = match self.streams_by_id.get_mut(&stream_id) {
             None => bail!("no stream {}", stream_id),
@@ -1326,7 +1326,7 @@ impl LockedDatabase {
             from
                 video_sample_entry
         "#)?;
-        let mut rows = stmt.query(&[] as &[&ToSql])?;
+        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let mut sha1 = [0u8; 20];
@@ -1365,7 +1365,7 @@ impl LockedDatabase {
             from
               sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
         "#)?;
-        let mut rows = stmt.query(&[] as &[&ToSql])?;
+        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let dir_uuid: FromSqlUuid = row.get(2)?;
@@ -1406,7 +1406,7 @@ impl LockedDatabase {
             from
               camera;
         "#)?;
-        let mut rows = stmt.query(&[] as &[&ToSql])?;
+        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let uuid: FromSqlUuid = row.get(1)?;
@@ -1444,7 +1444,7 @@ impl LockedDatabase {
             from
               stream;
         "#)?;
-        let mut rows = stmt.query(&[] as &[&ToSql])?;
+        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let type_: String = row.get(1)?;
@@ -1549,7 +1549,7 @@ impl LockedDatabase {
         self.conn.execute(r#"
             insert into sample_file_dir (path, uuid, last_complete_open_id)
                                  values (?,    ?,    ?)
-        "#, &[&path as &ToSql, &uuid_bytes, &o.id])?;
+        "#, &[&path as &dyn ToSql, &uuid_bytes, &o.id])?;
         let id = self.conn.last_insert_rowid() as i32;
         use ::std::collections::btree_map::Entry;
         let e = self.sample_file_dirs_by_id.entry(id);
@@ -1796,7 +1796,7 @@ impl LockedDatabase {
         self.signal.types_by_uuid()
     }
     pub fn list_changes_by_time(
-        &self, desired_time: Range<recording::Time>, f: &mut FnMut(&signal::ListStateChangesRow)) {
+        &self, desired_time: Range<recording::Time>, f: &mut dyn FnMut(&signal::ListStateChangesRow)) {
         self.signal.list_changes_by_time(desired_time, f)
     }
     pub fn update_signals(
@@ -1810,7 +1810,7 @@ impl LockedDatabase {
 /// Note this doesn't set journal options, so that it can be used on in-memory databases for
 /// test code.
 pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
-    conn.execute("pragma foreign_keys = on", &[] as &[&ToSql])?;
+    conn.execute("pragma foreign_keys = on", &[] as &[&dyn ToSql])?;
     let tx = conn.transaction()?;
     tx.execute_batch(include_str!("schema.sql"))?;
     {
@@ -1829,11 +1829,11 @@ pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
 pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Error> {
     let ver_tables: i32 = conn.query_row_and_then(
         "select count(*) from sqlite_master where name = 'version'",
-        &[] as &[&ToSql], |row| row.get(0))?;
+        &[] as &[&dyn ToSql], |row| row.get(0))?;
     if ver_tables == 0 {
         return Ok(None);
     }
-    Ok(Some(conn.query_row_and_then("select max(id) from version", &[] as &[&ToSql],
+    Ok(Some(conn.query_row_and_then("select max(id) from version", &[] as &[&dyn ToSql],
                                     |row| row.get(0))?))
 }
 
@@ -1871,7 +1871,7 @@ impl<C: Clocks + Clone> Database<C> {
     /// Creates the database from a caller-supplied SQLite connection.
     pub fn new(clocks: C, conn: rusqlite::Connection,
                read_write: bool) -> Result<Database<C>, Error> {
-        conn.execute("pragma foreign_keys = on", &[] as &[&ToSql])?;
+        conn.execute("pragma foreign_keys = on", &[] as &[&dyn ToSql])?;
         {
             let ver = get_schema_version(&conn)?.ok_or_else(|| format_err!(
                     "no such table: version. \
@@ -1901,7 +1901,7 @@ impl<C: Clocks + Clone> Database<C> {
             let mut stmt = conn.prepare(" insert into open (uuid, start_time_90k) values (?, ?)")?;
             let uuid = Uuid::new_v4();
             let uuid_bytes = &uuid.as_bytes()[..];
-            stmt.execute(&[&uuid_bytes as &ToSql, &real.0])?;
+            stmt.execute(&[&uuid_bytes as &dyn ToSql, &real.0])?;
             Some(Open {
                 id: conn.last_insert_rowid() as u32,
                 uuid,

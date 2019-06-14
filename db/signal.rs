@@ -227,7 +227,7 @@ impl State {
     }
 
     pub fn list_changes_by_time(
-        &self, desired_time: Range<recording::Time>, f: &mut FnMut(&ListStateChangesRow)) {
+        &self, desired_time: Range<recording::Time>, f: &mut dyn FnMut(&ListStateChangesRow)) {
 
         // First find the state immediately before. If it exists, include it.
         if let Some((&when, p)) = self.points_by_time.range(..desired_time.start).next_back() {

@@ -302,8 +302,8 @@ pub(crate) fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
     let mut v: u64 = 0;
     for i in 0..16 {
         v = (v << 4) | match id[i] {
-            b @ b'0'...b'9' => b - b'0',
-            b @ b'a'...b'f' => b - b'a' + 10,
+            b @ b'0'..=b'9' => b - b'0',
+            b @ b'a'..=b'f' => b - b'a' + 10,
             _ => return Err(()),
         } as u64;
     }

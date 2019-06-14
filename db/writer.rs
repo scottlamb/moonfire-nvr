@@ -867,9 +867,9 @@ mod tests {
     struct MockDir(Arc<Mutex<VecDeque<MockDirAction>>>);
 
     enum MockDirAction {
-        Create(CompositeId, Box<Fn(CompositeId) -> Result<MockFile, io::Error> + Send>),
-        Sync(Box<Fn() -> Result<(), io::Error> + Send>),
-        Unlink(CompositeId, Box<Fn(CompositeId) -> Result<(), io::Error> + Send>),
+        Create(CompositeId, Box<dyn Fn(CompositeId) -> Result<MockFile, io::Error> + Send>),
+        Sync(Box<dyn Fn() -> Result<(), io::Error> + Send>),
+        Unlink(CompositeId, Box<dyn Fn(CompositeId) -> Result<(), io::Error> + Send>),
     }
 
     impl MockDir {
@@ -919,8 +919,8 @@ mod tests {
     struct MockFile(Arc<Mutex<VecDeque<MockFileAction>>>);
 
     enum MockFileAction {
-        SyncAll(Box<Fn() -> Result<(), io::Error> + Send>),
-        Write(Box<Fn(&[u8]) -> Result<usize, io::Error> + Send>),
+        SyncAll(Box<dyn Fn() -> Result<(), io::Error> + Send>),
+        Write(Box<dyn Fn(&[u8]) -> Result<usize, io::Error> + Send>),
     }
 
     impl MockFile {

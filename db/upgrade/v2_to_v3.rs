@@ -57,7 +57,7 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
           sample_file_dir s
           join open o on (s.last_complete_open_id = o.id)
           cross join meta m
-    "#, &[] as &[&ToSql], |row| {
+    "#, &[] as &[&dyn ToSql], |row| {
       Ok((row.get(0)?,
           row.get(1)?,
           row.get(2)?,
@@ -84,7 +84,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         from
           recording_playback
     "#)?;
-    let mut rows = stmt.query(&[] as &[&ToSql])?;
+    let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
     while let Some(row) = rows.next()? {
         let id = db::CompositeId(row.get(0)?);
         let sample_file_uuid: FromSqlUuid = row.get(1)?;
