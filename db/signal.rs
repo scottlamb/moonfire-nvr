@@ -255,7 +255,7 @@ impl State {
 
     pub fn update_signals(
         &mut self, when: Range<recording::Time>, signals: &[u32], states: &[u16])
-        -> Result<(), Error> {
+        -> Result<(), base::Error> {
         // Do input validation before any mutation.
         self.update_signals_validate(signals, states)?;
 
@@ -274,7 +274,7 @@ impl State {
     }
 
     /// Helper for `update_signals` to do validation.
-    fn update_signals_validate(&self, signals: &[u32], states: &[u16]) -> Result<(), Error> {
+    fn update_signals_validate(&self, signals: &[u32], states: &[u16]) -> Result<(), base::Error> {
         if signals.len() != states.len() {
             bail_t!(InvalidArgument, "signals and states must have same length");
         }

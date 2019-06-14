@@ -629,7 +629,26 @@ impl ServiceInner {
         Ok(res)
     }
 
-    fn signals(&self, req: &Request<hyper::Body>) -> ResponseResult {
+    fn post_signals(&self, req: &Request<hyper::Body>, body: hyper::Chunk) -> ResponseResult {
+        let r: json::PostSignalsRequest = serde_json::from_slice(&body)
+            .map_err(|e| bad_req(e.to_string()))?;
+        let mut l = self.db.lock();
+        let now = recording::Time::new(self.db.clocks().realtime());
+        let start = r.start_time_90k.map(recording::Time).unwrap_or(now);
+        let end = match r.end_base {
+            json::PostSignalsEndBase::Epoch => recording::Time(r.rel_end_time_90k.ok_or_else(
+                || bad_req("must specify rel_end_time_90k when end_base is epoch"))?),
+            json::PostSignalsEndBase::Now => {
+                now + recording::Duration(r.rel_end_time_90k.unwrap_or(0))
+            },
+        };
+        l.update_signals(start .. end, &r.signal_ids, &r.states).map_err(from_base_error)?;
+        serve_json(req, &json::PostSignalsResponse {
+            time_90k: now.0,
+        })
+    }
+
+    fn get_signals(&self, req: &Request<hyper::Body>) -> ResponseResult {
         let mut time = recording::Time::min_value() .. recording::Time::max_value();
         if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
@@ -703,6 +722,63 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
     }
     None
 }
+
+/// Returns a future separating the request from its form body.
+///
+/// If this is not a `POST` or the body's `Content-Type` is not
+/// `application/x-www-form-urlencoded`, returns an appropriate error response instead.
+///
+/// Use with `and_then` to chain logic which consumes the form body.
+fn with_form_body(mut req: Request<hyper::Body>)
+                  -> Box<dyn Future<Item = (Request<hyper::Body>, hyper::Chunk),
+                                    Error = Response<Body>> +
+                         Send + 'static> {
+    if *req.method() != http::method::Method::POST {
+        return Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
+                                                   "POST expected")));
+    }
+    let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
+        Some(t) if t == "application/x-www-form-urlencoded" => true,
+        Some(t) if t == "application/x-www-form-urlencoded; charset=UTF-8" => true,
+        _ => false,
+    };
+    if !correct_mime_type {
+        return Box::new(future::err(bad_req(
+                    "expected application/x-www-form-urlencoded request body")));
+    }
+    let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
+    Box::new(b.concat2()
+              .map(|b| (req, b))
+              .map_err(|e| internal_server_err(format_err!("unable to read request body: {}",
+                                                             e))))
+}
+
+// TODO: remove redundancy with above. Probably better to just always expect requests in json
+// format rather than using the form style for login/logout.
+fn with_json_body(mut req: Request<hyper::Body>)
+                  -> Box<dyn Future<Item = (Request<hyper::Body>, hyper::Chunk),
+                                    Error = Response<Body>> +
+                         Send + 'static> {
+    if *req.method() != http::method::Method::POST {
+        return Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
+                                                   "POST expected")));
+    }
+    let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
+        Some(t) if t == "application/json" => true,
+        Some(t) if t == "application/json; charset=UTF-8" => true,
+        _ => false,
+    };
+    if !correct_mime_type {
+        return Box::new(future::err(bad_req(
+                    "expected application/json request body")));
+    }
+    let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
+    Box::new(b.concat2()
+              .map(|b| (req, b))
+              .map_err(|e| internal_server_err(format_err!("unable to read request body: {}",
+                                                             e))))
+}
+
 
 pub struct Config<'a> {
     pub db: Arc<db::Database>,
@@ -791,36 +867,6 @@ impl Service {
         }
     }
 
-    /// Returns a future separating the request from its form body.
-    ///
-    /// If this is not a `POST` or the body's `Content-Type` is not
-    /// `application/x-www-form-urlencoded`, returns an appropriate error response instead.
-    ///
-    /// Use with `and_then` to chain logic which consumes the form body.
-    fn with_form_body(&self, mut req: Request<hyper::Body>)
-                      -> Box<dyn Future<Item = (Request<hyper::Body>, hyper::Chunk),
-                                    Error = Response<Body>> +
-                             Send + 'static> {
-        if *req.method() != http::method::Method::POST {
-            return Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
-                                                       "POST expected")));
-        }
-        let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
-            Some(t) if t == "application/x-www-form-urlencoded" => true,
-            Some(t) if t == "application/x-www-form-urlencoded; charset=UTF-8" => true,
-            _ => false,
-        };
-        if !correct_mime_type {
-            return Box::new(future::err(bad_req(
-                        "expected application/x-www-form-urlencoded request body")));
-        }
-        let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
-        Box::new(b.concat2()
-                  .map(|b| (req, b))
-                  .map_err(|e| internal_server_err(format_err!("unable to read request body: {}",
-                                                                 e))))
-    }
-
     fn stream_live_m4s(&self, _req: &Request<::hyper::Body>, uuid: Uuid,
                        stream_type: db::StreamType) -> ResponseResult {
         let stream_id;
@@ -905,6 +951,21 @@ impl Service {
             .body(body)
             .unwrap())
     }
+
+    fn signals(&self, req: Request<hyper::Body>)
+               -> Box<dyn Future<Item = Response<Body>, Error = Response<Body>> + Send + 'static> {
+        use http::method::Method;
+        match *req.method() {
+            Method::POST => Box::new(with_json_body(req)
+                                     .and_then({
+                                         let s = self.0.clone();
+                                         move |(req, b)| s.post_signals(&req, b)
+                                     })),
+            Method::GET | Method::HEAD => Box::new(future::result(self.0.get_signals(&req))),
+            _ => Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
+                                                     "POST, GET, or HEAD expected"))),
+        }
+    }
 }
 
 impl ::hyper::service::Service for Service {
@@ -963,15 +1024,15 @@ impl ::hyper::service::Service for Service {
                 wrap_r(true, self.stream_live_m4s(&req, uuid, type_))
             },
             Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
-            Path::Login => wrap(true, self.with_form_body(req).and_then({
+            Path::Login => wrap(true, with_form_body(req).and_then({
                 let s = self.clone();
                 move |(req, b)| { s.0.login(&req, b) }
             })),
-            Path::Logout => wrap(true, self.with_form_body(req).and_then({
+            Path::Logout => wrap(true, with_form_body(req).and_then({
                 let s = self.clone();
                 move |(req, b)| { s.0.logout(&req, b) }
             })),
-            Path::Signals => wrap_r(true, self.0.signals(&req)),
+            Path::Signals => wrap(true, self.signals(req)),
             Path::Static => wrap_r(false, self.0.static_file(&req, req.uri().path())),
         }
     }

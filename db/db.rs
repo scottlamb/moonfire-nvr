@@ -1801,7 +1801,7 @@ impl LockedDatabase {
     }
     pub fn update_signals(
         &mut self, when: Range<recording::Time>, signals: &[u32], states: &[u16])
-        -> Result<(), Error> {
+        -> Result<(), base::Error> {
         self.signal.update_signals(when, signals, states)
     }
 }

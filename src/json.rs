@@ -30,7 +30,7 @@
 
 use db::auth::SessionHash;
 use failure::{Error, format_err};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use std::collections::BTreeMap;
 use std::ops::Not;
@@ -109,6 +109,29 @@ pub struct Signal<'a> {
     pub source: Uuid,
     pub type_: Uuid,
     pub short_name: &'a str,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all="camelCase")]
+pub enum PostSignalsEndBase {
+    Epoch,
+    Now,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct PostSignalsRequest {
+    pub signal_ids: Vec<u32>,
+    pub states: Vec<u16>,
+    pub start_time_90k: Option<i64>,
+    pub end_base: PostSignalsEndBase,
+    pub rel_end_time_90k: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct PostSignalsResponse {
+    pub time_90k: i64,
 }
 
 #[derive(Default, Serialize)]
