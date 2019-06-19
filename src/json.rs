@@ -42,9 +42,9 @@ pub struct TopLevel<'a> {
     pub time_zone_name: &'a str,
 
     // Use a custom serializer which presents the map's values as a sequence and includes the
-    // "days" attribute or not, according to the bool in the tuple.
+    // "days" and "camera_configs" attributes or not, according to the respective bools.
     #[serde(serialize_with = "TopLevel::serialize_cameras")]
-    pub cameras: (&'a db::LockedDatabase, bool),
+    pub cameras: (&'a db::LockedDatabase, bool, bool),
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<Session>,
@@ -83,8 +83,19 @@ pub struct Camera<'a> {
     pub short_name: &'a str,
     pub description: &'a str,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<CameraConfig<'a>>,
+
     #[serde(serialize_with = "Camera::serialize_streams")]
     pub streams: [Option<Stream<'a>>; 2],
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct CameraConfig<'a> {
+    pub host: &'a str,
+    pub username: &'a str,
+    pub password: &'a str,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,11 +174,20 @@ pub struct SignalTypeState<'a> {
 }
 
 impl<'a> Camera<'a> {
-    pub fn wrap(c: &'a db::Camera, db: &'a db::LockedDatabase, include_days: bool) -> Result<Self, Error> {
+    pub fn wrap(c: &'a db::Camera, db: &'a db::LockedDatabase, include_days: bool,
+                include_config: bool) -> Result<Self, Error> {
         Ok(Camera {
             uuid: c.uuid,
             short_name: &c.short_name,
             description: &c.description,
+            config: match include_config {
+                false => None,
+                true => Some(CameraConfig {
+                    host: &c.host,
+                    username: &c.username,
+                    password: &c.password,
+                }),
+            },
             streams: [
                 Stream::wrap(db, c.streams[0], include_days)?,
                 Stream::wrap(db, c.streams[1], include_days)?,
@@ -295,16 +315,18 @@ struct StreamDayValue {
 }
 
 impl<'a> TopLevel<'a> {
-    /// Serializes cameras as a list (rather than a map), optionally including the `days` field.
-    fn serialize_cameras<S>(cameras: &(&db::LockedDatabase, bool),
+    /// Serializes cameras as a list (rather than a map), optionally including the `days` and
+    /// `cameras` fields.
+    fn serialize_cameras<S>(cameras: &(&db::LockedDatabase, bool, bool),
                             serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
-        let (db, include_days) = *cameras;
+        let (db, include_days, include_config) = *cameras;
         let cs = db.cameras_by_id();
         let mut seq = serializer.serialize_seq(Some(cs.len()))?;
         for (_, c) in cs {
             seq.serialize_element(
-                &Camera::wrap(c, db, include_days).map_err(|e| S::Error::custom(e))?)?;
+                &Camera::wrap(c, db, include_days, include_config)
+                .map_err(|e| S::Error::custom(e))?)?;
         }
         seq.end()
     }

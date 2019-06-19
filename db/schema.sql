@@ -328,7 +328,11 @@ create table user (
   -- a Unix domain socket. (Additionally, the UID running Moonfire NVR can authenticate
   -- as anyone; there's no point in trying to do otherwise.) This might be an easy
   -- bootstrap method once configuration happens through a web UI rather than text UI.
-  unix_uid integer
+  unix_uid integer,
+
+  -- Permissions available for newly created tokens or when authenticating via
+  -- unix_uid above. A serialized "Permissions" protobuf.
+  permissions blob
 );
 
 -- A single session, whether for browser or robot use.
@@ -391,7 +395,10 @@ create table user_session (
   last_use_time_sec integer,           -- sec since epoch
   last_use_user_agent text,            -- User-Agent header from inbound HTTP request.
   last_use_peer_addr blob,             -- IPv4 or IPv6 address, or null for Unix socket.
-  use_count not null default 0
+  use_count not null default 0,
+
+  -- Permissions associated with this token; a serialized "Permissions" protobuf.
+  permissions blob
 ) without rowid;
 
 create index user_session_uid on user_session (user_id);

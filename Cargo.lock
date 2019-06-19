@@ -954,7 +954,8 @@ dependencies = [
  "odds 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "openssl 0.10.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "protobuf 2.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "protobuf 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
+ "protobuf-codegen-pure 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
  "regex 1.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "rusqlite 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec 0.6.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1000,6 +1001,7 @@ dependencies = [
  "mylog 0.1.0 (git+https://github.com/scottlamb/mylog)",
  "openssl 0.10.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "protobuf 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
  "reffers 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 1.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "reqwest 0.9.17 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1296,8 +1298,25 @@ dependencies = [
 
 [[package]]
 name = "protobuf"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "3.0.0-pre"
+source = "git+https://github.com/stepancheg/rust-protobuf#76c8892a410fa7a3d74041332c20fb2b1a74f71f"
+
+[[package]]
+name = "protobuf-codegen"
+version = "3.0.0-pre"
+source = "git+https://github.com/stepancheg/rust-protobuf#76c8892a410fa7a3d74041332c20fb2b1a74f71f"
+dependencies = [
+ "protobuf 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
+]
+
+[[package]]
+name = "protobuf-codegen-pure"
+version = "3.0.0-pre"
+source = "git+https://github.com/stepancheg/rust-protobuf#76c8892a410fa7a3d74041332c20fb2b1a74f71f"
+dependencies = [
+ "protobuf 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
+ "protobuf-codegen 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
+]
 
 [[package]]
 name = "publicsuffix"
@@ -2453,7 +2472,9 @@ dependencies = [
 "checksum phf_shared 0.7.24 (registry+https://github.com/rust-lang/crates.io-index)" = "234f71a15de2288bcb7e3b6515828d22af7ec8598ee6d24c3b526fa0a80b67a0"
 "checksum pkg-config 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)" = "676e8eb2b1b4c9043511a9b7bea0915320d7e502b0a079fb03f9635a5252b18c"
 "checksum proc-macro2 0.4.30 (registry+https://github.com/rust-lang/crates.io-index)" = "cf3d2011ab5c909338f7887f4fc896d35932e29146c12c8d01da6b22a80ba759"
-"checksum protobuf 2.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "a151c11a92df0059d6ab446fafa3b21a1210aad4bc2293e1c946e8132b10db01"
+"checksum protobuf 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)" = "<none>"
+"checksum protobuf-codegen 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)" = "<none>"
+"checksum protobuf-codegen-pure 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)" = "<none>"
 "checksum publicsuffix 1.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "5afecba86dcf1e4fd610246f89899d1924fe12e1e89f555eb7c7f710f3c5ad1d"
 "checksum quote 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)" = "faf4799c5d274f3868a4aae320a0a182cbd2baee377b378f080e16a23e9d80db"
 "checksum rand 0.3.23 (registry+https://github.com/rust-lang/crates.io-index)" = "64ac302d8f83c0c1974bf758f6b041c6c8ada916fbb44a609158ca8b064cc76c"

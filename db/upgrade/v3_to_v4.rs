@@ -62,6 +62,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           time_90k integer primary key,
           changes blob
         );
+
+        alter table user add column permissions blob;
+        alter table user_session add column permissions blob;
     "#)?;
     Ok(())
 }

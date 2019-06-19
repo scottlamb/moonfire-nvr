@@ -47,4 +47,5 @@ pub mod writer;
 pub mod testutil;
 
 pub use crate::db::*;
+pub use crate::schema::Permissions;
 pub use crate::signal::Signal;

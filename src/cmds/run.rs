@@ -33,7 +33,7 @@ use crate::stream;
 use crate::streamer;
 use crate::web;
 use db::{dir, writer};
-use failure::{Error, bail};
+use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use futures::{Future, Stream};
 use log::{error, info, warn};
@@ -68,7 +68,13 @@ Options:
     --http-addr=ADDR       Set the bind address for the unencrypted HTTP server.
                            [default: 0.0.0.0:8080]
     --read-only            Forces read-only mode / disables recording.
-    --require-auth         Requires authentication to access the web interface.
+    --allow-unauthenticated-permissions=PERMISSIONS
+                           Allow unauthenticated access to the web interface,
+                           with the given permissions (may be empty).
+                           PERMISSIONS should be a text Permissions protobuf
+                           such as "view_videos: true". NOTE: even an empty
+                           string allows some basic access that would be
+                           rejected if the argument were omitted.
     --trust-forward-hdrs   Trust X-Real-IP: and X-Forwarded-Proto: headers on
                            the incoming request. Set this only after ensuring
                            your proxy server is configured to set them and that
@@ -82,7 +88,7 @@ struct Args {
     flag_http_addr: String,
     flag_ui_dir: String,
     flag_read_only: bool,
-    flag_require_auth: bool,
+    flag_allow_unauthenticated_permissions: Option<String>,
     flag_trust_forward_hdrs: bool,
 }
 
@@ -186,10 +192,14 @@ pub fn run() -> Result<(), Error> {
 
     let time_zone_name = resolve_zone()?;
     info!("Resolved timezone: {}", &time_zone_name);
+    let allow_unauthenticated_permissions = args.flag_allow_unauthenticated_permissions
+        .map(|s| protobuf::text_format::parse_from_str(&s))
+        .transpose()
+        .map_err(|_| format_err!("Unable to parse --allow-unauthenticated-permissions"))?;
     let s = web::Service::new(web::Config {
         db: db.clone(),
         ui_dir: Some(&args.flag_ui_dir),
-        require_auth: args.flag_require_auth,
+        allow_unauthenticated_permissions,
         trust_forward_hdrs: args.flag_trust_forward_hdrs,
         time_zone_name,
     })?;

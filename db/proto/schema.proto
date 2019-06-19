@@ -60,3 +60,22 @@ message DirMeta {
   // guaranteed that no data has yet been written by this open.
   Open in_progress_open = 4;
 }
+
+// Permissions to perform actions, currently all simple bools.
+//
+// These indicate actions which may be unnecessary in some contexts. Some
+// basic access - like listing the cameras - is currently always allowed.
+// See design/api.md for a description of what requires these permissions.
+//
+// These are used in a few contexts:
+// * a session - affects what can be done when using that session to
+//   authenticate.
+// * a user - when a new session is created, it inherits these permissions.
+// * on the commandline - to specify what permissions are available for
+//   unauthenticated access.
+message Permissions {
+  bool view_video = 1;
+  bool read_camera_configs = 2;
+
+  bool update_signals = 3;
+}

@@ -33,6 +33,7 @@
 use crate::dir;
 use failure::{Error, bail, format_err};
 use libc;
+use protobuf::prelude::MessageField;
 use rusqlite::types::ToSql;
 use crate::schema::DirMeta;
 use std::fs;
@@ -113,7 +114,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
     {
         meta.db_uuid.extend_from_slice(db_uuid_bytes);
         meta.dir_uuid.extend_from_slice(dir_uuid_bytes);
-        let open = meta.mut_last_complete_open();
+        let open = meta.last_complete_open.mut_message();
         open.id = open_id;
         open.uuid.extend_from_slice(&open_uuid_bytes);
     }

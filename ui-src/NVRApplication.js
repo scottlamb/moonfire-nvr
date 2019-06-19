@@ -215,7 +215,7 @@ function fetch(selectedRange, videoLength) {
 function updateSession(session) {
   let sessionBar = $('#session');
   sessionBar.empty();
-  if (session === null) {
+  if (session === null || session === undefined) {
     sessionBar.hide();
     return;
   }
@@ -247,7 +247,7 @@ function updateSession(session) {
  */
 function onReceivedTopLevel(data) {
   if (data === null) {
-    data = {cameras: [], session: null, timeZoneName: null};
+    data = {cameras: [], timeZoneName: null};
   }
 
   newTimeZone(data.timeZoneName);

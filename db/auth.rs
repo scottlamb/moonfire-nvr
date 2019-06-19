@@ -31,11 +31,13 @@
 use log::info;
 use base::strutil;
 use blake2_rfc::blake2b::blake2b;
+use crate::schema::Permissions;
 use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use lazy_static::lazy_static;
 use libpasta;
 use parking_lot::Mutex;
+use protobuf::Message;
 use rusqlite::{Connection, Transaction, types::ToSql};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -68,6 +70,7 @@ pub struct User {
     pub password_id: i32,
     pub password_failure_count: i64,
     pub unix_uid: Option<i32>,
+    pub permissions: Permissions,
 
     /// True iff this `User` has changed since the last flush.
     /// Only a couple things are flushed lazily: `password_failure_count` and (on upgrade to a new
@@ -79,10 +82,11 @@ impl User {
     pub fn change(&self) -> UserChange {
         UserChange {
             id: Some(self.id),
-            username: self.username.to_string(),
+            username: self.username.clone(),
             flags: self.flags,
             set_password_hash: None,
             unix_uid: self.unix_uid,
+            permissions: self.permissions.clone(),
         }
     }
 
@@ -103,6 +107,7 @@ pub struct UserChange {
     pub flags: i32,
     set_password_hash: Option<Option<String>>,
     pub unix_uid: Option<i32>,
+    pub permissions: Permissions,
 }
 
 impl UserChange {
@@ -113,6 +118,7 @@ impl UserChange {
             flags: 0,
             set_password_hash: None,
             unix_uid: None,
+            permissions: Permissions::default(),
         }
     }
 
@@ -214,6 +220,8 @@ pub struct Session {
     revocation: Request,
     revocation_reason: Option<i32>,  // see RevocationReason enum
     revocation_reason_detail: Option<String>,
+
+    pub permissions: Permissions,
 
     last_use: Request,
     use_count: i32,
@@ -342,7 +350,8 @@ impl State {
                 password_hash,
                 password_id,
                 password_failure_count,
-                unix_uid
+                unix_uid,
+                permissions
             from
                 user
         "#)?;
@@ -350,6 +359,8 @@ impl State {
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let name: String = row.get(1)?;
+            let mut permissions = Permissions::new();
+            permissions.merge_from_bytes(row.get_raw_checked(7)?.as_blob()?)?;
             state.users_by_id.insert(id, User {
                 id,
                 username: name.clone(),
@@ -359,6 +370,7 @@ impl State {
                 password_failure_count: row.get(5)?,
                 unix_uid: row.get(6)?,
                 dirty: false,
+                permissions,
             });
             state.users_by_name.insert(name, id);
         }
@@ -385,7 +397,8 @@ impl State {
                 password_id = :password_id,
                 password_failure_count = :password_failure_count,
                 flags = :flags,
-                unix_uid = :unix_uid
+                unix_uid = :unix_uid,
+                permissions = :permissions
             where
                 id = :id
         "#)?;
@@ -402,6 +415,7 @@ impl State {
                 },
                 Some(h) => (h, e.get().password_id + 1, 0),
             };
+            let permissions = change.permissions.write_to_bytes().expect("proto3->vec is infallible");
             stmt.execute_named(&[
                 (":username", &&change.username[..]),
                 (":password_hash", phash),
@@ -410,6 +424,7 @@ impl State {
                 (":flags", &change.flags),
                 (":unix_uid", &change.unix_uid),
                 (":id", &id),
+                (":permissions", &permissions),
             ])?;
         }
         let u = e.into_mut();
@@ -421,20 +436,23 @@ impl State {
         }
         u.flags = change.flags;
         u.unix_uid = change.unix_uid;
+        u.permissions = change.permissions;
         Ok(u)
     }
 
     fn add_user(&mut self, conn: &Connection, change: UserChange) -> Result<&User, Error> {
         let mut stmt = conn.prepare_cached(r#"
-            insert into user (username,  password_hash,  flags,  unix_uid)
-                      values (:username, :password_hash, :flags, :unix_uid)
+            insert into user (username,  password_hash,  flags,  unix_uid,  permissions)
+                      values (:username, :password_hash, :flags, :unix_uid, :permissions)
         "#)?;
         let password_hash = change.set_password_hash.unwrap_or(None);
+        let permissions = change.permissions.write_to_bytes().expect("proto3->vec is infallible");
         stmt.execute_named(&[
             (":username", &&change.username[..]),
             (":password_hash", &password_hash),
             (":flags", &change.flags),
             (":unix_uid", &change.unix_uid),
+            (":permissions", &permissions),
         ])?;
         let id = conn.last_insert_rowid() as i32;
         self.users_by_name.insert(change.username.clone(), id);
@@ -452,6 +470,7 @@ impl State {
             password_failure_count: 0,
             unix_uid: change.unix_uid,
             dirty: false,
+            permissions: change.permissions,
         }))
     }
 
@@ -503,12 +522,13 @@ impl State {
         }
         let password_id = u.password_id;
         State::make_session(conn, req, u, domain, Some(password_id), session_flags,
-                            &mut self.sessions)
+                            &mut self.sessions, u.permissions.clone())
     }
 
     fn make_session<'s>(conn: &Connection, creation: Request, user: &mut User, domain: Vec<u8>,
                         creation_password_id: Option<i32>, flags: i32,
-                        sessions: &'s mut FnvHashMap<SessionHash, Session>)
+                        sessions: &'s mut FnvHashMap<SessionHash, Session>,
+                        permissions: Permissions)
                         -> Result<(RawSessionId, &'s Session), Error> {
         let mut session_id = RawSessionId::new();
         ::openssl::rand::rand_bytes(&mut session_id.0).unwrap();
@@ -518,13 +538,16 @@ impl State {
         let mut stmt = conn.prepare_cached(r#"
             insert into user_session (session_id_hash,  user_id,  seed,  flags,  domain,
                                       creation_password_id,  creation_time_sec,
-                                      creation_user_agent,  creation_peer_addr)
+                                      creation_user_agent,  creation_peer_addr,
+                                      permissions)
                               values (:session_id_hash, :user_id, :seed, :flags, :domain,
                                       :creation_password_id, :creation_time_sec,
-                                      :creation_user_agent, :creation_peer_addr)
+                                      :creation_user_agent, :creation_peer_addr,
+                                      :permissions)
         "#)?;
         let addr = creation.addr_buf();
         let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
+        let permissions_blob = permissions.write_to_bytes().expect("proto3->vec is infallible");
         stmt.execute_named(&[
             (":session_id_hash", &&hash.0[..]),
             (":user_id", &user.id),
@@ -535,6 +558,7 @@ impl State {
             (":creation_time_sec", &creation.when_sec),
             (":creation_user_agent", &creation.user_agent),
             (":creation_peer_addr", &addr),
+            (":permissions", &permissions_blob),
         ])?;
         let e = match sessions.entry(hash) {
             ::std::collections::hash_map::Entry::Occupied(_) => panic!("duplicate session hash!"),
@@ -547,6 +571,7 @@ impl State {
             creation_password_id,
             creation,
             seed: Seed(seed),
+            permissions,
             ..Default::default()
         });
         Ok((session_id, session))
@@ -692,7 +717,8 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Erro
             last_use_time_sec,
             last_use_user_agent,
             last_use_peer_addr,
-            use_count
+            use_count,
+            permissions
         from
             user_session
         where
@@ -703,6 +729,8 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Erro
     let creation_addr: FromSqlIpAddr = row.get(8)?;
     let revocation_addr: FromSqlIpAddr = row.get(11)?;
     let last_use_addr: FromSqlIpAddr = row.get(16)?;
+    let mut permissions = Permissions::new();
+    permissions.merge_from_bytes(row.get_raw_checked(18)?.as_blob()?)?;
     Ok(Session {
         user_id: row.get(0)?,
         seed: row.get(1)?,
@@ -729,6 +757,7 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Erro
         },
         use_count: row.get(17)?,
         dirty: false,
+        permissions,
     })
 }
 
@@ -960,5 +989,36 @@ mod tests {
         assert!(state.users_by_id().get(&uid).is_none());
         let e = state.authenticate_session(&conn, req.clone(), &sid.hash()).unwrap_err();
         assert_eq!(format!("{}", e), "no such session");
+    }
+
+    #[test]
+    fn permissions() {
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        let mut state = State::init(&conn).unwrap();
+        let mut change = UserChange::add_user("slamb".to_owned());
+        change.permissions.view_video = true;
+        let u = state.apply(&conn, change).unwrap();
+        assert!(u.permissions.view_video);
+        assert!(!u.permissions.update_signals);
+        let mut change = u.change();
+        assert!(change.permissions.view_video);
+        assert!(!change.permissions.update_signals);
+        change.permissions.update_signals = true;
+        let u = state.apply(&conn, change).unwrap();
+        assert!(u.permissions.view_video);
+        assert!(u.permissions.update_signals);
+        let uid = u.id;
+
+        {
+            let tx = conn.transaction().unwrap();
+            state.flush(&tx).unwrap();
+            tx.commit().unwrap();
+        }
+        let state = State::init(&conn).unwrap();
+        let u = state.users_by_id().get(&uid).unwrap();
+        assert!(u.permissions.view_video);
+        assert!(u.permissions.update_signals);
     }
 }

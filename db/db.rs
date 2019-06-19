@@ -66,6 +66,7 @@ use log::{error, info, trace};
 use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
+use protobuf::prelude::MessageField;
 use rusqlite::types::ToSql;
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, VecDeque};
@@ -326,7 +327,7 @@ impl SampleFileDir {
         meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
         meta.dir_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
         if let Some(o) = self.last_complete_open {
-            let open = meta.mut_last_complete_open();
+            let open = meta.last_complete_open.mut_message();
             open.id = o.id;
             open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
         }
@@ -1061,7 +1062,7 @@ impl LockedDatabase {
             if dir.dir.is_some() { continue }
             let mut meta = dir.meta(&self.uuid);
             if let Some(o) = self.open.as_ref() {
-                let open = meta.mut_in_progress_open();
+                let open = meta.in_progress_open.mut_message();
                 open.id = o.id;
                 open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
             }
@@ -1540,7 +1541,7 @@ impl LockedDatabase {
         {
             meta.db_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
             meta.dir_uuid.extend_from_slice(uuid_bytes);
-            let open = meta.mut_in_progress_open();
+            let open = meta.in_progress_open.mut_message();
             open.id = o.id;
             open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
         }

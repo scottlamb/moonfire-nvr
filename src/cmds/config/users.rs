@@ -31,6 +31,7 @@
 use cursive::Cursive;
 use cursive::traits::{Boxable, Identifiable};
 use cursive::views;
+use log::info;
 use std::sync::Arc;
 
 /// Builds a `UserChange` from an active `edit_user_dialog`.
@@ -50,6 +51,13 @@ fn get_change(siv: &mut Cursive, db: &db::LockedDatabase, id: Option<i32>,
         },
         PasswordChange::Clear => change.clear_password(),
     };
+    for (id, ref mut b) in &mut [
+        ("perm_view_video", &mut change.permissions.view_video),
+        ("perm_read_camera_configs", &mut change.permissions.read_camera_configs),
+        ("perm_update_signals", &mut change.permissions.update_signals)] {
+        **b = siv.find_id::<views::Checkbox>(id).unwrap().is_checked();
+        info!("{}: {}", id, **b);
+    }
     change
 }
 
@@ -112,9 +120,7 @@ fn select_set(siv: &mut Cursive) {
 /// Adds or updates a user.
 /// (The former if `item` is None; the latter otherwise.)
 fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>) {
-    let username;
-    let id_str;
-    let has_password;
+    let (username, id_str, has_password, permissions);
     let mut pw_group = views::RadioGroup::new();
     {
         let l = db.lock();
@@ -122,6 +128,7 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
         username = u.map(|u| u.username.clone()).unwrap_or(String::new());
         id_str = item.map(|id| id.to_string()).unwrap_or("<new>".to_string());
         has_password = u.map(|u| u.has_password()).unwrap_or(false);
+        permissions = u.map(|u| u.permissions.clone()).unwrap_or(db::Permissions::default());
     }
     let top_list = views::ListView::new()
         .child("id", views::TextView::new(id_str))
@@ -155,6 +162,18 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
                                 .with_id("new_pw")
                                 .full_width()));
     }
+
+    layout.add_child(views::DummyView);
+    layout.add_child(views::TextView::new("permissions"));
+    let mut perms = views::ListView::new();
+    for (name, b) in &[("view_video", permissions.view_video),
+                       ("read_camera_configs", permissions.read_camera_configs),
+                       ("update_signals", permissions.update_signals)] {
+        let mut checkbox = views::Checkbox::new();
+        checkbox.set_checked(*b);
+        perms.add_child(name, checkbox.with_id(format!("perm_{}", name)));
+    }
+    layout.add_child(perms);
 
     let dialog = views::Dialog::around(layout);
     let dialog = if let Some(id) = item {

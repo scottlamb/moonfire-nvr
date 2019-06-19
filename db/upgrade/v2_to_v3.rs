@@ -37,10 +37,11 @@ use crate::dir;
 use failure::Error;
 use libc;
 use crate::schema;
+use protobuf::prelude::MessageField;
+use rusqlite::types::ToSql;
 use std::io::{self, Write};
 use std::mem;
 use std::sync::Arc;
-use rusqlite::types::ToSql;
 use uuid::Uuid;
 
 /// Opens the sample file dir.
@@ -68,7 +69,7 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
     meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
     meta.dir_uuid.extend_from_slice(&s_uuid.0.as_bytes()[..]);
     {
-        let open = meta.mut_last_complete_open();
+        let open = meta.last_complete_open.mut_message();
         open.id = o_id as u32;
         open.uuid.extend_from_slice(&o_uuid.0.as_bytes()[..]);
     }

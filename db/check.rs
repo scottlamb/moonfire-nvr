@@ -37,6 +37,7 @@ use crate::recording;
 use failure::Error;
 use fnv::FnvHashMap;
 use log::error;
+use protobuf::prelude::MessageField;
 use rusqlite::types::ToSql;
 use crate::schema;
 use std::os::unix::ffi::OsStrExt;
@@ -69,7 +70,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
             meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
             meta.dir_uuid.extend_from_slice(&dir_uuid.0.as_bytes()[..]);
             {
-                let o = meta.mut_last_complete_open();
+                let o = meta.last_complete_open.mut_message();
                 o.id = open_id;
                 o.uuid.extend_from_slice(&open_uuid.0.as_bytes()[..]);
             }

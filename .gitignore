@@ -7,6 +7,7 @@ cameras.sql
 node_modules
 prep.config
 settings-nvr-local.js
+db/schema.rs
 target
 ui-dist
 yarn-error.log

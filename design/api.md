@@ -53,11 +53,15 @@ request parameters:
 
 *   `days`: a boolean indicating if the days parameter described below
     should be included.
+*   `cameraConfigs`: a boolean indicating if the `camera.config` parameter
+    described below should be included. This requires the
+    `read_camera_configs` permission as described in `schema.proto`.
 
-Example request URI:
+Example request URI (with added whitespace between parameters):
 
 ```
 /api/?days=true
+     &cameraConfigs=true
 ```
 
 The `application/json` response will have a dict as follows:
@@ -68,6 +72,11 @@ The `application/json` response will have a dict as follows:
     *   `uuid`: in text format
     *   `shortName`: a short name (typically one or two words)
     *   `description`: a longer description (typically a phrase or paragraph)
+    *   `config`: (only included if request parameter `cameraConfigs` is true)
+        a dictionary describing the configuration of the camera:
+        *   `username`
+        *   `password`
+        *   `host`
     *   `streams`: a dict of stream type ("main" or "sub") to a dictionary
         describing the stream:
         *   `retainBytes`: the configured total number of bytes of completed
@@ -81,9 +90,10 @@ The `application/json` response will have a dict as follows:
             be lesser if there are gaps in the recorded data.
         *   `totalSampleFileBytes`: the total number of bytes of sample data
             (the `mdat` portion of a `.mp4` file).
-        *   `days`: object representing calendar days (in the server's time
-            zone) with non-zero total duration of recordings for that day. The
-            keys are of the form `YYYY-mm-dd`; the values are objects with the
+        *   `days`: (only included if request pararameter `days` is true)
+            dictionary representing calendar days (in the server's time zone)
+            with non-zero total duration of recordings for that day. The keys
+            are of the form `YYYY-mm-dd`; the values are objects with the
             following attributes:
             *   `totalDuration90k` is the total duration recorded during that
                 day.  If a recording spans a day boundary, some portion of it
@@ -124,6 +134,11 @@ Example response:
       "uuid": "fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe",
       "shortName": "driveway",
       "description": "Hikvision DS-2CD2032 overlooking the driveway from east",
+      "config": {
+        "host": "192.168.1.100",
+        "user": "admin",
+        "password": "12345",
+      },
       "streams": {
         "main": {
           "retainBytes": 536870912000,
@@ -193,7 +208,9 @@ Example response:
 
 ### `GET /api/cameras/<uuid>/`
 
-Returns information for the camera with the given URL.
+Returns information for the camera with the given URL. As in the like section
+of `GET /api/` with the `days` parameter set and the `cameraConfigs` parameter
+unset.
 
 Example response:
 
@@ -310,6 +327,8 @@ Example response:
 ```
 
 ### `GET /api/cameras/<uuid>/<stream>/view.mp4`
+
+Requires the `view_video` permission.
 
 Returns a `.mp4` file, with an etag and support for range requests. The MIME
 type will be `video/mp4`, with a `codecs` parameter as specified in
@@ -524,6 +543,8 @@ This represents the following observations:
   3. signal 1 entered state 1 (`off`) at time 130985418600000.
 
 ### `POST /api/signals`
+
+Requires the `update_signals` permission.
 
 Alters the state of a signal.
 

@@ -179,6 +179,7 @@ fn internal_server_err<E: Into<Error>>(err: E) -> Response<Body> {
 
 fn from_base_error(err: base::Error) -> Response<Body> {
     let status_code = match err.kind() {
+        ErrorKind::PermissionDenied | ErrorKind::Unauthenticated => StatusCode::UNAUTHORIZED,
         ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
         ErrorKind::NotFound => StatusCode::NOT_FOUND,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -241,13 +242,21 @@ struct UiFile {
     path: PathBuf,
 }
 
+struct Caller {
+    permissions: db::Permissions,
+    session: Option<json::Session>,
+}
+
+impl Caller {
+}
+
 struct ServiceInner {
     db: Arc<db::Database>,
     dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
     ui_files: HashMap<String, UiFile>,
     pool: futures_cpupool::CpuPool,
     time_zone_name: String,
-    require_auth: bool,
+    allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
 }
 
@@ -264,24 +273,32 @@ fn serve_json<T: serde::ser::Serialize>(req: &Request<hyper::Body>, out: &T) -> 
 }
 
 impl ServiceInner {
-    fn top_level(&self, req: &Request<::hyper::Body>, session: Option<json::Session>)
-                 -> ResponseResult {
+    fn top_level(&self, req: &Request<::hyper::Body>, caller: Caller) -> ResponseResult {
         let mut days = false;
+        let mut camera_configs = false;
         if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value): (_, &str) = (key.borrow(), value.borrow());
                 match key {
                     "days" => days = value == "true",
+                    "cameraConfigs" => camera_configs = value == "true",
                     _ => {},
                 };
+            }
+        }
+
+        if camera_configs {
+            if !caller.permissions.read_camera_configs {
+                return Err(plain_response(StatusCode::UNAUTHORIZED,
+                                          "read_camera_configs required"));
             }
         }
 
         let db = self.db.lock();
         serve_json(req, &json::TopLevel {
             time_zone_name: &self.time_zone_name,
-            cameras: (&db, days),
-            session,
+            cameras: (&db, days, camera_configs),
+            session: caller.session,
             signals: (&db, days),
             signal_types: &db,
         })
@@ -291,7 +308,7 @@ impl ServiceInner {
         let db = self.db.lock();
         let camera = db.get_camera(uuid)
                        .ok_or_else(|| not_found(format!("no such camera {}", uuid)))?;
-        serve_json(req, &json::Camera::wrap(camera, &db, true).map_err(internal_server_err)?)
+        serve_json(req, &json::Camera::wrap(camera, &db, true, false).map_err(internal_server_err)?)
     }
 
     fn stream_recordings(&self, req: &Request<::hyper::Body>, uuid: Uuid, type_: db::StreamType)
@@ -372,9 +389,12 @@ impl ServiceInner {
         Err(not_found("no such init segment"))
     }
 
-    fn stream_view_mp4(&self, req: &Request<::hyper::Body>, uuid: Uuid,
+    fn stream_view_mp4(&self, req: &Request<::hyper::Body>, caller: Caller, uuid: Uuid,
                        stream_type: db::StreamType, mp4_type: mp4::Type, debug: bool)
                        -> ResponseResult {
+        if !caller.permissions.view_video {
+            return Err(plain_response(StatusCode::UNAUTHORIZED, "view_video required"));
+        }
         let stream_id = {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
@@ -629,7 +649,11 @@ impl ServiceInner {
         Ok(res)
     }
 
-    fn post_signals(&self, req: &Request<hyper::Body>, body: hyper::Chunk) -> ResponseResult {
+    fn post_signals(&self, req: &Request<hyper::Body>, caller: Caller, body: hyper::Chunk)
+                    -> ResponseResult {
+        if !caller.permissions.update_signals {
+            return Err(plain_response(StatusCode::UNAUTHORIZED, "update_signals required"));
+        }
         let r: json::PostSignalsRequest = serde_json::from_slice(&body)
             .map_err(|e| bad_req(e.to_string()))?;
         let mut l = self.db.lock();
@@ -676,24 +700,39 @@ impl ServiceInner {
         serve_json(req, &signals)
     }
 
-    fn authenticated(&self, req: &Request<hyper::Body>) -> Result<Option<json::Session>, Error> {
+    fn authenticate(&self, req: &Request<hyper::Body>, unauth_path: bool)
+                    -> Result<Caller, base::Error> {
         if let Some(sid) = extract_sid(req) {
             let authreq = self.authreq(req);
-            match self.db.lock().authenticate_session(authreq.clone(), &sid.hash()) {
-                Ok((s, u)) => {
-                    return Ok(Some(json::Session {
+
+            // TODO: real error handling! this assumes all errors are due to lack of
+            // authentication, when they could be logic errors in SQL or such.
+            if let Ok((s, u)) = self.db.lock().authenticate_session(authreq.clone(), &sid.hash()) {
+                return Ok(Caller {
+                    permissions: s.permissions.clone(),
+                    session: Some(json::Session {
                         username: u.username.clone(),
                         csrf: s.csrf(),
-                    }))
-                },
-                Err(_) => {
-                    // TODO: real error handling! this assumes all errors are due to lack of
-                    // authentication, when they could be logic errors in SQL or such.
-                    return Ok(None);
-                }
+                    }),
+                });
             }
         }
-        Ok(None)
+
+        if let Some(s) = self.allow_unauthenticated_permissions.as_ref() {
+            return Ok(Caller {
+                permissions: s.clone(),
+                session: None,
+            });
+        }
+
+        if unauth_path {
+            return Ok(Caller {
+                permissions: db::Permissions::default(),
+                session: None,
+            })
+        }
+
+        bail_t!(Unauthenticated, "unauthenticated");
     }
 }
 
@@ -783,9 +822,9 @@ fn with_json_body(mut req: Request<hyper::Body>)
 pub struct Config<'a> {
     pub db: Arc<db::Database>,
     pub ui_dir: Option<&'a str>,
-    pub require_auth: bool,
     pub trust_forward_hdrs: bool,
     pub time_zone_name: String,
+    pub allow_unauthenticated_permissions: Option<db::Permissions>,
 }
 
 #[derive(Clone)]
@@ -820,7 +859,7 @@ impl Service {
             dirs_by_stream_id,
             ui_files,
             pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
-            require_auth: config.require_auth,
+            allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
             trust_forward_hdrs: config.trust_forward_hdrs,
             time_zone_name: config.time_zone_name,
         })))
@@ -867,8 +906,11 @@ impl Service {
         }
     }
 
-    fn stream_live_m4s(&self, _req: &Request<::hyper::Body>, uuid: Uuid,
+    fn stream_live_m4s(&self, _req: &Request<::hyper::Body>, caller: Caller, uuid: Uuid,
                        stream_type: db::StreamType) -> ResponseResult {
+        if !caller.permissions.view_video {
+            return Err(plain_response(StatusCode::UNAUTHORIZED, "view_video required"));
+        }
         let stream_id;
         let open_id;
         let (sub_tx, sub_rx) = futures::sync::mpsc::unbounded();
@@ -952,14 +994,14 @@ impl Service {
             .unwrap())
     }
 
-    fn signals(&self, req: Request<hyper::Body>)
+    fn signals(&self, req: Request<hyper::Body>, caller: Caller)
                -> Box<dyn Future<Item = Response<Body>, Error = Response<Body>> + Send + 'static> {
         use http::method::Method;
         match *req.method() {
             Method::POST => Box::new(with_json_body(req)
                                      .and_then({
                                          let s = self.0.clone();
-                                         move |(req, b)| s.post_signals(&req, b)
+                                         move |(req, b)| s.post_signals(&req, caller, b)
                                      })),
             Method::GET | Method::HEAD => Box::new(future::result(self.0.get_signals(&req))),
             _ => Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
@@ -992,36 +1034,33 @@ impl ::hyper::service::Service for Service {
         }
 
         let p = Path::decode(req.uri().path());
-        let require_auth = self.0.require_auth && match p {
-            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static => false,
-            _ => true,
+        let always_allow_unauthenticated = match p {
+            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static => true,
+            _ => false,
         };
-        debug!("request on: {}: {:?}, require_auth={}", req.uri(), p, require_auth);
-        let session = match self.0.authenticated(&req) {
-            Ok(s) => s,
-            Err(e) => return Box::new(future::ok(internal_server_err(e))),
+        debug!("request on: {}: {:?}", req.uri(), p);
+        let caller = match self.0.authenticate(&req, always_allow_unauthenticated) {
+            Ok(c) => c,
+            Err(e) => return Box::new(future::ok(from_base_error(e))),
         };
-        if require_auth && session.is_none() {
-            return Box::new(future::ok(
-                    plain_response(StatusCode::UNAUTHORIZED, "unauthorized")));
-        }
         match p {
             Path::InitSegment(sha1, debug) => wrap_r(true, self.0.init_segment(sha1, debug, &req)),
-            Path::TopLevel => wrap_r(true, self.0.top_level(&req, session)),
+            Path::TopLevel => wrap_r(true, self.0.top_level(&req, caller)),
             Path::Request => wrap_r(true, self.0.request(&req)),
             Path::Camera(uuid) => wrap_r(true, self.0.camera(&req, uuid)),
             Path::StreamRecordings(uuid, type_) => {
                 wrap_r(true, self.0.stream_recordings(&req, uuid, type_))
             },
             Path::StreamViewMp4(uuid, type_, debug) => {
-                wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::Normal, debug))
-            },
-            Path::StreamViewMp4Segment(uuid, type_, debug) => {
-                wrap_r(true, self.0.stream_view_mp4(&req, uuid, type_, mp4::Type::MediaSegment,
+                wrap_r(true, self.0.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::Normal,
                                                     debug))
             },
+            Path::StreamViewMp4Segment(uuid, type_, debug) => {
+                wrap_r(true, self.0.stream_view_mp4(&req, caller, uuid, type_,
+                                                    mp4::Type::MediaSegment, debug))
+            },
             Path::StreamLiveMp4Segments(uuid, type_) => {
-                wrap_r(true, self.stream_live_m4s(&req, uuid, type_))
+                wrap_r(true, self.stream_live_m4s(&req, caller, uuid, type_))
             },
             Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
             Path::Login => wrap(true, with_form_body(req).and_then({
@@ -1032,7 +1071,7 @@ impl ::hyper::service::Service for Service {
                 let s = self.clone();
                 move |(req, b)| { s.0.logout(&req, b) }
             })),
-            Path::Signals => wrap(true, self.signals(req)),
+            Path::Signals => wrap(true, self.signals(req, caller)),
             Path::Static => wrap_r(false, self.0.static_file(&req, req.uri().path())),
         }
     }
@@ -1057,14 +1096,14 @@ mod tests {
     }
 
     impl Server {
-        fn new(require_auth: bool) -> Server {
+        fn new(allow_unauthenticated_permissions: Option<db::Permissions>) -> Server {
             let db = TestDb::new(base::clock::RealClocks {});
             let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel::<()>();
             let addr = "127.0.0.1:0".parse().unwrap();
             let service = super::Service::new(super::Config {
                 db: db.db.clone(),
                 ui_dir: None,
-                require_auth,
+                allow_unauthenticated_permissions,
                 trust_forward_hdrs: true,
                 time_zone_name: "".to_owned(),
             }).unwrap();
@@ -1213,7 +1252,7 @@ mod tests {
     #[test]
     fn unauthorized_without_cookie() {
         testutil::init();
-        let s = Server::new(true);
+        let s = Server::new(None);
         let cli = reqwest::Client::new();
         let resp = cli.get(&format!("{}/api/", &s.base_url)).send().unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
@@ -1222,7 +1261,7 @@ mod tests {
     #[test]
     fn login() {
         testutil::init();
-        let s = Server::new(true);
+        let s = Server::new(None);
         let cli = reqwest::Client::new();
         let login_url = format!("{}/api/login", &s.base_url);
 
@@ -1255,7 +1294,7 @@ mod tests {
     #[test]
     fn logout() {
         testutil::init();
-        let s = Server::new(true);
+        let s = Server::new(None);
         let cli = reqwest::Client::new();
         let mut p = HashMap::new();
         p.insert("username", "slamb");
@@ -1310,7 +1349,9 @@ mod tests {
     #[test]
     fn view_without_segments() {
         testutil::init();
-        let s = Server::new(false);
+        let mut permissions = db::Permissions::new();
+        permissions.view_video = true;
+        let s = Server::new(Some(permissions));
         let cli = reqwest::Client::new();
         let resp = cli.get(
             &format!("{}/api/cameras/{}/main/view.mp4", &s.base_url, s.db.test_camera_uuid))
