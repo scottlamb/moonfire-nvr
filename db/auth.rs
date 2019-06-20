@@ -210,7 +210,7 @@ pub enum RevocationReason {
 pub struct Session {
     user_id: i32,
     flags: i32,  // bitmask of SessionFlags enum values
-    domain: Vec<u8>,
+    domain: Option<Vec<u8>>,
     description: Option<String>,
     seed: Seed,
 
@@ -490,14 +490,18 @@ impl State {
         Ok(())
     }
 
+    pub fn get_user(&self, username: &str) -> Option<&User> {
+        self.users_by_name
+            .get(username)
+            .map(|id| self.users_by_id.get(id).expect("users_by_name implies users_by_id"))
+    }
+
     pub fn login_by_password(&mut self, conn: &Connection, req: Request, username: &str,
-                             password: String, domain: Vec<u8>, session_flags: i32)
+                             password: String, domain: Option<Vec<u8>>, session_flags: i32)
                              -> Result<(RawSessionId, &Session), Error> {
-        let id = match self.users_by_name.get(username) {
-            None => bail!("no such user {:?}", username),
-            Some(&id) => id,
-        };
-        let u = self.users_by_id.get_mut(&id).expect("users_by_name implies users_by_id");
+        let id = self.users_by_name.get(username)
+            .ok_or_else(|| format_err!("no such user {:?}", username))?;
+        let u = self.users_by_id.get_mut(id).expect("users_by_name implies users_by_id");
         if u.disabled() {
             bail!("user {:?} is disabled", username);
         }
@@ -521,15 +525,27 @@ impl State {
             u.dirty = true;
         }
         let password_id = u.password_id;
-        State::make_session(conn, req, u, domain, Some(password_id), session_flags,
+        State::make_session_int(conn, req, u, domain, Some(password_id), session_flags,
                             &mut self.sessions, u.permissions.clone())
     }
 
-    fn make_session<'s>(conn: &Connection, creation: Request, user: &mut User, domain: Vec<u8>,
-                        creation_password_id: Option<i32>, flags: i32,
-                        sessions: &'s mut FnvHashMap<SessionHash, Session>,
-                        permissions: Permissions)
-                        -> Result<(RawSessionId, &'s Session), Error> {
+    /// Makes a session directly (no password required).
+    pub fn make_session<'s>(&'s mut self, conn: &Connection, creation: Request, uid: i32,
+                            domain: Option<Vec<u8>>, flags: i32, permissions: Permissions)
+                            -> Result<(RawSessionId, &'s Session), Error> {
+        let u = self.users_by_id.get_mut(&uid).ok_or_else(|| format_err!("no such uid {:?}", uid))?;
+        if u.disabled() {
+            bail!("user is disabled");
+        }
+        State::make_session_int(conn, creation, u, domain, None, flags, &mut self.sessions,
+                                permissions)
+    }
+
+    fn make_session_int<'s>(conn: &Connection, creation: Request, user: &mut User,
+                            domain: Option<Vec<u8>>, creation_password_id: Option<i32>, flags: i32,
+                            sessions: &'s mut FnvHashMap<SessionHash, Session>,
+                            permissions: Permissions)
+                            -> Result<(RawSessionId, &'s Session), Error> {
         let mut session_id = RawSessionId::new();
         ::openssl::rand::rand_bytes(&mut session_id.0).unwrap();
         let mut seed = [0u8; 32];

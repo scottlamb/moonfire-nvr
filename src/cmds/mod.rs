@@ -38,6 +38,7 @@ use std::path::Path;
 
 mod check;
 mod config;
+mod login;
 mod init;
 mod run;
 mod sql;
@@ -48,6 +49,7 @@ mod upgrade;
 pub enum Command {
     Check,
     Config,
+    Login,
     Init,
     Run,
     Sql,
@@ -60,6 +62,7 @@ impl Command {
         match *self {
             Command::Check => check::run(),
             Command::Config => config::run(),
+            Command::Login => login::run(),
             Command::Init => init::run(),
             Command::Run => run::run(),
             Command::Sql => sql::run(),

@@ -1774,10 +1774,20 @@ impl LockedDatabase {
         self.auth.delete_user(&mut self.conn, id)
     }
 
+    pub fn get_user(&self, username: &str) -> Option<&User> {
+        self.auth.get_user(username)
+    }
+
     pub fn login_by_password(&mut self, req: auth::Request, username: &str, password: String,
-                             domain: Vec<u8>, session_flags: i32)
+                             domain: Option<Vec<u8>>, session_flags: i32)
                              -> Result<(RawSessionId, &Session), Error> {
         self.auth.login_by_password(&self.conn, req, username, password, domain, session_flags)
+    }
+
+    pub fn make_session(&mut self, creation: Request, uid: i32,
+                        domain: Option<Vec<u8>>, flags: i32, permissions: schema::Permissions)
+                        -> Result<(RawSessionId, &Session), Error> {
+        self.auth.make_session(&self.conn, creation, uid, domain, flags, permissions)
     }
 
     pub fn authenticate_session(&mut self, req: auth::Request, sid: &auth::SessionHash)

@@ -579,7 +579,7 @@ impl ServiceInner {
                     (auth::SessionFlags::SameSite as i32) |
                     (auth::SessionFlags::SameSiteStrict as i32) |
                     if is_secure { (auth::SessionFlags::Secure as i32) } else { 0 };
-        let (sid, _) = l.login_by_password(authreq, &username, password.into_owned(), domain,
+        let (sid, _) = l.login_by_password(authreq, &username, password.into_owned(), Some(domain),
             flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
         let s_suffix = if is_secure {
