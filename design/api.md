@@ -104,8 +104,9 @@ The `application/json` response will have a dict as follows:
                 time zone.  It is usually 24 hours after the start time. It
                 might be 23 hours or 25 hours during spring forward or fall
                 back, respectively.
-*   `signals`: a map of all signals known to the server. Keys are ids. Values are
-    dictionaries with the following properties:
+*   `signals`: a list of all signals known to the server. Each is a dictionary
+    with the following properties:
+       * `id`: an integer identifier.
        * `shortName`: a unique, human-readable description of the signal
        * `cameras`: a map of associated cameras' UUIDs to the type of association:
          `direct` or `indirect`. See `db/schema.sql` for more description.
@@ -163,8 +164,9 @@ Example response:
     },
     ...
   ],
-  "signals": {
-    1: {
+  "signals": [
+    {
+      "id": 1,
       "shortName": "driveway motion",
       "cameras": {
         "fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe": "direct"

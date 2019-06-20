@@ -115,6 +115,7 @@ pub struct Stream<'a> {
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Signal<'a> {
+    pub id: u32,
     #[serde(serialize_with = "Signal::serialize_cameras")]
     pub cameras: (&'a db::Signal, &'a db::LockedDatabase),
     pub source: Uuid,
@@ -249,6 +250,7 @@ impl<'a> Stream<'a> {
 impl<'a> Signal<'a> {
     pub fn wrap(s: &'a db::Signal, db: &'a db::LockedDatabase, _include_days: bool) -> Self {
         Signal {
+            id: s.id,
             cameras: (s, db),
             source: s.source,
             type_: s.type_,

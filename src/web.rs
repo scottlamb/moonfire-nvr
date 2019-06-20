@@ -178,6 +178,7 @@ fn internal_server_err<E: Into<Error>>(err: E) -> Response<Body> {
 }
 
 fn from_base_error(err: base::Error) -> Response<Body> {
+    info!("base error: {:?}", &err);
     let status_code = match err.kind() {
         ErrorKind::PermissionDenied | ErrorKind::Unauthenticated => StatusCode::UNAUTHORIZED,
         ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
@@ -708,6 +709,7 @@ impl ServiceInner {
             // TODO: real error handling! this assumes all errors are due to lack of
             // authentication, when they could be logic errors in SQL or such.
             if let Ok((s, u)) = self.db.lock().authenticate_session(authreq.clone(), &sid.hash()) {
+                info!("authenticate_session success");
                 return Ok(Caller {
                     permissions: s.permissions.clone(),
                     session: Some(json::Session {
@@ -716,7 +718,10 @@ impl ServiceInner {
                     }),
                 });
             }
+            info!("authenticate_session failed");
         }
+
+        info!("fallthrough");
 
         if let Some(s) = self.allow_unauthenticated_permissions.as_ref() {
             return Ok(Caller {
@@ -749,6 +754,7 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
         Some(c) => c,
     };
     for mut cookie in hdr.as_bytes().split(|&b| b == b';') {
+        info!("got cookie: {:?}", String::from_utf8_lossy(cookie));
         if cookie.starts_with(b" ") {
             cookie = &cookie[1..];
         }
@@ -756,6 +762,8 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
             let s = &cookie[2..];
             if let Ok(s) = auth::RawSessionId::decode_base64(s) {
                 return Some(s);
+            } else {
+                info!("decode_base64 failure");
             }
         }
     }
@@ -1020,7 +1028,10 @@ impl ::hyper::service::Service for Service {
         fn wrap<R>(is_private: bool, r: R)
                -> Box<dyn Future<Item = Response<Body>, Error = BoxedError> + Send + 'static>
         where R: Future<Item = Response<Body>, Error = Response<Body>> + Send + 'static {
-            return Box::new(r.or_else(|e| Ok(e)).map(move |mut r| {
+            return Box::new(r.or_else(|e| {
+                info!("returning error status {:?}", e.status());
+                Ok(e)
+            }).map(move |mut r| {
                 if is_private {
                     r.headers_mut().insert("Cache-Control", HeaderValue::from_static("private"));
                 }
