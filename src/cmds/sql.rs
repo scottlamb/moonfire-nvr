@@ -40,8 +40,11 @@ Runs a SQLite shell on the Moonfire NVR database with locking.
 
 Usage:
 
-    moonfire-nvr sql [options]
+    moonfire-nvr sql [options] [--] [<arg>...]
     moonfire-nvr sql --help
+
+Positional arguments will be passed to sqlite3. Use the -- separator to pass
+sqlite3 options, as in "moonfire-nvr sql -- -line 'select username from user'".
 
 Options:
 
@@ -55,6 +58,7 @@ Options:
 struct Args {
     flag_db_dir: String,
     flag_read_only: bool,
+    arg_arg: Vec<String>,
 }
 
 pub fn run() -> Result<(), Error> {
@@ -66,6 +70,6 @@ pub fn run() -> Result<(), Error> {
     if args.flag_read_only {
         db.push_str("?mode=ro");
     }
-    Command::new("sqlite3").arg(&db).status()?;
+    Command::new("sqlite3").arg(&db).args(&args.arg_arg).status()?;
     Ok(())
 }
