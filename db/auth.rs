@@ -809,18 +809,18 @@ mod tests {
             (u.id, u.change())
         };
         let e = state.login_by_password(&conn, req.clone(), "slamb", "hunter2".to_owned(),
-                                        b"nvr.example.com".to_vec(), 0).unwrap_err();
+                                        Some(b"nvr.example.com".to_vec()), 0).unwrap_err();
         assert_eq!(format!("{}", e), "no password set for user \"slamb\"");
         c.set_password("hunter2".to_owned());
         state.apply(&conn, c).unwrap();
         let e = state.login_by_password(&conn, req.clone(), "slamb",
                                        "hunter3".to_owned(),
-                                       b"nvr.example.com".to_vec(), 0).unwrap_err();
+                                       Some(b"nvr.example.com".to_vec()), 0).unwrap_err();
         assert_eq!(format!("{}", e), "incorrect password for user \"slamb\"");
         let sid = {
             let (sid, s) = state.login_by_password(&conn, req.clone(), "slamb",
                                                   "hunter2".to_owned(),
-                                                  b"nvr.example.com".to_vec(), 0).unwrap();
+                                                  Some(b"nvr.example.com".to_vec()), 0).unwrap();
             assert_eq!(s.user_id, uid);
             sid
         };
@@ -859,7 +859,7 @@ mod tests {
         };
         let sid = state.login_by_password(&conn, req.clone(), "slamb",
                                           "hunter2".to_owned(),
-                                          b"nvr.example.com".to_vec(), 0).unwrap().0;
+                                          Some(b"nvr.example.com".to_vec()), 0).unwrap().0;
         state.authenticate_session(&conn, req.clone(), &sid.hash()).unwrap();
 
         // Reload.
@@ -897,7 +897,7 @@ mod tests {
             user_agent: Some(b"some ua".to_vec()),
         };
         state.login_by_password(&conn, req.clone(), "slamb", "hunter2".to_owned(),
-                                b"nvr.example.com".to_vec(), 0).unwrap();
+                                Some(b"nvr.example.com".to_vec()), 0).unwrap();
         let new_hash = {
             // Password should have been automatically upgraded.
             let u = state.users_by_id().get(&uid).unwrap();
@@ -923,7 +923,7 @@ mod tests {
 
         // Login should still work.
         state.login_by_password(&conn, req.clone(), "slamb", "hunter2".to_owned(),
-                                b"nvr.example.com".to_vec(), 0).unwrap();
+                                Some(b"nvr.example.com".to_vec()), 0).unwrap();
     }
 
     #[test]
@@ -946,7 +946,7 @@ mod tests {
         // Get a session for later.
         let sid = state.login_by_password(&conn, req.clone(), "slamb",
                                           "hunter2".to_owned(),
-                                          b"nvr.example.com".to_vec(), 0).unwrap().0;
+                                          Some(b"nvr.example.com".to_vec()), 0).unwrap().0;
 
         // Disable the user.
         {
@@ -958,7 +958,7 @@ mod tests {
         // Fresh logins shouldn't work.
         let e = state.login_by_password(&conn, req.clone(), "slamb",
                                        "hunter2".to_owned(),
-                                       b"nvr.example.com".to_vec(), 0).unwrap_err();
+                                       Some(b"nvr.example.com".to_vec()), 0).unwrap_err();
         assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
 
         // Authenticating existing sessions shouldn't work either.
@@ -992,7 +992,7 @@ mod tests {
         // Get a session for later.
         let (sid, _) = state.login_by_password(&conn, req.clone(), "slamb",
                                                "hunter2".to_owned(),
-                                               b"nvr.example.com".to_vec(), 0).unwrap();
+                                               Some(b"nvr.example.com".to_vec()), 0).unwrap();
 
         state.delete_user(&mut conn, uid).unwrap();
         assert!(state.users_by_id().get(&uid).is_none());
