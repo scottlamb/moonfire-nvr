@@ -332,7 +332,7 @@ create table user (
 
   -- Permissions available for newly created tokens or when authenticating via
   -- unix_uid above. A serialized "Permissions" protobuf.
-  permissions blob
+  permissions blob not null default X''
 );
 
 -- A single session, whether for browser or robot use.
@@ -398,7 +398,7 @@ create table user_session (
   use_count not null default 0,
 
   -- Permissions associated with this token; a serialized "Permissions" protobuf.
-  permissions blob
+  permissions blob not null default X''
 ) without rowid;
 
 create index user_session_uid on user_session (user_id);
@@ -481,7 +481,7 @@ create table signal_change (
   -- delta:         1         1         196 (must be non-negative)
   -- states:             1         1              2
   -- varint:        \x01 \x01 \x01 \x01 \xc4 \x01 \x02
-  changes blob
+  changes blob not null
 );
 
 insert into version (id, unix_time,                           notes)

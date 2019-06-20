@@ -58,13 +58,18 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           primary key (signal_id, camera_id)
         ) without rowid;
 
-        create table signal_state (
+        create table signal_change (
           time_90k integer primary key,
-          changes blob
+          changes blob not null
         );
 
-        alter table user add column permissions blob;
-        alter table user_session add column permissions blob;
+        alter table user add column permissions blob not null default X'';
+        alter table user_session add column permissions blob not null default X'';
+
+        -- Set permissions to "view_video" on existing users and sessions to preserve their
+        -- behavior. Newly created users won't have prepopulated permissions like this.
+        update user set permissions = X'0801';
+        update user_session set permissions = X'0801';
     "#)?;
     Ok(())
 }

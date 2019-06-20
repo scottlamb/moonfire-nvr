@@ -222,3 +222,12 @@ Version 3 adds over version 1:
     separate uuid which has to be reserved in advance.
 *   additional timestamp fields which may be useful in diagnosing/correcting
     time jumps/inconsistencies.
+
+### Version 3 to version 4
+
+This upgrade affects only the SQLite database. Version 4 adds over version 3:
+
+*   permissions for users and sessions. Existing users will have only the
+    `view_video` permission, matching their previous behavior.
+*   the `signals` schema, used to store status of signals such as camera
+    motion detection, security system zones, etc.
