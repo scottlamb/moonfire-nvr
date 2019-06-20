@@ -2262,7 +2262,8 @@ mod bench {
                 let addr = "127.0.0.1:0".parse().unwrap();
                 let server = hyper::server::Server::bind(&addr)
                     .tcp_nodelay(true)
-                    .serve(move || Ok::<_, Box<StdError + Send + Sync>>(MyService(mp4.clone())));
+                    .serve(move || Ok::<_, Box<dyn StdError + Send + Sync>>(
+                            MyService(mp4.clone())));
                 tx.send(server.local_addr()).unwrap();
                 ::tokio::run(server.map_err(|e| panic!(e)));
             });

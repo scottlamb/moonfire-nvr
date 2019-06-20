@@ -1393,17 +1393,16 @@ mod bench {
             let test_camera_uuid = db.test_camera_uuid;
             testutil::add_dummy_recordings_to_db(&db.db, 1440);
             let addr = "127.0.0.1:0".parse().unwrap();
-            let require_auth = false;
             let service = super::Service::new(super::Config {
                 db: db.db.clone(),
                 ui_dir: None,
-                require_auth,
+                allow_unauthenticated_permissions: Some(db::Permissions::default()),
                 trust_forward_hdrs: false,
                 time_zone_name: "".to_owned(),
             }).unwrap();
             let server = hyper::server::Server::bind(&addr)
                 .tcp_nodelay(true)
-                .serve(move || Ok::<_, Box<StdError + Send + Sync>>(service.clone()));
+                .serve(move || Ok::<_, Box<dyn StdError + Send + Sync>>(service.clone()));
             let addr = server.local_addr();  // resolve port 0 to a real ephemeral port number.
             ::std::thread::spawn(move || {
                 ::tokio::run(server.map_err(|e| panic!(e)));
