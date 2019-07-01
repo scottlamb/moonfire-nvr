@@ -96,13 +96,13 @@ impl<C: Clocks + Clone> TestDb<C> {
             assert_eq!(TEST_CAMERA_ID, l.add_camera(db::CameraChange {
                 short_name: "test camera".to_owned(),
                 description: "".to_owned(),
-                host: "test-camera".to_owned(),
+                onvif_host: "test-camera".to_owned(),
                 username: "foo".to_owned(),
                 password: "bar".to_owned(),
                 streams: [
                     db::StreamChange {
                         sample_file_dir_id: Some(sample_file_dir_id),
-                        rtsp_path: "/main".to_owned(),
+                        rtsp_url: "rtsp://test-camera/main".to_owned(),
                         record: true,
                         flush_if_sec,
                     },

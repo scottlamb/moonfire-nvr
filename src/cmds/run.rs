@@ -261,7 +261,7 @@ pub fn run() -> Result<(), Error> {
             let mut streamer = streamer::Streamer::new(&env, syncer.dir.clone(),
                                                        syncer.channel.clone(), *id, camera, stream,
                                                        rotate_offset_sec,
-                                                       streamer::ROTATE_INTERVAL_SEC);
+                                                       streamer::ROTATE_INTERVAL_SEC)?;
             info!("Starting streamer for {}", streamer.short_name());
             let name = format!("s-{}", streamer.short_name());
             streamers.push(thread::Builder::new().name(name).spawn(move|| {

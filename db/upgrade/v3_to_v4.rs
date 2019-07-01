@@ -70,6 +70,57 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         -- behavior. Newly created users won't have prepopulated permissions like this.
         update user set permissions = X'0801';
         update user_session set permissions = X'0801';
+
+        alter table stream rename to old_stream;
+        create table stream (
+          id integer primary key,
+          camera_id integer not null references camera (id),
+          sample_file_dir_id integer references sample_file_dir (id),
+          type text not null check (type in ('main', 'sub')),
+          record integer not null check (record in (1, 0)),
+          rtsp_url text not null,
+          retain_bytes integer not null check (retain_bytes >= 0),
+          flush_if_sec integer not null,
+          next_recording_id integer not null check (next_recording_id >= 0),
+          unique (camera_id, type)
+        );
+        insert into stream
+        select
+          s.id,
+          s.camera_id,
+          s.sample_file_dir_id,
+          s.type,
+          s.record,
+          'rtsp://' || c.host || s.rtsp_path as rtsp_url,
+          retain_bytes,
+          flush_if_sec,
+          next_recording_id
+        from
+          old_stream s join camera c on (s.camera_id = c.id);
+        drop table old_stream;
+
+        alter table camera rename to old_camera;
+        create table camera (
+          id integer primary key,
+          uuid blob unique not null check (length(uuid) = 16),
+          short_name text not null,
+          description text,
+          onvif_host text,
+          username text,
+          password text
+        );
+        insert into camera
+        select
+          id,
+          uuid,
+          short_name,
+          description,
+          host,
+          username,
+          password
+        from
+          old_camera;
+        drop table old_camera;
     "#)?;
     Ok(())
 }

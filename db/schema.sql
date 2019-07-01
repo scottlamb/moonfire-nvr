@@ -94,8 +94,11 @@ create table camera (
   -- A short description of the camera.
   description text,
 
-  -- The host (or IP address) to use in rtsp:// URLs when accessing the camera.
-  host text,
+  -- The host part of the http:// URL when accessing ONVIF, optionally
+  -- including ":<port>". Eg with ONVIF host "192.168.1.110:85", the full URL
+  -- of the devie management service will be
+  -- "http://192.168.1.110:85/device_service".
+  onvif_host text,
 
   -- The username to use when accessing the camera.
   -- If empty, no username or password will be supplied.
@@ -116,8 +119,9 @@ create table stream (
   -- will not be deleted.
   record integer not null check (record in (1, 0)),
 
-  -- The path (starting with "/") to use in rtsp:// URLs to for this stream.
-  rtsp_path text not null,
+  -- The rtsp:// URL to use for this stream, excluding username and password.
+  -- (Those are taken from the camera row's respective fields.)
+  rtsp_url text not null,
 
   -- The number of bytes of video to retain, excluding the currently-recording
   -- file. Older files will be deleted as necessary to stay within this limit.

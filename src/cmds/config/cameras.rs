@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use super::{decode_size, encode_size};
+use url::Url;
 
 /// Builds a `CameraChange` from an active `edit_camera_dialog`.
 fn get_change(siv: &mut Cursive) -> db::CameraChange {
@@ -45,19 +46,19 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
     // https://github.com/gyscos/Cursive/issues/144
     let sn = siv.find_id::<views::EditView>("short_name").unwrap().get_content().as_str().into();
     let d = siv.find_id::<views::TextArea>("description").unwrap().get_content().into();
-    let h = siv.find_id::<views::EditView>("host").unwrap().get_content().as_str().into();
+    let h = siv.find_id::<views::EditView>("onvif_host").unwrap().get_content().as_str().into();
     let u = siv.find_id::<views::EditView>("username").unwrap().get_content().as_str().into();
     let p = siv.find_id::<views::EditView>("password").unwrap().get_content().as_str().into();
     let mut c = db::CameraChange {
         short_name: sn,
         description: d,
-        host: h,
+        onvif_host: h,
         username: u,
         password: p,
         streams: Default::default(),
     };
     for &t in &db::ALL_STREAM_TYPES {
-        let p = siv.find_id::<views::EditView>(&format!("{}_rtsp_path", t.as_str()))
+        let u = siv.find_id::<views::EditView>(&format!("{}_rtsp_url", t.as_str()))
                 .unwrap().get_content().as_str().into();
         let r = siv.find_id::<views::Checkbox>(&format!("{}_record", t.as_str()))
                 .unwrap().is_checked();
@@ -68,7 +69,7 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
             &format!("{}_sample_file_dir", t.as_str()))
             .unwrap().selection().unwrap();
         c.streams[t.index()] = db::StreamChange {
-            rtsp_path: p,
+            rtsp_url: u,
             sample_file_dir_id: d,
             record: r,
             flush_if_sec: f,
@@ -101,10 +102,10 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
     }
 }
 
-fn press_test_inner(url: &str) -> Result<String, Error> {
+fn press_test_inner(url: &Url) -> Result<String, Error> {
     let stream = stream::FFMPEG.open(stream::Source::Rtsp {
-        url,
-        redacted_url: url,
+        url: url.as_str(),
+        redacted_url: url.as_str(),  // don't need redaction in config UI.
     })?;
     let extra_data = stream.get_extra_data()?;
     Ok(format!("{}x{} video stream", extra_data.width, extra_data.height))
@@ -112,11 +113,24 @@ fn press_test_inner(url: &str) -> Result<String, Error> {
 
 fn press_test(siv: &mut Cursive, t: db::StreamType) {
     let c = get_change(siv);
-    let url = format!("rtsp://{}:{}@{}{}", c.username, c.password, c.host,
-                      c.streams[t.index()].rtsp_path);
+    let mut url = match Url::parse(&c.streams[t.index()].rtsp_url) {
+        Ok(u) => u,
+        Err(e) => {
+            siv.add_layer(views::Dialog::text(
+                    format!("Unparseable URL: {}", e))
+                    .title("Stream test failed")
+                    .dismiss_button("Back"));
+            return;
+        },
+    };
+
+    if !c.username.is_empty() {
+        url.set_username(&c.username);
+        url.set_password(Some(&c.password));
+    }
     siv.add_layer(views::Dialog::text(format!("Testing {} stream at {}. This may take a while \
                                                on timeout or if you have a long key frame interval",
-                                              t.as_str(), url))
+                                              t.as_str(), &url))
                   .title("Testing"));
 
     // Let siv have this thread for its event loop; do the work in a background thread.
@@ -132,7 +146,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
             let description = match r {
                 Err(ref e) => {
                     siv.add_layer(
-                        views::Dialog::text(format!("{} stream at {}:\n\n{}", t.as_str(), url, e))
+                        views::Dialog::text(format!("{} stream at {}:\n\n{}", t.as_str(), &url, e))
                         .title("Stream test failed")
                         .dismiss_button("Back"));
                     return;
@@ -140,7 +154,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
                 Ok(ref d) => d,
             };
             siv.add_layer(views::Dialog::text(
-                    format!("{} stream at {}:\n\n{}", t.as_str(), url, description))
+                    format!("{} stream at {}:\n\n{}", t.as_str(), &url, description))
                     .title("Stream test succeeded")
                     .dismiss_button("Back"));
         })).unwrap();
@@ -247,7 +261,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
         }))
         .child("uuid", views::TextView::new("<new>").with_id("uuid"))
         .child("short name", views::EditView::new().with_id("short_name"))
-        .child("host", views::EditView::new().with_id("host"))
+        .child("onvif_host", views::EditView::new().with_id("onvif_host"))
         .child("username", views::EditView::new().with_id("username"))
         .child("password", views::EditView::new().with_id("password"))
         .min_height(6);
@@ -264,9 +278,9 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                        .collect();
     for &type_ in &db::ALL_STREAM_TYPES {
         let list = views::ListView::new()
-            .child("rtsp path", views::LinearLayout::horizontal()
+            .child("rtsp url", views::LinearLayout::horizontal()
                 .child(views::EditView::new()
-                       .with_id(format!("{}_rtsp_path", type_.as_str()))
+                       .with_id(format!("{}_rtsp_url", type_.as_str()))
                        .full_width())
                 .child(views::DummyView)
                 .child(views::Button::new("Test", move |siv| press_test(siv, type_))))
@@ -315,8 +329,8 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                     format!("{} / {} ({:.1}%)", s.sample_file_bytes, s.retain_bytes,
                                 100. * s.sample_file_bytes as f32 / s.retain_bytes as f32)
                 };
-                dialog.call_on_id(&format!("{}_rtsp_path", t.as_str()),
-                                  |v: &mut views::EditView| v.set_content(s.rtsp_path.to_owned()));
+                dialog.call_on_id(&format!("{}_rtsp_url", t.as_str()),
+                                  |v: &mut views::EditView| v.set_content(s.rtsp_url.to_owned()));
                 dialog.call_on_id(&format!("{}_usage_cap", t.as_str()),
                                   |v: &mut views::TextView| v.set_content(u));
                 dialog.call_on_id(&format!("{}_record", t.as_str()),
@@ -331,7 +345,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
         }
         let name = camera.short_name.clone();
         for &(view_id, content) in &[("short_name", &*camera.short_name),
-                                     ("host", &*camera.host),
+                                     ("onvif_host", &*camera.onvif_host),
                                      ("username", &*camera.username),
                                      ("password", &*camera.password)] {
             dialog.call_on_id(view_id, |v: &mut views::EditView| v.set_content(content.to_string()))

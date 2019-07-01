@@ -76,7 +76,7 @@ The `application/json` response will have a dict as follows:
         a dictionary describing the configuration of the camera:
         *   `username`
         *   `password`
-        *   `host`
+        *   `onvif_host`
     *   `streams`: a dict of stream type ("main" or "sub") to a dictionary
         describing the stream:
         *   `retainBytes`: the configured total number of bytes of completed
@@ -136,7 +136,7 @@ Example response:
       "shortName": "driveway",
       "description": "Hikvision DS-2CD2032 overlooking the driveway from east",
       "config": {
-        "host": "192.168.1.100",
+        "onvif_host": "192.168.1.100",
         "user": "admin",
         "password": "12345",
       },

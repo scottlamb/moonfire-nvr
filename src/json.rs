@@ -93,7 +93,7 @@ pub struct Camera<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct CameraConfig<'a> {
-    pub host: &'a str,
+    pub onvif_host: &'a str,
     pub username: &'a str,
     pub password: &'a str,
 }
@@ -184,7 +184,7 @@ impl<'a> Camera<'a> {
             config: match include_config {
                 false => None,
                 true => Some(CameraConfig {
-                    host: &c.host,
+                    onvif_host: &c.onvif_host,
                     username: &c.username,
                     password: &c.password,
                 }),

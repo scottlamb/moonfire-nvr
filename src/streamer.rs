@@ -38,6 +38,7 @@ use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use time;
+use url::Url;
 
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
 
@@ -60,16 +61,24 @@ pub struct Streamer<'a, C, S> where C: Clocks + Clone, S: 'a + stream::Stream {
     opener: &'a dyn stream::Opener<S>,
     stream_id: i32,
     short_name: String,
-    url: String,
-    redacted_url: String,
+    url: Url,
+    redacted_url: Url,
 }
 
 impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::Stream {
     pub fn new<'b>(env: &Environment<'a, 'b, C, S>, dir: Arc<dir::SampleFileDir>,
                    syncer_channel: writer::SyncerChannel<::std::fs::File>,
                    stream_id: i32, c: &Camera, s: &Stream, rotate_offset_sec: i64,
-                   rotate_interval_sec: i64) -> Self {
-        Streamer {
+                   rotate_interval_sec: i64) -> Result<Self, Error> {
+        let mut url = Url::parse(&s.rtsp_url)?;
+        let mut redacted_url = url.clone();
+        if !c.username.is_empty() {
+            url.set_username(&c.username);
+            redacted_url.set_username(&c.username);
+            url.set_password(Some(&c.password));
+            redacted_url.set_password(Some("redacted"));
+        }
+        Ok(Streamer {
             shutdown: env.shutdown.clone(),
             rotate_offset_sec: rotate_offset_sec,
             rotate_interval_sec: rotate_interval_sec,
@@ -79,9 +88,9 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
             opener: env.opener,
             stream_id: stream_id,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
-            url: format!("rtsp://{}:{}@{}{}", c.username, c.password, c.host, s.rtsp_path),
-            redacted_url: format!("rtsp://{}:redacted@{}{}", c.username, c.host, s.rtsp_path),
-        }
+            url,
+            redacted_url,
+        })
     }
 
     pub fn short_name(&self) -> &str { &self.short_name }
@@ -104,8 +113,8 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
         let mut stream = {
             let _t = TimerGuard::new(&clocks, || format!("opening {}", self.redacted_url));
             self.opener.open(stream::Source::Rtsp {
-                url: &self.url,
-                redacted_url: &self.redacted_url,
+                url: self.url.as_str(),
+                redacted_url: self.redacted_url.as_str(),
             })?
         };
         let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();

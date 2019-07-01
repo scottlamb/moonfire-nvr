@@ -348,7 +348,7 @@ pub struct Camera {
     pub uuid: Uuid,
     pub short_name: String,
     pub description: String,
-    pub host: String,
+    pub onvif_host: String,
     pub username: String,
     pub password: String,
     pub streams: [Option<i32>; 2],
@@ -402,7 +402,7 @@ pub struct Stream {
     pub camera_id: i32,
     pub sample_file_dir_id: Option<i32>,
     pub type_: StreamType,
-    pub rtsp_path: String,
+    pub rtsp_url: String,
     pub retain_bytes: i64,
     pub flush_if_sec: i64,
 
@@ -465,7 +465,7 @@ pub struct LiveSegment {
 #[derive(Clone, Debug, Default)]
 pub struct StreamChange {
     pub sample_file_dir_id: Option<i32>,
-    pub rtsp_path: String,
+    pub rtsp_url: String,
     pub record: bool,
     pub flush_if_sec: i64,
 }
@@ -475,7 +475,7 @@ pub struct StreamChange {
 pub struct CameraChange {
     pub short_name: String,
     pub description: String,
-    pub host: String,
+    pub onvif_host: String,
     pub username: String,
     pub password: String,
 
@@ -678,7 +678,7 @@ impl StreamStateChanger {
                               d, sc.sample_file_dir_id, sid);
                     }
                 }
-                if !have_data && sc.rtsp_path.is_empty() && sc.sample_file_dir_id.is_none() &&
+                if !have_data && sc.rtsp_url.is_empty() && sc.sample_file_dir_id.is_none() &&
                    !sc.record {
                     // Delete stream.
                     let mut stmt = tx.prepare_cached(r#"
@@ -692,7 +692,7 @@ impl StreamStateChanger {
                     // Update stream.
                     let mut stmt = tx.prepare_cached(r#"
                         update stream set
-                            rtsp_path = :rtsp_path,
+                            rtsp_url = :rtsp_url,
                             record = :record,
                             flush_if_sec = :flush_if_sec,
                             sample_file_dir_id = :sample_file_dir_id
@@ -700,7 +700,7 @@ impl StreamStateChanger {
                             id = :id
                     "#)?;
                     let rows = stmt.execute_named(&[
-                        (":rtsp_path", &sc.rtsp_path),
+                        (":rtsp_url", &sc.rtsp_url),
                         (":record", &sc.record),
                         (":flush_if_sec", &sc.flush_if_sec),
                         (":sample_file_dir_id", &sc.sample_file_dir_id),
@@ -714,22 +714,22 @@ impl StreamStateChanger {
                     streams.push((sid, Some((camera_id, type_, sc))));
                 }
             } else {
-                if sc.rtsp_path.is_empty() && sc.sample_file_dir_id.is_none() && !sc.record {
+                if sc.rtsp_url.is_empty() && sc.sample_file_dir_id.is_none() && !sc.record {
                     // Do nothing; there is no record and we want to keep it that way.
                     continue;
                 }
                 // Insert stream.
                 let mut stmt = tx.prepare_cached(r#"
-                    insert into stream (camera_id,  sample_file_dir_id,  type,  rtsp_path,  record,
+                    insert into stream (camera_id,  sample_file_dir_id,  type,  rtsp_url,  record,
                                         retain_bytes, flush_if_sec,  next_recording_id)
-                                values (:camera_id, :sample_file_dir_id, :type, :rtsp_path, :record,
+                                values (:camera_id, :sample_file_dir_id, :type, :rtsp_url, :record,
                                         0,            :flush_if_sec, 1)
                 "#)?;
                 stmt.execute_named(&[
                     (":camera_id", &camera_id),
                     (":sample_file_dir_id", &sc.sample_file_dir_id),
                     (":type", &type_.as_str()),
-                    (":rtsp_path", &sc.rtsp_path),
+                    (":rtsp_url", &sc.rtsp_url),
                     (":record", &sc.record),
                     (":flush_if_sec", &sc.flush_if_sec),
                 ])?;
@@ -757,7 +757,7 @@ impl StreamStateChanger {
                         type_,
                         camera_id,
                         sample_file_dir_id: sc.sample_file_dir_id,
-                        rtsp_path: mem::replace(&mut sc.rtsp_path, String::new()),
+                        rtsp_url: mem::replace(&mut sc.rtsp_url, String::new()),
                         retain_bytes: 0,
                         flush_if_sec: sc.flush_if_sec,
                         range: None,
@@ -778,7 +778,7 @@ impl StreamStateChanger {
                 (Entry::Occupied(e), Some((_, _, sc))) => {
                     let e = e.into_mut();
                     e.sample_file_dir_id = sc.sample_file_dir_id;
-                    e.rtsp_path = sc.rtsp_path;
+                    e.rtsp_url = sc.rtsp_url;
                     e.record = sc.record;
                     e.flush_if_sec = sc.flush_if_sec;
                 },
@@ -1401,7 +1401,7 @@ impl LockedDatabase {
               uuid,
               short_name,
               description,
-              host,
+              onvif_host,
               username,
               password
             from
@@ -1416,7 +1416,7 @@ impl LockedDatabase {
                 uuid: uuid.0,
                 short_name: row.get(2)?,
                 description: row.get(3)?,
-                host: row.get(4)?,
+                onvif_host: row.get(4)?,
                 username: row.get(5)?,
                 password: row.get(6)?,
                 streams: Default::default(),
@@ -1437,7 +1437,7 @@ impl LockedDatabase {
               type,
               camera_id,
               sample_file_dir_id,
-              rtsp_path,
+              rtsp_url,
               retain_bytes,
               flush_if_sec,
               next_recording_id,
@@ -1463,7 +1463,7 @@ impl LockedDatabase {
                 type_,
                 camera_id,
                 sample_file_dir_id: row.get(3)?,
-                rtsp_path: row.get(4)?,
+                rtsp_url: row.get(4)?,
                 retain_bytes: row.get(5)?,
                 flush_if_sec,
                 range: None,
@@ -1618,14 +1618,16 @@ impl LockedDatabase {
         let camera_id;
         {
             let mut stmt = tx.prepare_cached(r#"
-                insert into camera (uuid,  short_name,  description,  host,  username,  password)
-                            values (:uuid, :short_name, :description, :host, :username, :password)
+                insert into camera (uuid,  short_name,  description,  onvif_host,  username,
+                                    password)
+                            values (:uuid, :short_name, :description, :onvif_host, :username,
+                                    :password)
             "#)?;
             stmt.execute_named(&[
                 (":uuid", &uuid_bytes),
                 (":short_name", &camera.short_name),
                 (":description", &camera.description),
-                (":host", &camera.host),
+                (":onvif_host", &camera.onvif_host),
                 (":username", &camera.username),
                 (":password", &camera.password),
             ])?;
@@ -1640,7 +1642,7 @@ impl LockedDatabase {
             uuid,
             short_name: camera.short_name,
             description: camera.description,
-            host: camera.host,
+            onvif_host: camera.onvif_host,
             username: camera.username,
             password: camera.password,
             streams,
@@ -1664,7 +1666,7 @@ impl LockedDatabase {
                 update camera set
                     short_name = :short_name,
                     description = :description,
-                    host = :host,
+                    onvif_host = :onvif_host,
                     username = :username,
                     password = :password
                 where
@@ -1674,7 +1676,7 @@ impl LockedDatabase {
                 (":id", &camera_id),
                 (":short_name", &camera.short_name),
                 (":description", &camera.description),
-                (":host", &camera.host),
+                (":onvif_host", &camera.onvif_host),
                 (":username", &camera.username),
                 (":password", &camera.password),
             ])?;
@@ -1685,7 +1687,7 @@ impl LockedDatabase {
         tx.commit()?;
         c.short_name = camera.short_name;
         c.description = camera.description;
-        c.host = camera.host;
+        c.onvif_host = camera.onvif_host;
         c.username = camera.username;
         c.password = camera.password;
         c.streams = streams.apply(&mut self.streams_by_id);
@@ -2036,11 +2038,11 @@ mod tests {
                 rows += 1;
                 camera_id = row.id;
                 assert_eq!(uuid, row.uuid);
-                assert_eq!("test-camera", row.host);
+                assert_eq!("test-camera", row.onvif_host);
                 assert_eq!("foo", row.username);
                 assert_eq!("bar", row.password);
-                //assert_eq!("/main", row.main_rtsp_path);
-                //assert_eq!("/sub", row.sub_rtsp_path);
+                //assert_eq!("/main", row.main_rtsp_url);
+                //assert_eq!("/sub", row.sub_rtsp_url);
                 //assert_eq!(42, row.retain_bytes);
                 //assert_eq!(None, row.range);
                 //assert_eq!(recording::Duration(0), row.duration);
@@ -2225,19 +2227,19 @@ mod tests {
         let mut c = CameraChange {
             short_name: "testcam".to_owned(),
             description: "".to_owned(),
-            host: "test-camera".to_owned(),
+            onvif_host: "test-camera".to_owned(),
             username: "foo".to_owned(),
             password: "bar".to_owned(),
             streams: [
                 StreamChange {
                     sample_file_dir_id: Some(sample_file_dir_id),
-                    rtsp_path: "/main".to_owned(),
+                    rtsp_url: "rtsp://test-camera/main".to_owned(),
                     record: false,
                     flush_if_sec: 1,
                 },
                 StreamChange {
                     sample_file_dir_id: Some(sample_file_dir_id),
-                    rtsp_path: "/sub".to_owned(),
+                    rtsp_url: "rtsp://test-camera/sub".to_owned(),
                     record: true,
                     flush_if_sec: 1,
                 },
