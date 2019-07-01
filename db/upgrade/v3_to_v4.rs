@@ -71,34 +71,6 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         update user set permissions = X'0801';
         update user_session set permissions = X'0801';
 
-        alter table stream rename to old_stream;
-        create table stream (
-          id integer primary key,
-          camera_id integer not null references camera (id),
-          sample_file_dir_id integer references sample_file_dir (id),
-          type text not null check (type in ('main', 'sub')),
-          record integer not null check (record in (1, 0)),
-          rtsp_url text not null,
-          retain_bytes integer not null check (retain_bytes >= 0),
-          flush_if_sec integer not null,
-          next_recording_id integer not null check (next_recording_id >= 0),
-          unique (camera_id, type)
-        );
-        insert into stream
-        select
-          s.id,
-          s.camera_id,
-          s.sample_file_dir_id,
-          s.type,
-          s.record,
-          'rtsp://' || c.host || s.rtsp_path as rtsp_url,
-          retain_bytes,
-          flush_if_sec,
-          next_recording_id
-        from
-          old_stream s join camera c on (s.camera_id = c.id);
-        drop table old_stream;
-
         alter table camera rename to old_camera;
         create table camera (
           id integer primary key,
@@ -120,6 +92,98 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           password
         from
           old_camera;
+
+        alter table stream rename to old_stream;
+        create table stream (
+          id integer primary key,
+          camera_id integer not null references camera (id),
+          sample_file_dir_id integer references sample_file_dir (id),
+          type text not null check (type in ('main', 'sub')),
+          record integer not null check (record in (1, 0)),
+          rtsp_url text not null,
+          retain_bytes integer not null check (retain_bytes >= 0),
+          flush_if_sec integer not null,
+          next_recording_id integer not null check (next_recording_id >= 0),
+          unique (camera_id, type)
+        );
+        insert into stream
+        select
+          s.id,
+          s.camera_id,
+          s.sample_file_dir_id,
+          s.type,
+          s.record,
+          'rtsp://' || c.onvif_host || s.rtsp_path as rtsp_url,
+          retain_bytes,
+          flush_if_sec,
+          next_recording_id
+        from
+          old_stream s join camera c on (s.camera_id = c.id);
+
+        alter table recording rename to old_recording;
+        create table recording (
+          composite_id integer primary key,
+          open_id integer not null,
+          stream_id integer not null references stream (id),
+          run_offset integer not null,
+          flags integer not null,
+          sample_file_bytes integer not null check (sample_file_bytes > 0),
+          start_time_90k integer not null check (start_time_90k > 0),
+          duration_90k integer not null
+              check (duration_90k >= 0 and duration_90k < 5*60*90000),
+          video_samples integer not null check (video_samples > 0),
+          video_sync_samples integer not null check (video_sync_samples > 0),
+          video_sample_entry_id integer references video_sample_entry (id),
+          check (composite_id >> 32 = stream_id)
+        );
+        insert into recording select
+          composite_id,
+          open_id,
+          stream_id,
+          run_offset,
+          flags,
+          sample_file_bytes,
+          start_time_90k,
+          duration_90k,
+          video_samples,
+          video_sync_samples,
+          video_sample_entry_id
+        from old_recording;
+        drop index recording_cover;
+        create index recording_cover on recording (
+          stream_id,
+          start_time_90k,
+          open_id,
+          duration_90k,
+          video_samples,
+          video_sync_samples,
+          video_sample_entry_id,
+          sample_file_bytes,
+          run_offset,
+          flags
+        );
+
+        alter table recording_integrity rename to old_recording_integrity;
+        create table recording_integrity (
+          composite_id integer primary key references recording (composite_id),
+          local_time_delta_90k integer,
+          local_time_since_open_90k integer,
+          wall_time_delta_90k integer,
+          sample_file_sha1 blob check (length(sample_file_sha1) <= 20)
+        );
+        insert into recording_integrity select * from old_recording_integrity;
+
+        alter table recording_playback rename to old_recording_playback;
+        create table recording_playback (
+          composite_id integer primary key references recording (composite_id),
+          video_index blob not null check (length(video_index) > 0)
+        );
+        insert into recording_playback select * from old_recording_playback;
+
+        drop table old_recording_playback;
+        drop table old_recording_integrity;
+        drop table old_recording;
+        drop table old_stream;
         drop table old_camera;
     "#)?;
     Ok(())

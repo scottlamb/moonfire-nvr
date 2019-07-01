@@ -157,8 +157,8 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
 
         create table recording (
           composite_id integer primary key,
-          stream_id integer not null references stream (id),
           open_id integer not null,
+          stream_id integer not null references stream (id),
           run_offset integer not null,
           flags integer not null,
           sample_file_bytes integer not null check (sample_file_bytes > 0),
