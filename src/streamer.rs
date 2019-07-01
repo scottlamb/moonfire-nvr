@@ -73,10 +73,10 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
         let mut url = Url::parse(&s.rtsp_url)?;
         let mut redacted_url = url.clone();
         if !c.username.is_empty() {
-            url.set_username(&c.username);
-            redacted_url.set_username(&c.username);
-            url.set_password(Some(&c.password));
-            redacted_url.set_password(Some("redacted"));
+            url.set_username(&c.username).map_err(|_| format_err!("can't set username"))?;
+            redacted_url.set_username(&c.username).unwrap();
+            url.set_password(Some(&c.password)).unwrap();
+            redacted_url.set_password(Some("redacted")).unwrap();
         }
         Ok(Streamer {
             shutdown: env.shutdown.clone(),
@@ -357,7 +357,7 @@ mod tests {
             let s = l.streams_by_id().get(&testutil::TEST_STREAM_ID).unwrap();
             let dir = db.dirs_by_stream_id.get(&testutil::TEST_STREAM_ID).unwrap().clone();
             stream = super::Streamer::new(&env, dir, db.syncer_channel.clone(),
-                                          testutil::TEST_STREAM_ID, camera, s, 0, 3);
+                                          testutil::TEST_STREAM_ID, camera, s, 0, 3).unwrap();
         }
         stream.run();
         assert!(opener.streams.lock().is_empty());

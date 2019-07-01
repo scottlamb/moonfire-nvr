@@ -125,8 +125,8 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
     };
 
     if !c.username.is_empty() {
-        url.set_username(&c.username);
-        url.set_password(Some(&c.password));
+        let _ = url.set_username(&c.username);
+        let _ = url.set_password(Some(&c.password));
     }
     siv.add_layer(views::Dialog::text(format!("Testing {} stream at {}. This may take a while \
                                                on timeout or if you have a long key frame interval",
