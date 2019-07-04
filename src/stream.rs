@@ -29,6 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::h264;
+use cstr::*;
 use failure::{Error, bail};
 use ffmpeg;
 use lazy_static::lazy_static;
@@ -78,12 +79,6 @@ impl Ffmpeg {
     }
 }
 
-macro_rules! c_str {
-    ($s:expr) => { {
-        unsafe { CStr::from_ptr(concat!($s, "\0").as_ptr() as *const c_char) }
-    } }
-}
-
 impl Opener<FfmpegStream> for Ffmpeg {
     fn open(&self, src: Source) -> Result<FfmpegStream, Error> {
         use ffmpeg::InputFormatContext;
@@ -93,7 +88,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
                 let mut open_options = ffmpeg::Dictionary::new();
 
                 // Work around https://github.com/scottlamb/moonfire-nvr/issues/10
-                open_options.set(c_str!("advanced_editlist"), c_str!("false")).unwrap();
+                open_options.set(cstr!("advanced_editlist"), cstr!("false")).unwrap();
                 let url = format!("file:{}", filename);
                 let i = InputFormatContext::open(&CString::new(url.clone()).unwrap(),
                                                  &mut open_options)?;
@@ -105,14 +100,14 @@ impl Opener<FfmpegStream> for Ffmpeg {
             }
             Source::Rtsp{url, redacted_url} => {
                 let mut open_options = ffmpeg::Dictionary::new();
-                open_options.set(c_str!("rtsp_transport"), c_str!("tcp")).unwrap();
-                open_options.set(c_str!("user-agent"), c_str!("moonfire-nvr")).unwrap();
+                open_options.set(cstr!("rtsp_transport"), cstr!("tcp")).unwrap();
+                open_options.set(cstr!("user-agent"), cstr!("moonfire-nvr")).unwrap();
                 // 10-second socket timeout, in microseconds.
-                open_options.set(c_str!("stimeout"), c_str!("10000000")).unwrap();
+                open_options.set(cstr!("stimeout"), cstr!("10000000")).unwrap();
 
                 // Moonfire NVR currently only supports video, so receiving audio is wasteful.
                 // It also triggers <https://github.com/scottlamb/moonfire-nvr/issues/36>.
-                open_options.set(c_str!("allowed_media_types"), c_str!("video")).unwrap();
+                open_options.set(cstr!("allowed_media_types"), cstr!("video")).unwrap();
 
                 let i = InputFormatContext::open(&CString::new(url).unwrap(), &mut open_options)?;
                 if !open_options.empty() {

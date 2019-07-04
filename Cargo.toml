@@ -22,6 +22,7 @@ base = { package = "moonfire-base", path = "base" }
 base64 = "0.10.0"
 bytes = "0.4.6"
 byteorder = "1.0"
+cstr = "0.1.7"
 cursive = "0.12"
 db = { package = "moonfire-db", path = "db" }
 docopt = "1.0"

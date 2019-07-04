@@ -33,6 +33,7 @@
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
 use crate::db::CompositeId;
+use cstr::*;
 use failure::{Error, Fail, bail, format_err};
 use libc::c_char;
 use log::warn;
@@ -140,7 +141,7 @@ pub(crate) unsafe fn renameat(from_fd: &Fd, from_path: *const c_char,
 /// Reads `dir`'s metadata. If none is found, returns an empty proto.
 pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     let mut meta = schema::DirMeta::default();
-    let p = unsafe { ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char) };
+    let p = cstr!("meta");
     let mut f = match unsafe { dir.openat(p.as_ptr(), libc::O_RDONLY, 0) } {
         Err(e) => {
             if e.kind() == ::std::io::ErrorKind::NotFound {
@@ -159,10 +160,8 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
 
 /// Write `dir`'s metadata, clobbering existing data.
 pub(crate) fn write_meta(dir: &Fd, meta: &schema::DirMeta) -> Result<(), Error> {
-    let (tmp_path, final_path) = unsafe {
-        (ffi::CStr::from_ptr("meta.tmp\0".as_ptr() as *const c_char),
-         ffi::CStr::from_ptr("meta\0".as_ptr() as *const c_char))
-    };
+    let tmp_path = cstr!("meta.tmp");
+    let final_path = cstr!("meta");
     let mut f = unsafe { dir.openat(tmp_path.as_ptr(),
                                     libc::O_CREAT | libc::O_TRUNC | libc::O_WRONLY, 0o600)? };
     meta.write_to_writer(&mut f)?;
