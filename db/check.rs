@@ -183,7 +183,7 @@ fn read_dir(path: &str, opts: &Options) -> Result<Dir, Error> {
         let f = e.file_name();
         let f = f.as_bytes();
         match f {
-            b"meta" | b"meta-tmp" => continue,
+            b"meta" => continue,
             _ => {},
         };
         let id = match dir::parse_id(f) {

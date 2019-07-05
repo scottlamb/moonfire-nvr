@@ -34,8 +34,7 @@ use failure::{Error, bail};
 use ffmpeg;
 use lazy_static::lazy_static;
 use log::{debug, info, warn};
-use std::os::raw::c_char;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::result::Result;
 use std::sync;
 

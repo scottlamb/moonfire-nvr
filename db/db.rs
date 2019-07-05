@@ -83,7 +83,7 @@ use time;
 use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
-pub const EXPECTED_VERSION: i32 = 4;
+pub const EXPECTED_VERSION: i32 = 5;
 
 const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
     select
@@ -2189,20 +2189,20 @@ mod tests {
     fn test_version_too_old() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (3, 0, '');").unwrap();
+        c.execute_batch("delete from version; insert into version values (4, 0, '');").unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(e.to_string().starts_with(
-                "Database schema version 3 is too old (expected 4)"), "got: {:?}", e);
+                "Database schema version 4 is too old (expected 5)"), "got: {:?}", e);
     }
 
     #[test]
     fn test_version_too_new() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (5, 0, '');").unwrap();
+        c.execute_batch("delete from version; insert into version values (6, 0, '');").unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(e.to_string().starts_with(
-                "Database schema version 5 is too new (expected 4)"), "got: {:?}", e);
+                "Database schema version 6 is too new (expected 5)"), "got: {:?}", e);
     }
 
     /// Basic test of running some queries on a fresh database.

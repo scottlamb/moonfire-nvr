@@ -32,6 +32,7 @@
 //!
 //! This includes opening files for serving, rotating away old files, and saving new files.
 
+use crate::coding;
 use crate::db::CompositeId;
 use cstr::*;
 use failure::{Error, Fail, bail, format_err};
@@ -46,6 +47,11 @@ use std::mem;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::FromRawFd;
 use std::sync::Arc;
+
+/// The fixed length of a directory's `meta` file.
+///
+/// See DirMeta comments within proto/schema.proto for more explanation.
+const FIXED_DIR_META_LEN: usize = 512;
 
 /// A sample file directory. Typically one per physical disk drive.
 ///
@@ -100,8 +106,8 @@ impl Fd {
     }
 
     /// Opens a sample file within this directory with the given flags and (if creating) mode.
-    unsafe fn openat(&self, p: *const c_char, flags: libc::c_int, mode: libc::c_int)
-                     -> Result<fs::File, io::Error> {
+    pub(crate) unsafe fn openat(&self, p: *const c_char, flags: libc::c_int, mode: libc::c_int)
+                                -> Result<fs::File, io::Error> {
         let fd = libc::openat(self.0, p, flags, mode);
         if fd < 0 {
             return Err(io::Error::last_os_error())
@@ -153,6 +159,13 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     };
     let mut data = Vec::new();
     f.read_to_end(&mut data)?;
+    let (len, pos) = coding::decode_varint32(&data, 0)
+        .map_err(|_| format_err!("Unable to decode varint length in meta file"))?;
+    if data.len() != FIXED_DIR_META_LEN || len as usize + pos > FIXED_DIR_META_LEN {
+        bail!("Expected a {}-byte file with a varint length of a DirMeta message; got \
+               a {}-byte file with length {}", FIXED_DIR_META_LEN, data.len(), len);
+    }
+    let data = &data[pos..pos+len as usize];
     let mut s = protobuf::CodedInputStream::from_bytes(&data);
     meta.merge_from(&mut s).map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
     Ok(meta)
@@ -160,14 +173,28 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
 
 /// Write `dir`'s metadata, clobbering existing data.
 pub(crate) fn write_meta(dir: &Fd, meta: &schema::DirMeta) -> Result<(), Error> {
-    let tmp_path = cstr!("meta.tmp");
-    let final_path = cstr!("meta");
-    let mut f = unsafe { dir.openat(tmp_path.as_ptr(),
-                                    libc::O_CREAT | libc::O_TRUNC | libc::O_WRONLY, 0o600)? };
-    meta.write_to_writer(&mut f)?;
-    f.sync_all()?;
-    unsafe { renameat(&dir, tmp_path.as_ptr(), &dir, final_path.as_ptr())? };
-    dir.sync()?;
+    let mut data = meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
+    if data.len() > FIXED_DIR_META_LEN {
+        bail!("Length-delimited DirMeta message requires {} bytes, over limit of {}",
+              data.len(), FIXED_DIR_META_LEN);
+    }
+    data.resize(FIXED_DIR_META_LEN, 0);  // pad to required length.
+    let path = cstr!("meta");
+    let mut f = unsafe { dir.openat(path.as_ptr(),
+                                    libc::O_CREAT | libc::O_WRONLY, 0o600)? };
+    let stat = f.metadata()?;
+    if stat.len() == 0 {
+        // Need to sync not only the data but also the file metadata and dirent.
+        f.write_all(&data)?;
+        f.sync_all()?;
+        dir.sync()?;
+    } else if stat.len() == FIXED_DIR_META_LEN as u64 {
+        // Just syncing the data will suffice; existing metadata and dirent are fine.
+        f.write_all(&data)?;
+        f.sync_data()?;
+    } else {
+        bail!("Existing meta file is {}-byte; expected {}", stat.len(), FIXED_DIR_META_LEN);
+    }
     Ok(())
 }
 
@@ -183,7 +210,10 @@ impl SampleFileDir {
         s.fd.lock(if read_write { libc::LOCK_EX } else { libc::LOCK_SH } | libc::LOCK_NB)?;
         let dir_meta = read_meta(&s.fd)?;
         if !SampleFileDir::consistent(db_meta, &dir_meta) {
-            bail!("metadata mismatch.\ndb: {:#?}\ndir: {:#?}", db_meta, &dir_meta);
+            let serialized =
+                db_meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
+            bail!("metadata mismatch.\ndb: {:#?}\ndir: {:#?}\nserialized db: {:#?}",
+                  db_meta, &dir_meta, &serialized);
         }
         if db_meta.in_progress_open.is_some() {
             s.write_meta(db_meta)?;
@@ -193,7 +223,7 @@ impl SampleFileDir {
 
     /// Returns true if the existing directory and database metadata are consistent; the directory
     /// is then openable.
-    fn consistent(db_meta: &schema::DirMeta, dir_meta: &schema::DirMeta) -> bool {
+    pub(crate) fn consistent(db_meta: &schema::DirMeta, dir_meta: &schema::DirMeta) -> bool {
         if dir_meta.db_uuid != db_meta.db_uuid { return false; }
         if dir_meta.dir_uuid != db_meta.dir_uuid { return false; }
 
@@ -234,7 +264,7 @@ impl SampleFileDir {
             let e = e?;
             match e.file_name().as_bytes() {
                 b"." | b".." => continue,
-                b"meta" | b"meta-tmp" => continue,  // existing metadata is fine.
+                b"meta" => continue,  // existing metadata is fine.
                 _ => return Ok(false),
             }
         }
@@ -291,7 +321,7 @@ impl SampleFileDir {
     }
 }
 
-/// Parse a composite id filename.
+/// Parses a composite id filename.
 ///
 /// These are exactly 16 bytes, lowercase hex.
 pub(crate) fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
@@ -311,6 +341,9 @@ pub(crate) fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
 
 #[cfg(test)]
 mod tests {
+    use protobuf::prelude::MessageField;
+    use super::*;
+
     #[test]
     fn parse_id() {
         use super::parse_id;
@@ -320,5 +353,20 @@ mod tests {
         parse_id(b"meta").unwrap_err();
         parse_id(b"0").unwrap_err();
         parse_id(b"000000010000000x").unwrap_err();
+    }
+
+    /// Ensures that a DirMeta with all fields filled fits within the maximum size.
+    #[test]
+    fn max_len_meta() {
+        let mut meta = schema::DirMeta::new();
+        let fake_uuid = &[0u8; 16][..];
+        meta.db_uuid.extend_from_slice(fake_uuid);
+        meta.dir_uuid.extend_from_slice(fake_uuid);
+        meta.last_complete_open.mut_message().id = u32::max_value();
+        meta.last_complete_open.mut_message().id = u32::max_value();
+        meta.in_progress_open.mut_message().uuid.extend_from_slice(fake_uuid);
+        meta.in_progress_open.mut_message().uuid.extend_from_slice(fake_uuid);
+        let data = meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
+        assert!(data.len() <= FIXED_DIR_META_LEN, "{} vs {}", data.len(), FIXED_DIR_META_LEN);
     }
 }

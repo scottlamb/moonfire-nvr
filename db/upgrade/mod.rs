@@ -41,6 +41,7 @@ mod v0_to_v1;
 mod v1_to_v2;
 mod v2_to_v3;
 mod v3_to_v4;
+mod v4_to_v5;
 
 const UPGRADE_NOTES: &'static str =
     concat!("upgraded using moonfire-db ", env!("CARGO_PKG_VERSION"));
@@ -66,6 +67,7 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
         v1_to_v2::run,
         v2_to_v3::run,
         v3_to_v4::run,
+        v4_to_v5::run,
     ];
 
     {

@@ -268,6 +268,24 @@ create table sample_file_dir (
 ```
 
 ```proto
+// Metadata stored in sample file dirs as "<dir>/meta". This is checked
+// against the metadata stored within the database to detect inconsistencies
+// between the directory and database, such as those described in
+// design/schema.md.
+//
+// As of schema version 4, the overall file format is as follows: a
+// varint-encoded length, followed by a serialized DirMeta message, followed
+// by NUL bytes padding to a total length of 512 bytes. This message never
+// exceeds that length.
+//
+// The goal of this format is to allow atomically rewriting a meta file
+// in-place. I hope that on modern OSs and hardware, a single-sector
+// rewrite is atomic, though POSIX frustratingly doesn't seem to guarantee
+// this. There's some discussion of that here:
+// <https://stackoverflow.com/a/2068608/23584>. At worst, there's a short
+// window during which the meta file can be corrupted. As the file's purpose
+// is to check for inconsistencies, it can be reconstructed if you assume no
+// inconsistency exists.
 message DirMeta {
   // A uuid associated with the database, in binary form. dir_uuid is strictly
   // more powerful, but it improves diagnostics to know if the directory
@@ -302,13 +320,12 @@ These are updated through procedures below:
 
 This is a sub-procedure used in several places below.
 
-Precondition: the directory's lock is held with `LOCK_EX` (exclusive).
+Precondition: the directory's lock is held with `LOCK_EX` (exclusive) and
+there is an existing metadata file.
 
-  1. Write a new `meta.tmp` (opened with `O_CREAT|O_TRUNC` to discard an
-     existing temporary file if any).
-  2. `fsync` the `meta.tmp` file descriptor.
-  3. `rename` `meta.tmp` to `meta`.
-  4. `fsync` the directory.
+  1. Open the metadata file.
+  2. Rewrite the fixed-length data atomically.
+  3. `fdatasync` the file.
 
 *Open the database as read-only*
 

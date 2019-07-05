@@ -489,4 +489,4 @@ create table signal_change (
 );
 
 insert into version (id, unix_time,                           notes)
-             values (4,  cast(strftime('%s', 'now') as int), 'db creation');
+             values (5,  cast(strftime('%s', 'now') as int), 'db creation');

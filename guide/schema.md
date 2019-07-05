@@ -223,11 +223,18 @@ Version 3 adds over version 1:
 *   additional timestamp fields which may be useful in diagnosing/correcting
     time jumps/inconsistencies.
 
-### Version 3 to version 4
+### Version 3 to version 4 to version 5
 
-This upgrade affects only the SQLite database. Version 4 adds over version 3:
+This upgrade affects only the SQLite database.
+
+Version 4 represents a half-finished upgrade from version 3 to version 5; it
+is never used.
+
+Version 5 adds over version 3:
 
 *   permissions for users and sessions. Existing users will have only the
     `view_video` permission, matching their previous behavior.
 *   the `signals` schema, used to store status of signals such as camera
     motion detection, security system zones, etc.
+*   the ability to recover from a completely full sample file directory (#65)
+    without manual intervention.
