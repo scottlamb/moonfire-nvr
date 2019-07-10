@@ -89,7 +89,6 @@ Although not all listed in the default `prep.config` file, these are the
 available configuration variable and their defaults.
 
     NVR_USER=moonfire-nvr
-    NVR_GROUP=$NVR_USER
     NVR_PORT=8080
     NVR_HOME_BASE=/var/lib
     DB_NAME=db

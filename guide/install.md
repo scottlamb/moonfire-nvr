@@ -13,7 +13,9 @@ See the [github page](https://github.com/scottlamb/moonfire-nvr) (in case
 you're not reading this text there already). You can download the
 bleeding-edge version from the commandline via git:
 
-    $ git clone https://github.com/scottlamb/moonfire-nvr.git
+```
+$ git clone https://github.com/scottlamb/moonfire-nvr.git
+```
 
 ## Building and installing from source
 
@@ -39,26 +41,29 @@ Moonfire NVR keeps two kinds of state:
 By now Moonfire NVR's dedicated user and database should have been created for
 you. Next you need to create a sample file directory.
 
-## Creating a sample file directory
-
-### ...on a dedicated hard drive
+## Dedicated hard drive seutp
 
 If a dedicated hard drive is available, set up the mount point:
 
-    $ sudo vim /etc/fstab
-    $ sudo mkdir /media/nvr
-    $ sudo mount /media/nvr
-    $ sudo mkdir /media/nvr/sample
-    $ sudo chown moonfire-nvr:moonfire-nvr /media/nvr/sample
+```
+$ sudo vim /etc/fstab
+$ sudo mkdir /media/nvr
+$ sudo mount /media/nvr
+$ sudo install -d -o moonfire-nvr -g moonfire-nvr -m 700 /media/nvr/sample
+```
 
-In the fstab you'd add a line similar to this:
+In `/etc/fstab`, add a line similar to this:
 
-    /dev/disk/by-uuid/23d550bc-0e38-4825-acac-1cac8a7e091f    /media/nvr   ext4    defaults,noatime,nofail  0       2
+```
+/dev/disk/by-uuid/23d550bc-0e38-4825-acac-1cac8a7e091f    /media/nvr   ext4    defaults,noatime,nofail  0       2
+```
 
 You'll have to lookup the correct uuid for your disk. One way to do that is
 via the following command:
 
-    $ ls -l /dev/disk/by-uuid
+```
+$ ls -l /dev/disk/by-uuid
+```
 
 If you use the `nofail` attribute in `/etc/fstab` as described above, your
 system will boot successfully even when the hard drive is unavailable (such as
@@ -66,19 +71,18 @@ when your external USB storage is unmounted). This is convenient, but you
 likely want to ensure the `moonfire-nvr` service only starts when the mounting
 is successful. Edit the systemd configuration to do so:
 
-   $ sudo vim /etc/systemd/system/moonfire-nvr.service
-   $ sudo systemctl daemon-reload
+```
+$ sudo vim /etc/systemd/system/moonfire-nvr.service
+$ sudo systemctl daemon-reload
+```
 
-You'll want to add a line like `Requires=media-nvr.mount` to the `[Unit]`
-section of the file.
+You'll want to add lines similar to the following to the `[Unit]` section of
+the file:
 
-### ...without a dedicated hard drive
-
-If you don't have a dedicated hard drive available, simply create a directory
-owned by the dedicated user. It's convenient to place it within the
-installation's directory (typically `/var/lib/moonfire-nvr`):
-
-    $ sudo -u moonfire-nvr -H mkdir sample
+```
+After=media.nvr.mount
+Requires=media-mvr.mount
+```
 
 ## Completing configuration through the UI
 
@@ -87,11 +91,18 @@ configurations to the database.
 
 You can configure the system's database through a text-based user interface:
 
-    $ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
+```
+$ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
+```
 
 In the user interface,
 
  1. add your sample file dir(s) under "Directories and retention".
+    If you used a dedicated hard drive, use the directory you precreated
+    (`/media/surveillance/sample`). Otherwise, try
+    `/var/lib/moonfire-nvr/sample`. Moonfire NVR will create the directory as
+    long as it has the required permissions on the parent directory.
+
  2. add cameras under "Cameras and streams".
 
     * There's a "Test" button to verify your settings directly from the add/edit
@@ -135,8 +146,10 @@ system](secure.md) first.
 The following commands will start Moonfire NVR and enable it for following
 boots, respectively:
 
-    $ sudo systemctl start moonfire-nvr
-    $ sudo systemctl enable moonfire-nvr
+```
+$ sudo systemctl start moonfire-nvr
+$ sudo systemctl enable moonfire-nvr
+```
 
 The HTTP interface is accessible on port 8080; if your web browser is running
 on the same machine, you can access it at

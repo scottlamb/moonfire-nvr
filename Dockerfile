@@ -6,13 +6,12 @@ RUN	apt-get update && \
 	apt-get install -y apt-utils && \
 	apt-get install -y apt-transport-https tzdata git curl sudo vim  && \
 	rm -rf /var/lib/apt/lists/*
-RUN 	groupadd -r moonfire-nvr && \
-	useradd moonfire-nvr --no-log-init -m -r -g moonfire-nvr && \
+RUN	useradd --no-log-init --home-dir /var/lib/moonfire-nvr --system --user-group moonfire-nvr && \
 	echo 'moonfire-nvr ALL=(ALL) NOPASSWD: ALL' >>/etc/sudoers
-ENV	HOME /home/moonfire-nvr
+ENV	HOME /var/lib/moonfire-nvr
 COPY	--chown=moonfire-nvr:moonfire-nvr . /home/moonfire-nvr/moonfire-nvr
 USER	moonfire-nvr
-WORKDIR /home/moonfire-nvr/moonfire-nvr
+WORKDIR /var/lib/moonfire-nvr/moonfire-nvr
 RUN 	whoami && ls -l && \
 	./scripts/setup-ubuntu.sh && \
 	./scripts/setup-ubuntu.sh && \

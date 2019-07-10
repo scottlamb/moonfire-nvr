@@ -33,17 +33,20 @@ You will need the following C libraries installed:
 On recent Ubuntu or Raspbian, the following command will install
 all non-Rust dependencies:
 
-    $ sudo apt-get install \
-                   build-essential \
-                   libavcodec-dev \
-                   libavformat-dev \
-                   libavutil-dev \
-                   libncurses5-dev \
-                   libncursesw5-dev \
-                   libsqlite3-dev \
-                   libssl-dev \
-                   pkgconf \
-                   tzdata
+```
+$ sudo apt-get install \
+               build-essential \
+               libavcodec-dev \
+               libavformat-dev \
+               libavutil-dev \
+               libncurses5-dev \
+               libncursesw5-dev \
+               libsqlite3-dev \
+               libssl-dev \
+               pkgconf \
+               sqlite3 \
+               tzdata
+```
 
 Next, you need Rust 1.34+ and Cargo. The easiest way to install them is by
 following the instructions at [rustup.rs](https://www.rustup.rs/).
@@ -52,61 +55,66 @@ Finally, building the UI requires [yarn](https://yarnpkg.com/en/).
 
 Once prerequisites are installed, Moonfire NVR can be built as follows:
 
-    $ yarn
-    $ yarn build
-    $ cargo test
-    $ cargo build --release
-    $ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
-    $ sudo mkdir /usr/local/lib/moonfire-nvr
-    $ sudo cp -R ui-dist /usr/local/lib/moonfire-nvr/ui
+```
+$ yarn
+$ yarn build
+$ cargo test
+$ cargo build --release
+$ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
+$ sudo mkdir /usr/local/lib/moonfire-nvr
+$ sudo cp -R ui-dist /usr/local/lib/moonfire-nvr/ui
+```
 
 ## Creating the user and database
 
 You can create Moonfire NVR's dedicated user and SQLite database with the
 following commands:
 
-    $ sudo addgroup --system moonfire-nvr
-    $ sudo adduser --system moonfire-nvr --home /var/lib/moonfire-nvr
-    $ sudo mkdir /var/lib/moonfire-nvr
-    $ sudo chown moonfire-nvr:moonfire-nvr /var/lib/moonfire-nvr
-    $ sudo -u moonfire-nvr -H mkdir db sample
-    $ sudo -u moonfire-nvr moonfire-nvr init
+```
+$ sudo useradd --system --user-group --create-home --home /var/lib/moonfire-nvr moonfire-nvr
+$ sudo -u moonfire-nvr -H sh -c 'cd && mkdir --mode=700 db'
+$ sudo -u moonfire-nvr moonfire-nvr init
+```
 
 ## System Service
 
 Moonfire NVR can be run as a systemd service. Create
 `/etc/systemd/system/moonfire-nvr.service`:
 
-    [Unit]
-    Description=Moonfire NVR
-    After=network-online.target
+```
+[Unit]
+Description=Moonfire NVR
+After=network-online.target
 
-    [Service]
-    ExecStart=/usr/local/bin/moonfire-nvr run \
-        --db-dir=/var/lib/moonfire-nvr/db \
-        --http-addr=0.0.0.0:8080 \
-        --allow-unauthenticated-permissions='view_video: true'
-    Environment=TZ=:/etc/localtime
-    Environment=MOONFIRE_FORMAT=google-systemd
-    Environment=MOONFIRE_LOG=info
-    Environment=RUST_BACKTRACE=1
-    Type=simple
-    User=moonfire-nvr
-    Nice=-20
-    Restart=on-abnormal
-    CPUAccounting=true
-    MemoryAccounting=true
-    BlockIOAccounting=true
+[Service]
+ExecStart=/usr/local/bin/moonfire-nvr run \
+    --db-dir=/var/lib/moonfire-nvr/db \
+    --http-addr=0.0.0.0:8080 \
+    --allow-unauthenticated-permissions='view_video: true'
+Environment=TZ=:/etc/localtime
+Environment=MOONFIRE_FORMAT=google-systemd
+Environment=MOONFIRE_LOG=info
+Environment=RUST_BACKTRACE=1
+Type=simple
+User=moonfire-nvr
+Nice=-20
+Restart=on-failure
+CPUAccounting=true
+MemoryAccounting=true
+BlockIOAccounting=true
 
-    [Install]
-    WantedBy=multi-user.target
+[Install]
+WantedBy=multi-user.target
+```
 
 Note that the HTTP port currently has no authentication, encryption, or
 logging; it should not be directly exposed to the Internet.
 
 Tell `systemd` to look for the new file:
 
-    $ sudo systemctl daemon-reload
+```
+$ sudo systemctl daemon-reload
+```
 
 See the [systemd](http://www.freedesktop.org/wiki/Software/systemd/)
 documentation for more information. The [manual
