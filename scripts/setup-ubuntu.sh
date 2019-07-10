@@ -38,32 +38,21 @@ makePrepConfig
 export DEBIAN_FRONTEND=noninteractive
 
 
-# Process command line options
-#
-while getopts ":f" opt; do
-	case $opt in
-	  f)    DONT_BUILD_FFMPEG=1
-		;;
-	  :)
-		echo_fatal "Option -$OPTARG requires an argument."
-		;;
-	  \?)
-		echo_fatal -x "Invalid option: -$OPTARG"
-		;;
-	esac
-done
-
 sudo_warn
 
 # Setup all apt packages we need
 #
 echo_info -x 'Preparing and downloading packages we need...'
 PKGS="build-essential \
+      libavcodec-dev \
+      libavformat-dev \
+      libavutil-dev \
       libncurses5-dev \
       libncursesw5-dev \
       libsqlite3-dev \
       libssl-dev \
       pkgconf \
+      sqlite3 \
       tzdata"
 
 # Add yarn before NodeSource so it can all go in one update
@@ -101,42 +90,6 @@ if [ ${DO_UPDATE:-1} ]; then sudo apt-get update -y; fi
 sudo apt-get install -y $PKGS
 sudo apt-get autoremove -y
 echo_info -x
-
-# Check for ffmpeg and install by building if necessary
-# This needs to be done before building moonfire so it can
-# find the right versions of the libraries.
-#
-ffv=`ffmpeg -version 2>/dev/null | extractVersion libavutil`
-ffv=${ffv:-0}
-if ! versionAtLeast "$ffv" "$FFMPEG_MIN_VERSION"; then
-	if [ "${DONT_BUILD_FFMPEG:-0}" -ne 0 ]; then
-		echo_warn -x "ffmpeg version (${ffv}) installed is too old for moonfire." \
-			"Suggest you manually install at least version $FFMPEG_MIN_VERSION of libavutil." \
-			"ffmpeg versions 2.x and 3.x all should work."
-	else
-		OLDDIR=`pwd`
-		cd ..
-		if [ -d FFmpeg ]; then
-			echo_info -x "Removing older FFmpeg directory..."
-			rm -fr FFmpeg
-		fi
-		echo_info -x "Fetching FFmpeg source..."
-		git clone --depth 1 -b "release/${FFMPEG_RELEASE_VERSION}" https://github.com/FFmpeg/FFmpeg.git
-		cd FFmpeg
-		pt=`uname -p 2>/dev/null`
-		if [ -z "${pt##*86*}" ]; then
-			DEBIAN_FRONTEND=noninteractive sudo apt-get install -y yasm
-		fi
-		./configure --enable-shared
-		make
-		sudo make install
-		sudo ldconfig
-		cd "$OLDDIR"
-		OLDDIR=
-	fi
-else
-	echo_info -x "FFmpeg is already usable..."
-fi
 
 # If cargo appears installed, initialize for using it so rustc can be found
 #

@@ -41,8 +41,6 @@ NODE_MIN_VERSION="8"
 YARN_MIN_VERSION="1.0"
 CARGO_MIN_VERSION="0.2"
 RUSTC_MIN_VERSION="1.33"
-FFMPEG_MIN_VERSION="55.1.101"
-FFMPEG_RELEASE_VERSION="3.4"
 
 normalizeDirPath()
 {
@@ -78,11 +76,6 @@ read_lines()
 catPrefix()
 {
 	sed -e "s/^/$2/" < "$1"
-}
-
-mkdir_moonfire()
-{
-	sudo -u "${NVR_USER}" -H mkdir "$@"
 }
 
 echo_multi()
@@ -151,7 +144,6 @@ initEnvironmentVars()
 		. "${MOONFIRE_DIR}/prep.config"
 	fi
 	NVR_USER="${NVR_USER:-moonfire-nvr}"
-	NVR_GROUP="${NVR_GROUP:-$NVR_USER}"
 	NVR_PORT="${NVR_PORT:-8080}"
 	NVR_HOME_BASE="${NVR_HOME_BASE:-/var/lib}"
 	NVR_HOME="${NVR_HOME_BASE}/${NVR_USER}"
@@ -244,23 +236,6 @@ userExists()
 	return $(id -u "$1" >/dev/null 2>&1)
 }
 
-groupExists()
-{
-	return $(id -g "$1" >/dev/null 2>&1)
-}
-
-moonfire()
-{
-	case "$1" in
-	start)
-		sudo systemctl start "$2"
-		;;
-	stop)
-		sudo systemctl stop "$2"
-		;;
-	esac
-}
-
 sudo_warn()
 {
 	echo_warn -x -p '!!!!!     ' \
@@ -271,48 +246,18 @@ sudo_warn()
 		'------------------------------------------------------------------------------'
 }
 
-
-# Prepare for sqlite directory and set schema into db
-#
-setup_db()
-{
-	if [ ! -d "${DB_DIR}" ]; then
-		echo_info -x 'Create database directory...'
-		mkdir_moonfire -p "${DB_DIR}"
-	fi
-	echo_info -x 'Ensure database is initialized...'
-	sudo -u "${NVR_USER}" -H -- "${SERVICE_BIN}" init --db-dir="${DB_DIR}"
-}
-
-# Make sure all sample directories and files owned by moonfire
-#
-fix_ownership()
-{
-	sudo chown -R ${NVR_USER}:${NVR_USER} "$1"
-	echo_info -x "Fix ownership of files in \"$1\"..."
-}
-
-# Create user and groups if not there
+# Create user, group, and database directory if not there
 #
 prep_moonfire_user()
 {
 	echo_info -x "Create user/group and directories we need..."
-	if ! groupExists "${NVR_GROUP}"; then
-		sudo addgroup --quiet --system ${NVR_GROUP}
-	fi
 	if ! userExists "${NVR_USER}"; then
-		sudo adduser --quiet --system ${NVR_USER} \
-			--ingroup "${NVR_GROUP}" --home "${NVR_HOME}"
+		sudo useradd --system ${NVR_USER} --user-group --create-home --home-dir "${NVR_HOME}"
 	fi
-	if [ ! -d "${NVR_HOME}" ]; then
-		sudo mkdir "${NVR_HOME}"
-		sudo chown "${NVR_USER}:${NVR_GROUP}"  "${NVR_HOME}"
-	fi
-	sudo chown ${NVR_USER}:${NVR_GROUP} "${NVR_HOME}"
+	sudo -u ${NVR_USER} -H sh -c 'cd && test -d db || mkdir --mode=700 db'
 }
 
 pre_install_prep()
 {
 	prep_moonfire_user
-	setup_db
 }

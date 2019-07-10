@@ -67,7 +67,6 @@ fi
 if [ -d "ui-dist" ]; then
 	sudo mkdir -p "${LIB_DIR}/ui"
 	sudo cp -R ui-dist/. "${LIB_DIR}/ui/"
-	sudo chown -R ${NVR_USER}:${NVR_GROUP} "${LIB_DIR}/ui/"
 	echo_info -x "Server UI installed..."
 else
 	echo_fatal -x "Server UI failed to build or install..."
@@ -114,7 +113,7 @@ Environment=RUST_BACKTRACE=1
 Type=simple
 User=${NVR_USER}
 Nice=-20
-Restart=on-abnormal
+Restart=on-failure
 CPUAccounting=true
 MemoryAccounting=true
 BlockIOAccounting=true
@@ -123,13 +122,4 @@ BlockIOAccounting=true
 WantedBy=multi-user.target
 NVR_EOF
 
-# Configure and start service
-#
-if [ -f "${SERVICE_PATH}" ]; then
-	echo_info -x 'Configuring system daemon...'
-	sudo systemctl daemon-reload
-	sudo systemctl enable ${SERVICE_NAME}
-	sudo systemctl restart ${SERVICE_NAME}
-	echo_info -x 'Getting system daemon status...'
-	sudo systemctl status ${SERVICE_NAME}
-fi
+sudo systemctl daemon-reload
