@@ -104,6 +104,9 @@ In the user interface,
 
  2. add cameras under "Cameras and streams".
 
+    * See the [wiki](https://github.com/scottlamb/moonfire-nvr/wiki) for notes
+      about specific camera models.
+
     * There's a "Test" button to verify your settings directly from the add/edit
       camera dialog.
 

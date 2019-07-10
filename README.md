@@ -59,6 +59,8 @@ make this possible:
 *   [Building and installing](guide/install.md)
 *   [UI Development](guide/developing-ui.md)
 *   [Troubleshooting](guide/troubleshooting.md)
+*   [Wiki](https://github.com/scottlamb/moonfire-nvr/wiki) has notes on
+    several camera models.
 
 # <a name="help"></a> Getting help and getting involved
 
