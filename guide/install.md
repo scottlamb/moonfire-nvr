@@ -76,12 +76,11 @@ $ sudo vim /etc/systemd/system/moonfire-nvr.service
 $ sudo systemctl daemon-reload
 ```
 
-You'll want to add lines similar to the following to the `[Unit]` section of
+You'll want to add a line similar to the following to the `[Unit]` section of
 the file:
 
 ```
-After=media.nvr.mount
-Requires=media-mvr.mount
+RequiresMountsFor=/media/nvr
 ```
 
 ## Completing configuration through the UI
