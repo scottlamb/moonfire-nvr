@@ -97,6 +97,10 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     // be careful about the order of operations during the upgrade.
     conn.execute("pragma foreign_keys = on", &[] as &[&ToSql])?;
 
+    // Make the database actually durable.
+    conn.execute("pragma fullfsync = on", &[] as &[&ToSql])?;
+    conn.execute("pragma synchronous = 2", &[] as &[&ToSql])?;
+
     // WAL is the preferred journal mode for normal operation; it reduces the number of syncs
     // without compromising safety.
     set_journal_mode(&conn, "wal").unwrap();
