@@ -113,10 +113,19 @@ In the user interface,
     * Be sure to assign each stream you want to capture to a sample file
       directory and check the "record" box.
 
-    * `flush_if_sec` should typically be about 60. This causes the database to
-      be flushed when the first instant of a completed recording second is a
-      minute old. Lower values cause less video to be lost on power loss;
-      higher values reduce wear on the SSD holding the SQLite database.
+    * `flush_if_sec` should typically be 120 seconds. This causes the database to
+      be flushed when the first instant of one of this stream's completed
+      recordings is 2 minutes old. A "recording" is a segment of a video
+      stream that is 60–120 seconds when first establishing the stream, about
+      60 seconds midstream, and shorter when an error or server shutdown
+      terminates the stream. Thus, a value just below 60 will cause the
+      database to be flushed once per minute per stream in the steady state. A
+      value around 180 will cause the database to be once every 3 minutes per
+      stream, or less frequently if other streams cause flushes first. Lower
+      values cause less video to be lost on power loss. Higher values reduce
+      wear on the SSD holding the SQLite database, particularly when you have
+      many cameras and when you record both the "main" and "sub" streams of
+      each camera.
 
  3. Assign disk space to your cameras back in "Directories and retention".
     Leave a little slack (at least 100 MB per camera) between the total limit
