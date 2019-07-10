@@ -1824,6 +1824,8 @@ impl LockedDatabase {
 /// test code.
 pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
     conn.execute("pragma foreign_keys = on", &[] as &[&dyn ToSql])?;
+    conn.execute("pragma fullfsync = on", &[] as &[&dyn ToSql])?;
+    conn.execute("pragma synchronous = 2", &[] as &[&dyn ToSql])?;
     let tx = conn.transaction()?;
     tx.execute_batch(include_str!("schema.sql"))?;
     {
@@ -1885,6 +1887,8 @@ impl<C: Clocks + Clone> Database<C> {
     pub fn new(clocks: C, conn: rusqlite::Connection,
                read_write: bool) -> Result<Database<C>, Error> {
         conn.execute("pragma foreign_keys = on", &[] as &[&dyn ToSql])?;
+        conn.execute("pragma fullfsync = on", &[] as &[&dyn ToSql])?;
+        conn.execute("pragma synchronous = 2", &[] as &[&dyn ToSql])?;
         {
             let ver = get_schema_version(&conn)?.ok_or_else(|| format_err!(
                     "no such table: version. \
