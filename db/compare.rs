@@ -87,8 +87,11 @@ fn get_tables(c: &rusqlite::Connection) -> Result<Vec<String>, rusqlite::Error> 
 /// Returns a vec of columns in the given table.
 fn get_table_columns(c: &rusqlite::Connection, table: &str)
                      -> Result<Vec<Column>, rusqlite::Error> {
-    c.prepare_cached("select * from pragma_table_info(?)")?
-     .query_map(params![table], |r| Ok(Column {
+    // Note that placeholders aren't allowed for these pragmas. Just assume sane table names
+    // (no escaping). "select * from pragma_..." syntax would be nicer but requires SQLite
+    // 3.16.0 (2017-01-02). Ubuntu 16.04 Xenial (still used on Travis CI) has an older SQLite.
+    c.prepare(&format!("pragma table_info(\"{}\")", table))?
+     .query_map(params![], |r| Ok(Column {
          cid: r.get(0)?,
          name: r.get(1)?,
          type_: r.get(2)?,
@@ -101,8 +104,9 @@ fn get_table_columns(c: &rusqlite::Connection, table: &str)
 
 /// Returns a vec of indices associated with the given table.
 fn get_indices(c: &rusqlite::Connection, table: &str) -> Result<Vec<Index>, rusqlite::Error> {
-    c.prepare_cached("select * from pragma_index_list(?)")?
-     .query_map(params![table], |r| Ok(Index {
+    // See note at get_tables_columns about placeholders.
+    c.prepare(&format!("pragma index_list(\"{}\")", table))?
+     .query_map(params![], |r| Ok(Index {
          seq: r.get(0)?,
          name: r.get(1)?,
          unique: r.get(2)?,
@@ -115,8 +119,9 @@ fn get_indices(c: &rusqlite::Connection, table: &str) -> Result<Vec<Index>, rusq
 /// Returns a vec of all the columns in the given index.
 fn get_index_columns(c: &rusqlite::Connection, index: &str)
                      -> Result<Vec<IndexColumn>, rusqlite::Error> {
-    c.prepare_cached("select * from pragma_index_info(?)")?
-     .query_map(params![index], |r| Ok(IndexColumn {
+    // See note at get_tables_columns about placeholders.
+    c.prepare(&format!("pragma index_info(\"{}\")", index))?
+     .query_map(params![], |r| Ok(IndexColumn {
          seqno: r.get(0)?,
          cid: r.get(1)?,
          name: r.get(2)?,
