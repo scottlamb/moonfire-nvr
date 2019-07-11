@@ -1879,9 +1879,11 @@ mod tests {
 
         if let Some((orig_dur, new_dur)) = final_durations {
             // One would normally expect the duration to be exactly the same, but when using an
-            // edit list, ffmpeg appears to extend the last packet's duration by the amount skipped
-            // at the beginning. I think this is a bug on their side.
-            assert!(orig_dur - shorten + pts_offset == new_dur,
+            // edit list, ffmpeg 3.x appears to extend the last packet's duration by the amount
+            // skipped at the beginning. ffmpeg 4.x behaves properly. Allow either behavior.
+            // See <https://github.com/scottlamb/moonfire-nvr/issues/10>.
+            assert!(orig_dur - shorten + pts_offset == new_dur ||
+                    orig_dur - shorten              == new_dur,
                     "orig_dur={} new_dur={} shorten={} pts_offset={}",
                     orig_dur, new_dur, shorten, pts_offset);
         }
