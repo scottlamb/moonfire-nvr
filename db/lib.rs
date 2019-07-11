@@ -33,6 +33,7 @@
 pub mod auth;
 pub mod check;
 mod coding;
+mod compare;
 pub mod db;
 pub mod dir;
 mod raw;

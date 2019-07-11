@@ -98,6 +98,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           last_use_peer_addr blob,
           use_count not null default 0
         ) without rowid;
+        create index user_session_uid on user_session (user_id);
     "#)?;
     let db_uuid = ::uuid::Uuid::new_v4();
     let db_uuid_bytes = &db_uuid.as_bytes()[..];

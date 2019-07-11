@@ -43,7 +43,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         alter table camera rename to old_camera;
         create table camera (
           id integer primary key,
-          uuid blob unique,
+          uuid blob unique not null check (length(uuid) = 16),
           short_name text not null,
           description text,
           host text,

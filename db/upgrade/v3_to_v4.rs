@@ -185,6 +185,10 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         drop table old_recording;
         drop table old_stream;
         drop table old_camera;
+
+        -- This was supposed to be present in version 2, but the upgrade procedure used to miss it.
+        -- Catch up so we know a version 4 database is right.
+        create index if not exists user_session_uid on user_session (user_id);
     "#)?;
     Ok(())
 }

@@ -30,6 +30,7 @@
 
 //! Subcommand to check the database and sample file dir for errors.
 
+use crate::compare;
 use crate::db::{self, CompositeId, FromSqlUuid};
 use crate::dir;
 use crate::raw;
@@ -48,6 +49,15 @@ pub struct Options {
 }
 
 pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
+    // Compare schemas.
+    {
+        let mut expected = rusqlite::Connection::open_in_memory()?;
+        db::init(&mut expected)?;
+        if let Some(diffs) = compare::get_diffs("actual", conn, "expected", &expected)? {
+            println!("{}", &diffs);
+        }
+    }
+
     let db_uuid = raw::get_db_uuid(&conn)?;
 
     // Scan directories.
