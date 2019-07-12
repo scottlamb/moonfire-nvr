@@ -35,12 +35,11 @@
 use crate::db::{self, FromSqlUuid};
 use crate::dir;
 use failure::Error;
-use libc;
 use crate::schema;
 use protobuf::prelude::MessageField;
 use rusqlite::types::ToSql;
-use std::io::{self, Write};
-use std::mem;
+use std::io::Write;
+use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -90,10 +89,10 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         let id = db::CompositeId(row.get(0)?);
         let sample_file_uuid: FromSqlUuid = row.get(1)?;
         let from_path = get_uuid_pathname(sample_file_uuid.0);
-        let to_path = get_id_pathname(id);
-        let r = unsafe { dir::renameat(&d.fd, from_path.as_ptr(), &d.fd, to_path.as_ptr()) };
-        if let Err(e) = r {
-            if e.kind() == io::ErrorKind::NotFound {
+        let to_path = crate::dir::CompositeIdPath::from(id);
+        if let Err(e) = nix::fcntl::renameat(d.fd.as_raw_fd(), &from_path[..],
+                                             d.fd.as_raw_fd(), &to_path) {
+            if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
                 continue;  // assume it was already moved.
             }
             Err(e)?;
@@ -122,17 +121,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
 }
 
 /// Gets a pathname for a sample file suitable for passing to open or unlink.
-fn get_uuid_pathname(uuid: Uuid) -> [libc::c_char; 37] {
+fn get_uuid_pathname(uuid: Uuid) -> [u8; 37] {
     let mut buf = [0u8; 37];
     write!(&mut buf[..36], "{}", uuid.to_hyphenated_ref())
         .expect("can't format uuid to pathname buf");
-
-    // libc::c_char seems to be i8 on some platforms (Linux/arm) and u8 on others (Linux/amd64).
-    unsafe { mem::transmute::<[u8; 37], [libc::c_char; 37]>(buf) }
-}
-
-fn get_id_pathname(id: db::CompositeId) -> [libc::c_char; 17] {
-    let mut buf = [0u8; 17];
-    write!(&mut buf[..16], "{:016x}", id.0).expect("can't format id to pathname buf");
-    unsafe { mem::transmute::<[u8; 17], [libc::c_char; 17]>(buf) }
+    buf
 }

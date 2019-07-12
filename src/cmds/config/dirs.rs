@@ -303,7 +303,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
             l.open_sample_file_dirs(&[dir_id]).unwrap();  // TODO: don't unwrap.
             let dir = l.sample_file_dirs_by_id().get(&dir_id).unwrap();
             let stat = dir.get().unwrap().statfs().unwrap();
-            fs_capacity = stat.f_bsize as i64 * stat.f_bavail as i64 + total_used;
+            fs_capacity = stat.block_size() as i64 * stat.blocks_available() as i64 + total_used;
             path = dir.path.clone();
         }
         Rc::new(RefCell::new(Model {

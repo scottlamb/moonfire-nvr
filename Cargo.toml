@@ -40,6 +40,7 @@ log = { version = "0.4", features = ["release_max_level_info"] }
 memchr = "2.0.2"
 memmap = "0.7"
 mylog = { git = "https://github.com/scottlamb/mylog" }
+nix = { git = "https://github.com/scottlamb/nix", branch = "pr-renameat" }
 openssl = "0.10"
 parking_lot = { version = "0.8", features = [] }
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }

@@ -34,16 +34,16 @@
 
 use crate::coding;
 use crate::db::CompositeId;
+use crate::schema;
 use cstr::*;
 use failure::{Error, Fail, bail, format_err};
-use libc::c_char;
 use log::warn;
 use protobuf::Message;
-use crate::schema;
-use std::ffi;
+use nix::{NixPath, fcntl::{AtFlags, FlockArg, OFlag}, sys::stat::Mode};
+use nix::sys::statvfs::Statvfs;
+use std::ffi::{CStr, CString};
 use std::fs;
-use std::io::{self, Read, Write};
-use std::mem;
+use std::io::{Read, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::FromRawFd;
 use std::sync::Arc;
@@ -66,14 +66,37 @@ pub struct SampleFileDir {
     pub(crate) fd: Fd,
 }
 
+pub(crate) struct CompositeIdPath([u8; 17]);
+
+impl CompositeIdPath {
+    pub(crate) fn from(id: CompositeId) -> Self {
+        let mut buf = [0u8; 17];
+        write!(&mut buf[..16], "{:016x}", id.0).expect("can't format id to pathname buf");
+        CompositeIdPath(buf)
+    }
+}
+
+impl NixPath for CompositeIdPath {
+    fn len(&self) -> usize { 16 }
+
+    fn with_nix_path<T, F>(&self, f: F) -> Result<T, nix::Error>
+    where F: FnOnce(&CStr) -> T {
+        let p = CStr::from_bytes_with_nul(&self.0[..]).expect("no interior nuls");
+        Ok(f(p))
+    }
+}
+
 /// A file descriptor associated with a directory (not necessarily the sample file dir).
 #[derive(Debug)]
-pub struct Fd(libc::c_int);
+pub struct Fd(std::os::unix::io::RawFd);
+
+impl std::os::unix::io::AsRawFd for Fd {
+    fn as_raw_fd(&self) -> std::os::unix::io::RawFd { self.0 }
+}
 
 impl Drop for Fd {
     fn drop(&mut self) {
-        if unsafe { libc::close(self.0) } < 0 {
-            let e = io::Error::last_os_error();
+        if let Err(e) = nix::unistd::close(self.0) {
             warn!("Unable to close sample file dir: {}", e);
         }
     }
@@ -81,76 +104,46 @@ impl Drop for Fd {
 
 impl Fd {
     /// Opens the given path as a directory.
-    pub fn open(path: &str, mkdir: bool) -> Result<Fd, io::Error> {
-        let cstring = ffi::CString::new(path)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if mkdir && unsafe { libc::mkdir(cstring.as_ptr(), 0o700) } != 0 {
-            let e = io::Error::last_os_error();
-            if e.kind() != io::ErrorKind::AlreadyExists {
-                return Err(e.into());
+    pub fn open(path: &str, mkdir: bool) -> Result<Fd, nix::Error> {
+        let cstring = CString::new(path).map_err(|_| nix::Error::InvalidPath)?;
+        if mkdir {
+            match nix::unistd::mkdir(cstring.as_c_str(), nix::sys::stat::Mode::S_IRWXU) {
+                Ok(()) | Err(nix::Error::Sys(nix::errno::Errno::EEXIST)) => {},
+                Err(e) => return Err(e),
             }
         }
-        let fd = unsafe { libc::open(cstring.as_ptr(), libc::O_DIRECTORY | libc::O_RDONLY, 0) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
+        let fd = nix::fcntl::open(cstring.as_c_str(), OFlag::O_DIRECTORY | OFlag::O_RDONLY,
+                                  Mode::empty())?;
         Ok(Fd(fd))
     }
 
-    pub(crate) fn sync(&self) -> Result<(), io::Error> {
-        let res = unsafe { libc::fsync(self.0) };
-        if res < 0 {
-            return Err(io::Error::last_os_error())
-        }
-        Ok(())
+    pub(crate) fn sync(&self) -> Result<(), nix::Error> {
+        nix::unistd::fsync(self.0)
     }
 
     /// Opens a sample file within this directory with the given flags and (if creating) mode.
-    pub(crate) unsafe fn openat(&self, p: *const c_char, flags: libc::c_int, mode: libc::c_int)
-                                -> Result<fs::File, io::Error> {
-        let fd = libc::openat(self.0, p, flags, mode);
-        if fd < 0 {
-            return Err(io::Error::last_os_error())
-        }
-        Ok(fs::File::from_raw_fd(fd))
+    pub(crate) fn openat<P: ?Sized + NixPath>(&self, p: &P, oflag: OFlag, mode: Mode)
+                                              -> Result<fs::File, nix::Error> {
+        let fd = nix::fcntl::openat(self.0, p, oflag, mode)?;
+        Ok(unsafe { fs::File::from_raw_fd(fd) })
     }
 
     /// Locks the directory with the specified `flock` operation.
-    pub fn lock(&self, operation: libc::c_int) -> Result<(), io::Error> {
-        let ret = unsafe { libc::flock(self.0, operation) };
-        if ret < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
-        Ok(())
+    pub fn lock(&self, arg: FlockArg) -> Result<(), nix::Error> {
+        nix::fcntl::flock(self.0, arg)
     }
 
-    pub fn statfs(&self) -> Result<libc::statvfs, io::Error> {
-        unsafe {
-            let mut stat: libc::statvfs = mem::zeroed();
-            if libc::fstatvfs(self.0, &mut stat) < 0 {
-                return Err(io::Error::last_os_error())
-            }
-            Ok(stat)
-        }
+    pub fn statfs(&self) -> Result<nix::sys::statvfs::Statvfs, nix::Error> {
+        nix::sys::statvfs::fstatvfs(self)
     }
-}
-
-pub(crate) unsafe fn renameat(from_fd: &Fd, from_path: *const c_char,
-                   to_fd: &Fd, to_path: *const c_char) -> Result<(), io::Error> {
-    let result = libc::renameat(from_fd.0, from_path, to_fd.0, to_path);
-    if result < 0 {
-        return Err(io::Error::last_os_error())
-    }
-    Ok(())
 }
 
 /// Reads `dir`'s metadata. If none is found, returns an empty proto.
 pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     let mut meta = schema::DirMeta::default();
-    let p = cstr!("meta");
-    let mut f = match unsafe { dir.openat(p.as_ptr(), libc::O_RDONLY, 0) } {
+    let mut f = match dir.openat(cstr!("meta"), OFlag::O_RDONLY, Mode::empty()) {
         Err(e) => {
-            if e.kind() == ::std::io::ErrorKind::NotFound {
+            if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
                 return Ok(meta);
             }
             return Err(e.into());
@@ -179,9 +172,8 @@ pub(crate) fn write_meta(dir: &Fd, meta: &schema::DirMeta) -> Result<(), Error> 
               data.len(), FIXED_DIR_META_LEN);
     }
     data.resize(FIXED_DIR_META_LEN, 0);  // pad to required length.
-    let path = cstr!("meta");
-    let mut f = unsafe { dir.openat(path.as_ptr(),
-                                    libc::O_CREAT | libc::O_WRONLY, 0o600)? };
+    let mut f = dir.openat(cstr!("meta"), OFlag::O_CREAT | OFlag::O_WRONLY,
+                           Mode::S_IRUSR | Mode::S_IWUSR)?;
     let stat = f.metadata()?;
     if stat.len() == 0 {
         // Need to sync not only the data but also the file metadata and dirent.
@@ -207,7 +199,11 @@ impl SampleFileDir {
                 -> Result<Arc<SampleFileDir>, Error> {
         let read_write = db_meta.in_progress_open.is_some();
         let s = SampleFileDir::open_self(path, false)?;
-        s.fd.lock(if read_write { libc::LOCK_EX } else { libc::LOCK_SH } | libc::LOCK_NB)?;
+        s.fd.lock(if read_write {
+                      FlockArg::LockExclusiveNonblock
+                  } else {
+                      FlockArg::LockSharedNonblock
+                  })?;
         let dir_meta = read_meta(&s.fd)?;
         if !SampleFileDir::consistent(db_meta, &dir_meta) {
             let serialized =
@@ -243,7 +239,7 @@ impl SampleFileDir {
     pub(crate) fn create(path: &str, db_meta: &schema::DirMeta)
                          -> Result<Arc<SampleFileDir>, Error> {
         let s = SampleFileDir::open_self(path, true)?;
-        s.fd.lock(libc::LOCK_EX | libc::LOCK_NB)?;
+        s.fd.lock(FlockArg::LockExclusiveNonblock)?;
         let old_meta = read_meta(&s.fd)?;
 
         // Verify metadata. We only care that it hasn't been completely opened.
@@ -280,43 +276,31 @@ impl SampleFileDir {
     }
 
     /// Opens the given sample file for reading.
-    pub fn open_file(&self, composite_id: CompositeId) -> Result<fs::File, io::Error> {
-        let p = SampleFileDir::get_rel_pathname(composite_id);
-        unsafe { self.fd.openat(p.as_ptr(), libc::O_RDONLY, 0) }
+    pub fn open_file(&self, composite_id: CompositeId) -> Result<fs::File, nix::Error> {
+        let p = CompositeIdPath::from(composite_id);
+        self.fd.openat(&p, OFlag::O_RDONLY, Mode::empty())
     }
 
-    pub fn create_file(&self, composite_id: CompositeId) -> Result<fs::File, io::Error> {
-        let p = SampleFileDir::get_rel_pathname(composite_id);
-        unsafe { self.fd.openat(p.as_ptr(), libc::O_WRONLY | libc::O_EXCL | libc::O_CREAT, 0o600) }
+    pub fn create_file(&self, composite_id: CompositeId) -> Result<fs::File, nix::Error> {
+        let p = CompositeIdPath::from(composite_id);
+        self.fd.openat(&p, OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_CREAT,
+                       Mode::S_IRUSR | Mode::S_IWUSR)
     }
 
     pub(crate) fn write_meta(&self, meta: &schema::DirMeta) -> Result<(), Error> {
         write_meta(&self.fd, meta)
     }
 
-    pub fn statfs(&self) -> Result<libc::statvfs, io::Error> { self.fd.statfs() }
-
-    /// Gets a pathname for a sample file suitable for passing to open or unlink.
-    fn get_rel_pathname(id: CompositeId) -> [libc::c_char; 17] {
-        let mut buf = [0u8; 17];
-        write!(&mut buf[..16], "{:016x}", id.0).expect("can't format id to pathname buf");
-
-        // libc::c_char seems to be i8 on some platforms (Linux/arm) and u8 on others (Linux/amd64).
-        unsafe { mem::transmute::<[u8; 17], [libc::c_char; 17]>(buf) }
-    }
+    pub fn statfs(&self) -> Result<Statvfs, nix::Error> { self.fd.statfs() }
 
     /// Unlinks the given sample file within this directory.
-    pub(crate) fn unlink_file(&self, id: CompositeId) -> Result<(), io::Error> {
-        let p = SampleFileDir::get_rel_pathname(id);
-        let res = unsafe { libc::unlinkat(self.fd.0, p.as_ptr(), 0) };
-        if res < 0 {
-            return Err(io::Error::last_os_error())
-        }
-        Ok(())
+    pub(crate) fn unlink_file(&self, id: CompositeId) -> Result<(), nix::Error> {
+        let p = CompositeIdPath::from(id);
+        nix::unistd::unlinkat(self.fd.0, &p, AtFlags::empty())
     }
 
     /// Syncs the directory itself.
-    pub(crate) fn sync(&self) -> Result<(), io::Error> {
+    pub(crate) fn sync(&self) -> Result<(), nix::Error> {
         self.fd.sync()
     }
 }

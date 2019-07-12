@@ -31,7 +31,7 @@
 use db::dir;
 use docopt;
 use failure::{Error, Fail};
-use libc;
+use nix::fcntl::FlockArg;
 use rusqlite;
 use serde::Deserialize;
 use std::path::Path;
@@ -84,7 +84,7 @@ enum OpenMode {
 fn open_dir(db_dir: &str, mode: OpenMode) -> Result<dir::Fd, Error> {
     let dir = dir::Fd::open(db_dir, mode == OpenMode::Create)?;
     let ro = mode == OpenMode::ReadOnly;
-    dir.lock(if ro { libc::LOCK_SH } else { libc::LOCK_EX } | libc::LOCK_NB)
+    dir.lock(if ro { FlockArg::LockExclusiveNonblock } else { FlockArg::LockSharedNonblock })
        .map_err(|e| e.context(format!("db dir {:?} already in use; can't get {} lock",
                                       db_dir, if ro { "shared" } else { "exclusive" })))?;
     Ok(dir)

@@ -32,7 +32,7 @@
 
 use crate::dir;
 use failure::{Error, bail, format_err};
-use libc;
+use nix::fcntl::FlockArg;
 use protobuf::prelude::MessageField;
 use rusqlite::types::ToSql;
 use crate::schema::DirMeta;
@@ -47,7 +47,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
                                         schema version 1 to 2."))?;
 
     let d = dir::Fd::open(sample_file_path, false)?;
-    d.lock(libc::LOCK_EX | libc::LOCK_NB)?;
+    d.lock(FlockArg::LockExclusiveNonblock)?;
     verify_dir_contents(sample_file_path, tx)?;
 
     // These create statements match the schema.sql when version 2 was the latest.

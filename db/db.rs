@@ -116,12 +116,7 @@ struct VideoIndex(Box<[u8]>);
 
 impl rusqlite::types::FromSql for VideoIndex {
     fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
-        let blob = value.as_blob()?;
-        let len = blob.len();
-        let mut v = Vec::with_capacity(len);
-        unsafe { v.set_len(len) };
-        v.copy_from_slice(blob);
-        Ok(VideoIndex(v.into_boxed_slice()))
+        Ok(VideoIndex(value.as_blob()?.to_vec().into_boxed_slice()))
     }
 }
 
