@@ -44,8 +44,7 @@ use nix::sys::statvfs::Statvfs;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 
 /// The fixed length of a directory's `meta` file.
@@ -121,13 +120,6 @@ impl Fd {
         nix::unistd::fsync(self.0)
     }
 
-    /// Opens a sample file within this directory with the given flags and (if creating) mode.
-    pub(crate) fn openat<P: ?Sized + NixPath>(&self, p: &P, oflag: OFlag, mode: Mode)
-                                              -> Result<fs::File, nix::Error> {
-        let fd = nix::fcntl::openat(self.0, p, oflag, mode)?;
-        Ok(unsafe { fs::File::from_raw_fd(fd) })
-    }
-
     /// Locks the directory with the specified `flock` operation.
     pub fn lock(&self, arg: FlockArg) -> Result<(), nix::Error> {
         nix::fcntl::flock(self.0, arg)
@@ -141,7 +133,7 @@ impl Fd {
 /// Reads `dir`'s metadata. If none is found, returns an empty proto.
 pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     let mut meta = schema::DirMeta::default();
-    let mut f = match dir.openat(cstr!("meta"), OFlag::O_RDONLY, Mode::empty()) {
+    let mut f = match crate::fs::openat(dir.0, cstr!("meta"), OFlag::O_RDONLY, Mode::empty()) {
         Err(e) => {
             if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
                 return Ok(meta);
@@ -165,21 +157,21 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
 }
 
 /// Write `dir`'s metadata, clobbering existing data.
-pub(crate) fn write_meta(dir: &Fd, meta: &schema::DirMeta) -> Result<(), Error> {
+pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Error> {
     let mut data = meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
     if data.len() > FIXED_DIR_META_LEN {
         bail!("Length-delimited DirMeta message requires {} bytes, over limit of {}",
               data.len(), FIXED_DIR_META_LEN);
     }
     data.resize(FIXED_DIR_META_LEN, 0);  // pad to required length.
-    let mut f = dir.openat(cstr!("meta"), OFlag::O_CREAT | OFlag::O_WRONLY,
-                           Mode::S_IRUSR | Mode::S_IWUSR)?;
+    let mut f = crate::fs::openat(dirfd, cstr!("meta"), OFlag::O_CREAT | OFlag::O_WRONLY,
+                                  Mode::S_IRUSR | Mode::S_IWUSR)?;
     let stat = f.metadata()?;
     if stat.len() == 0 {
         // Need to sync not only the data but also the file metadata and dirent.
         f.write_all(&data)?;
         f.sync_all()?;
-        dir.sync()?;
+        nix::unistd::fsync(dirfd)?;
     } else if stat.len() == FIXED_DIR_META_LEN as u64 {
         // Just syncing the data will suffice; existing metadata and dirent are fine.
         f.write_all(&data)?;
@@ -247,18 +239,24 @@ impl SampleFileDir {
         if old_meta.last_complete_open.is_some() {
             bail!("Can't create dir at path {}: is already in use:\n{:?}", path, old_meta);
         }
-        if !SampleFileDir::is_empty(path)? {
+        if !s.is_empty()? {
             bail!("Can't create dir at path {} with existing files", path);
         }
         s.write_meta(db_meta)?;
         Ok(s)
     }
 
+    pub(crate) fn opendir(&self) -> Result<nix::dir::Dir, nix::Error> {
+        nix::dir::Dir::openat(self.fd.as_raw_fd(), ".", OFlag::O_DIRECTORY | OFlag::O_RDONLY,
+                              Mode::empty())
+    }
+
     /// Determines if the directory is empty, aside form metadata.
-    pub(crate) fn is_empty(path: &str) -> Result<bool, Error> {
-        for e in fs::read_dir(path)? {
+    pub(crate) fn is_empty(&self) -> Result<bool, Error> {
+        let mut dir = self.opendir()?;
+        for e in dir.iter() {
             let e = e?;
-            match e.file_name().as_bytes() {
+            match e.file_name().to_bytes() {
                 b"." | b".." => continue,
                 b"meta" => continue,  // existing metadata is fine.
                 _ => return Ok(false),
@@ -278,17 +276,17 @@ impl SampleFileDir {
     /// Opens the given sample file for reading.
     pub fn open_file(&self, composite_id: CompositeId) -> Result<fs::File, nix::Error> {
         let p = CompositeIdPath::from(composite_id);
-        self.fd.openat(&p, OFlag::O_RDONLY, Mode::empty())
+        crate::fs::openat(self.fd.0, &p, OFlag::O_RDONLY, Mode::empty())
     }
 
     pub fn create_file(&self, composite_id: CompositeId) -> Result<fs::File, nix::Error> {
         let p = CompositeIdPath::from(composite_id);
-        self.fd.openat(&p, OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_CREAT,
-                       Mode::S_IRUSR | Mode::S_IWUSR)
+        crate::fs::openat(self.fd.0, &p, OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_CREAT,
+                          Mode::S_IRUSR | Mode::S_IWUSR)
     }
 
     pub(crate) fn write_meta(&self, meta: &schema::DirMeta) -> Result<(), Error> {
-        write_meta(&self.fd, meta)
+        write_meta(self.fd.0, meta)
     }
 
     pub fn statfs(&self) -> Result<Statvfs, nix::Error> { self.fd.statfs() }

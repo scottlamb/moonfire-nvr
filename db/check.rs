@@ -38,11 +38,11 @@ use crate::recording;
 use failure::Error;
 use fnv::FnvHashMap;
 use log::error;
+use nix::fcntl::AtFlags;
 use protobuf::prelude::MessageField;
 use rusqlite::types::ToSql;
 use crate::schema;
-use std::os::unix::ffi::OsStrExt;
-use std::fs;
+use std::os::unix::io::AsRawFd;
 
 pub struct Options {
     pub compare_lens: bool,
@@ -86,8 +86,8 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
             }
 
             // Open the directory (checking its metadata) and hold it open (for the lock).
-            let _dir = dir::SampleFileDir::open(&dir_path, &meta)?;
-            let mut streams = read_dir(&dir_path, opts)?;
+            let dir = dir::SampleFileDir::open(&dir_path, &meta)?;
+            let mut streams = read_dir(&dir, opts)?;
             let mut rows = garbage_stmt.query(&[&dir_id])?;
             while let Some(row) = rows.next()? {
                 let id = CompositeId(row.get(0)?);
@@ -186,24 +186,27 @@ fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
 /// Reads through the given sample file directory.
 /// Logs unexpected files and creates a hash map of the files found there.
 /// If `opts.compare_lens` is set, the values are lengths; otherwise they're insignificant.
-fn read_dir(path: &str, opts: &Options) -> Result<Dir, Error> {
+fn read_dir(d: &dir::SampleFileDir, opts: &Options) -> Result<Dir, Error> {
     let mut dir = Dir::default();
-    for e in fs::read_dir(path)? {
+    let mut d = d.opendir()?;
+    let fd = d.as_raw_fd();
+    for e in d.iter() {
         let e = e?;
         let f = e.file_name();
-        let f = f.as_bytes();
-        match f {
-            b"meta" => continue,
+        match f.to_bytes() {
+            b"." | b".." | b"meta" => continue,
             _ => {},
         };
-        let id = match dir::parse_id(f) {
+        let id = match dir::parse_id(f.to_bytes()) {
             Ok(id) => id,
             Err(_) => {
                 error!("sample file directory contains file {:?} which isn't an id", f);
                 continue;
             }
         };
-        let len = if opts.compare_lens { e.metadata()?.len() } else { 0 };
+        let len = if opts.compare_lens {
+            nix::sys::stat::fstatat(fd, f, AtFlags::empty())?.st_size as u64
+        } else { 0 };
         let stream = dir.entry(id.stream()).or_insert_with(Stream::default);
         stream.entry(id.recording()).or_insert_with(Recording::default).file = Some(len);
     }

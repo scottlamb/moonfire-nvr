@@ -1,5 +1,5 @@
-// This file is part of Moonfire NVR, a security camera digital video recorder.
-// Copyright (C) 2018 Scott Lamb <slamb@slamb.org>
+// This file is part of Moonfire NVR, a security camera network video recorder.
+// Copyright (C) 2019 Scott Lamb <slamb@slamb.org>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -28,26 +28,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#![cfg_attr(all(feature="nightly", test), feature(test))]
+use std::os::unix::io::{FromRawFd, RawFd};
+use nix::NixPath;
+use nix::fcntl::OFlag;
+use nix::sys::stat::Mode;
 
-pub mod auth;
-pub mod check;
-mod coding;
-mod compare;
-pub mod db;
-pub mod dir;
-mod fs;
-mod raw;
-pub mod recording;
-mod schema;
-pub mod signal;
-pub mod upgrade;
-pub mod writer;
-
-// This is only for #[cfg(test)], but it's also used by the dependent crate, and it appears that
-// #[cfg(test)] is not passed on to dependencies.
-pub mod testutil;
-
-pub use crate::db::*;
-pub use crate::schema::Permissions;
-pub use crate::signal::Signal;
+pub fn openat<P: ?Sized + NixPath>(dirfd: RawFd, path: &P, oflag: OFlag, mode: Mode)
+                                   -> Result<std::fs::File, nix::Error> {
+    let fd = nix::fcntl::openat(dirfd, path, oflag, mode)?;
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}

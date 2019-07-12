@@ -32,12 +32,12 @@
 
 use crate::dir;
 use failure::{Error, bail, format_err};
-use nix::fcntl::FlockArg;
+use nix::fcntl::{FlockArg, OFlag};
+use nix::sys::stat::Mode;
 use protobuf::prelude::MessageField;
 use rusqlite::types::ToSql;
 use crate::schema::DirMeta;
-use std::fs;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::io::AsRawFd;
 use uuid::Uuid;
 
 pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
@@ -46,9 +46,10 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
             .ok_or_else(|| format_err!("--sample-file-dir required when upgrading from \
                                         schema version 1 to 2."))?;
 
-    let d = dir::Fd::open(sample_file_path, false)?;
-    d.lock(FlockArg::LockExclusiveNonblock)?;
-    verify_dir_contents(sample_file_path, tx)?;
+    let mut d = nix::dir::Dir::open(sample_file_path, OFlag::O_DIRECTORY | OFlag::O_RDONLY,
+                                    Mode::empty())?;
+    nix::fcntl::flock(d.as_raw_fd(), FlockArg::LockExclusiveNonblock)?;
+    verify_dir_contents(sample_file_path, &mut d, tx)?;
 
     // These create statements match the schema.sql when version 2 was the latest.
     tx.execute_batch(r#"
@@ -119,7 +120,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         open.id = open_id;
         open.uuid.extend_from_slice(&open_uuid_bytes);
     }
-    dir::write_meta(&d, &meta)?;
+    dir::write_meta(d.as_raw_fd(), &meta)?;
 
     tx.execute(r#"
         insert into sample_file_dir (path,  uuid, last_complete_open_id)
@@ -292,7 +293,8 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
 /// *   optional: reserved sample file uuids.
 /// *   optional: meta and meta-tmp from half-completed update attempts.
 /// *   forbidden: anything else.
-fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Result<(), Error> {
+fn verify_dir_contents(sample_file_path: &str, dir: &mut nix::dir::Dir,
+                       tx: &rusqlite::Transaction) -> Result<(), Error> {
     // Build a hash of the uuids found in the directory.
     let n: i64 = tx.query_row(r#"
         select
@@ -302,10 +304,10 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
           (select count(*) as c from reserved_sample_files) b;
     "#, &[] as &[&dyn ToSql], |r| r.get(0))?;
     let mut files = ::fnv::FnvHashSet::with_capacity_and_hasher(n as usize, Default::default());
-    for e in fs::read_dir(sample_file_path)? {
+    for e in dir.iter() {
         let e = e?;
         let f = e.file_name();
-        match f.as_bytes() {
+        match f.to_bytes() {
             b"." | b".." => continue,
             b"meta" | b"meta-tmp" => {
                 // Ignore metadata files. These might from a half-finished update attempt.
@@ -315,8 +317,8 @@ fn verify_dir_contents(sample_file_path: &str, tx: &rusqlite::Transaction) -> Re
             _ => {},
         };
         let s = match f.to_str() {
-            Some(s) => s,
-            None => bail!("unexpected file {:?} in {:?}", f, sample_file_path),
+            Ok(s) => s,
+            Err(_) => bail!("unexpected file {:?} in {:?}", f, sample_file_path),
         };
         let uuid = match Uuid::parse_str(s) {
             Ok(u) => u,

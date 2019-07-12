@@ -1590,7 +1590,7 @@ impl LockedDatabase {
                 _ => arc,
             },
         };
-        if !dir::SampleFileDir::is_empty(&d.get().path)? {
+        if !dir.is_empty()? {
             bail!("Can't delete sample file directory {} which still has files", &d.get().path);
         }
         let mut meta = d.get().meta(&self.uuid);

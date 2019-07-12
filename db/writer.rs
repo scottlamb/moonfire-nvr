@@ -45,7 +45,6 @@ use std::cmp::Ordering;
 use std::cmp;
 use std::io;
 use std::mem;
-use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
@@ -263,12 +262,13 @@ impl<F: FileWriter> SyncerChannel<F> {
 
 /// Lists files which should be "abandoned" (deleted without ever recording in the database)
 /// on opening.
-fn list_files_to_abandon(path: &str, streams_to_next: FnvHashMap<i32, i32>)
+fn list_files_to_abandon(dir: &dir::SampleFileDir, streams_to_next: FnvHashMap<i32, i32>)
                          -> Result<Vec<CompositeId>, Error> {
     let mut v = Vec::new();
-    for e in ::std::fs::read_dir(path)? {
+    let mut d = dir.opendir()?;
+    for e in d.iter() {
         let e = e?;
-        let id = match dir::parse_id(e.file_name().as_bytes()) {
+        let id = match dir::parse_id(e.file_name().to_bytes()) {
             Ok(i) => i,
             Err(_) => continue,
         };
@@ -304,7 +304,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
                  }
              })
              .collect();
-        let to_abandon = list_files_to_abandon(&d.path, streams_to_next)?;
+        let to_abandon = list_files_to_abandon(&dir, streams_to_next)?;
         let mut undeletable = 0;
         for &id in &to_abandon {
             if let Err(e) = dir.unlink_file(id) {

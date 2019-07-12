@@ -82,7 +82,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         dir.lock(FlockArg::LockExclusiveNonblock)?;
         let tmp_path = cstr!("meta.tmp");
         let path = cstr!("meta");
-        let mut f = dir.openat(path, OFlag::O_RDONLY, Mode::empty())?;
+        let mut f = crate::fs::openat(dir.as_raw_fd(), path, OFlag::O_RDONLY, Mode::empty())?;
         let mut data = Vec::new();
         f.read_to_end(&mut data)?;
         if data.len() == FIXED_DIR_META_LEN {
@@ -95,8 +95,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         if !dir::SampleFileDir::consistent(&db_meta, &dir_meta) {
             bail!("Inconsistent db_meta={:?} dir_meta={:?}", &db_meta, &dir_meta);
         }
-        let mut f = dir.openat(tmp_path, OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_WRONLY,
-                               Mode::S_IRUSR | Mode::S_IWUSR)?;
+        let mut f = crate::fs::openat(dir.as_raw_fd(), tmp_path,
+                                      OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_WRONLY,
+                                      Mode::S_IRUSR | Mode::S_IWUSR)?;
         let mut data =
             dir_meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
         if data.len() > FIXED_DIR_META_LEN {
