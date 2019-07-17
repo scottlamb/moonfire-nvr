@@ -107,7 +107,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         data.resize(FIXED_DIR_META_LEN, 0);  // pad to required length.
         f.write_all(&data)?;
         f.sync_all()?;
-        nix::fcntl::renameat(dir.as_raw_fd(), tmp_path, dir.as_raw_fd(), path)?;
+        nix::fcntl::renameat(Some(dir.as_raw_fd()), tmp_path, Some(dir.as_raw_fd()), path)?;
         dir.sync()?;
     }
     Ok(())

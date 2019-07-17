@@ -39,7 +39,7 @@ use cstr::*;
 use failure::{Error, Fail, bail, format_err};
 use log::warn;
 use protobuf::Message;
-use nix::{NixPath, fcntl::{AtFlags, FlockArg, OFlag}, sys::stat::Mode};
+use nix::{NixPath, fcntl::{FlockArg, OFlag}, sys::stat::Mode};
 use nix::sys::statvfs::Statvfs;
 use std::ffi::{CStr, CString};
 use std::fs;
@@ -294,7 +294,7 @@ impl SampleFileDir {
     /// Unlinks the given sample file within this directory.
     pub(crate) fn unlink_file(&self, id: CompositeId) -> Result<(), nix::Error> {
         let p = CompositeIdPath::from(id);
-        nix::unistd::unlinkat(self.fd.0, &p, AtFlags::empty())
+        nix::unistd::unlinkat(Some(self.fd.0), &p, nix::unistd::UnlinkatFlags::NoRemoveDir)
     }
 
     /// Syncs the directory itself.

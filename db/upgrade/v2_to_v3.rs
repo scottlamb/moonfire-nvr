@@ -90,8 +90,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         let sample_file_uuid: FromSqlUuid = row.get(1)?;
         let from_path = get_uuid_pathname(sample_file_uuid.0);
         let to_path = crate::dir::CompositeIdPath::from(id);
-        if let Err(e) = nix::fcntl::renameat(d.fd.as_raw_fd(), &from_path[..],
-                                             d.fd.as_raw_fd(), &to_path) {
+        if let Err(e) = nix::fcntl::renameat(Some(d.fd.as_raw_fd()), &from_path[..],
+                                             Some(d.fd.as_raw_fd()), &to_path) {
             if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
                 continue;  // assume it was already moved.
             }
