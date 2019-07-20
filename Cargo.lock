@@ -1076,7 +1076,7 @@ dependencies = [
  "lru-cache 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "moonfire-base 0.0.1",
  "mylog 0.1.0 (git+https://github.com/scottlamb/mylog)",
- "nix 0.14.1 (git+https://github.com/scottlamb/nix?branch=pr-renameat)",
+ "nix 0.14.1 (git+https://github.com/nix-rust/nix)",
  "odds 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "openssl 0.10.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1127,7 +1127,7 @@ dependencies = [
  "moonfire-db 0.0.1",
  "moonfire-ffmpeg 0.0.1",
  "mylog 0.1.0 (git+https://github.com/scottlamb/mylog)",
- "nix 0.14.1 (git+https://github.com/scottlamb/nix?branch=pr-renameat)",
+ "nix 0.14.1 (git+https://github.com/nix-rust/nix)",
  "openssl 0.10.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "protobuf 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
@@ -1197,7 +1197,7 @@ dependencies = [
 [[package]]
 name = "nix"
 version = "0.14.1"
-source = "git+https://github.com/scottlamb/nix?branch=pr-renameat#6454a06c341de7f1c92f97222a6c37572176ee9b"
+source = "git+https://github.com/nix-rust/nix#38de0424d77c870db85a698b01a01763f343ecac"
 dependencies = [
  "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cc 1.0.37 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2737,7 +2737,7 @@ dependencies = [
 "checksum native-tls 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "4b2df1a4c22fd44a62147fd8f13dd0f95c9d8ca7b2610299b2a2f9cf8964274e"
 "checksum ncurses 5.99.0 (registry+https://github.com/rust-lang/crates.io-index)" = "15699bee2f37e9f8828c7b35b2bc70d13846db453f2d507713b758fabe536b82"
 "checksum net2 0.2.33 (registry+https://github.com/rust-lang/crates.io-index)" = "42550d9fb7b6684a6d404d9fa7250c2eb2646df731d1c06afc06dcee9e1bcf88"
-"checksum nix 0.14.1 (git+https://github.com/scottlamb/nix?branch=pr-renameat)" = "<none>"
+"checksum nix 0.14.1 (git+https://github.com/nix-rust/nix)" = "<none>"
 "checksum nodrop 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)" = "2f9667ddcc6cc8a43afc9b7917599d7216aa09c463919ea32c59ed6cac8bc945"
 "checksum num 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "cf4825417e1e1406b3782a8ce92f4d53f26ec055e3622e1881ca8e9f5f9e08db"
 "checksum num-complex 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "fcb0cf31fb3ff77e6d2a6ebd6800df7fdcd106f2ad89113c9130bcd07f93dffc"
