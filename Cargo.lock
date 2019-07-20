@@ -1473,12 +1473,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "protobuf"
 version = "3.0.0-pre"
-source = "git+https://github.com/stepancheg/rust-protobuf#4c97ba2a1624626d2ac8472ec9139613744f1de9"
+source = "git+https://github.com/stepancheg/rust-protobuf#c28865f0ada87733b80806eecbdcbd4906d13ee3"
 
 [[package]]
 name = "protobuf-codegen"
 version = "3.0.0-pre"
-source = "git+https://github.com/stepancheg/rust-protobuf#4c97ba2a1624626d2ac8472ec9139613744f1de9"
+source = "git+https://github.com/stepancheg/rust-protobuf#c28865f0ada87733b80806eecbdcbd4906d13ee3"
 dependencies = [
  "protobuf 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
 ]
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "protobuf-codegen-pure"
 version = "3.0.0-pre"
-source = "git+https://github.com/stepancheg/rust-protobuf#4c97ba2a1624626d2ac8472ec9139613744f1de9"
+source = "git+https://github.com/stepancheg/rust-protobuf#c28865f0ada87733b80806eecbdcbd4906d13ee3"
 dependencies = [
  "protobuf 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",
  "protobuf-codegen 3.0.0-pre (git+https://github.com/stepancheg/rust-protobuf)",

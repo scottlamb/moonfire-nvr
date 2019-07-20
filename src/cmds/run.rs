@@ -33,7 +33,7 @@ use crate::stream;
 use crate::streamer;
 use crate::web;
 use db::{dir, writer};
-use failure::{Error, bail, format_err};
+use failure::{Error, ResultExt, bail};
 use fnv::FnvHashMap;
 use futures::{Future, Stream};
 use log::{error, info, warn};
@@ -195,7 +195,7 @@ pub fn run() -> Result<(), Error> {
     let allow_unauthenticated_permissions = args.flag_allow_unauthenticated_permissions
         .map(|s| protobuf::text_format::parse_from_str(&s))
         .transpose()
-        .map_err(|_| format_err!("Unable to parse --allow-unauthenticated-permissions"))?;
+        .context("Unable to parse --allow-unauthenticated-permissions")?;
     let s = web::Service::new(web::Config {
         db: db.clone(),
         ui_dir: Some(&args.flag_ui_dir),

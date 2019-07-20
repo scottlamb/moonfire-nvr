@@ -32,7 +32,7 @@
 
 use base::clock::{self, Clocks};
 use db::auth::SessionFlags;
-use failure::{Error, bail, format_err};
+use failure::{Error, ResultExt, bail, format_err};
 use serde::Deserialize;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::io::Write as _;
@@ -89,7 +89,7 @@ pub fn run() -> Result<(), Error> {
     let permissions = match args.flag_permissions {
         None => u.permissions.clone(),
         Some(s) => protobuf::text_format::parse_from_str(&s)
-                   .map_err(|_| format_err!("unable to parse --permissions"))?
+                   .context("unable to parse --permissions")?
     };
     let creation = db::auth::Request {
         when_sec: Some(db.clocks().realtime().sec),
