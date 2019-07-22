@@ -38,10 +38,8 @@ use failure::Error;
 use crate::schema;
 use protobuf::prelude::MessageField;
 use rusqlite::types::ToSql;
-use std::io::Write;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Opens the sample file dir.
 ///
@@ -88,9 +86,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     while let Some(row) = rows.next()? {
         let id = db::CompositeId(row.get(0)?);
         let sample_file_uuid: FromSqlUuid = row.get(1)?;
-        let from_path = get_uuid_pathname(sample_file_uuid.0);
+        let from_path = super::UuidPath::from(sample_file_uuid.0);
         let to_path = crate::dir::CompositeIdPath::from(id);
-        if let Err(e) = nix::fcntl::renameat(Some(d.fd.as_raw_fd()), &from_path[..],
+        if let Err(e) = nix::fcntl::renameat(Some(d.fd.as_raw_fd()), &from_path,
                                              Some(d.fd.as_raw_fd()), &to_path) {
             if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
                 continue;  // assume it was already moved.
@@ -118,12 +116,4 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         drop table old_video_sample_entry;
     "#)?;
     Ok(())
-}
-
-/// Gets a pathname for a sample file suitable for passing to open or unlink.
-fn get_uuid_pathname(uuid: Uuid) -> [u8; 37] {
-    let mut buf = [0u8; 37];
-    write!(&mut buf[..36], "{}", uuid.to_hyphenated_ref())
-        .expect("can't format uuid to pathname buf");
-    buf
 }

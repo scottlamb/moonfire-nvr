@@ -35,7 +35,11 @@
 use crate::db;
 use failure::{Error, bail};
 use log::info;
+use std::ffi::CStr;
+use std::io::Write;
+use nix::NixPath;
 use rusqlite::params;
+use uuid::Uuid;
 
 mod v0_to_v1;
 mod v1_to_v2;
@@ -82,7 +86,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
             bail!("Database is at negative version {}!", old_ver);
         }
         info!("Upgrading database from version {} to version {}...", old_ver, target_ver);
-        set_journal_mode(&conn, args.flag_preset_journal).unwrap();
+        set_journal_mode(&conn, args.flag_preset_journal)?;
         for ver in old_ver .. target_ver {
             info!("...from version {} to version {}", ver, ver + 1);
             let tx = conn.transaction()?;
@@ -113,22 +117,46 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
 
     // WAL is the preferred journal mode for normal operation; it reduces the number of syncs
     // without compromising safety.
-    set_journal_mode(&conn, "wal").unwrap();
+    set_journal_mode(&conn, "wal")?;
     if !args.flag_no_vacuum {
         info!("...vacuuming database after upgrade.");
         conn.execute_batch(r#"
             pragma page_size = 16384;
             vacuum;
-        "#).unwrap();
+        "#)?;
     }
     info!("...done.");
 
     Ok(())
 }
 
+/// A uuid-based path, as used in version 0 and version 1 schemas.
+struct UuidPath([u8; 37]);
+
+impl UuidPath {
+    pub(crate) fn from(uuid: Uuid) -> Self {
+        let mut buf = [0u8; 37];
+        write!(&mut buf[..36], "{}", uuid.to_hyphenated_ref())
+            .expect("can't format uuid to pathname buf");
+        UuidPath(buf)
+    }
+}
+
+impl NixPath for UuidPath {
+    fn len(&self) -> usize { 36 }
+
+    fn with_nix_path<T, F>(&self, f: F) -> Result<T, nix::Error>
+    where F: FnOnce(&CStr) -> T {
+        let p = CStr::from_bytes_with_nul(&self.0[..]).expect("no interior nuls");
+        Ok(f(p))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::compare;
+    use crate::testutil;
+    use failure::{ResultExt, format_err};
     use super::*;
 
     fn new_conn() -> Result<rusqlite::Connection, Error> {
@@ -152,25 +180,59 @@ mod tests {
     /// Doesn't (yet) compare any actual data.
     #[test]
     fn upgrade_and_compare() -> Result<(), Error> {
-        let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
-        let path = tmpdir.path().to_str().unwrap().to_owned();
+        testutil::init();
+        let tmpdir = tempdir::TempDir::new("moonfire-nvr-test")?;
+        let path = tmpdir.path().to_str().ok_or_else(|| format_err!("invalid UTF-8"))?.to_owned();
         let mut upgraded = new_conn()?;
         upgraded.execute_batch(include_str!("v0.sql"))?;
+        upgraded.execute_batch(r#"
+            insert into camera (id, uuid, short_name, description, host, username, password,
+                                main_rtsp_path, sub_rtsp_path, retain_bytes)
+                        values (1, zeroblob(16), 'test camera', 'desc', 'host', 'user', 'pass',
+                                'main', 'sub', 42);
+        "#)?;
+        upgraded.execute(r#"
+            insert into video_sample_entry (id, sha1, width, height, data)
+                                    values (1, X'3BA3EDE1BD93B7BCB7AB5BD099C047701451B822',
+                                            1920, 1080, ?);
+        "#, params![testutil::TEST_VIDEO_SAMPLE_ENTRY_DATA])?;
+        upgraded.execute_batch(r#"
+            insert into recording (id, camera_id, sample_file_bytes, start_time_90k, duration_90k,
+                                   local_time_delta_90k, video_samples, video_sync_samples,
+                                   video_sample_entry_id, sample_file_uuid, sample_file_sha1,
+                                   video_index)
+                           values (1, 1, 42, 140063580000000, 90000, 0, 1, 1, 1,
+                                   X'E69D45E8CBA64DC1BA2ECB1585983A10', zeroblob(20), X'00');
+            insert into reserved_sample_files values (X'51EF700C933E4197AAE4EE8161E94221', 0),
+                                                     (X'E69D45E8CBA64DC1BA2ECB1585983A10', 1);
+        "#)?;
+        let rec1 = tmpdir.path().join("e69d45e8-cba6-4dc1-ba2e-cb1585983a10");
+        let garbage = tmpdir.path().join("51ef700c-933e-4197-aae4-ee8161e94221");
+        std::fs::File::create(&rec1)?;
+        std::fs::File::create(&garbage)?;
 
         for (ver, fresh_sql) in &[(1, Some(include_str!("v1.sql"))),
                                   (2, None),  // transitional; don't compare schemas.
                                   (3, Some(include_str!("v3.sql"))),
                                   (4, None),  // transitional; don't compare schemas.
-                                  (4, Some(include_str!("../schema.sql")))] {
+                                  (5, Some(include_str!("../schema.sql")))] {
             upgrade(&Args {
                 flag_sample_file_dir: Some(&path),
                 flag_preset_journal: "delete",
                 flag_no_vacuum: false,
-            }, *ver, &mut upgraded)?;
+            }, *ver, &mut upgraded).context(format!("upgrading to version {}", ver))?;
             if let Some(f) = fresh_sql {
                 compare(&upgraded, *ver, f)?;
             }
         }
+
+        // Check that recording files get renamed.
+        assert!(!rec1.exists());
+        assert!(tmpdir.path().join("0000000100000001").exists());
+
+        // Check that garbage files get cleaned up.
+        assert!(!garbage.exists());
+
         Ok(())
     }
 }

@@ -346,7 +346,16 @@ fn verify_dir_contents(sample_file_path: &str, dir: &mut nix::dir::Dir,
     let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
     while let Some(row) = rows.next()? {
         let uuid: crate::db::FromSqlUuid = row.get(0)?;
-        files.remove(&uuid.0);
+        if files.remove(&uuid.0) {
+            // Also remove the garbage file. For historical reasons (version 2 was originally
+            // defined as not having a garbage table so still is), do this here rather than with
+            // the other path manipulations in v2_to_v3.rs. There's no harm anyway in deleting
+            // a garbage file so if the upgrade transation fails this is still a valid and complete
+            // version 1 database.
+            let p = super::UuidPath::from(uuid.0);
+            nix::unistd::unlinkat(Some(dir.as_raw_fd()), &p,
+                                  nix::unistd::UnlinkatFlags::NoRemoveDir)?;
+        }
     }
 
     if !files.is_empty() {

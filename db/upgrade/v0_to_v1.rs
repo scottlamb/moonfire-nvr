@@ -34,7 +34,7 @@ use crate::db;
 use crate::recording;
 use failure::Error;
 use log::warn;
-use rusqlite::types::ToSql;
+use rusqlite::params;
 use std::collections::HashMap;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
@@ -88,12 +88,27 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           sample_file_sha1 blob not null check (length(sample_file_sha1) = 20),
           video_index blob not null check (length(video_index) > 0)
         );
+        insert into camera
+        select
+          id,
+          uuid,
+          short_name,
+          description,
+          host,
+          username,
+          password,
+          main_rtsp_path,
+          sub_rtsp_path,
+          retain_bytes,
+          1 as next_recording_id
+        from
+          old_camera;
     "#)?;
-    let camera_state = fill_recording(tx).unwrap();
-    fill_camera(tx, camera_state).unwrap();
+    let camera_state = fill_recording(tx)?;
+    update_camera(tx, camera_state)?;
     tx.execute_batch(r#"
-      drop table old_camera;
       drop table old_recording;
+      drop table old_camera;
     "#)?;
     Ok(())
 }
@@ -142,7 +157,7 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
       insert into recording_playback values (:composite_id, :sample_file_uuid, :sample_file_sha1,
                                              :video_index)
     "#)?;
-    let mut rows = select.query(&[] as &[&dyn ToSql])?;
+    let mut rows = select.query(params![])?;
     let mut camera_state: HashMap<i32, CameraState> = HashMap::new();
     while let Some(row) = rows.next()? {
         let camera_id: i32 = row.get(0)?;
@@ -203,44 +218,15 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
     Ok(camera_state)
 }
 
-fn fill_camera(tx: &rusqlite::Transaction, camera_state: HashMap<i32, CameraState>)
+fn update_camera(tx: &rusqlite::Transaction, camera_state: HashMap<i32, CameraState>)
                 -> Result<(), Error> {
-    let mut select = tx.prepare(r#"
-      select
-        id, uuid, short_name, description, host, username, password, main_rtsp_path,
-        sub_rtsp_path, retain_bytes
-      from
-        old_camera
+    let mut stmt = tx.prepare(r#"
+      update camera set next_recording_id = :next_recording_id where id = :id
     "#)?;
-    let mut insert = tx.prepare(r#"
-      insert into camera values (:id, :uuid, :short_name, :description, :host, :username, :password,
-      :main_rtsp_path, :sub_rtsp_path, :retain_bytes, :next_recording_id)
-    "#)?;
-    let mut rows = select.query(&[] as &[&dyn ToSql])?;
-    while let Some(row) = rows.next()? {
-        let id: i32 = row.get(0)?;
-        let uuid: Vec<u8> = row.get(1)?;
-        let short_name: String = row.get(2)?;
-        let description: String = row.get(3)?;
-        let host: String = row.get(4)?;
-        let username: String = row.get(5)?;
-        let password: String = row.get(6)?;
-        let main_rtsp_path: String = row.get(7)?;
-        let sub_rtsp_path: String = row.get(8)?;
-        let retain_bytes: i64 = row.get(9)?;
-        insert.execute_named(&[
+    for (ref id, ref state) in &camera_state {
+        stmt.execute_named(&[
             (":id", &id),
-            (":uuid", &uuid),
-            (":short_name", &short_name),
-            (":description", &description),
-            (":host", &host),
-            (":username", &username),
-            (":password", &password),
-            (":main_rtsp_path", &main_rtsp_path),
-            (":sub_rtsp_path", &sub_rtsp_path),
-            (":retain_bytes", &retain_bytes),
-            (":next_recording_id",
-             &camera_state.get(&id).map(|s| s.next_recording_id).unwrap_or(1)),
+            (":next_recording_id", &state.next_recording_id),
         ])?;
     }
     Ok(())
