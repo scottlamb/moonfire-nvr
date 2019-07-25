@@ -36,9 +36,8 @@ use lazy_static::lazy_static;
 use log::{debug, info, warn};
 use std::ffi::CString;
 use std::result::Result;
-use std::sync;
 
-static START: sync::Once = sync::ONCE_INIT;
+static START: parking_lot::Once = parking_lot::Once::new();
 
 lazy_static! {
     pub static ref FFMPEG: Ffmpeg = Ffmpeg::new();

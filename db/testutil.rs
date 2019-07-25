@@ -35,14 +35,14 @@ use fnv::FnvHashMap;
 use mylog;
 use rusqlite;
 use std::env;
-use std::sync::{self, Arc};
+use std::sync::Arc;
 use std::thread;
 use tempdir::TempDir;
 use time;
 use uuid::Uuid;
 use crate::writer;
 
-static INIT: sync::Once = sync::ONCE_INIT;
+static INIT: parking_lot::Once = parking_lot::Once::new();
 
 /// id of the camera created by `TestDb::new` below.
 pub const TEST_CAMERA_ID: i32 = 1;
