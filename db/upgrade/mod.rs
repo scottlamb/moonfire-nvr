@@ -224,6 +224,13 @@ mod tests {
             if let Some(f) = fresh_sql {
                 compare(&upgraded, *ver, f)?;
             }
+            if *ver == 3 {
+                // Check that the garbage files is cleaned up properly, but also add it back
+                // to simulate a bug prior to 433be217. The v5 upgrade should take care of
+                // anything left over.
+                assert!(!garbage.exists());
+                std::fs::File::create(&garbage)?;
+            }
         }
 
         // Check that recording files get renamed.
