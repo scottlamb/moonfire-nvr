@@ -301,7 +301,7 @@ impl MediaType {
     pub fn is_video(self) -> bool { self.0 == unsafe { moonfire_ffmpeg_avmedia_type_video } }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub struct Error(libc::c_int);
 
 impl Error {
@@ -324,6 +324,12 @@ impl std::error::Error for Error {
     }
 
     fn cause(&self) -> Option<&dyn std::error::Error> { None }
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Error({} /* {} */)", self.0, self)
+    }
 }
 
 impl fmt::Display for Error {
@@ -487,7 +493,9 @@ mod tests {
     #[test]
     fn test_error() {
         let eof_formatted = format!("{}", Error::eof());
-        assert!(eof_formatted.contains("End of file"), "eof is: {}", eof_formatted);
+        assert!(eof_formatted.contains("End of file"), "eof formatted is: {}", eof_formatted);
+        let eof_debug = format!("{:?}", Error::eof());
+        assert!(eof_debug.contains("End of file"), "eof debug is: {}", eof_debug);
 
         // Errors should be round trippable to a CString. (This will fail if they contain NUL
         // bytes.)
