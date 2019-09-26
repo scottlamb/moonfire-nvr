@@ -39,7 +39,7 @@ use crate::recording;
 use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use parking_lot::Mutex;
-use log::{debug, info, trace, warn};
+use log::{debug, trace, warn};
 use openssl::hash;
 use std::cmp::Ordering;
 use std::cmp;
@@ -205,9 +205,6 @@ pub fn lower_retention(db: Arc<db::Database>, dir_id: i32, limits: &[NewLimit])
             }
             if l.limit >= bytes_before { continue }
             delete_recordings(db, l.stream_id, extra)?;
-            let stream = db.streams_by_id().get(&l.stream_id).unwrap();
-            info!("stream {}, deleting: {}->{}", l.stream_id, bytes_before,
-                  stream.sample_file_bytes + stream.bytes_to_add - stream.bytes_to_delete);
         }
         Ok(())
     })
@@ -238,8 +235,6 @@ fn delete_recordings(db: &mut db::LockedDatabase, stream_id: i32,
         }
         false
     })?;
-    info!("{}: deleting {} bytes in {} recordings ({} bytes needed)",
-          stream_id, bytes_to_delete, n, bytes_needed);
     Ok(())
 }
 

@@ -28,6 +28,66 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use lazy_static::lazy_static;
+use regex::Regex;
+use std::fmt::Write as _;
+use std::str::FromStr as _;
+
+static MULTIPLIERS: [(char, u64); 4] = [
+    // (suffix character, power of 2)
+    ('T', 40),
+    ('G', 30),
+    ('M', 20),
+    ('K', 10),
+];
+
+/// Encodes a size into human-readable form.
+pub fn encode_size(mut raw: i64) -> String {
+    let mut encoded = String::new();
+    for &(c, n) in &MULTIPLIERS {
+        if raw >= 1i64<<n {
+            write!(&mut encoded, "{}{} ", raw >> n, c).unwrap();
+            raw &= (1i64 << n) - 1;
+        }
+    }
+    if raw > 0 || encoded.len() == 0 {
+        write!(&mut encoded, "{}", raw).unwrap();
+    } else {
+        encoded.pop();  // remove trailing space.
+    }
+    encoded
+}
+
+/// Decodes a human-readable size as output by encode_size.
+pub fn decode_size(encoded: &str) -> Result<i64, ()> {
+    let mut decoded = 0i64;
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r"\s*([0-9]+)([TGMK])?,?\s*").unwrap();
+    }
+    let mut last_pos = 0;
+    for cap in RE.captures_iter(encoded) {
+        let whole_cap = cap.get(0).unwrap();
+        if whole_cap.start() > last_pos {
+            return Err(());
+        }
+        last_pos = whole_cap.end();
+        let mut piece = i64::from_str(&cap[1]).map_err(|_| ())?;
+        if let Some(m) = cap.get(2) {
+            let m = m.as_str().as_bytes()[0] as char;
+            for &(some_m, n) in &MULTIPLIERS {
+                if some_m == m {
+                    piece *= 1i64<<n;
+                    break;
+                }
+            }
+        }
+        decoded += piece;
+    }
+    if last_pos < encoded.len() {
+        return Err(());
+    }
+    Ok(decoded)
+}
 
 /// Returns a hex-encoded version of the input.
 pub fn hex(raw: &[u8]) -> String {
@@ -66,6 +126,11 @@ pub fn dehex(hexed: &[u8]) -> Result<[u8; 20], ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_decode() {
+        assert_eq!(super::decode_size("100M").unwrap(), 100i64 << 20);
+    }
 
     #[test]
     fn round_trip() {

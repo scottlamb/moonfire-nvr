@@ -28,6 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use base::strutil::{decode_size, encode_size};
 use crate::stream::{self, Opener, Stream};
 use cursive::Cursive;
 use cursive::traits::{Boxable, Identifiable, Finder};
@@ -37,7 +38,6 @@ use failure::Error;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use super::{decode_size, encode_size};
 use url::Url;
 
 /// Builds a `CameraChange` from an active `edit_camera_dialog`.

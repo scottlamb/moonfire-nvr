@@ -28,6 +28,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use base::strutil::{decode_size, encode_size};
 use cursive::Cursive;
 use cursive::traits::{Boxable, Identifiable};
 use cursive::views;
@@ -38,7 +39,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use super::{decode_size, encode_size};
 
 struct Stream {
     label: String,
