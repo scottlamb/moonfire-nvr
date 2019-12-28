@@ -235,6 +235,8 @@ Version 5 adds over version 3:
 *   permissions for users and sessions. Existing users will have only the
     `view_video` permission, matching their previous behavior.
 *   the `signals` schema, used to store status of signals such as camera
-    motion detection, security system zones, etc.
+    motion detection, security system zones, etc. Note that while the schema
+    is stable for now, there's no support yet for configuring signals via
+    the `moonfire-nvr config` subcommand.
 *   the ability to recover from a completely full sample file directory (#65)
     without manual intervention.
