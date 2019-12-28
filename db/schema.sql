@@ -33,7 +33,12 @@
 
 -- Database metadata. There should be exactly one row in this table.
 create table meta (
-  uuid blob not null check (length(uuid) = 16)
+  uuid blob not null check (length(uuid) = 16),
+
+  -- The maximum number of entries in the signal_state table. If an update
+  -- causes this to be exceeded, older times will be garbage collected to stay
+  -- within the limit.
+  max_signal_changes integer check (max_signal_changes >= 0)
 );
 
 -- This table tracks the schema version.

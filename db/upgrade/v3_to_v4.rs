@@ -35,6 +35,8 @@ use failure::Error;
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     // These create statements match the schema.sql when version 4 was the latest.
     tx.execute_batch(r#"
+        alter table meta add column max_signal_changes integer check (max_signal_changes >= 0);
+
         create table signal (
           id integer primary key,
           source_uuid blob not null check (length(source_uuid) = 16),
