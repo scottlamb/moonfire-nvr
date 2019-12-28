@@ -75,8 +75,9 @@ pub struct RealClocks {}
 impl RealClocks {
     fn get(&self, clock: libc::clockid_t) -> Timespec {
         unsafe {
-            let mut ts = mem::uninitialized();
-            assert_eq!(0, libc::clock_gettime(clock, &mut ts));
+            let mut ts = mem::MaybeUninit::uninit();
+            assert_eq!(0, libc::clock_gettime(clock, ts.as_mut_ptr()));
+            let ts = ts.assume_init();
             Timespec::new(ts.tv_sec as i64, ts.tv_nsec as i32)
         }
     }
