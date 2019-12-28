@@ -29,13 +29,13 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use log::info;
+use parking_lot::Once;
 use std::cell::{Ref, RefCell};
 use std::ffi::CStr;
 use std::fmt::{self, Write};
 use std::ptr;
-use std::sync;
 
-static START: sync::Once = sync::ONCE_INIT;
+static START: Once = Once::new();
 
 //#[link(name = "avcodec")]
 extern "C" {
