@@ -495,6 +495,7 @@ impl Segment {
         }
         let mut have_frame = true;
         let mut key_frame = 0;
+
         for i in 0 .. self.frames {
             if !have_frame {
                 bail!("recording {}: expected {} frames, found only {}", self.id, self.frames, i+1);
@@ -507,11 +508,16 @@ impl Segment {
                 }
             }
 
-            // Note: this inner loop uses try! rather than ? for performance. Don't change these
-            // lines without reading https://github.com/rust-lang/rust/issues/37939 and running
+            // Note: this inner loop avoids ? for performance. Don't change these lines without
+            // reading https://github.com/rust-lang/rust/issues/37939 and running
             // mp4::bench::build_index.
-            r#try!(f(&it));
-            have_frame = r#try!(it.next(data));
+            if let Err(e) = f(&it) {
+                return Err(e);
+            }
+            have_frame = match it.next(data) {
+                Err(e) => return Err(e),
+                Ok(hf) => hf,
+            };
         }
         if key_frame < self.key_frames {
             bail!("recording {}: expected {} key frames, found only {}",
