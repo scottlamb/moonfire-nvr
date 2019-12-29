@@ -54,6 +54,20 @@ const int moonfire_ffmpeg_av_codec_id_h264 = AV_CODEC_ID_H264;
 
 const int moonfire_ffmpeg_averror_eof = AVERROR_EOF;
 
+// Prior to libavcodec 58.9.100, multithreaded callers were expected to supply
+// a lock callback. That release deprecated this API. It also introduced a
+// FF_API_LOCKMGR #define to track its removal:
+//
+// * older builds (in which the lock callback is needed) don't define it.
+// * middle builds (in which the callback is deprecated) define it as 1.
+//   value of 1.
+// * future builds (in which the callback removed) will define
+//   it as 0.
+//
+// so (counterintuitively) use the lock manager when FF_API_LOCKMGR is
+// undefined.
+
+#ifndef FF_API_LOCKMGR
 static int lock_callback(void **mutex, enum AVLockOp op) {
     switch (op) {
         case AV_LOCK_CREATE:
@@ -82,11 +96,14 @@ static int lock_callback(void **mutex, enum AVLockOp op) {
     }
     return 0;
 }
+#endif
 
 void moonfire_ffmpeg_init(void) {
+#ifndef FF_API_LOCKMGR
     if (av_lockmgr_register(&lock_callback) < 0) {
         abort();
     }
+#endif
 }
 
 struct moonfire_ffmpeg_streams {
