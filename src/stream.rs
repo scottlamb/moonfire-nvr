@@ -123,7 +123,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
         {
             let s = input.streams();
             for i in 0 .. s.len() {
-                if s.get(i).codec().codec_type().is_video() {
+                if s.get(i).codecpar().codec_type().is_video() {
                     debug!("Video stream index is {}", i);
                     video_i = Some(i);
                     break;
@@ -161,7 +161,7 @@ impl Stream for FfmpegStream {
         if tb.num != 1 || tb.den != 90000 {
             bail!("video stream has timebase {}/{}; expected 1/90000", tb.num, tb.den);
         }
-        let codec = video.codec();
+        let codec = video.codecpar();
         let codec_id = codec.codec_id();
         if !codec_id.is_h264() {
             bail!("stream's video codec {:?} is not h264", codec_id);

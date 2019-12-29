@@ -43,11 +43,11 @@ extern "C" {
     fn av_init_packet(p: *mut AVPacket);
     fn av_packet_unref(p: *mut AVPacket);
 
-    fn moonfire_ffmpeg_cctx_codec_id(ctx: *const AVCodecContext) -> libc::c_int;
-    fn moonfire_ffmpeg_cctx_codec_type(ctx: *const AVCodecContext) -> libc::c_int;
-    fn moonfire_ffmpeg_cctx_extradata(ctx: *const AVCodecContext) -> DataLen;
-    fn moonfire_ffmpeg_cctx_height(ctx: *const AVCodecContext) -> libc::c_int;
-    fn moonfire_ffmpeg_cctx_width(ctx: *const AVCodecContext) -> libc::c_int;
+    fn moonfire_ffmpeg_codecpar_codec_id(ctx: *const AVCodecParameters) -> libc::c_int;
+    fn moonfire_ffmpeg_codecpar_codec_type(ctx: *const AVCodecParameters) -> libc::c_int;
+    fn moonfire_ffmpeg_codecpar_extradata(ctx: *const AVCodecParameters) -> DataLen;
+    fn moonfire_ffmpeg_codecpar_height(ctx: *const AVCodecParameters) -> libc::c_int;
+    fn moonfire_ffmpeg_codecpar_width(ctx: *const AVCodecParameters) -> libc::c_int;
 }
 
 //#[link(name = "avformat")]
@@ -66,7 +66,7 @@ extern "C" {
 
     fn moonfire_ffmpeg_fctx_streams(ctx: *const AVFormatContext) -> StreamsLen;
 
-    fn moonfire_ffmpeg_stream_codec(stream: *const AVStream) -> *const AVCodecContext;
+    fn moonfire_ffmpeg_stream_codecpar(stream: *const AVStream) -> *const AVCodecParameters;
     fn moonfire_ffmpeg_stream_time_base(stream: *const AVStream) -> AVRational;
 }
 
@@ -127,7 +127,7 @@ pub struct AVRational {
 }
 
 // No ABI stability assumption here; use heap allocation/deallocation and accessors only.
-enum AVCodecContext {}
+enum AVCodecParameters {}
 enum AVDictionary {}
 enum AVFormatContext {}
 enum AVInputFormat {}
@@ -259,8 +259,8 @@ impl<'owner> Streams<'owner> {
 pub struct Stream<'o>(&'o AVStream);
 
 impl<'o> Stream<'o> {
-    pub fn codec<'s>(&'s self) -> CodecContext<'s> {
-        CodecContext(unsafe { moonfire_ffmpeg_stream_codec(self.0).as_ref() }.unwrap())
+    pub fn codecpar<'s>(&'s self) -> CodecParameters<'s> {
+        CodecParameters(unsafe { moonfire_ffmpeg_stream_codecpar(self.0).as_ref() }.unwrap())
     }
 
     pub fn time_base(&self) -> AVRational {
@@ -268,22 +268,22 @@ impl<'o> Stream<'o> {
     }
 }
 
-pub struct CodecContext<'s>(&'s AVCodecContext);
+pub struct CodecParameters<'s>(&'s AVCodecParameters);
 
-impl<'s> CodecContext<'s> {
+impl<'s> CodecParameters<'s> {
     pub fn extradata(&self) -> &[u8] {
         unsafe {
-            let d = moonfire_ffmpeg_cctx_extradata(self.0);
+            let d = moonfire_ffmpeg_codecpar_extradata(self.0);
             ::std::slice::from_raw_parts(d.data, d.len)
         }
     }
-    pub fn width(&self) -> libc::c_int { unsafe { moonfire_ffmpeg_cctx_width(self.0) } }
-    pub fn height(&self) -> libc::c_int { unsafe { moonfire_ffmpeg_cctx_height(self.0) } }
+    pub fn width(&self) -> libc::c_int { unsafe { moonfire_ffmpeg_codecpar_width(self.0) } }
+    pub fn height(&self) -> libc::c_int { unsafe { moonfire_ffmpeg_codecpar_height(self.0) } }
     pub fn codec_id(&self) -> CodecId {
-        CodecId(unsafe { moonfire_ffmpeg_cctx_codec_id(self.0) })
+        CodecId(unsafe { moonfire_ffmpeg_codecpar_codec_id(self.0) })
     }
     pub fn codec_type(&self) -> MediaType {
-        MediaType(unsafe { moonfire_ffmpeg_cctx_codec_type(self.0) })
+        MediaType(unsafe { moonfire_ffmpeg_codecpar_codec_type(self.0) })
     }
 }
 
