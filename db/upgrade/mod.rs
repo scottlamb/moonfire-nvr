@@ -143,6 +143,7 @@ impl UuidPath {
 }
 
 impl NixPath for UuidPath {
+    fn is_empty(&self) -> bool { false }
     fn len(&self) -> usize { 36 }
 
     fn with_nix_path<T, F>(&self, f: F) -> Result<T, nix::Error>

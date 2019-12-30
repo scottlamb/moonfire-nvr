@@ -76,6 +76,7 @@ impl CompositeIdPath {
 }
 
 impl NixPath for CompositeIdPath {
+    fn is_empty(&self) -> bool { false }
     fn len(&self) -> usize { 16 }
 
     fn with_nix_path<T, F>(&self, f: F) -> Result<T, nix::Error>
