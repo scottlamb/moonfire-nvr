@@ -91,7 +91,7 @@ use log::{debug, error, trace, warn};
 use memmap;
 use openssl::hash;
 use parking_lot::Once;
-use reffers::ARefs;
+use reffers::ARefss;
 use crate::slices::{self, Slices};
 use smallvec::SmallVec;
 use std::cell::UnsafeCell;
@@ -613,7 +613,7 @@ impl Slice {
 
     fn wrap_index<F>(&self, mp4: &File, r: Range<u64>, f: &F) -> Result<Chunk, Error>
     where F: Fn(&[u8], SegmentLengths) -> &[u8] {
-        let mp4 = ARefs::new(mp4.0.clone());
+        let mp4 = ARefss::new(mp4.0.clone());
         let r = r.start as usize .. r.end as usize;
         let p = self.p();
         Ok(mp4.try_map(|mp4| Ok::<_, Error>(&mp4.segments[p].get_index(&mp4.db, f)?[r]))?.into())
@@ -630,7 +630,7 @@ impl Slice {
             mp4.0.db.lock()
                .with_recording_playback(s.s.id, &mut |playback| s.truns(playback, pos, len))
                .err_kind(ErrorKind::Unknown)?;
-        let truns = ARefs::new(truns);
+        let truns = ARefss::new(truns);
         Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]).into())
     }
 }
@@ -641,7 +641,7 @@ impl slices::Slice for Slice {
 
     fn end(&self) -> u64 { return self.0 & 0xFF_FF_FF_FF_FF }
     fn get_range(&self, f: &File, range: Range<u64>, len: u64)
-                 -> Box<dyn Stream<Item = Self::Chunk, Error = BoxedError> + Send> {
+                 -> Box<dyn Stream<Item = Result<Self::Chunk, BoxedError>> + Send + Sync> {
         trace!("getting mp4 slice {:?}'s range {:?} / {}", self, range, len);
         let p = self.p();
         let res = match self.t() {
@@ -651,11 +651,11 @@ impl slices::Slice for Slice {
                 Ok(part.into())
             },
             SliceType::Buf => {
-                let r = ARefs::new(f.0.clone());
+                let r = ARefss::new(f.0.clone());
                 Ok(r.map(|f| &f.buf[p+range.start as usize .. p+range.end as usize]).into())
             },
             SliceType::VideoSampleEntry => {
-                let r = ARefs::new(f.0.clone());
+                let r = ARefss::new(f.0.clone());
                 Ok(r.map(|f| &f.video_sample_entries[p]
                                .data[range.start as usize .. range.end as usize]).into())
             },
@@ -667,7 +667,7 @@ impl slices::Slice for Slice {
             SliceType::SubtitleSampleData => f.0.get_subtitle_sample_data(p, range.clone(), len),
             SliceType::Truns => self.wrap_truns(f, range.clone(), len as usize),
         };
-        Box::new(stream::once(res
+        Box::new(stream::once(futures::future::ready(res
             .map_err(|e| wrap_error(e))
             .and_then(move |c| {
                 if c.remaining() != (range.end - range.start) as usize {
@@ -677,7 +677,7 @@ impl slices::Slice for Slice {
                         self, range, c.remaining())));
                 }
                 Ok(c)
-            })))
+            }))))
     }
 
     fn get_slices(ctx: &File) -> &Slices<Self> { &ctx.0.slices }
@@ -1444,7 +1444,7 @@ impl FileInner {
             let r = s.s.sample_file_range();
             pos += r.end - r.start;
         }
-        Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]).into())
+        Ok(ARefss::new(v).map(|v| &v[r.start as usize .. r.end as usize]).into())
     }
 
     /// Gets a `Chunk` of video sample data from disk.
@@ -1470,7 +1470,7 @@ impl FileInner {
                 .map(&f).err_kind(ErrorKind::Internal)?
             });
         use core::ops::Deref;
-        Ok(ARefs::new(mmap).map(|m| m.deref()).into())
+        Ok(ARefss::new(mmap).map(|m| m.deref()).into())
     }
 
     fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, l: u64) -> Result<Chunk, Error> {
@@ -1487,7 +1487,7 @@ impl FileInner {
             write!(v, "{}", tm.strftime(SUBTITLE_TEMPLATE).err_kind(ErrorKind::Internal)?)
                 .expect("Vec write shouldn't fail");
         }
-        Ok(ARefs::new(v).map(|v| &v[r.start as usize .. r.end as usize]).into())
+        Ok(ARefss::new(v).map(|v| &v[r.start as usize .. r.end as usize]).into())
     }
 }
 
@@ -1512,13 +1512,13 @@ impl http_serve::Entity for File {
         }
         mime.extend_from_slice(b"\"");
         hdrs.insert(http::header::CONTENT_TYPE,
-                    http::header::HeaderValue::from_shared(mime.freeze()).unwrap());
+                    http::header::HeaderValue::from_maybe_shared(mime.freeze()).unwrap());
     }
     fn last_modified(&self) -> Option<SystemTime> { Some(self.0.last_modified) }
     fn etag(&self) -> Option<HeaderValue> { Some(self.0.etag.clone()) }
     fn len(&self) -> u64 { self.0.slices.len() }
     fn get_range(&self, range: Range<u64>)
-                 -> Box<dyn Stream<Item = Self::Data, Error = Self::Error> + Send> {
+                 -> Box<dyn Stream<Item = Result<Self::Data, Self::Error>> + Send + Sync> {
         self.0.slices.get_range(self, range)
     }
 }
@@ -1553,41 +1553,41 @@ mod tests {
     use db::recording::{self, TIME_UNITS_PER_SEC};
     use db::testutil::{self, TestDb, TEST_STREAM_ID};
     use db::writer;
-    use futures::Future;
-    use futures::Stream as FuturesStream;
+    use futures::stream::TryStreamExt;
     use log::info;
     use openssl::hash;
     use http_serve::{self, Entity};
     use std::fs;
     use std::ops::Range;
     use std::path::Path;
+    use std::pin::Pin;
     use std::str;
     use super::*;
 
-    fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64)
+    async fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64)
     where E::Error : ::std::fmt::Debug {
         let mut p = 0;
-        e.get_range(start .. start + slice.len() as u64)
-         .for_each(|chunk| {
+        Pin::from(e.get_range(start .. start + slice.len() as u64))
+         .try_for_each(|chunk| {
              let c: &[u8] = chunk.bytes();
              slice[p .. p + c.len()].copy_from_slice(c);
              p += c.len();
-             Ok::<_, E::Error>(())
+             futures::future::ok::<_, E::Error>(())
          })
-        .wait()
+        .await
         .unwrap();
     }
 
     /// Returns the SHA-1 digest of the given `Entity`.
-    fn digest<E: http_serve::Entity>(e: &E) -> hash::DigestBytes
+    async fn digest<E: http_serve::Entity>(e: &E) -> hash::DigestBytes
     where E::Error : ::std::fmt::Debug {
-        e.get_range(0 .. e.len())
-         .fold(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap(), |mut sha1, chunk| {
+        Pin::from(e.get_range(0 .. e.len()))
+         .try_fold(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap(), |mut sha1, chunk| {
              let c: &[u8] = chunk.bytes();
              sha1.update(c).unwrap();
-             Ok::<_, E::Error>(sha1)
+             futures::future::ok::<_, E::Error>(sha1)
          })
-         .wait()
+         .await
          .unwrap()
          .finish()
          .unwrap()
@@ -1618,14 +1618,14 @@ mod tests {
 
         /// Pushes the box at the given position onto the stack (returning true), or returns
         /// false if pos == max.
-        fn internal_push(&mut self, pos: u64, max: u64) -> bool {
+        async fn internal_push(&mut self, pos: u64, max: u64) -> bool {
             if pos == max { return false; }
             let mut hdr = [0u8; 16];
-            fill_slice(&mut hdr[..8], &self.mp4, pos);
+            fill_slice(&mut hdr[..8], &self.mp4, pos).await;
             let (len, hdr_len, boxtype_slice) = match BigEndian::read_u32(&hdr[..4]) {
                 0 => (self.mp4.len() - pos, 8, &hdr[4..8]),
                 1 => {
-                    fill_slice(&mut hdr[8..], &self.mp4, pos + 8);
+                    fill_slice(&mut hdr[8..], &self.mp4, pos + 8).await;
                     (BigEndian::read_u64(&hdr[8..16]), 16, &hdr[4..8])
                 },
                 l => (l as u64, 8, &hdr[4..8]),
@@ -1661,53 +1661,53 @@ mod tests {
 
         /// Gets the specified byte range within the current box (excluding length and type).
         /// Must not be at EOF.
-        pub fn get(&self, start: u64, buf: &mut [u8]) {
+        pub async fn get(&self, start: u64, buf: &mut [u8]) {
             let interior = &self.stack.last().expect("at root").interior;
             assert!(start + (buf.len() as u64) <= interior.end - interior.start,
                     "path={} start={} buf.len={} interior={:?}",
                     self.path(), start, buf.len(), interior);
-            fill_slice(buf, &self.mp4, start+interior.start);
+            fill_slice(buf, &self.mp4, start+interior.start).await;
         }
 
-        pub fn get_all(&self) -> Vec<u8> {
+        pub async fn get_all(&self) -> Vec<u8> {
             let interior = self.stack.last().expect("at root").interior.clone();
             let len = (interior.end - interior.start) as usize;
             trace!("get_all: start={}, len={}", interior.start, len);
             let mut out = Vec::with_capacity(len);
             unsafe { out.set_len(len) };
-            fill_slice(&mut out[..], &self.mp4, interior.start);
+            fill_slice(&mut out[..], &self.mp4, interior.start).await;
             out
         }
 
         /// Gets the specified u32 within the current box (excluding length and type).
         /// Must not be at EOF.
-        pub fn get_u32(&self, p: u64) -> u32 {
+        pub async fn get_u32(&self, p: u64) -> u32 {
             let mut buf = [0u8; 4];
-            self.get(p, &mut buf);
+            self.get(p, &mut buf).await;
             BigEndian::read_u32(&buf[..])
         }
 
-        pub fn get_u64(&self, p: u64) -> u64 {
+        pub async fn get_u64(&self, p: u64) -> u64 {
             let mut buf = [0u8; 8];
-            self.get(p, &mut buf);
+            self.get(p, &mut buf).await;
             BigEndian::read_u64(&buf[..])
         }
 
         /// Navigates to the next box after the current one, or up if the current one is last.
-        pub fn next(&mut self) -> bool {
+        pub async fn next(&mut self) -> bool {
             let old = self.stack.pop().expect("positioned at root; there is no next");
             let max = self.stack.last().map(|b| b.interior.end).unwrap_or_else(|| self.mp4.len());
-            self.internal_push(old.interior.end, max)
+            self.internal_push(old.interior.end, max).await
         }
 
         /// Finds the next box of the given type after the current one, or navigates up if absent.
-        pub fn find(&mut self, boxtype: &[u8]) -> bool {
+        pub async fn find(&mut self, boxtype: &[u8]) -> bool {
             trace!("looking for {}", str::from_utf8(boxtype).unwrap());
             loop {
                 if &self.stack.last().unwrap().boxtype[..] == boxtype {
                     return true;
                 }
-                if !self.next() {
+                if !self.next().await {
                     return false;
                 }
             }
@@ -1717,10 +1717,11 @@ mod tests {
         pub fn up(&mut self) { self.stack.pop(); }
 
         /// Moves down the stack. Must be positioned on a box with children.
-        pub fn down(&mut self) {
+        pub async fn down(&mut self) {
             let range = self.stack.last().map(|b| b.interior.clone())
                                          .unwrap_or_else(|| 0 .. self.mp4.len());
-            assert!(self.internal_push(range.start, range.end), "no children in {}", self.path());
+            assert!(self.internal_push(range.start, range.end).await,
+                    "no children in {}", self.path());
         }
     }
 
@@ -1732,17 +1733,17 @@ mod tests {
 
     /// Finds the `moov/trak` that has a `tkhd` associated with the given `track_id`, which must
     /// exist.
-    fn find_track(mp4: File, track_id: u32) -> Track {
+    async fn find_track(mp4: File, track_id: u32) -> Track {
         let mut cursor = BoxCursor::new(mp4);
-        cursor.down();
-        assert!(cursor.find(b"moov"));
-        cursor.down();
+        cursor.down().await;
+        assert!(cursor.find(b"moov").await);
+        cursor.down().await;
         loop {
-            assert!(cursor.find(b"trak"));
-            cursor.down();
-            assert!(cursor.find(b"tkhd"));
+            assert!(cursor.find(b"trak").await);
+            cursor.down().await;
+            assert!(cursor.find(b"tkhd").await);
             let mut version = [0u8; 1];
-            cursor.get(0, &mut version);
+            cursor.get(0, &mut version).await;
 
             // Let id_pos be the offset after the FullBox section of the track_id.
             let id_pos = match version[0] {
@@ -1750,27 +1751,27 @@ mod tests {
                 1 => 16,  // ...64-bit times...
                 v => panic!("unexpected tkhd version {}", v),
             };
-            let cur_track_id = cursor.get_u32(4 + id_pos);
+            let cur_track_id = cursor.get_u32(4 + id_pos).await;
             trace!("found moov/trak/tkhd with id {}; want {}", cur_track_id, track_id);
             if cur_track_id == track_id {
                 break;
             }
             cursor.up();
-            assert!(cursor.next());
+            assert!(cursor.next().await);
         }
         let edts_cursor;
-        if cursor.find(b"edts") {
+        if cursor.find(b"edts").await {
             edts_cursor = Some(cursor.clone());
             cursor.up();
         } else {
             edts_cursor = None;
         };
-        cursor.down();
-        assert!(cursor.find(b"mdia"));
-        cursor.down();
-        assert!(cursor.find(b"minf"));
-        cursor.down();
-        assert!(cursor.find(b"stbl"));
+        cursor.down().await;
+        assert!(cursor.find(b"mdia").await);
+        cursor.down().await;
+        assert!(cursor.find(b"minf").await);
+        cursor.down().await;
+        assert!(cursor.find(b"stbl").await);
         Track{
             edts_cursor: edts_cursor,
             stbl_cursor: cursor,
@@ -1833,17 +1834,16 @@ mod tests {
         builder.build(tdb.db.clone(), tdb.dirs_by_stream_id.clone()).unwrap()
     }
 
-    fn write_mp4(mp4: &File, dir: &Path) -> String {
+    async fn write_mp4(mp4: &File, dir: &Path) -> String {
         let mut filename = dir.to_path_buf();
         filename.push("clip.new.mp4");
         let mut out = fs::OpenOptions::new().write(true).create_new(true).open(&filename).unwrap();
         use ::std::io::Write;
-        mp4.get_range(0 .. mp4.len())
-           .for_each(|chunk| {
-               out.write_all(chunk.bytes())?;
-               Ok(())
+        Pin::from(mp4.get_range(0 .. mp4.len()))
+           .try_for_each(|chunk| {
+               futures::future::ready(out.write_all(chunk.bytes()).map_err(|e| e.into()))
            })
-           .wait()
+           .await
            .unwrap();
         info!("wrote {:?}", filename);
         filename.to_str().unwrap().to_string()
@@ -1909,8 +1909,8 @@ mod tests {
     }
 
     /// Tests sample table for a simple video index of all sync frames.
-    #[test]
-    fn test_all_sync_frames() {
+    #[tokio::test]
+    async fn test_all_sync_frames() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
@@ -1923,12 +1923,12 @@ mod tests {
 
         // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
         let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2 .. 2+4+6+8).unwrap();
-        let track = find_track(mp4, 1);
+        let track = find_track(mp4, 1).await;
         assert!(track.edts_cursor.is_none());
         let mut cursor = track.stbl_cursor;
-        cursor.down();
-        cursor.find(b"stts");
-        assert_eq!(cursor.get_all(), &[
+        cursor.down().await;
+        cursor.find(b"stts").await;
+        assert_eq!(cursor.get_all().await, &[
             0x00, 0x00, 0x00, 0x00,  // version + flags
             0x00, 0x00, 0x00, 0x03,  // entry_count
 
@@ -1938,8 +1938,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x08,
         ]);
 
-        cursor.find(b"stsz");
-        assert_eq!(cursor.get_all(), &[
+        cursor.find(b"stsz").await;
+        assert_eq!(cursor.get_all().await, &[
             0x00, 0x00, 0x00, 0x00,  // version + flags
             0x00, 0x00, 0x00, 0x00,  // sample_size
             0x00, 0x00, 0x00, 0x03,  // sample_count
@@ -1950,8 +1950,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x0c,
         ]);
 
-        cursor.find(b"stss");
-        assert_eq!(cursor.get_all(), &[
+        cursor.find(b"stss").await;
+        assert_eq!(cursor.get_all().await, &[
             0x00, 0x00, 0x00, 0x00,  // version + flags
             0x00, 0x00, 0x00, 0x03,  // entry_count
 
@@ -1963,8 +1963,8 @@ mod tests {
     }
 
     /// Tests sample table and edit list for a video index with half sync frames.
-    #[test]
-    fn test_half_sync_frames() {
+    #[tokio::test]
+    async fn test_half_sync_frames() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
@@ -1978,13 +1978,13 @@ mod tests {
         // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
         let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2+4+6 .. 2+4+6+8).unwrap();
-        let track = find_track(mp4, 1);
+        let track = find_track(mp4, 1).await;
 
         // Examine edts. It should skip the 3rd frame.
         let mut cursor = track.edts_cursor.unwrap();
-        cursor.down();
-        cursor.find(b"elst");
-        assert_eq!(cursor.get_all(), &[
+        cursor.down().await;
+        cursor.find(b"elst").await;
+        assert_eq!(cursor.get_all().await, &[
             0x01, 0x00, 0x00, 0x00,                          // version + flags
             0x00, 0x00, 0x00, 0x01,                          // length
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,  // segment_duration
@@ -1994,9 +1994,9 @@ mod tests {
 
         // Examine stbl.
         let mut cursor = track.stbl_cursor;
-        cursor.down();
-        cursor.find(b"stts");
-        assert_eq!(cursor.get_all(), &[
+        cursor.down().await;
+        cursor.find(b"stts").await;
+        assert_eq!(cursor.get_all().await, &[
             0x00, 0x00, 0x00, 0x00,  // version + flags
             0x00, 0x00, 0x00, 0x02,  // entry_count
 
@@ -2005,8 +2005,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x08,
         ]);
 
-        cursor.find(b"stsz");
-        assert_eq!(cursor.get_all(), &[
+        cursor.find(b"stsz").await;
+        assert_eq!(cursor.get_all().await, &[
             0x00, 0x00, 0x00, 0x00,  // version + flags
             0x00, 0x00, 0x00, 0x00,  // sample_size
             0x00, 0x00, 0x00, 0x02,  // sample_count
@@ -2016,8 +2016,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x0c,
         ]);
 
-        cursor.find(b"stss");
-        assert_eq!(cursor.get_all(), &[
+        cursor.find(b"stss").await;
+        assert_eq!(cursor.get_all().await, &[
             0x00, 0x00, 0x00, 0x00,  // version + flags
             0x00, 0x00, 0x00, 0x01,  // entry_count
 
@@ -2026,16 +2026,16 @@ mod tests {
         ]);
     }
 
-    #[test]
-    fn test_no_segments() {
+    #[tokio::test]
+    async fn test_no_segments() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let e = make_mp4_from_encoders(Type::Normal, &db, vec![], 0 .. 0).err().unwrap();
         assert_eq!(e.to_string(), "Invalid argument: no video_sample_entries");
     }
 
-    #[test]
-    fn test_multi_segment() {
+    #[tokio::test]
+    async fn test_multi_segment() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut encoders = Vec::new();
@@ -2054,25 +2054,25 @@ mod tests {
         // This should include samples 3 and 4 only, both sync frames.
         let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1+2 .. 1+2+3+4).unwrap();
         let mut cursor = BoxCursor::new(mp4);
-        cursor.down();
-        assert!(cursor.find(b"moov"));
-        cursor.down();
-        assert!(cursor.find(b"trak"));
-        cursor.down();
-        assert!(cursor.find(b"mdia"));
-        cursor.down();
-        assert!(cursor.find(b"minf"));
-        cursor.down();
-        assert!(cursor.find(b"stbl"));
-        cursor.down();
-        assert!(cursor.find(b"stss"));
-        assert_eq!(cursor.get_u32(4), 2);  // entry_count
-        assert_eq!(cursor.get_u32(8), 1);
-        assert_eq!(cursor.get_u32(12), 2);
+        cursor.down().await;
+        assert!(cursor.find(b"moov").await);
+        cursor.down().await;
+        assert!(cursor.find(b"trak").await);
+        cursor.down().await;
+        assert!(cursor.find(b"mdia").await);
+        cursor.down().await;
+        assert!(cursor.find(b"minf").await);
+        cursor.down().await;
+        assert!(cursor.find(b"stbl").await);
+        cursor.down().await;
+        assert!(cursor.find(b"stss").await);
+        assert_eq!(cursor.get_u32(4).await, 2);  // entry_count
+        assert_eq!(cursor.get_u32(8).await, 1);
+        assert_eq!(cursor.get_u32(12).await, 2);
     }
 
-    #[test]
-    fn test_zero_duration_recording() {
+    #[tokio::test]
+    async fn test_zero_duration_recording() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut encoders = Vec::new();
@@ -2088,17 +2088,17 @@ mod tests {
 
         // Multi-segment recording with an edit list, encoding with a zero-duration recording.
         let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1 .. 2+3).unwrap();
-        let track = find_track(mp4, 1);
+        let track = find_track(mp4, 1).await;
         let mut cursor = track.edts_cursor.unwrap();
-        cursor.down();
-        cursor.find(b"elst");
-        assert_eq!(cursor.get_u32(4), 1);   // entry_count
-        assert_eq!(cursor.get_u64(8), 4);   // segment_duration
-        assert_eq!(cursor.get_u64(16), 1);  // media_time
+        cursor.down().await;
+        cursor.find(b"elst").await;
+        assert_eq!(cursor.get_u32(4).await, 1);   // entry_count
+        assert_eq!(cursor.get_u64(8).await, 4);   // segment_duration
+        assert_eq!(cursor.get_u64(16).await, 1);  // media_time
     }
 
-    #[test]
-    fn test_media_segment() {
+    #[tokio::test]
+    async fn test_media_segment() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
@@ -2114,45 +2114,45 @@ mod tests {
         let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![r],
                                          2+4+6 .. 2+4+6+8+1).unwrap();
         let mut cursor = BoxCursor::new(mp4);
-        cursor.down();
+        cursor.down().await;
 
         let mut mdat = cursor.clone();
-        assert!(mdat.find(b"mdat"));
+        assert!(mdat.find(b"mdat").await);
 
-        assert!(cursor.find(b"moof"));
-        cursor.down();
-        assert!(cursor.find(b"traf"));
-        cursor.down();
-        assert!(cursor.find(b"trun"));
-        assert_eq!(cursor.get_u32(4), 2);
-        assert_eq!(cursor.get_u32(8) as u64, mdat.interior().start);
-        assert_eq!(cursor.get_u32(12), 174063616);  // first_sample_flags
-        assert_eq!(cursor.get_u32(16), 6);   // sample duration
-        assert_eq!(cursor.get_u32(20), 9);   // sample size
-        assert_eq!(cursor.get_u32(24), 8);   // sample duration
-        assert_eq!(cursor.get_u32(28), 12);  // sample size
-        assert!(cursor.next());
+        assert!(cursor.find(b"moof").await);
+        cursor.down().await;
+        assert!(cursor.find(b"traf").await);
+        cursor.down().await;
+        assert!(cursor.find(b"trun").await);
+        assert_eq!(cursor.get_u32(4).await, 2);
+        assert_eq!(cursor.get_u32(8).await as u64, mdat.interior().start);
+        assert_eq!(cursor.get_u32(12).await, 174063616);  // first_sample_flags
+        assert_eq!(cursor.get_u32(16).await, 6);   // sample duration
+        assert_eq!(cursor.get_u32(20).await, 9);   // sample size
+        assert_eq!(cursor.get_u32(24).await, 8);   // sample duration
+        assert_eq!(cursor.get_u32(28).await, 12);  // sample size
+        assert!(cursor.next().await);
         assert_eq!(cursor.name(), "trun");
-        assert_eq!(cursor.get_u32(4), 1);
-        assert_eq!(cursor.get_u32(8) as u64, mdat.interior().start + 9 + 12);
-        assert_eq!(cursor.get_u32(12), 174063616);  // first_sample_flags
-        assert_eq!(cursor.get_u32(16), 1);    // sample duration
-        assert_eq!(cursor.get_u32(20), 15);   // sample size
+        assert_eq!(cursor.get_u32(4).await, 1);
+        assert_eq!(cursor.get_u32(8).await as u64, mdat.interior().start + 9 + 12);
+        assert_eq!(cursor.get_u32(12).await, 174063616);  // first_sample_flags
+        assert_eq!(cursor.get_u32(16).await, 1);    // sample duration
+        assert_eq!(cursor.get_u32(20).await, 15);   // sample size
     }
 
-    #[test]
-    fn test_round_trip() {
+    #[tokio::test]
+    async fn test_round_trip() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 0, false);
-        let new_filename = write_mp4(&mp4, db.tmpdir.path());
+        let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
         compare_mp4s(&new_filename, 0, 0);
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
-        let sha1 = digest(&mp4);
+        let sha1 = digest(&mp4).await;
         assert_eq!("17376879bcf872dd4ad1197225a32d5473fb0dc6", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "\"953dcf1a61debe785d5dec3ae2d3992a819b68ae\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
@@ -2161,19 +2161,19 @@ mod tests {
         db.syncer_join.join().unwrap();
     }
 
-    #[test]
-    fn test_round_trip_with_subtitles() {
+    #[tokio::test]
+    async fn test_round_trip_with_subtitles() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 0, true);
-        let new_filename = write_mp4(&mp4, db.tmpdir.path());
+        let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
         compare_mp4s(&new_filename, 0, 0);
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
-        let sha1 = digest(&mp4);
+        let sha1 = digest(&mp4).await;
         assert_eq!("1cd90e0b49747cc54c953153d6709f2fb5df6b14", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "\"736655313f10747528a663190517620cdffea6d0\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
@@ -2182,19 +2182,19 @@ mod tests {
         db.syncer_join.join().unwrap();
     }
 
-    #[test]
-    fn test_round_trip_with_edit_list() {
+    #[tokio::test]
+    async fn test_round_trip_with_edit_list() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 1, 0, false);
-        let new_filename = write_mp4(&mp4, db.tmpdir.path());
+        let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
         compare_mp4s(&new_filename, 1, 0);
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
-        let sha1 = digest(&mp4);
+        let sha1 = digest(&mp4).await;
         assert_eq!("49893e3997da6bc625a04b09abf4b1ddbe0bc85d", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "\"e87ed99dea31b7c4d1e9186045abaf5ac3c2d2f8\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
@@ -2203,19 +2203,19 @@ mod tests {
         db.syncer_join.join().unwrap();
     }
 
-    #[test]
-    fn test_round_trip_with_shorten() {
+    #[tokio::test]
+    async fn test_round_trip_with_shorten() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 1, false);
-        let new_filename = write_mp4(&mp4, db.tmpdir.path());
+        let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
         compare_mp4s(&new_filename, 0, 1);
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
-        let sha1 = digest(&mp4);
+        let sha1 = digest(&mp4).await;
         assert_eq!("0615feaa3c50a7889fb0e6842de3bd3d3143bc78", strutil::hex(&sha1[..]));
         const EXPECTED_ETAG: &'static str = "\"6f0d21a6027b0e444f404a68527dbf5c9a5c1a26\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
@@ -2232,12 +2232,10 @@ mod bench {
     use base::clock::RealClocks;
     use db::recording;
     use db::testutil::{self, TestDb};
-    use futures::{Future, future};
+    use futures::future;
     use hyper;
-    use http::header;
     use http_serve;
     use lazy_static::lazy_static;
-    use std::error::Error as StdError;
     use super::tests::create_mp4_from_db;
     use url::Url;
 
@@ -2259,34 +2257,28 @@ mod bench {
             testutil::add_dummy_recordings_to_db(&db.db, 60);
             let mp4 = create_mp4_from_db(&db, 0, 0, false);
             let p = mp4.0.initial_sample_byte_pos;
-            let (tx, rx) = ::std::sync::mpsc::channel();
-            ::std::thread::spawn(move || {
-                let addr = "127.0.0.1:0".parse().unwrap();
-                let server = hyper::server::Server::bind(&addr)
-                    .tcp_nodelay(true)
-                    .serve(move || Ok::<_, Box<dyn StdError + Send + Sync>>(
-                            MyService(mp4.clone())));
-                tx.send(server.local_addr()).unwrap();
-                ::tokio::run(server.map_err(|e| panic!(e)));
+            let make_svc = hyper::service::make_service_fn(move |_conn| {
+                future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
+                    let mp4 = mp4.clone();
+                    move |req| future::ok::<hyper::Response<crate::body::Body>, hyper::Error>(
+                        http_serve::serve(mp4.clone(), &req))
+                }))
             });
-            let addr = rx.recv().unwrap();
+            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let srv = rt.enter(|| {
+                let addr = ([127, 0, 0, 1], 0).into();
+                hyper::server::Server::bind(&addr)
+                    .tcp_nodelay(true)
+                    .serve(make_svc)
+            });
+            let addr = srv.local_addr();  // resolve port 0 to a real ephemeral port number.
+            ::std::thread::spawn(move || {
+                rt.block_on(srv).unwrap();
+            });
             BenchServer {
                 url: Url::parse(&format!("http://{}:{}/", addr.ip(), addr.port())).unwrap(),
                 generated_len: p,
             }
-        }
-    }
-
-    struct MyService(super::File);
-
-    impl hyper::service::Service for MyService {
-        type ReqBody = hyper::Body;
-        type ResBody = crate::body::Body;
-        type Error = crate::body::BoxedError;
-        type Future = future::FutureResult<::http::Response<Self::ResBody>, Self::Error>;
-
-        fn call(&mut self, req: ::http::Request<Self::ReqBody>) -> Self::Future {
-            future::ok(http_serve::serve(self.0.clone(), &req))
         }
     }
 
@@ -2332,7 +2324,7 @@ mod bench {
         let mut run = || {
             let mut resp =
                 client.get(server.url.clone())
-                      .header(header::RANGE, format!("bytes=0-{}", p - 1))
+                      .header(reqwest::header::RANGE, format!("bytes=0-{}", p - 1))
                       .send()
                       .unwrap();
             buf.clear();

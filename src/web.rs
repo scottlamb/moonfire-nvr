@@ -30,6 +30,7 @@
 
 use base::clock::Clocks;
 use base::{ErrorKind, ResultExt, bail_t, strutil};
+use bytes::Bytes;
 use crate::body::{Body, BoxedError};
 use crate::json;
 use crate::mp4;
@@ -41,8 +42,8 @@ use db::{auth, recording};
 use db::dir::SampleFileDir;
 use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
-use futures::{Future, Stream, future};
-use futures_cpupool;
+use futures::future::{self, Future, TryFutureExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
 use http::{Request, Response, status::StatusCode};
 use http_serve;
 use http::header::{self, HeaderValue};
@@ -56,6 +57,7 @@ use std::fs;
 use std::net::IpAddr;
 use std::ops::Range;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use url::form_urlencoded;
 use uuid::Uuid;
@@ -67,6 +69,9 @@ lazy_static! {
     static ref SEGMENTS_RE: Regex =
         Regex::new(r"^(\d+)(-\d+)?(@\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
 }
+
+type BoxedFuture = Box<dyn Future<Output = Result<Response<Body>, BoxedError>> +
+                       Sync + Send + 'static>;
 
 #[derive(Debug, Eq, PartialEq)]
 enum Path {
@@ -254,7 +259,6 @@ struct ServiceInner {
     db: Arc<db::Database>,
     dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
     ui_files: HashMap<String, UiFile>,
-    pool: futures_cpupool::CpuPool,
     time_zone_name: String,
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
@@ -505,11 +509,12 @@ impl ServiceInner {
 
     fn static_file(&self, req: &Request<::hyper::Body>, path: &str) -> ResponseResult {
         let s = self.ui_files.get(path).ok_or_else(|| not_found("no such static file"))?;
-        let f = fs::File::open(&s.path).map_err(internal_server_err)?;
+        let f = tokio::task::block_in_place(move || {
+            fs::File::open(&s.path).map_err(internal_server_err)
+        })?;
         let mut hdrs = http::HeaderMap::new();
         hdrs.insert(header::CONTENT_TYPE, s.mime.clone());
-        let e = http_serve::ChunkedReadFile::new(f, Some(self.pool.clone()), hdrs)
-            .map_err(internal_server_err)?;
+        let e = http_serve::ChunkedReadFile::new(f, hdrs).map_err(internal_server_err)?;
         Ok(http_serve::serve(e, &req))
     }
 
@@ -552,7 +557,7 @@ impl ServiceInner {
                .unwrap_or(false)
     }
 
-    fn login(&self, req: &Request<::hyper::Body>, body: hyper::Chunk) -> ResponseResult {
+    fn login(&self, req: &Request<::hyper::Body>, body: Bytes) -> ResponseResult {
         let mut username = None;
         let mut password = None;
         for (key, value) in form_urlencoded::parse(&body) {
@@ -583,23 +588,24 @@ impl ServiceInner {
             flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
         let s_suffix = if is_secure {
-            "; HttpOnly; Secure; SameSite=Strict; Max-Age=2147483648; Path=/"
+            &b"; HttpOnly; Secure; SameSite=Strict; Max-Age=2147483648; Path=/"[..]
         } else {
-            "; HttpOnly; SameSite=Strict; Max-Age=2147483648; Path=/"
+            &b"; HttpOnly; SameSite=Strict; Max-Age=2147483648; Path=/"[..]
         };
         let mut encoded = [0u8; 64];
         base64::encode_config_slice(&sid, base64::STANDARD_NO_PAD, &mut encoded);
         let mut cookie = BytesMut::with_capacity("s=".len() + encoded.len() + s_suffix.len());
-        cookie.put("s=");
+        cookie.put(&b"s="[..]);
         cookie.put(&encoded[..]);
         cookie.put(s_suffix);
         Ok(Response::builder()
-            .header(header::SET_COOKIE, cookie.freeze())
+            .header(header::SET_COOKIE, HeaderValue::from_maybe_shared(cookie.freeze())
+                                        .expect("cookie can't have invalid bytes"))
             .status(StatusCode::NO_CONTENT)
             .body(b""[..].into()).unwrap())
     }
 
-    fn logout(&self, req: &Request<hyper::Body>, body: hyper::Chunk) -> ResponseResult {
+    fn logout(&self, req: &Request<hyper::Body>, body: Bytes) -> ResponseResult {
         // Parse parameters.
         let mut csrf = None;
         for (key, value) in form_urlencoded::parse(&body) {
@@ -649,7 +655,7 @@ impl ServiceInner {
         Ok(res)
     }
 
-    fn post_signals(&self, req: &Request<hyper::Body>, caller: Caller, body: hyper::Chunk)
+    fn post_signals(&self, req: &Request<hyper::Body>, caller: Caller, body: Bytes)
                     -> ResponseResult {
         if !caller.permissions.update_signals {
             return Err(plain_response(StatusCode::UNAUTHORIZED, "update_signals required"));
@@ -769,13 +775,10 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
 /// `application/x-www-form-urlencoded`, returns an appropriate error response instead.
 ///
 /// Use with `and_then` to chain logic which consumes the form body.
-fn with_form_body(mut req: Request<hyper::Body>)
-                  -> Box<dyn Future<Item = (Request<hyper::Body>, hyper::Chunk),
-                                    Error = Response<Body>> +
-                         Send + 'static> {
+async fn with_form_body(mut req: Request<hyper::Body>)
+    -> Result<(Request<hyper::Body>, Bytes), Response<Body>> {
     if *req.method() != http::method::Method::POST {
-        return Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
-                                                   "POST expected")));
+        return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected"));
     }
     let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(t) if t == "application/x-www-form-urlencoded" => true,
@@ -783,25 +786,21 @@ fn with_form_body(mut req: Request<hyper::Body>)
         _ => false,
     };
     if !correct_mime_type {
-        return Box::new(future::err(bad_req(
-                    "expected application/x-www-form-urlencoded request body")));
+        return Err(bad_req("expected application/x-www-form-urlencoded request body"));
     }
     let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
-    Box::new(b.concat2()
-              .map(|b| (req, b))
-              .map_err(|e| internal_server_err(format_err!("unable to read request body: {}",
-                                                             e))))
+    match hyper::body::to_bytes(b).await {
+        Ok(b) => Ok((req, b)),
+        Err(e) => Err(internal_server_err(format_err!("unable to read request body: {}", e))),
+    }
 }
 
 // TODO: remove redundancy with above. Probably better to just always expect requests in json
 // format rather than using the form style for login/logout.
-fn with_json_body(mut req: Request<hyper::Body>)
-                  -> Box<dyn Future<Item = (Request<hyper::Body>, hyper::Chunk),
-                                    Error = Response<Body>> +
-                         Send + 'static> {
+async fn with_json_body(mut req: Request<hyper::Body>)
+    -> Result<(Request<hyper::Body>, Bytes), Response<Body>> {
     if *req.method() != http::method::Method::POST {
-        return Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
-                                                   "POST expected")));
+        return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected"));
     }
     let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(t) if t == "application/json" => true,
@@ -809,14 +808,13 @@ fn with_json_body(mut req: Request<hyper::Body>)
         _ => false,
     };
     if !correct_mime_type {
-        return Box::new(future::err(bad_req(
-                    "expected application/json request body")));
+        return Err(bad_req("expected application/json request body"));
     }
     let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
-    Box::new(b.concat2()
-              .map(|b| (req, b))
-              .map_err(|e| internal_server_err(format_err!("unable to read request body: {}",
-                                                             e))))
+    match hyper::body::to_bytes(b).await {
+        Ok(b) => Ok((req, b)),
+        Err(e) => Err(internal_server_err(format_err!("unable to read request body: {}", e))),
+    }
 }
 
 
@@ -859,7 +857,6 @@ impl Service {
             db: config.db,
             dirs_by_stream_id,
             ui_files,
-            pool: futures_cpupool::Builder::new().pool_size(1).name_prefix("static").create(),
             allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
             trust_forward_hdrs: config.trust_forward_hdrs,
             time_zone_name: config.time_zone_name,
@@ -914,7 +911,7 @@ impl Service {
         }
         let stream_id;
         let open_id;
-        let (sub_tx, sub_rx) = futures::sync::mpsc::unbounded();
+        let (sub_tx, sub_rx) = futures::channel::mpsc::unbounded();
         {
             let mut db = self.0.db.lock();
             open_id = match db.open {
@@ -934,9 +931,8 @@ impl Service {
                 .expect("stream_id refed by camera");
         }
         let inner = self.0.clone();
-        let body: crate::body::BodyStream = Box::new(sub_rx
-            .map_err(|()| unreachable!())
-            .and_then(move |live| -> Result<_, base::Error> {
+        let body = sub_rx
+            .map(move |live| -> Result<_, base::Error> {
                 let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
                 let mut vse_id = None;
                 {
@@ -960,7 +956,6 @@ impl Service {
                 let mp4 = builder.build(inner.db.clone(), inner.dirs_by_stream_id.clone())?;
                 let mut hdrs = http::header::HeaderMap::new();
                 mp4.add_headers(&mut hdrs);
-                //Ok(format!("{:?}\n\n", mp4).into())
                 let mime_type = hdrs.get(http::header::CONTENT_TYPE).unwrap();
                 let len = mp4.len();
                 use futures::stream::once;
@@ -977,16 +972,17 @@ impl Service {
                     live.off_90k.start,
                     live.off_90k.end,
                     &vse_id);
-                let v: Vec<crate::body::BodyStream> = vec![
-                    Box::new(once(Ok(hdr.into()))),
-                    mp4.get_range(0 .. len),
-                    Box::new(once(Ok("\r\n\r\n".into())))
+                let v: Vec<Pin<crate::body::BodyStream>> = vec![
+                    Box::pin(once(futures::future::ok(hdr.into()))),
+                    Pin::from(mp4.get_range(0 .. len)),
+                    Box::pin(once(futures::future::ok("\r\n\r\n".into())))
                 ];
-                Ok(futures::stream::iter_ok::<_, crate::body::BoxedError>(v))
-            })
-            .map_err(|e| Box::new(e.compat()))
-            .flatten()
-            .flatten());
+                Ok(futures::stream::iter(v).flatten())
+            });
+        let body = body.map_err::<BoxedError, _>(|e| Box::new(e.compat()));
+        let _: &dyn Stream<Item = Result<_, BoxedError>> = &body;
+        let body = body.try_flatten();
+        let body: crate::body::BodyStream = Box::new(body);
         let body: Body = body.into();
         Ok(http::Response::builder()
             .header("X-Open-Id", open_id.to_string())
@@ -996,32 +992,24 @@ impl Service {
     }
 
     fn signals(&self, req: Request<hyper::Body>, caller: Caller)
-               -> Box<dyn Future<Item = Response<Body>, Error = Response<Body>> + Send + 'static> {
+               -> Box<dyn Future<Output = Result<Response<Body>, Response<Body>>> + Send + Sync + 'static> {
         use http::method::Method;
         match *req.method() {
             Method::POST => Box::new(with_json_body(req)
                                      .and_then({
                                          let s = self.0.clone();
-                                         move |(req, b)| s.post_signals(&req, caller, b)
+                                         move |(req, b)| future::ready(s.post_signals(&req, caller, b))
                                      })),
-            Method::GET | Method::HEAD => Box::new(future::result(self.0.get_signals(&req))),
+            Method::GET | Method::HEAD => Box::new(future::ready(self.0.get_signals(&req))),
             _ => Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
                                                      "POST, GET, or HEAD expected"))),
         }
     }
-}
 
-impl ::hyper::service::Service for Service {
-    type ReqBody = ::hyper::Body;
-    type ResBody = Body;
-    type Error = BoxedError;
-    type Future = Box<dyn Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send + 'static>;
-
-    fn call(&mut self, req: Request<::hyper::Body>) -> Self::Future {
-        fn wrap<R>(is_private: bool, r: R)
-               -> Box<dyn Future<Item = Response<Body>, Error = BoxedError> + Send + 'static>
-        where R: Future<Item = Response<Body>, Error = Response<Body>> + Send + 'static {
-            return Box::new(r.or_else(|e| Ok(e)).map(move |mut r| {
+    pub fn serve(&mut self, req: Request<::hyper::Body>) -> BoxedFuture {
+        fn wrap<R>(is_private: bool, r: R) -> BoxedFuture
+        where R: Future<Output = Result<Response<Body>, Response<Body>>> + Send + Sync + 'static {
+            return Box::new(r.or_else(|e| futures::future::ok(e)).map_ok(move |mut r| {
                 if is_private {
                     r.headers_mut().insert("Cache-Control", HeaderValue::from_static("private"));
                 }
@@ -1030,8 +1018,8 @@ impl ::hyper::service::Service for Service {
         }
 
         fn wrap_r(is_private: bool, r: ResponseResult)
-               -> Box<dyn Future<Item = Response<Body>, Error = BoxedError> + Send + 'static> {
-            return wrap(is_private, future::result(r))
+               -> Box<dyn Future<Output = Result<Response<Body>, BoxedError>> + Send + Sync + 'static> {
+            return wrap(is_private, future::ready(r))
         }
 
         let p = Path::decode(req.uri().path());
@@ -1066,13 +1054,13 @@ impl ::hyper::service::Service for Service {
             Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
             Path::Login => wrap(true, with_form_body(req).and_then({
                 let s = self.clone();
-                move |(req, b)| { s.0.login(&req, b) }
+                move |(req, b)| future::ready(s.0.login(&req, b))
             })),
             Path::Logout => wrap(true, with_form_body(req).and_then({
                 let s = self.clone();
-                move |(req, b)| { s.0.logout(&req, b) }
+                move |(req, b)| future::ready(s.0.logout(&req, b))
             })),
-            Path::Signals => wrap(true, self.signals(req, caller)),
+            Path::Signals => wrap(true, Pin::from(self.signals(req, caller))),
             Path::Static => wrap_r(false, self.0.static_file(&req, req.uri().path())),
         }
     }
@@ -1081,11 +1069,9 @@ impl ::hyper::service::Service for Service {
 #[cfg(test)]
 mod tests {
     use db::testutil::{self, TestDb};
-    use futures::Future;
-    use http::header;
+    use futures::future::FutureExt;
     use log::info;
     use std::collections::HashMap;
-    use std::error::Error as StdError;
     use super::Segments;
 
     struct Server {
@@ -1093,14 +1079,13 @@ mod tests {
         base_url: String,
         //test_camera_uuid: Uuid,
         handle: Option<::std::thread::JoinHandle<()>>,
-        shutdown_tx: Option<futures::sync::oneshot::Sender<()>>,
+        shutdown_tx: Option<futures::channel::oneshot::Sender<()>>,
     }
 
     impl Server {
         fn new(allow_unauthenticated_permissions: Option<db::Permissions>) -> Server {
             let db = TestDb::new(base::clock::RealClocks {});
-            let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel::<()>();
-            let addr = "127.0.0.1:0".parse().unwrap();
+            let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel::<()>();
             let service = super::Service::new(super::Config {
                 db: db.db.clone(),
                 ui_dir: None,
@@ -1108,12 +1093,22 @@ mod tests {
                 trust_forward_hdrs: true,
                 time_zone_name: "".to_owned(),
             }).unwrap();
-            let server = hyper::server::Server::bind(&addr)
-                .tcp_nodelay(true)
-                .serve(move || Ok::<_, Box<dyn StdError + Send + Sync>>(service.clone()));
-            let addr = server.local_addr();  // resolve port 0 to a real ephemeral port number.
+            let make_svc = hyper::service::make_service_fn(move |_conn| {
+                futures::future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
+                    let mut s = service.clone();
+                    move |req| std::pin::Pin::from(s.serve(req))
+                }))
+            });
+            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let srv = rt.enter(|| {
+                let addr = ([127, 0, 0, 1], 0).into();
+                hyper::server::Server::bind(&addr)
+                    .tcp_nodelay(true)
+                    .serve(make_svc)
+            });
+            let addr = srv.local_addr();  // resolve port 0 to a real ephemeral port number.
             let handle = ::std::thread::spawn(move || {
-                ::tokio::run(server.with_graceful_shutdown(shutdown_rx).map_err(|e| panic!(e)));
+                rt.block_on(srv.with_graceful_shutdown(shutdown_rx.map(|_| ()))).unwrap();
             });
 
             // Create a user.
@@ -1141,14 +1136,14 @@ mod tests {
     struct SessionCookie(Option<String>);
 
     impl SessionCookie {
-        pub fn new(headers: &http::HeaderMap) -> Self {
+        pub fn new(headers: &reqwest::header::HeaderMap) -> Self {
             let mut c = SessionCookie::default();
             c.update(headers);
             c
         }
 
-        pub fn update(&mut self, headers: &http::HeaderMap) {
-            for set_cookie in headers.get_all(header::SET_COOKIE) {
+        pub fn update(&mut self, headers: &reqwest::header::HeaderMap) {
+            for set_cookie in headers.get_all(reqwest::header::SET_COOKIE) {
                 let mut set_cookie = set_cookie.to_str().unwrap().split("; ");
                 let c = set_cookie.next().unwrap();
                 let mut clear = false;
@@ -1256,7 +1251,7 @@ mod tests {
         let s = Server::new(None);
         let cli = reqwest::Client::new();
         let resp = cli.get(&format!("{}/api/", &s.base_url)).send().unwrap();
-        assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+        assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
     }
 
     #[test]
@@ -1267,29 +1262,29 @@ mod tests {
         let login_url = format!("{}/api/login", &s.base_url);
 
         let resp = cli.get(&login_url).send().unwrap();
-        assert_eq!(resp.status(), http::StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(resp.status(), reqwest::StatusCode::METHOD_NOT_ALLOWED);
 
         let resp = cli.post(&login_url).send().unwrap();
-        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 
         let mut p = HashMap::new();
         p.insert("username", "slamb");
         p.insert("password", "asdf");
         let resp = cli.post(&login_url).form(&p).send().unwrap();
-        assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+        assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
 
         p.insert("password", "hunter2");
         let resp = cli.post(&login_url).form(&p).send().unwrap();
-        assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
         let cookie = SessionCookie::new(resp.headers());
         info!("cookie: {:?}", cookie);
         info!("header: {}", cookie.header());
 
         let resp = cli.get(&format!("{}/api/", &s.base_url))
-                      .header(header::COOKIE, cookie.header())
+                      .header(reqwest::header::COOKIE, cookie.header())
                       .send()
                       .unwrap();
-        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
     #[test]
@@ -1301,38 +1296,38 @@ mod tests {
         p.insert("username", "slamb");
         p.insert("password", "hunter2");
         let resp = cli.post(&format!("{}/api/login", &s.base_url)).form(&p).send().unwrap();
-        assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
         let cookie = SessionCookie::new(resp.headers());
 
         // A GET shouldn't work.
         let resp = cli.get(&format!("{}/api/logout", &s.base_url))
-                      .header(header::COOKIE, cookie.header())
+                      .header(reqwest::header::COOKIE, cookie.header())
                       .send()
                       .unwrap();
-        assert_eq!(resp.status(), http::StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(resp.status(), reqwest::StatusCode::METHOD_NOT_ALLOWED);
 
         // Neither should a POST without a csrf token.
         let resp = cli.post(&format!("{}/api/logout", &s.base_url))
-                      .header(header::COOKIE, cookie.header())
+                      .header(reqwest::header::COOKIE, cookie.header())
                       .send()
                       .unwrap();
-        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 
         // But it should work with the csrf token.
         // Retrieve that from the toplevel API request.
         let toplevel: serde_json::Value = cli.post(&format!("{}/api/", &s.base_url))
-                                             .header(header::COOKIE, cookie.header())
+                                             .header(reqwest::header::COOKIE, cookie.header())
                                              .send().unwrap()
                                              .json().unwrap();
         let csrf = toplevel.get("session").unwrap().get("csrf").unwrap().as_str();
         let mut p = HashMap::new();
         p.insert("csrf", csrf);
         let resp = cli.post(&format!("{}/api/logout", &s.base_url))
-                      .header(header::COOKIE, cookie.header())
+                      .header(reqwest::header::COOKIE, cookie.header())
                       .form(&p)
                       .send()
                       .unwrap();
-        assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
         let mut updated_cookie = cookie.clone();
         updated_cookie.update(resp.headers());
 
@@ -1341,10 +1336,10 @@ mod tests {
 
         // It should also be invalidated server-side.
         let resp = cli.get(&format!("{}/api/", &s.base_url))
-                      .header(header::COOKIE, cookie.header())
+                      .header(reqwest::header::COOKIE, cookie.header())
                       .send()
                       .unwrap();
-        assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+        assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
     }
 
     #[test]
@@ -1357,7 +1352,7 @@ mod tests {
         let resp = cli.get(
             &format!("{}/api/cameras/{}/main/view.mp4", &s.base_url, s.db.test_camera_uuid))
             .send().unwrap();
-        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 }
 
@@ -1366,10 +1361,8 @@ mod bench {
     extern crate test;
 
     use db::testutil::{self, TestDb};
-    use futures::Future;
     use hyper;
     use lazy_static::lazy_static;
-    use std::error::Error as StdError;
     use uuid::Uuid;
 
     struct Server {
@@ -1382,7 +1375,6 @@ mod bench {
             let db = TestDb::new(::base::clock::RealClocks {});
             let test_camera_uuid = db.test_camera_uuid;
             testutil::add_dummy_recordings_to_db(&db.db, 1440);
-            let addr = "127.0.0.1:0".parse().unwrap();
             let service = super::Service::new(super::Config {
                 db: db.db.clone(),
                 ui_dir: None,
@@ -1390,12 +1382,22 @@ mod bench {
                 trust_forward_hdrs: false,
                 time_zone_name: "".to_owned(),
             }).unwrap();
-            let server = hyper::server::Server::bind(&addr)
-                .tcp_nodelay(true)
-                .serve(move || Ok::<_, Box<dyn StdError + Send + Sync>>(service.clone()));
-            let addr = server.local_addr();  // resolve port 0 to a real ephemeral port number.
+            let make_svc = hyper::service::make_service_fn(move |_conn| {
+                futures::future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
+                    let mut s = service.clone();
+                    move |req| std::pin::Pin::from(s.serve(req))
+                }))
+            });
+            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let srv = rt.enter(|| {
+                let addr = ([127, 0, 0, 1], 0).into();
+                hyper::server::Server::bind(&addr)
+                    .tcp_nodelay(true)
+                    .serve(make_svc)
+            });
+            let addr = srv.local_addr();  // resolve port 0 to a real ephemeral port number.
             ::std::thread::spawn(move || {
-                ::tokio::run(server.map_err(|e| panic!(e)));
+                rt.block_on(srv).unwrap();
             });
             Server {
                 base_url: format!("http://{}:{}", addr.ip(), addr.port()),

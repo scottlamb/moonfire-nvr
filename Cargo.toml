@@ -20,7 +20,7 @@ members = ["base", "db", "ffmpeg"]
 [dependencies]
 base = { package = "moonfire-base", path = "base" }
 base64 = "0.10.0"
-bytes = "0.4.6"
+bytes = "0.5.3"
 byteorder = "1.0"
 cstr = "0.1.7"
 cursive = "0.12"
@@ -28,12 +28,11 @@ db = { package = "moonfire-db", path = "db" }
 docopt = "1.0"
 failure = "0.1.1"
 ffmpeg = { package = "moonfire-ffmpeg", path = "ffmpeg" }
-futures = "0.1"
-futures-cpupool = "0.1"
+futures = "0.3"
 fnv = "1.0"
-http = "0.1.5"
-http-serve = "0.1.0"
-hyper = "0.12.9"
+http = "0.2.0"
+http-serve = "0.2.0"
+hyper = "0.13.0"
 lazy_static = "1.0"
 libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }
@@ -52,8 +51,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = "0.6"
 time = "0.1"
-tokio = "0.1.8"
-tokio-signal = "0.2"
+tokio = { version = "0.2.0", features = ["blocking", "macros", "rt-threaded", "signal"] }
 url = "1.4"
 uuid = { version = "0.7", features = ["serde", "std", "v4"] }
 

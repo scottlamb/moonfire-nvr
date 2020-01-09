@@ -32,77 +32,81 @@
 
 use base::Error;
 use futures::{Stream, stream};
-use hyper::body::Payload;
-use reffers::ARefs;
+use reffers::ARefss;
 use std::error::Error as StdError;
+use std::pin::Pin;
 
-pub struct Chunk(ARefs<'static, [u8]>);
+pub struct Chunk(ARefss<'static, [u8]>);
 
 //pub type CompatError = ::failure::Compat<Error>;
 pub type BoxedError = Box<dyn StdError + Send + Sync>;
-pub type BodyStream = Box<dyn Stream<Item = Chunk, Error = BoxedError> + Send + 'static>;
+pub type BodyStream = Box<dyn Stream<Item = Result<Chunk, BoxedError>> + Send + Sync + 'static>;
 
 pub fn wrap_error(e: Error) -> BoxedError {
     Box::new(e.compat())
 }
 
-impl From<ARefs<'static, [u8]>> for Chunk {
-    fn from(r: ARefs<'static, [u8]>) -> Self { Chunk(r) }
+impl From<ARefss<'static, [u8]>> for Chunk {
+    fn from(r: ARefss<'static, [u8]>) -> Self { Chunk(r) }
 }
 
 impl From<&'static [u8]> for Chunk {
-    fn from(r: &'static [u8]) -> Self { Chunk(ARefs::new(r)) }
+    fn from(r: &'static [u8]) -> Self { Chunk(ARefss::new(r)) }
 }
 
 impl From<&'static str> for Chunk {
-    fn from(r: &'static str) -> Self { Chunk(ARefs::new(r.as_bytes())) }
+    fn from(r: &'static str) -> Self { Chunk(ARefss::new(r.as_bytes())) }
 }
 
 impl From<String> for Chunk {
-    fn from(r: String) -> Self { Chunk(ARefs::new(r.into_bytes()).map(|v| &v[..])) }
+    fn from(r: String) -> Self { Chunk(ARefss::new(r.into_bytes()).map(|v| &v[..])) }
 }
 
 impl From<Vec<u8>> for Chunk {
-    fn from(r: Vec<u8>) -> Self { Chunk(ARefs::new(r).map(|v| &v[..])) }
+    fn from(r: Vec<u8>) -> Self { Chunk(ARefss::new(r).map(|v| &v[..])) }
 }
 
 impl ::bytes::Buf for Chunk {
     fn remaining(&self) -> usize { self.0.len() }
     fn bytes(&self) -> &[u8] { &*self.0 }
     fn advance(&mut self, cnt: usize) {
-        self.0 = ::std::mem::replace(&mut self.0, ARefs::new(&[][..])).map(|b| &b[cnt..]);
+        self.0 = ::std::mem::replace(&mut self.0, ARefss::new(&[][..])).map(|b| &b[cnt..]);
     }
 }
 
-pub struct Body(BodyStream);
+pub struct Body(Pin<BodyStream>);
 
-impl Payload for Body {
+impl hyper::body::HttpBody for Body {
     type Data = Chunk;
     type Error = BoxedError;
 
-    fn poll_data(&mut self) -> ::futures::Poll<Option<Self::Data>, Self::Error> {
-        self.0.poll()
+    fn poll_data(self: Pin<&mut Self>, cx: &mut std::task::Context)
+        -> std::task::Poll<Option<Result<Self::Data, Self::Error>>> {
+            // This is safe because the pin is not structural.
+            // https://doc.rust-lang.org/std/pin/#pinning-is-not-structural-for-field
+            // (The field _holds_ a pin, but isn't itself pinned.)
+            unsafe { self.get_unchecked_mut() }.0.as_mut().poll_next(cx)
+            //Pin::from(self.0).as_mut().poll_next(cx)
+    }
+
+    fn poll_trailers(self: Pin<&mut Self>, _cx: &mut std::task::Context)
+        -> std::task::Poll<Result<Option<http::header::HeaderMap>, Self::Error>> {
+            std::task::Poll::Ready(Ok(None))
     }
 }
 
 impl From<BodyStream> for Body {
-    fn from(b: BodyStream) -> Self { Body(b) }
+    fn from(b: BodyStream) -> Self { Body(Pin::from(b)) }
 }
 
 impl<C: Into<Chunk>> From<C> for Body {
     fn from(c: C) -> Self {
-        Body(Box::new(stream::once(Ok(c.into()))))
+        Body(Box::pin(stream::once(futures::future::ok(c.into()))))
     }
 }
 
 impl From<Error> for Body {
     fn from(e: Error) -> Self {
-        Body(Box::new(stream::once(Err(wrap_error(e)))))
+        Body(Box::pin(stream::once(futures::future::err(wrap_error(e)))))
     }
 }
-
-//impl<C: Into<Chunk>> From<C> for Body {
-//    fn from(c: C) -> Self {
-//        Body(Box::new(stream::once(Ok(c.into()))))
-//    }
-//}

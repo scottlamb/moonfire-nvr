@@ -35,15 +35,16 @@ use crate::web;
 use db::{dir, writer};
 use failure::{Error, ResultExt, bail};
 use fnv::FnvHashMap;
-use futures::{Future, Stream};
-use log::{error, info, warn};
+use futures::future::FutureExt;
+use hyper::service::{make_service_fn, service_fn};
+use log::{info, warn};
 use serde::Deserialize;
-use std::error::Error as StdError;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use tokio;
-use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
+use tokio::signal::unix::{SignalKind, signal};
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
 // They seem to be correct for Linux and macOS at least.
@@ -90,14 +91,6 @@ struct Args {
     flag_read_only: bool,
     flag_allow_unauthenticated_permissions: Option<String>,
     flag_trust_forward_hdrs: bool,
-}
-
-fn setup_shutdown() -> impl Future<Item = (), Error = ()> + Send {
-    let int = Signal::new(SIGINT).flatten_stream().into_future();
-    let term = Signal::new(SIGTERM).flatten_stream().into_future();
-    int.select(term)
-       .map(|_| ())
-       .map_err(|_| ())
 }
 
 fn trim_zoneinfo(p: &str) -> &str {
@@ -173,7 +166,8 @@ struct Syncer {
     join: thread::JoinHandle<()>,
 }
 
-pub fn run() -> Result<(), Error> {
+#[tokio::main]
+pub async fn run() -> Result<(), Error> {
     let args: Args = super::parse_args(USAGE)?;
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
@@ -274,18 +268,29 @@ pub fn run() -> Result<(), Error> {
 
     // Start the web interface.
     let addr = args.flag_http_addr.parse().unwrap();
-    let server = ::hyper::server::Server::bind(&addr).tcp_nodelay(true).serve(
-        move || Ok::<_, Box<dyn StdError + Send + Sync>>(s.clone()));
+    let make_svc = make_service_fn(move |_conn| {
+        futures::future::ok::<_, std::convert::Infallible>(service_fn({
+            let mut s = s.clone();
+            move |req| Pin::from(s.serve(req))
+        }))
+    });
+    let server = ::hyper::server::Server::bind(&addr)
+        .tcp_nodelay(true)
+        .serve(make_svc);
 
-    let shutdown = setup_shutdown().shared();
+    let mut int = signal(SignalKind::interrupt())?;
+    let mut term = signal(SignalKind::terminate())?;
+    let shutdown = futures::future::select(
+        Box::pin(int.recv()),
+        Box::pin(term.recv()));
+
+    let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
+    let server = server.with_graceful_shutdown(shutdown_rx.map(|_| ()));
+    let server_handle = tokio::spawn(server);
 
     info!("Ready to serve HTTP requests");
-    let reactor = ::std::thread::spawn({
-        let shutdown = shutdown.clone();
-        || tokio::run(server.with_graceful_shutdown(shutdown.map(|_| ()))
-                            .map_err(|e| error!("hyper error: {}", e)))
-    });
-    shutdown.wait().unwrap();
+    shutdown.await;
+    shutdown_tx.send(()).unwrap();
 
     info!("Shutting down streamers.");
     shutdown_streamers.store(true, Ordering::SeqCst);
@@ -306,7 +311,7 @@ pub fn run() -> Result<(), Error> {
     db.lock().clear_watches();
 
     info!("Waiting for HTTP requests to finish.");
-    reactor.join().unwrap();
+    server_handle.await??;
     info!("Exiting.");
     Ok(())
 }

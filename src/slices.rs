@@ -33,15 +33,16 @@
 use base::format_err_t;
 use crate::body::{BoxedError, wrap_error};
 use failure::{Error, bail};
-use futures::{Stream, stream};
+use futures::{Stream, stream, stream::StreamExt};
 use std::fmt;
 use std::ops::Range;
+use std::pin::Pin;
 
 /// Gets a byte range given a context argument.
 /// Each `Slice` instance belongs to a single `Slices`.
 pub trait Slice : fmt::Debug + Sized + Sync + 'static {
-    type Ctx: Send + Clone;
-    type Chunk: Send;
+    type Ctx: Send + Sync + Clone;
+    type Chunk: Send + Sync;
 
     /// The byte position (relative to the start of the `Slices`) of the end of this slice,
     /// exclusive. Note the starting position (and thus length) are inferred from the previous
@@ -52,7 +53,7 @@ pub trait Slice : fmt::Debug + Sized + Sync + 'static {
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
     fn get_range(&self, ctx: &Self::Ctx, r: Range<u64>, len: u64)
-                 -> Box<dyn Stream<Item = Self::Chunk, Error = BoxedError> + Send>;
+                 -> Box<dyn Stream<Item = Result<Self::Chunk, BoxedError>> + Sync + Send>;
 
     fn get_slices(ctx: &Self::Ctx) -> &Slices<Self>;
 }
@@ -111,9 +112,9 @@ impl<S> Slices<S> where S: Slice {
     /// Writes `range` to `out`.
     /// This interface mirrors `http_serve::Entity::write_to`, with the additional `ctx` argument.
     pub fn get_range(&self, ctx: &S::Ctx, range: Range<u64>)
-                     -> Box<dyn Stream<Item = S::Chunk, Error = BoxedError> + Send> {
+                     -> Box<dyn Stream<Item = Result<S::Chunk, BoxedError>> + Sync + Send> {
         if range.start > range.end || range.end > self.len {
-            return Box::new(stream::once(Err(wrap_error(format_err_t!(
+            return Box::new(stream::once(futures::future::err(wrap_error(format_err_t!(
                         Internal, "Bad range {:?} for slice of length {}", range, self.len)))));
         }
 
@@ -133,15 +134,15 @@ impl<S> Slices<S> where S: Slice {
             let (body, min_end);
             {
                 let self_ = S::get_slices(&c);
-                if i == self_.slices.len() { return None }
+                if i == self_.slices.len() { return futures::future::ready(None) }
                 let s = &self_.slices[i];
-                if range.end == slice_start + start_pos { return None }
+                if range.end == slice_start + start_pos { return futures::future::ready(None) }
                 let s_end = s.end();
                 min_end = ::std::cmp::min(range.end, s_end);
                 let l = s_end - slice_start;
                 body = s.get_range(&c, start_pos .. min_end - slice_start, l);
             };
-            Some(Ok::<_, BoxedError>((body, (c, i+1, 0, min_end))))
+            futures::future::ready(Some((Pin::from(body), (c, i+1, 0, min_end))))
         });
         Box::new(bodies.flatten())
     }
@@ -151,10 +152,10 @@ impl<S> Slices<S> where S: Slice {
 mod tests {
     use crate::body::BoxedError;
     use db::testutil;
-    use futures::{Future, Stream};
-    use futures::stream;
+    use futures::stream::{self, Stream, TryStreamExt};
     use lazy_static::lazy_static;
     use std::ops::Range;
+    use std::pin::Pin;
     use super::{Slice, Slices};
 
     #[derive(Debug, Eq, PartialEq)]
@@ -176,8 +177,8 @@ mod tests {
         fn end(&self) -> u64 { self.end }
 
         fn get_range(&self, _ctx: &&'static Slices<FakeSlice>, r: Range<u64>, _l: u64)
-                     -> Box<dyn Stream<Item = FakeChunk, Error = BoxedError> + Send> {
-            Box::new(stream::once(Ok(FakeChunk{slice: self.name, range: r})))
+                     -> Box<dyn Stream<Item = Result<FakeChunk, BoxedError>> + Send + Sync> {
+            Box::new(stream::once(futures::future::ok(FakeChunk{slice: self.name, range: r})))
         }
 
         fn get_slices(ctx: &&'static Slices<FakeSlice>) -> &'static Slices<Self> { *ctx }
@@ -195,33 +196,37 @@ mod tests {
         };
     }
 
+    async fn get_range(r: Range<u64>) -> Vec<FakeChunk> {
+        Pin::from(SLICES.get_range(&&*SLICES, r)).try_collect().await.unwrap()
+    }
+
     #[test]
     pub fn size() {
         testutil::init();
         assert_eq!(5 + 13 + 7 + 17 + 19, SLICES.len());
     }
 
-    #[test]
-    pub fn exact_slice() {
+    #[tokio::test]
+    pub async fn exact_slice() {
         // Test writing exactly slice b.
         testutil::init();
-        let out = SLICES.get_range(&&*SLICES, 5 .. 18).collect().wait().unwrap();
+        let out = get_range(5 .. 18).await;
         assert_eq!(&[FakeChunk{slice: "b", range: 0 .. 13}], &out[..]);
     }
 
-    #[test]
-    pub fn offset_first() {
+    #[tokio::test]
+    pub async fn offset_first() {
         // Test writing part of slice a.
         testutil::init();
-        let out = SLICES.get_range(&&*SLICES, 1 .. 3).collect().wait().unwrap();
+        let out = get_range(1 .. 3).await;
         assert_eq!(&[FakeChunk{slice: "a", range: 1 .. 3}], &out[..]);
     }
 
-    #[test]
-    pub fn offset_mid() {
+    #[tokio::test]
+    pub async fn offset_mid() {
         // Test writing part of slice b, all of slice c, and part of slice d.
         testutil::init();
-        let out = SLICES.get_range(&&*SLICES, 17 .. 26).collect().wait().unwrap();
+        let out = get_range(17 .. 26).await;
         assert_eq!(&[
                    FakeChunk{slice: "b", range: 12 .. 13},
                    FakeChunk{slice: "c", range: 0 .. 7},
@@ -229,11 +234,11 @@ mod tests {
                    ], &out[..]);
     }
 
-    #[test]
-    pub fn everything() {
+    #[tokio::test]
+    pub async fn everything() {
         // Test writing the whole Slices.
         testutil::init();
-        let out = SLICES.get_range(&&*SLICES, 0 .. 61).collect().wait().unwrap();
+        let out = get_range(0 .. 61).await;
         assert_eq!(&[
                    FakeChunk{slice: "a", range: 0 .. 5},
                    FakeChunk{slice: "b", range: 0 .. 13},
@@ -243,10 +248,10 @@ mod tests {
                    ], &out[..]);
     }
 
-    #[test]
-    pub fn at_end() {
+    #[tokio::test]
+    pub async fn at_end() {
         testutil::init();
-        let out = SLICES.get_range(&&*SLICES, 61 .. 61).collect().wait().unwrap();
+        let out = get_range(61 .. 61).await;
         let empty: &[FakeChunk] = &[];
         assert_eq!(empty, &out[..]);
     }
