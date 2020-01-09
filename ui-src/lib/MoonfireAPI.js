@@ -168,10 +168,11 @@ export default class MoonfireAPI {
    */
   login(username, password) {
     return $.ajax(this._builder.makeUrl('login'), {
-      data: {
+      data: JSON.stringify({
         username: username,
         password: password,
-      },
+      }),
+      contentType: 'application/json',
       method: 'POST',
     });
   }
@@ -185,9 +186,10 @@ export default class MoonfireAPI {
    */
   logout(csrf) {
     return $.ajax(this._builder.makeUrl('logout'), {
-      data: {
+      data: JSON.stringify({
         csrf: csrf,
-      },
+      }),
+      contentType: 'application/json',
       method: 'POST',
     });
   }

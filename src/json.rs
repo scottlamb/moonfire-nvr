@@ -132,6 +132,19 @@ pub enum PostSignalsEndBase {
 
 #[derive(Deserialize)]
 #[serde(rename_all="camelCase")]
+pub struct LoginRequest<'a> {
+    pub username: &'a str,
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct LogoutRequest<'a> {
+    pub csrf: &'a str,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all="camelCase")]
 pub struct PostSignalsRequest {
     pub signal_ids: Vec<u32>,
     pub states: Vec<u16>,

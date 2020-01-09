@@ -558,19 +558,8 @@ impl ServiceInner {
     }
 
     fn login(&self, req: &Request<::hyper::Body>, body: Bytes) -> ResponseResult {
-        let mut username = None;
-        let mut password = None;
-        for (key, value) in form_urlencoded::parse(&body) {
-            match &*key {
-                "username" => username = Some(value),
-                "password" => password = Some(value),
-                _ => {},
-            };
-        }
-        let (username, password) = match (username, password) {
-            (Some(u), Some(p)) => (u, p),
-            _ => return Err(bad_req("expected username + password")),
-        };
+        let r: json::LoginRequest = serde_json::from_slice(&body)
+            .map_err(|e| bad_req(e.to_string()))?;
         let authreq = self.authreq(req);
         let host = req.headers().get(header::HOST).ok_or_else(|| bad_req("missing Host header!"))?;
         let host = host.as_bytes();
@@ -584,7 +573,7 @@ impl ServiceInner {
                     (auth::SessionFlags::SameSite as i32) |
                     (auth::SessionFlags::SameSiteStrict as i32) |
                     if is_secure { (auth::SessionFlags::Secure as i32) } else { 0 };
-        let (sid, _) = l.login_by_password(authreq, &username, password.into_owned(), Some(domain),
+        let (sid, _) = l.login_by_password(authreq, &r.username, r.password, Some(domain),
             flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
         let s_suffix = if is_secure {
@@ -606,14 +595,8 @@ impl ServiceInner {
     }
 
     fn logout(&self, req: &Request<hyper::Body>, body: Bytes) -> ResponseResult {
-        // Parse parameters.
-        let mut csrf = None;
-        for (key, value) in form_urlencoded::parse(&body) {
-            match &*key {
-                "csrf" => csrf = Some(value),
-                _ => {},
-            };
-        }
+        let r: json::LogoutRequest = serde_json::from_slice(&body)
+            .map_err(|e| bad_req(e.to_string()))?;
 
         let mut res = Response::new(b""[..].into());
         if let Some(sid) = extract_sid(req) {
@@ -622,10 +605,7 @@ impl ServiceInner {
             let hash = sid.hash();
             let need_revoke = match l.authenticate_session(authreq.clone(), &hash) {
                 Ok((s, _)) => {
-                    let correct_csrf = if let Some(c) = csrf {
-                        csrf_matches(&*c, s.csrf())
-                    } else { false };
-                    if !correct_csrf {
+                    if !csrf_matches(r.csrf, s.csrf()) {
                         warn!("logout request with missing/incorrect csrf");
                         return Err(bad_req("logout with incorrect csrf token"));
                     }
@@ -769,34 +749,12 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
     None
 }
 
-/// Returns a future separating the request from its form body.
+/// Returns a future separating the request from its JSON body.
 ///
 /// If this is not a `POST` or the body's `Content-Type` is not
-/// `application/x-www-form-urlencoded`, returns an appropriate error response instead.
+/// `application/json`, returns an appropriate error response instead.
 ///
 /// Use with `and_then` to chain logic which consumes the form body.
-async fn with_form_body(mut req: Request<hyper::Body>)
-    -> Result<(Request<hyper::Body>, Bytes), Response<Body>> {
-    if *req.method() != http::method::Method::POST {
-        return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected"));
-    }
-    let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
-        Some(t) if t == "application/x-www-form-urlencoded" => true,
-        Some(t) if t == "application/x-www-form-urlencoded; charset=UTF-8" => true,
-        _ => false,
-    };
-    if !correct_mime_type {
-        return Err(bad_req("expected application/x-www-form-urlencoded request body"));
-    }
-    let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
-    match hyper::body::to_bytes(b).await {
-        Ok(b) => Ok((req, b)),
-        Err(e) => Err(internal_server_err(format_err!("unable to read request body: {}", e))),
-    }
-}
-
-// TODO: remove redundancy with above. Probably better to just always expect requests in json
-// format rather than using the form style for login/logout.
 async fn with_json_body(mut req: Request<hyper::Body>)
     -> Result<(Request<hyper::Body>, Bytes), Response<Body>> {
     if *req.method() != http::method::Method::POST {
@@ -1052,11 +1010,11 @@ impl Service {
                 wrap_r(true, self.stream_live_m4s(&req, caller, uuid, type_))
             },
             Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
-            Path::Login => wrap(true, with_form_body(req).and_then({
+            Path::Login => wrap(true, with_json_body(req).and_then({
                 let s = self.clone();
                 move |(req, b)| future::ready(s.0.login(&req, b))
             })),
-            Path::Logout => wrap(true, with_form_body(req).and_then({
+            Path::Logout => wrap(true, with_json_body(req).and_then({
                 let s = self.clone();
                 move |(req, b)| future::ready(s.0.logout(&req, b))
             })),
@@ -1270,11 +1228,11 @@ mod tests {
         let mut p = HashMap::new();
         p.insert("username", "slamb");
         p.insert("password", "asdf");
-        let resp = cli.post(&login_url).form(&p).send().unwrap();
+        let resp = cli.post(&login_url).json(&p).send().unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
 
         p.insert("password", "hunter2");
-        let resp = cli.post(&login_url).form(&p).send().unwrap();
+        let resp = cli.post(&login_url).json(&p).send().unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
         let cookie = SessionCookie::new(resp.headers());
         info!("cookie: {:?}", cookie);
@@ -1295,7 +1253,7 @@ mod tests {
         let mut p = HashMap::new();
         p.insert("username", "slamb");
         p.insert("password", "hunter2");
-        let resp = cli.post(&format!("{}/api/login", &s.base_url)).form(&p).send().unwrap();
+        let resp = cli.post(&format!("{}/api/login", &s.base_url)).json(&p).send().unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
         let cookie = SessionCookie::new(resp.headers());
 
@@ -1324,7 +1282,7 @@ mod tests {
         p.insert("csrf", csrf);
         let resp = cli.post(&format!("{}/api/logout", &s.base_url))
                       .header(reqwest::header::COOKIE, cookie.header())
-                      .form(&p)
+                      .json(&p)
                       .send()
                       .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);

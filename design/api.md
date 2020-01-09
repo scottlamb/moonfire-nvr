@@ -26,8 +26,8 @@ All requests for JSON data should be sent with the header
 
 ### `POST /api/login`
 
-The request should have an `application/x-www-form-urlencoded` body containing
-`username` and `password` parameters.
+The request should have an `application/json` body containing a dict with
+`username` and `password` keys.
 
 On successful authentication, the server will return an HTTP 204 (no content)
 with a `Set-Cookie` header for the `s` cookie, which is an opaque, HttpOnly
@@ -39,7 +39,7 @@ future versions will likely be more sophisticated.
 
 ### `POST /api/logout`
 
-The request should have an `application/x-www-form-urlencoded` body containing
+The request should have an `application/json` body containing
 a `csrf` parameter copied from the `session.csrf` of the
 top-level API request.
 
