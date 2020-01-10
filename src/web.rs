@@ -1057,17 +1057,20 @@ mod tests {
                     move |req| std::pin::Pin::from(s.serve(req))
                 }))
             });
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
-            let srv = rt.enter(|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let handle = ::std::thread::spawn(move || {
                 let addr = ([127, 0, 0, 1], 0).into();
-                hyper::server::Server::bind(&addr)
+                let mut rt = tokio::runtime::Runtime::new().unwrap();
+                let srv = rt.enter(|| {
+                    hyper::server::Server::bind(&addr)
                     .tcp_nodelay(true)
                     .serve(make_svc)
-            });
-            let addr = srv.local_addr();  // resolve port 0 to a real ephemeral port number.
-            let handle = ::std::thread::spawn(move || {
+                });
+                let addr = srv.local_addr();  // resolve port 0 to a real ephemeral port number.
+                tx.send(addr).unwrap();
                 rt.block_on(srv.with_graceful_shutdown(shutdown_rx.map(|_| ()))).unwrap();
             });
+            let addr = rx.recv().unwrap();
 
             // Create a user.
             let mut c = db::UserChange::add_user("slamb".to_owned());
@@ -1203,36 +1206,36 @@ mod tests {
                    Segments::parse("1-5.26-42").unwrap());
     }
 
-    #[test]
-    fn unauthorized_without_cookie() {
+    #[tokio::test]
+    async fn unauthorized_without_cookie() {
         testutil::init();
         let s = Server::new(None);
         let cli = reqwest::Client::new();
-        let resp = cli.get(&format!("{}/api/", &s.base_url)).send().unwrap();
+        let resp = cli.get(&format!("{}/api/", &s.base_url)).send().await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
     }
 
-    #[test]
-    fn login() {
+    #[tokio::test]
+    async fn login() {
         testutil::init();
         let s = Server::new(None);
         let cli = reqwest::Client::new();
         let login_url = format!("{}/api/login", &s.base_url);
 
-        let resp = cli.get(&login_url).send().unwrap();
+        let resp = cli.get(&login_url).send().await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::METHOD_NOT_ALLOWED);
 
-        let resp = cli.post(&login_url).send().unwrap();
+        let resp = cli.post(&login_url).send().await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 
         let mut p = HashMap::new();
         p.insert("username", "slamb");
         p.insert("password", "asdf");
-        let resp = cli.post(&login_url).json(&p).send().unwrap();
+        let resp = cli.post(&login_url).json(&p).send().await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
 
         p.insert("password", "hunter2");
-        let resp = cli.post(&login_url).json(&p).send().unwrap();
+        let resp = cli.post(&login_url).json(&p).send().await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
         let cookie = SessionCookie::new(resp.headers());
         info!("cookie: {:?}", cookie);
@@ -1241,19 +1244,20 @@ mod tests {
         let resp = cli.get(&format!("{}/api/", &s.base_url))
                       .header(reqwest::header::COOKIE, cookie.header())
                       .send()
+                      .await
                       .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
-    #[test]
-    fn logout() {
+    #[tokio::test]
+    async fn logout() {
         testutil::init();
         let s = Server::new(None);
         let cli = reqwest::Client::new();
         let mut p = HashMap::new();
         p.insert("username", "slamb");
         p.insert("password", "hunter2");
-        let resp = cli.post(&format!("{}/api/login", &s.base_url)).json(&p).send().unwrap();
+        let resp = cli.post(&format!("{}/api/login", &s.base_url)).json(&p).send().await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
         let cookie = SessionCookie::new(resp.headers());
 
@@ -1261,6 +1265,7 @@ mod tests {
         let resp = cli.get(&format!("{}/api/logout", &s.base_url))
                       .header(reqwest::header::COOKIE, cookie.header())
                       .send()
+                      .await
                       .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::METHOD_NOT_ALLOWED);
 
@@ -1268,6 +1273,7 @@ mod tests {
         let resp = cli.post(&format!("{}/api/logout", &s.base_url))
                       .header(reqwest::header::COOKIE, cookie.header())
                       .send()
+                      .await
                       .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 
@@ -1275,8 +1281,8 @@ mod tests {
         // Retrieve that from the toplevel API request.
         let toplevel: serde_json::Value = cli.post(&format!("{}/api/", &s.base_url))
                                              .header(reqwest::header::COOKIE, cookie.header())
-                                             .send().unwrap()
-                                             .json().unwrap();
+                                             .send().await.unwrap()
+                                             .json().await.unwrap();
         let csrf = toplevel.get("session").unwrap().get("csrf").unwrap().as_str();
         let mut p = HashMap::new();
         p.insert("csrf", csrf);
@@ -1284,6 +1290,7 @@ mod tests {
                       .header(reqwest::header::COOKIE, cookie.header())
                       .json(&p)
                       .send()
+                      .await
                       .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
         let mut updated_cookie = cookie.clone();
@@ -1296,12 +1303,13 @@ mod tests {
         let resp = cli.get(&format!("{}/api/", &s.base_url))
                       .header(reqwest::header::COOKIE, cookie.header())
                       .send()
+                      .await
                       .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
     }
 
-    #[test]
-    fn view_without_segments() {
+    #[tokio::test]
+    async fn view_without_segments() {
         testutil::init();
         let mut permissions = db::Permissions::new();
         permissions.view_video = true;
@@ -1309,7 +1317,7 @@ mod tests {
         let cli = reqwest::Client::new();
         let resp = cli.get(
             &format!("{}/api/cameras/{}/main/view.mp4", &s.base_url, s.db.test_camera_uuid))
-            .send().unwrap();
+            .send().await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 }
