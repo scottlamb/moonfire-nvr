@@ -42,13 +42,13 @@ use url::Url;
 
 /// Builds a `CameraChange` from an active `edit_camera_dialog`.
 fn get_change(siv: &mut Cursive) -> db::CameraChange {
-    // Note: these find_id calls are separate statements, which seems to be important:
+    // Note: these find_name calls are separate statements, which seems to be important:
     // https://github.com/gyscos/Cursive/issues/144
-    let sn = siv.find_id::<views::EditView>("short_name").unwrap().get_content().as_str().into();
-    let d = siv.find_id::<views::TextArea>("description").unwrap().get_content().into();
-    let h = siv.find_id::<views::EditView>("onvif_host").unwrap().get_content().as_str().into();
-    let u = siv.find_id::<views::EditView>("username").unwrap().get_content().as_str().into();
-    let p = siv.find_id::<views::EditView>("password").unwrap().get_content().as_str().into();
+    let sn = siv.find_name::<views::EditView>("short_name").unwrap().get_content().as_str().into();
+    let d = siv.find_name::<views::TextArea>("description").unwrap().get_content().into();
+    let h = siv.find_name::<views::EditView>("onvif_host").unwrap().get_content().as_str().into();
+    let u = siv.find_name::<views::EditView>("username").unwrap().get_content().as_str().into();
+    let p = siv.find_name::<views::EditView>("password").unwrap().get_content().as_str().into();
     let mut c = db::CameraChange {
         short_name: sn,
         description: d,
@@ -58,14 +58,14 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
         streams: Default::default(),
     };
     for &t in &db::ALL_STREAM_TYPES {
-        let u = siv.find_id::<views::EditView>(&format!("{}_rtsp_url", t.as_str()))
+        let u = siv.find_name::<views::EditView>(&format!("{}_rtsp_url", t.as_str()))
                 .unwrap().get_content().as_str().into();
-        let r = siv.find_id::<views::Checkbox>(&format!("{}_record", t.as_str()))
+        let r = siv.find_name::<views::Checkbox>(&format!("{}_record", t.as_str()))
                 .unwrap().is_checked();
-        let f = i64::from_str(siv.find_id::<views::EditView>(
+        let f = i64::from_str(siv.find_name::<views::EditView>(
                 &format!("{}_flush_if_sec", t.as_str())).unwrap().get_content().as_str())
                 .unwrap_or(0);
-        let d = *siv.find_id::<views::SelectView<Option<i32>>>(
+        let d = *siv.find_name::<views::SelectView<Option<i32>>>(
             &format!("{}_sample_file_dir", t.as_str()))
             .unwrap().selection().unwrap();
         c.streams[t.index()] = db::StreamChange {
@@ -173,7 +173,7 @@ fn press_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, name: String
             .child(views::EditView::new().on_submit({
                 let db = db.clone();
                 move |siv, _| confirm_deletion(siv, &db, id, to_delete)
-            }).with_id("confirm")))
+            }).with_name("confirm")))
         .button("Delete", {
             let db = db.clone();
             move |siv| confirm_deletion(siv, &db, id, to_delete)
@@ -189,7 +189,7 @@ fn press_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, name: String
 }
 
 fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delete: i64) {
-    let typed = siv.find_id::<views::EditView>("confirm").unwrap().get_content();
+    let typed = siv.find_name::<views::EditView>("confirm").unwrap().get_content();
     if decode_size(typed.as_str()).ok() == Some(to_delete) {
         siv.pop_layer();  // deletion confirmation dialog
 
@@ -259,16 +259,16 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
             None => "<new>".to_string(),
             Some(id) => id.to_string(),
         }))
-        .child("uuid", views::TextView::new("<new>").with_id("uuid"))
-        .child("short name", views::EditView::new().with_id("short_name"))
-        .child("onvif_host", views::EditView::new().with_id("onvif_host"))
-        .child("username", views::EditView::new().with_id("username"))
-        .child("password", views::EditView::new().with_id("password"))
+        .child("uuid", views::TextView::new("<new>").with_name("uuid"))
+        .child("short name", views::EditView::new().with_name("short_name"))
+        .child("onvif_host", views::EditView::new().with_name("onvif_host"))
+        .child("username", views::EditView::new().with_name("username"))
+        .child("password", views::EditView::new().with_name("password"))
         .min_height(6);
     let mut layout = views::LinearLayout::vertical()
         .child(camera_list)
         .child(views::TextView::new("description"))
-        .child(views::TextArea::new().with_id("description").min_height(3));
+        .child(views::TextArea::new().with_name("description").min_height(3));
 
     let dirs: Vec<_> = ::std::iter::once(("<none>".to_owned(), None))
                        .chain(db.lock()
@@ -280,7 +280,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
         let list = views::ListView::new()
             .child("rtsp url", views::LinearLayout::horizontal()
                 .child(views::EditView::new()
-                       .with_id(format!("{}_rtsp_url", type_.as_str()))
+                       .with_name(format!("{}_rtsp_url", type_.as_str()))
                        .full_width())
                 .child(views::DummyView)
                 .child(views::Button::new("Test", move |siv| press_test(siv, type_))))
@@ -288,12 +288,12 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                    views::SelectView::<Option<i32>>::new()
                    .with_all(dirs.iter().map(|d| d.clone()))
                    .popup()
-                   .with_id(format!("{}_sample_file_dir", type_.as_str())))
-            .child("record", views::Checkbox::new().with_id(format!("{}_record", type_.as_str())))
+                   .with_name(format!("{}_sample_file_dir", type_.as_str())))
+            .child("record", views::Checkbox::new().with_name(format!("{}_record", type_.as_str())))
             .child("flush_if_sec", views::EditView::new()
-                   .with_id(format!("{}_flush_if_sec", type_.as_str())))
+                   .with_name(format!("{}_flush_if_sec", type_.as_str())))
             .child("usage/capacity",
-                   views::TextView::new("").with_id(format!("{}_usage_cap", type_.as_str())))
+                   views::TextView::new("").with_name(format!("{}_usage_cap", type_.as_str())))
             .min_height(5);
         layout.add_child(views::DummyView);
         layout.add_child(views::TextView::new(format!("{} stream", type_.as_str())));
@@ -304,7 +304,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
     let dialog = if let Some(camera_id) = *item {
         let l = db.lock();
         let camera = l.cameras_by_id().get(&camera_id).expect("missing camera");
-        dialog.call_on_id("uuid", |v: &mut views::TextView| v.set_content(camera.uuid.to_string()))
+        dialog.call_on_name("uuid", |v: &mut views::TextView| v.set_content(camera.uuid.to_string()))
               .expect("missing TextView");
 
         let mut bytes = 0;
@@ -329,17 +329,17 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                     format!("{} / {} ({:.1}%)", s.sample_file_bytes, s.retain_bytes,
                                 100. * s.sample_file_bytes as f32 / s.retain_bytes as f32)
                 };
-                dialog.call_on_id(&format!("{}_rtsp_url", t.as_str()),
+                dialog.call_on_name(&format!("{}_rtsp_url", t.as_str()),
                                   |v: &mut views::EditView| v.set_content(s.rtsp_url.to_owned()));
-                dialog.call_on_id(&format!("{}_usage_cap", t.as_str()),
+                dialog.call_on_name(&format!("{}_usage_cap", t.as_str()),
                                   |v: &mut views::TextView| v.set_content(u));
-                dialog.call_on_id(&format!("{}_record", t.as_str()),
+                dialog.call_on_name(&format!("{}_record", t.as_str()),
                                   |v: &mut views::Checkbox| v.set_checked(s.record));
-                dialog.call_on_id(
+                dialog.call_on_name(
                     &format!("{}_flush_if_sec", t.as_str()),
                     |v: &mut views::EditView| v.set_content(s.flush_if_sec.to_string()));
             }
-            dialog.call_on_id(
+            dialog.call_on_name(
                 &format!("{}_sample_file_dir", t.as_str()),
                 |v: &mut views::SelectView<Option<i32>>| v.set_selection(selected_dir));
         }
@@ -348,10 +348,10 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                                      ("onvif_host", &*camera.onvif_host),
                                      ("username", &*camera.username),
                                      ("password", &*camera.password)] {
-            dialog.call_on_id(view_id, |v: &mut views::EditView| v.set_content(content.to_string()))
+            dialog.call_on_name(view_id, |v: &mut views::EditView| v.set_content(content.to_string()))
                   .expect("missing EditView");
         }
-        dialog.call_on_id("description",
+        dialog.call_on_name("description",
                           |v: &mut views::TextArea| v.set_content(camera.description.to_string()))
               .expect("missing TextArea");
         dialog.title("Edit camera")
@@ -365,7 +365,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
               })
     } else {
         for t in &db::ALL_STREAM_TYPES {
-            dialog.call_on_id(&format!("{}_usage_cap", t.as_str()),
+            dialog.call_on_name(&format!("{}_usage_cap", t.as_str()),
                               |v: &mut views::TextView| v.set_content("<new>"));
         }
         dialog.title("Add camera")

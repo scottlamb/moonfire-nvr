@@ -89,20 +89,20 @@ fn edit_limit(model: &RefCell<Model>, siv: &mut Cursive, id: i32, content: &str)
     if delta != 0 {
         let prev_over = model.total_retain > model.fs_capacity;
         model.total_retain += delta;
-        siv.find_id::<views::TextView>("total_retain")
+        siv.find_name::<views::TextView>("total_retain")
             .unwrap()
             .set_content(encode_size(model.total_retain));
         let now_over = model.total_retain > model.fs_capacity;
         if now_over != prev_over {
             model.errors += if now_over { 1 } else { -1 };
-            siv.find_id::<views::TextView>("total_ok")
+            siv.find_name::<views::TextView>("total_ok")
                 .unwrap()
                 .set_content(if now_over { "*" } else { " " });
         }
     }
     if new_value.is_none() != stream.retain.is_none() {
         model.errors += if new_value.is_none() { 1 } else { -1 };
-        siv.find_id::<views::TextView>(&format!("{}_ok", id))
+        siv.find_name::<views::TextView>(&format!("{}_ok", id))
             .unwrap()
             .set_content(if new_value.is_none() { "*" } else { " " });
     }
@@ -110,7 +110,7 @@ fn edit_limit(model: &RefCell<Model>, siv: &mut Cursive, id: i32, content: &str)
     debug!("model.errors = {}", model.errors);
     if (model.errors == 0) != (old_errors == 0) {
         trace!("toggling change state: errors={}", model.errors);
-        siv.find_id::<views::Button>("change")
+        siv.find_name::<views::Button>("change")
            .unwrap()
            .set_enabled(model.errors == 0);
     }
@@ -124,7 +124,7 @@ fn edit_record(model: &RefCell<Model>, id: i32, record: bool) {
 }
 
 fn confirm_deletion(model: &RefCell<Model>, siv: &mut Cursive, to_delete: i64) {
-    let typed = siv.find_id::<views::EditView>("confirm")
+    let typed = siv.find_name::<views::EditView>("confirm")
                    .unwrap()
                    .get_content();
     debug!("confirm, typed: {} vs expected: {}", typed.as_str(), to_delete);
@@ -175,7 +175,7 @@ fn press_change(model: &Rc<RefCell<Model>>, siv: &mut Cursive) {
                 .child(views::EditView::new().on_submit({
                     let model = model.clone();
                     move |siv, _| confirm_deletion(&model, siv, to_delete)
-                }).with_id("confirm")))
+                }).with_name("confirm")))
             .button("Confirm", {
                 let model = model.clone();
                 move |siv| confirm_deletion(&model, siv, to_delete)
@@ -219,12 +219,12 @@ fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
                         let db = db.clone();
                         move |siv, path| add_dir(&db, siv, path)
                     })
-                    .with_id("path")
+                    .with_name("path")
                     .fixed_width(60)))
             .button("Add", {
                 let db = db.clone();
                 move |siv| {
-                    let path = siv.find_id::<views::EditView>("path").unwrap().get_content();
+                    let path = siv.find_name::<views::EditView>("path").unwrap().get_content();
                     add_dir(&db, siv, &path)
                 }
             })
@@ -350,7 +350,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
                         move |siv, _| press_change(&model, siv)
                     })
                     .fixed_width(20))
-                .child(views::TextView::new("").with_id(format!("{}_ok", id)).fixed_width(1)));
+                .child(views::TextView::new("").with_name(format!("{}_ok", id)).fixed_width(1)));
     }
     let over = model.borrow().total_retain > model.borrow().fs_capacity;
     list.add_child(
@@ -360,8 +360,8 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
             .child(views::TextView::new(encode_size(model.borrow().total_used))
                    .fixed_width(BYTES_WIDTH))
             .child(views::TextView::new(encode_size(model.borrow().total_retain))
-                   .with_id("total_retain").fixed_width(BYTES_WIDTH))
-            .child(views::TextView::new(if over { "*" } else { " " }).with_id("total_ok")));
+                   .with_name("total_retain").fixed_width(BYTES_WIDTH))
+            .child(views::TextView::new(if over { "*" } else { " " }).with_name("total_ok")));
     list.add_child(
         "filesystem",
         views::LinearLayout::horizontal()
@@ -375,7 +375,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
     change_button.set_enabled(!over);
     let mut buttons = views::LinearLayout::horizontal()
         .child(views::DummyView.full_width());
-    buttons.add_child(change_button.with_id("change"));
+    buttons.add_child(change_button.with_name("change"));
     buttons.add_child(views::DummyView);
     buttons.add_child(views::Button::new("Cancel", |siv| { siv.pop_layer(); }));
     siv.add_layer(

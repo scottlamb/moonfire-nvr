@@ -23,7 +23,7 @@ base64 = "0.11.0"
 bytes = "0.5.3"
 byteorder = "1.0"
 cstr = "0.1.7"
-cursive = "0.12"
+cursive = "0.14.0"
 db = { package = "moonfire-db", path = "db" }
 docopt = "1.0"
 failure = "0.1.1"

@@ -42,11 +42,11 @@ fn get_change(siv: &mut Cursive, db: &db::LockedDatabase, id: Option<i32>,
         None => db::UserChange::add_user(String::new()),
     };
     change.username.clear();
-    change.username += siv.find_id::<views::EditView>("username").unwrap().get_content().as_str();
+    change.username += siv.find_name::<views::EditView>("username").unwrap().get_content().as_str();
     match pw {
         PasswordChange::Leave => {},
         PasswordChange::Set => {
-            let pwd = siv.find_id::<views::EditView>("new_pw").unwrap().get_content();
+            let pwd = siv.find_name::<views::EditView>("new_pw").unwrap().get_content();
             change.set_password(pwd.as_str().into());
         },
         PasswordChange::Clear => change.clear_password(),
@@ -55,7 +55,7 @@ fn get_change(siv: &mut Cursive, db: &db::LockedDatabase, id: Option<i32>,
         ("perm_view_video", &mut change.permissions.view_video),
         ("perm_read_camera_configs", &mut change.permissions.read_camera_configs),
         ("perm_update_signals", &mut change.permissions.update_signals)] {
-        **b = siv.find_id::<views::Checkbox>(id).unwrap().is_checked();
+        **b = siv.find_name::<views::Checkbox>(id).unwrap().is_checked();
         info!("{}: {}", id, **b);
     }
     change
@@ -114,7 +114,7 @@ enum PasswordChange {
 }
 
 fn select_set(siv: &mut Cursive) {
-    siv.find_id::<views::RadioButton<PasswordChange>>("pw_set").unwrap().select();
+    siv.find_name::<views::RadioButton<PasswordChange>>("pw_set").unwrap().select();
 }
 
 /// Adds or updates a user.
@@ -134,7 +134,7 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
         .child("id", views::TextView::new(id_str))
         .child("username", views::EditView::new()
                .content(username.clone())
-               .with_id("username"));
+               .with_name("username"));
     let mut layout = views::LinearLayout::vertical()
         .child(top_list)
         .child(views::DummyView)
@@ -145,21 +145,21 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
         layout.add_child(pw_group.button(PasswordChange::Clear, "Clear"));
         layout.add_child(views::LinearLayout::horizontal()
                          .child(pw_group.button(PasswordChange::Set, "Set to:")
-                                .with_id("pw_set"))
+                                .with_name("pw_set"))
                          .child(views::DummyView)
                          .child(views::EditView::new()
                                 .on_edit(|siv, _, _| select_set(siv))
-                                .with_id("new_pw")
+                                .with_name("new_pw")
                                 .full_width()));
     } else {
         layout.add_child(pw_group.button(PasswordChange::Leave, "Leave unset"));
         layout.add_child(views::LinearLayout::horizontal()
                          .child(pw_group.button(PasswordChange::Set, "Reset to:")
-                                .with_id("pw_set"))
+                                .with_name("pw_set"))
                          .child(views::DummyView)
                          .child(views::EditView::new()
                                 .on_edit(|siv, _, _| select_set(siv))
-                                .with_id("new_pw")
+                                .with_name("new_pw")
                                 .full_width()));
     }
 
@@ -171,7 +171,7 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
                        ("update_signals", permissions.update_signals)] {
         let mut checkbox = views::Checkbox::new();
         checkbox.set_checked(*b);
-        perms.add_child(name, checkbox.with_id(format!("perm_{}", name)));
+        perms.add_child(name, checkbox.with_name(format!("perm_{}", name)));
     }
     layout.add_child(perms);
 
