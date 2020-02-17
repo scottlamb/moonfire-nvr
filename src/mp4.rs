@@ -95,6 +95,7 @@ use reffers::ARefss;
 use crate::slices::{self, Slices};
 use smallvec::SmallVec;
 use std::cell::UnsafeCell;
+use std::convert::TryFrom;
 use std::cmp;
 use std::fmt;
 use std::io;
@@ -104,7 +105,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 /// This value should be incremented any time a change is made to this file that causes different
-/// bytes to be output for a particular set of `Mp4Builder` options. Incrementing this value will
+/// bytes to be output for a particular set of `FileBuilder` options. Incrementing this value will
 /// cause the etag to change as well.
 const FORMAT_VERSION: [u8; 1] = [0x06];
 
@@ -551,6 +552,7 @@ pub struct FileBuilder {
     body: BodyState,
     type_: Type,
     include_timestamp_subtitle_track: bool,
+    content_disposition: Option<HeaderValue>,
 }
 
 /// The portion of `FileBuilder` which is mutated while building the body of the file.
@@ -711,7 +713,7 @@ macro_rules! write_length {
     }}
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Type {
     Normal,
     InitSegment,
@@ -734,6 +736,7 @@ impl FileBuilder {
             },
             type_: type_,
             include_timestamp_subtitle_track: false,
+            content_disposition: None,
         }
     }
 
@@ -773,6 +776,13 @@ impl FileBuilder {
         Ok(())
     }
 
+    pub fn set_filename(&mut self, filename: &str) -> Result<(), Error> {
+        self.content_disposition =
+            Some(HeaderValue::try_from(format!("attachment; filename=\"{}\"", filename))
+                 .err_kind(ErrorKind::InvalidArgument)?);
+        Ok(())
+    }
+
     /// Builds the `File`, consuming the builder.
     pub fn build(mut self, db: Arc<db::Database>,
                  dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>)
@@ -783,6 +793,10 @@ impl FileBuilder {
         etag.update(&FORMAT_VERSION[..]).err_kind(ErrorKind::Internal)?;
         if self.include_timestamp_subtitle_track {
             etag.update(b":ts:").err_kind(ErrorKind::Internal)?;
+        }
+        if let Some(cd) = self.content_disposition.as_ref() {
+            etag.update(b":cd:").err_kind(ErrorKind::Internal)?;
+            etag.update(cd.as_bytes()).err_kind(ErrorKind::Internal)?;
         }
         match self.type_ {
             Type::Normal => {},
@@ -884,8 +898,9 @@ impl FileBuilder {
             video_sample_entries: self.video_sample_entries,
             initial_sample_byte_pos,
             last_modified,
-            etag: HeaderValue::from_str(&format!("\"{}\"", &strutil::hex(&etag)))
+            etag: HeaderValue::try_from(format!("\"{}\"", &strutil::hex(&etag)))
                   .expect("hex string should be valid UTF-8"),
+            content_disposition: self.content_disposition,
         })))
     }
 
@@ -1433,6 +1448,7 @@ struct FileInner {
     initial_sample_byte_pos: u64,
     last_modified: SystemTime,
     etag: HeaderValue,
+    content_disposition: Option<HeaderValue>,
 }
 
 impl FileInner {
@@ -1513,6 +1529,10 @@ impl http_serve::Entity for File {
         mime.extend_from_slice(b"\"");
         hdrs.insert(http::header::CONTENT_TYPE,
                     http::header::HeaderValue::from_maybe_shared(mime.freeze()).unwrap());
+
+        if let Some(cd) = self.0.content_disposition.as_ref() {
+            hdrs.insert(http::header::CONTENT_DISPOSITION, cd.clone());
+        }
     }
     fn last_modified(&self) -> Option<SystemTime> { Some(self.0.last_modified) }
     fn etag(&self) -> Option<HeaderValue> { Some(self.0.etag.clone()) }

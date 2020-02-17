@@ -399,16 +399,20 @@ impl ServiceInner {
         if !caller.permissions.view_video {
             return Err(plain_response(StatusCode::UNAUTHORIZED, "view_video required"));
         }
-        let stream_id = {
+        let (stream_id, camera_name);
+        {
             let db = self.db.lock();
             let camera = db.get_camera(uuid)
                            .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
                                                          format!("no such camera {}", uuid)))?;
-            camera.streams[stream_type.index()]
+            camera_name = camera.short_name.clone();
+            stream_id = camera.streams[stream_type.index()]
                 .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
                                               format!("no such stream {}/{}", uuid,
-                                                      stream_type)))?
+                                                      stream_type)))?;
+
         };
+        let mut start_time_for_filename = None;
         let mut builder = mp4::FileBuilder::new(mp4_type);
         if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
@@ -465,6 +469,10 @@ impl ServiceInner {
                                 let times = start as i32 .. end as i32;
                                 debug!("...appending recording {} with times {:?} \
                                        (out of dur {})", r.id, times, d);
+                                if start_time_for_filename.is_none() {
+                                    start_time_for_filename =
+                                        Some(r.start + recording::Duration(start));
+                                }
                                 builder.append(&db, r, start as i32 .. end as i32)?;
                             } else {
                                 debug!("...skipping recording {} dur {}", r.id, d);
@@ -498,6 +506,14 @@ impl ServiceInner {
                     _ => return Err(bad_req(format!("parameter {} not understood", key))),
                 }
             };
+        }
+        if let Some(start) = start_time_for_filename {
+            let tm = time::at(time::Timespec{sec: start.unix_seconds(), nsec: 0});
+            let stream_abbrev = if stream_type == db::StreamType::MAIN { "main" } else { "sub" };
+            let suffix = if mp4_type == mp4::Type::Normal { "mp4" } else { "m4s" };
+            builder.set_filename(&format!("{}-{}-{}.{}", tm.strftime("%Y%m%d%H%M%S").unwrap(),
+                                          camera_name, stream_abbrev, suffix))
+                .map_err(from_base_error)?;
         }
         let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())
                          .map_err(from_base_error)?;
@@ -572,7 +588,7 @@ impl ServiceInner {
         let flags = (auth::SessionFlags::HttpOnly as i32) |
                     (auth::SessionFlags::SameSite as i32) |
                     (auth::SessionFlags::SameSiteStrict as i32) |
-                    if is_secure { (auth::SessionFlags::Secure as i32) } else { 0 };
+                    if is_secure { auth::SessionFlags::Secure as i32 } else { 0 };
         let (sid, _) = l.login_by_password(authreq, &r.username, r.password, Some(domain),
             flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
