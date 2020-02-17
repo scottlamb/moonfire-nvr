@@ -1398,14 +1398,14 @@ mod bench {
         let server = &*SERVER;
         let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/main/recordings", server.base_url,
                                                server.test_camera_uuid)).unwrap();
-        let mut buf = Vec::new();
         let client = reqwest::Client::new();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
         let mut f = || {
-            let mut resp = client.get(url.clone()).send().unwrap();
-            assert_eq!(resp.status(), reqwest::StatusCode::OK);
-            buf.clear();
-            use std::io::Read;
-            resp.read_to_end(&mut buf).unwrap();
+            rt.block_on(async {
+                let resp = client.get(url.clone()).send().await.unwrap();
+                assert_eq!(resp.status(), reqwest::StatusCode::OK);
+                let _b = resp.bytes().await.unwrap();
+            });
         };
         f();  // warm.
         b.iter(f);

@@ -2338,19 +2338,20 @@ mod bench {
         testutil::init();
         let server = &*SERVER;
         let p = server.generated_len;
-        let mut buf = Vec::with_capacity(p as usize);
         b.bytes = p;
         let client = reqwest::Client::new();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
         let mut run = || {
-            let mut resp =
-                client.get(server.url.clone())
-                      .header(reqwest::header::RANGE, format!("bytes=0-{}", p - 1))
-                      .send()
-                      .unwrap();
-            buf.clear();
-            use std::io::Read;
-            let size = resp.read_to_end(&mut buf).unwrap();
-            assert_eq!(p, size as u64);
+            rt.block_on(async {
+                let resp =
+                    client.get(server.url.clone())
+                          .header(reqwest::header::RANGE, format!("bytes=0-{}", p - 1))
+                          .send()
+                          .await
+                          .unwrap();
+                let b = resp.bytes().await.unwrap();
+                assert_eq!(p, b.len() as u64);
+            });
         };
         run();  // warm.
         b.iter(run);
