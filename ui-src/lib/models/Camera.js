@@ -30,20 +30,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import JsonWrapper from './JsonWrapper';
 import Stream from './Stream';
 
 /**
  * Camera JSON wrapper.
  */
-export default class Camera extends JsonWrapper {
+export default class Camera {
   /**
    * Construct from JSON.
    *
    * @param  {JSON} cameraJson JSON for single camera.
    */
   constructor(cameraJson) {
-    super(cameraJson);
+    this.json_ = cameraJson;
     this.streams_ = {};
     Object.keys(cameraJson.streams).forEach((streamType) => {
       this.streams_[streamType] = new Stream(cameraJson.streams[streamType]);
@@ -52,17 +51,17 @@ export default class Camera extends JsonWrapper {
 
   /** @return {String} */
   get uuid() {
-    return this.json.uuid;
+    return this.json_.uuid;
   }
 
   /** @return {String} */
   get shortName() {
-    return this.json.shortName;
+    return this.json_.shortName;
   }
 
   /** @return {String} */
   get description() {
-    return this.json.description;
+    return this.json_.description;
   }
 
   /** @return {Object.<string, Stream>} */

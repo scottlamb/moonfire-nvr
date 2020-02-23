@@ -30,20 +30,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import JsonWrapper from './JsonWrapper';
 import Range90k from './Range90k';
 
 /**
  * Stream JSON wrapper.
  */
-export default class Stream extends JsonWrapper {
+export default class Stream {
   /**
    * Construct from JSON.
    *
    * @param  {JSON} streamJson JSON for single stream.
    */
   constructor(streamJson) {
-    super(streamJson);
+    this.json_ = streamJson;
   }
 
   /**
@@ -53,7 +52,7 @@ export default class Stream extends JsonWrapper {
    * @return {Number} Amount in bytes
    */
   get retainBytes() {
-    return this.json.retainBytes;
+    return this.json_.retainBytes;
   }
 
   /**
@@ -66,9 +65,9 @@ export default class Stream extends JsonWrapper {
    */
   get range90k() {
     return new Range90k(
-      this.json.minStartTime90k,
-      this.json.maxEndTime90k,
-      this.json.totalDuration90k
+      this.json_.minStartTime90k,
+      this.json_.maxEndTime90k,
+      this.json_.totalDuration90k
     );
   }
 
@@ -79,7 +78,7 @@ export default class Stream extends JsonWrapper {
    * @return {Number} Amount in bytes
    */
   get totalSampleFileBytes() {
-    return this.json.totalSampleFileBytes;
+    return this.json_.totalSampleFileBytes;
   }
 
   /**
@@ -95,7 +94,7 @@ export default class Stream extends JsonWrapper {
    */
   get days() {
     return new Map(
-      Object.entries(this.json.days).map(function(t) {
+      Object.entries(this.json_.days).map(function(t) {
         let [k, v] = t;
         v = new Range90k(v.startTime90k, v.endTime90k, v.totalDuration90k);
         return [k, v];

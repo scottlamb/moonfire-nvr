@@ -81,9 +81,6 @@ module.exports = (env, args) => {
       ],
     },
     plugins: [
-      new webpack.DefinePlugin({
-        'process.env.NODE_ENV': JSON.stringify(args.mode),
-      }),
       new webpack.IgnorePlugin(/\.\/locale$/),
       new HtmlWebpackPlugin({
         title: nvrSettings.app_title,
