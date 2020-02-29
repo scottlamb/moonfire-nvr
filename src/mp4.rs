@@ -1510,6 +1510,28 @@ impl FileInner {
 #[derive(Clone)]
 pub struct File(Arc<FileInner>);
 
+impl File {
+    pub async fn append_into_vec(self, v: &mut Vec<u8>) -> Result<(), Error> {
+        use http_serve::Entity;
+        v.reserve(usize::try_from(self.len())
+            .map_err(|_| format_err_t!(InvalidArgument, "{}-byte mp4 is too big to send over WebSockets!",
+                                       self.len()))?);
+        let mut b = std::pin::Pin::from(self.get_range(0 .. self.len()));
+        loop {
+            use futures::stream::StreamExt;
+            match b.next().await {
+                Some(r) => {
+                    let chunk = r
+                        .map_err(failure::Error::from_boxed_compat)
+                        .err_kind(ErrorKind::Unknown)?;
+                    v.extend_from_slice(chunk.bytes())
+                },
+                None => return Ok(()),
+            }
+        }
+    }
+}
+
 impl http_serve::Entity for File {
     type Data = Chunk;
     type Error = BoxedError;

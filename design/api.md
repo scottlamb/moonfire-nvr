@@ -416,17 +416,21 @@ URL minus the `.txt` suffix.
 
 ### `GET /api/cameras/<uuid>/<stream>/live.m4s`
 
-Returns a `multipart/mixed` sequence of parts. An extra top-level header,
-`X-Open-Id`, contains the `openId` which is assigned to all recordings in this
-live stream.
+Initiate a WebSocket stream for chunks of video. Expects the standard
+WebSocket headers as described in [RFC 6455][rfc-6455] and (if authentication
+is required) the `s` cookie.
 
-Each part is a `.mp4` media segment that starts with a key frame and contains
-all other frames which depend on that key frame. The following part headers
-will be included:
+The server will send a sequence of binary messages. Each message corresponds
+to one run (GOP) of video: a key (IDR) frame and all other frames which depend
+on it. These are encoded as a `.mp4` media segment. The following headers will
+be included:
 
-*   `Content-Length`: as defined by HTTP
-*   `Content-Type`: the MIME type, including `codecs` parameter.
-*   `X-Recording-Id`: the ID of the recording these frames are contained in.
+*   `X-Recording-Id`: the open id, a period, and the recording id of the
+    recording these frames belong to.
+*   `X-Recording-Start`: the timestamp (in Moonfire NVR's usual 90,000ths
+    of a second) of the start of the recording. Note that if the recording
+    is "unanchored" (as described in `GET /api/.../recordings`), the
+    recording's start time may change before it is completed.
 *   `X-Time-Range`: the relative start and end times of these frames within
     the recording, in the same format as `REL_START_TIME` and `REL_END_TIME`
     above.
@@ -442,40 +446,36 @@ Example request URI:
 /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/live.m4s
 ```
 
-Example response:
+Example binary message sequence:
 
 ```
-Content-Type: multipart/mixed; boundary=B
-X-Open-Id: 42
-
---B
-Content-Length: 536445
 Content-Type: video/mp4; codecs="avc1.640028"
-X-Recording-Id: 5680
+X-Recording-Id: 42.5680
+X-Recording-Start: 130985461191810
 X-Time-Range: 5220058-5400061
 X-Video-Sample-Entry-Sha1: 25fad1b92c344dadc0473a783dff957b0d7d56bb
 
 binary mp4 data
+```
 
---B
-Content-Length: 541118
+```
 Content-Type: video/mp4; codecs="avc1.640028"
-X-Recording-Id: 5681
+X-Recording-Id: 42.5681
+X-Recording-Start: 130985461191822
 X-Time-Range: 0-180002
 X-Video-Sample-Entry-Sha1: 25fad1b92c344dadc0473a783dff957b0d7d56bb
 
 binary mp4 data
+```
 
---B
-Content-Length: 539195
+```
 Content-Type: video/mp4; codecs="avc1.640028"
-X-Recording-Id: 5681
+X-Recording-Id: 42.5681
+X-Recording-Start: 130985461191822
 X-Time-Range: 180002-360004
 X-Video-Sample-Entry-Sha1: 25fad1b92c344dadc0473a783dff957b0d7d56bb
 
 binary mp4 data
-
-...
 ```
 
 These segments are exactly the same as ones that can be retrieved at the
@@ -484,6 +484,13 @@ following URLs, respectively:
    * `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5680@42.5220058-5400061`
    * `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5681@42.0-180002`
    * `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5681@42.180002-360004`
+
+Note: an earlier version of this API used a `multipart/mixed` segment instead,
+compatible with the [multipart-stream-js][multipart-stream-js] library. The
+problem with this approach is that browsers have low limits on the number of
+active HTTP/1.1 connections: six in Chrome's case. The WebSocket limit is much
+higher (256), allowing browser-side Javascript to stream all active camera
+streams simultaneously as well as making other simultaneous HTTP requests.
 
 ### `GET /api/init/<sha1>.mp4`
 
@@ -660,3 +667,5 @@ Response:
 [media-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-media-segments
 [init-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-init-segments
 [rfc-6381]: https://tools.ietf.org/html/rfc6381
+[rfc-6455]: https://tools.ietf.org/html/rfc6455
+[multipart-mixed-js]: https://github.com/scottlamb/multipart-mixed-js

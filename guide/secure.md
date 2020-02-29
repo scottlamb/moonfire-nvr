@@ -198,6 +198,11 @@ upstream moonfire {
     server 127.0.0.1:8080;
 }
 
+map $http_upgrade $connection_upgrade {
+    default Upgrade;
+    ''      close;
+}
+
 server {
     root /var/www/html;
     index index.html index.htm index.nginx-debian.html;
@@ -208,6 +213,10 @@ server {
         proxy_pass http://moonfire;
         # try_files $uri $uri/ =404;
     }
+
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
 
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Real-IP $remote_addr;
@@ -255,6 +264,10 @@ including a login form.
 Login with the credentials you added through `moonfire-nvr config` in the
 [previous guide](install.md). You should see your username and "logout" in the
 upper-right corner of the web interface.
+
+Also try the live streaming feature, which requires WebSockets. The nginx
+configuration above includes sections derived from nginx's [NGINX as a
+WebSocket Proxy](https://www.nginx.com/blog/websocket-nginx/) doc.
 
 If it doesn't work as expected, re-read this guide, then open an issue on
 github for help.
