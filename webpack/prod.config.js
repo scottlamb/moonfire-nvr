@@ -32,17 +32,15 @@
 
 const webpack = require('webpack');
 const CompressionPlugin = require('compression-webpack-plugin');
-const NVRSettings = require('./NVRSettings');
 const baseConfig = require('./base.config.js');
+const merge = require('webpack-merge');
 
 const CleanWebpackPlugin = require('clean-webpack-plugin');
 
 module.exports = (env, args) => {
-  const settingsObject = new NVRSettings(env, args);
-  const nvrSettings = settingsObject.settings;
-
-  return settingsObject.webpackMerge(baseConfig, {
-    devtool: 'cheap-module-source-map',
+  return merge(baseConfig, {
+    devtool: 'source-map',
+    mode: 'production',
     module: {
       rules: [
         {
@@ -68,12 +66,7 @@ module.exports = (env, args) => {
             new UglifyJsPlugin({
               cache: true, // webpack4: default
               parallel: true, // webpack4: default
-              sourceMap:
-                (args.devtool && /source-?map/.test(args.devtool)) ||
-                (args.plugins &&
-                  args.plugins.some(
-                    (p) => p instanceof webpack.SourceMapDevToolPlugin
-                  )),
+              sourceMap: true,
               uglifyOptions: {
                 compress: {
                   keep_infinity: true, // Do not change to 1/0
@@ -120,9 +113,7 @@ module.exports = (env, args) => {
       },
     },
     plugins: [
-      new CleanWebpackPlugin([nvrSettings.dist_dir], {
-        root: nvrSettings._paths.project_root,
-      }),
+      new CleanWebpackPlugin(),
       new CompressionPlugin({
         asset: '[path].gz[query]',
         algorithm: 'gzip',

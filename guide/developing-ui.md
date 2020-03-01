@@ -24,7 +24,9 @@ Checkout the branch you want to work on and type
 
 This will pack and prepare a development setup. By default the development
 server that serves up the web page(s) will listen on
-[http://localhost:3000](http://localhost:3000) so you can direct your browser
+[http://localhost:3000/](http://localhost:3000/) so you can direct your browser
+there. It assumes the Moonfire NVR server is running at
+[http://localhost:8080/](http://localhost:8080/) and will proxy API requests
 there.
 
 Make any changes to the source code as you desire (look at existing code
@@ -34,113 +36,70 @@ you can use the browser's debugger), or compilation breaking Javascript errors.
 The latter will often be reported as errors during the webpack assembly
 process, but some will show up in the browser console, or both.
 
-## Control and location of settings
+## Overriding defaults
 
-Much of the settings needed to put the UI together, run webpack etc. is
-located in a series of files that contain webpack configuration. These
-files all live in the "webpack" subdirectory. We will not explain all
-of them here, as you should rarely need to understand them, let alone
-modify them.
+The configuration understands these environment variables:
 
-What is worth mentioning is that the `package.json` file is configured
-to use a different webpack configuration for development vs. production
-builds. Both configurations depend on a shared configuration common to
-both.
+| variable            | description                                 | default                  |
+| :------------------ | :------------------------------------------ | :----------------------- |
+| `MOONFIRE_URL`      | base URL of the backing Moonfire NVR server | `http://localhost:8080/` |
+| `MOONFIRE_DEV_PORT` | port to listen on                           | 3000                     |
+| `MOONFIRE_DEV_HOST` | base URL of the backing Moonfire NVR server | `localhost` (1)          |
 
-There are also some settings that control aspects of the MoonFire UI
-behavior, such as window titles etc. These settings are found in the
-`settings-nvr.js` file in the project root directory. They should be
-pretty self explanatory.
+(1) Moonfire NVR's `webpack/dev.config.js` has no default value for
+`MOONFIRE_DEV_HOST`. `webpack-dev-server` itself has a default of `localhost`,
+as described
+[here](https://webpack.js.org/configuration/dev-server/#devserverhost).
 
-The webpack configuration for all webpack builds is able to load the
-values from `settings-nvr.js` and then, if the file exists, load those
-from `settings-nvr-local.js` and use them to add to the configuration,
-or replace. You can take advantage of this to add your own configuration
-values in the "local" file, which does not get checked in, but is used
-to affect development, and production builds.
+Thus one could connect to a remote Moonfire NVR by specifying its URL as
+follows:
 
-## Special considerations for API calls
+    $ MOONFIRE_URL=https://nvr.example.com/ yarn start
 
-The UI code will make calls to the MoonFire NVR's server API, which is
-assumed to run on the same host as the MoonFire server. This makes sense
-because that server is also normally the one serving up the UI. For UI 
-development, however this is not always convenient, or even useful.
+This allows you to test a new UI against your stable, production Moonfire NVR
+installation with real data.
 
-For one, you may be doing this development on a machine other than where
-the main MoonFire server is running. That can work, but of course that
-machine will not be responding the the API calls. If the UI does not
-gracefully handle API failure errors (it should but development on that
-is ongoing), it may break your UI code.
+The default `MOONFIRE_DEV_HOST` is suitable for connecting to the proxy server
+from a browser running on the same machine. If you want your server to be
+externally accessible, you may want to bind to `0.0.0.0` instead:
 
-Therefore, for practical purposes, you may want the API calls to go to
-a different server than where the localhost is. Rather than editing the
-`webpack/dev.conf.js` file to make this happen, you should use a different
-mechanism. The reason for not modifying this file (unless the change is
-needed by all), is that the file is under source control and thus should
-not reflect settings that are just for your personal use.
+    $ MOONFIRE_DEV_HOST=0.0.0.0 yarn start
 
-The manner in which you can achieve using a different server for API
-calls is by telling the development server to use a "proxy" for
-certain urls. All API calls start with "/api", so we'll take advantage
-of that. Create a the file `settings-nvr-local.js` right next to the standard
-`settings-nvr.js`. The file should look something like this:
+Be careful, though: it's insecure to send your production credentials over a
+non-`https` connection, as described more below.
 
-    module.exports.settings = {
-      devServer: {
-        proxy: {
-          '/api': 'http://192.168.1.232:8080'
-        }
-      }
-    };
+## A note on `https`
 
-This tells the development server to proxy all urls that it encounters
-requests for to the url specified. The way this is done is by taking the
-full URI component for the original request, and appending it to the string
-configured on the right side of the path to be rewritten above. In a standard
-MoonFire install, the server (and thus the API server as well), will be
-listening on port 8080 a the IP address where the server lives. So adjust
-the above for reach your own MoonFire instance where there is a server
-running with some real data behind it.
+Commonly production setups require credentials and run over `https`, as
+described in [secure.md](secure.md). Furthermore, Moonfire NVR will set the
+`secure` attribute on cookies it receives over `https`, so that the browser
+will only send them over a `https` connection.
 
-### Issues with "older" MoonFire builds
+This is great for security and somewhat inconvenient for proxying.
+Fundamentally, there are three ways to make it work:
 
-You might also have though to change the "/api" string in the source code
-to include the IP address of the MoonFire server. This would use the
-"right" (desirable) URLs, but the requests will fail due to a violation
-of the Cross-Origin Resource Sharing (CORS) protocol. If you really
-need to, you can add a configuration option to the MoonFire server
-by modifying its "service definition". We will not explain here how.
+   1. Configure the proxy server with valid credentials to supply on every
+      request, without requiring the browser to authenticate.
+   2. Configure the proxy server to strip out the `secure` attribute from
+      cookie response headers, so the browser will send them to the proxy
+      server.
+   3. Configure the proxy server with a TLS certificate.
+         a. using a self-signed certificate manually added to the browser's
+            store.
+         b. using a certificate from a "real" Certificate Authority (such as
+             letsencrypt).
 
-## Changing development server configuration
+Currently the configuration only implements method 2. It's easy to configure
+but has a couple caveats:
 
-You can find our standard configuration for the development server inside
-the `webpacks/dev.conf.js` file. Using the technique outlined above you
-can change ports, ip addresses etc. One example where this may come in
-useful is that you may want to "test" your new API code, running on
-machine "A" (from a development server), proxying API requests to machine
-"B" (because it has real data), from a browser running on machine "C".
+   * if you alternate between proxying to a test Moonfire NVR
+     installation and a real one, your browser won't know the difference. It
+     will supply whichever credentials were sent to it last.
+   * if you connect via a host other than localhost (and set
+     `MOONFIRE_DEV_HOST` to allow this), your browser will have a production
+     cookie that it's willing to send to a remote host over a non-`https`
+     connection. If you ever load this website using an untrustworthy DNS
+     server, your credentials can be compromised.
 
-The development server normally is configured to listing on port 3000
-on "localhost." (which would correspond to machine "A" in this example).
-However, you cannot use "localhost" on another machine to refer to "A".
-You may think that using the IP address of "A" works, but it doesn't
-because "localhost" lives at an IP address local to machine "A".
-
-To make this work you must tell the development server on host "A" to
-listen differently. You need to configure it to listen on IP address
-"0.0.0.0", which means "all available interfaces". Once that is in
-place you can use the IP address to reach "A" from "C". "A" will then
-send API requests on to "B", and present final UI using information
-from "A" and "B" to the browser on "C".
-
-Modify the local settings to something like this:
-
-    module.exports.settings = {
-      devServer: {
-        host: "0.0.0.0",
-        proxy: {
-          '/api': 'http://192.168.1.232:8080'
-        }
-      }
-    };
-
+We might add support for method 3 in the future. It's less convenient to
+configure but can avoid these problems.

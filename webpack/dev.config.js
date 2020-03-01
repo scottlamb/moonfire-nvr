@@ -30,36 +30,57 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+const merge = require('webpack-merge');
 const webpack = require('webpack');
-const NVRSettings = require('./NVRSettings');
 const baseConfig = require('./base.config.js');
 
-module.exports = (env, args) => {
-  const settingsObject = new NVRSettings(env, args);
-  const nvrSettings = settingsObject.settings;
+module.exports = merge(baseConfig, {
+  stats: {
+    warnings: true,
+  },
+  devtool: 'inline-source-map',
+  mode: 'development',
+  optimization: {
+    minimize: false,
+    namedChunks: true,
+  },
+  devServer: {
+    inline: true,
+    port: process.env.MOONFIRE_DEV_PORT || 3000,
+    host: process.env.MOONFIRE_DEV_HOST,
+    hot: true,
+    clientLogLevel: 'info',
+    proxy: {
+      '/api': {
+        target: process.env.MOONFIRE_URL || 'http://localhost:8080/',
 
-  return settingsObject.webpackMerge(baseConfig, {
-    stats: {
-      warnings: true,
-    },
-    devtool: 'inline-source-map',
-    optimization: {
-      minimize: false,
-      namedChunks: true,
-    },
-    devServer: {
-      contentBase: nvrSettings.app_src_dir,
-      historyApiFallback: true,
-      inline: true,
-      port: 3000,
-      hot: true,
-      clientLogLevel: 'info',
-      proxy: {
-        '/api': `http://${nvrSettings.moonfire.server}:${
-          nvrSettings.moonfire.port
-        }`,
+
+        // The live stream URLs require WebSockets.
+        ws: true,
+
+        // Change the Host: header so the name-based virtual hosts work
+        // properly.
+        changeOrigin: true,
+
+        // If the backing host is https, Moonfire NVR will set a 'secure'
+        // attribute on cookie responses, so that the browser will only send
+        // them over https connections. This is a good security practice, but
+        // it means a non-https development proxy server won't work. Strip out
+        // this attribute in the proxy with code from here:
+        // https://github.com/chimurai/http-proxy-middleware/issues/169#issuecomment-575027907
+        // See also discussion in guide/developing-ui.md.
+        onProxyRes: (proxyRes, req, res) => {
+          const sc = proxyRes.headers['set-cookie'];
+          if (Array.isArray(sc)) {
+            proxyRes.headers['set-cookie'] = sc.map(sc => {
+              return sc.split(';')
+                .filter(v => v.trim().toLowerCase() !== 'secure')
+                .join('; ')
+            });
+          }
+        },
       },
     },
-    plugins: [new webpack.HotModuleReplacementPlugin()],
-  });
-};
+  },
+  plugins: [new webpack.HotModuleReplacementPlugin()],
+});
