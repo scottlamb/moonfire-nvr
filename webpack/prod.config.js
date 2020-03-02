@@ -54,33 +54,6 @@ module.exports = (env, args) => {
     },
     optimization: {
       minimize: true,
-      minimizer: [
-        {
-          apply: (compiler) => {
-            /**
-             * Setup the UglifyJsPlugin as webpack4 does, plus options
-             * we decide to override.
-             */
-            // Lazy load the uglifyjs plugin
-            const UglifyJsPlugin = require('uglifyjs-webpack-plugin');
-            new UglifyJsPlugin({
-              cache: true, // webpack4: default
-              parallel: true, // webpack4: default
-              sourceMap: true,
-              uglifyOptions: {
-                compress: {
-                  keep_infinity: true, // Do not change to 1/0
-                  warnings: false, // Do not warn when dropping
-                },
-                output: {
-                  // Eliminate most comments, but not marked ones
-                  comments: 'some',
-                },
-              },
-            }).apply(compiler);
-          },
-        },
-      ],
       splitChunks: {
         minSize: 30000,
         minChunks: 1,
