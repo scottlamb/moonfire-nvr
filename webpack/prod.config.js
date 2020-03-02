@@ -35,7 +35,7 @@ const CompressionPlugin = require('compression-webpack-plugin');
 const baseConfig = require('./base.config.js');
 const merge = require('webpack-merge');
 
-const CleanWebpackPlugin = require('clean-webpack-plugin');
+const { CleanWebpackPlugin } = require('clean-webpack-plugin');
 
 module.exports = (env, args) => {
   return merge(baseConfig, {
@@ -88,7 +88,7 @@ module.exports = (env, args) => {
     plugins: [
       new CleanWebpackPlugin(),
       new CompressionPlugin({
-        asset: '[path].gz[query]',
+        filename: '[path].gz[query]',
         algorithm: 'gzip',
         test: /\.js$|\.css$|\.html$/,
         threshold: 10240,

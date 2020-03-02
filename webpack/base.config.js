@@ -49,10 +49,17 @@ module.exports = {
         test: /\.js$/,
         loader: 'babel-loader',
         query: {
-          presets: ['env', {modules: false}],
+          presets: [
+            ['@babel/preset-env', {
+              targets: {
+                esmodules: true,
+              },
+              modules: false
+            }]
+          ],
         },
         exclude: /(node_modules|bower_components)/,
-        include: ['./ui-src'],
+        include: [path.resolve('./ui-src')],
       },
       {
         test: /\.png$/,

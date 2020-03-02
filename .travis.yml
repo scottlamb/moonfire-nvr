@@ -33,7 +33,7 @@ matrix:
         - yarn build
         - node_modules/eslint/bin/eslint.js ui-src
     - language: node_js
-      node_js: "8"
+      node_js: "lts/*"
       script:
         - yarn
         - yarn build
