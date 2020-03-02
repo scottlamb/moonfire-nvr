@@ -44,21 +44,21 @@ export default class StreamView {
    * @param  {[type]} recordingsParent   Parent element to attach to or null)
    */
   constructor(
-    cameraModel,
-    streamType,
-    recordingFormatter,
-    trimmed,
-    recordingsParent = null
+      cameraModel,
+      streamType,
+      recordingFormatter,
+      trimmed,
+      recordingsParent = null
   ) {
     this.camera = cameraModel;
     this.streamType = streamType;
     this.stream = cameraModel.streams[streamType];
     this.recordingsView = new RecordingsView(
-      this.camera,
-      this.streamType,
-      recordingFormatter,
-      trimmed,
-      recordingsParent
+        this.camera,
+        this.streamType,
+        recordingFormatter,
+        trimmed,
+        recordingsParent
     );
     this._enabled = true;
     this.recordingsUrl = null;

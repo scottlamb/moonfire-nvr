@@ -106,7 +106,7 @@ export default class TimeFormatter {
     let format = this._formatStr;
     const ms = ts90k / 90.0;
     const fracFmt = 'FFFFF';
-    let fracLoc = format.indexOf(fracFmt);
+    const fracLoc = format.indexOf(fracFmt);
     if (fracLoc != -1) {
       const frac = ts90k % 90000;
       format =

@@ -45,13 +45,13 @@ import moment from 'moment-timezone';
  * @type {RegExp}
  */
 const timeRe = new RegExp(
-  [
-    '^', // Start
-    '([0-9]{1,2}:[0-9]{2})', // Capture HH:MM
-    '(?:(:[0-9]{2})(?::([0-9]{5}))?)?', // Capture [:ss][:FFFFF]
-    '([+-][0-9]{1,2}:?(?:[0-9]{2})?)?', // Capture [+-][zone]
-    '$', // End
-  ].join('')
+    [
+      '^', // Start
+      '([0-9]{1,2}:[0-9]{2})', // Capture HH:MM
+      '(?:(:[0-9]{2})(?::([0-9]{5}))?)?', // Capture [:ss][:FFFFF]
+      '([+-][0-9]{1,2}:?(?:[0-9]{2})?)?', // Capture [+-][zone]
+      '$', // End
+    ].join('')
 );
 
 /**

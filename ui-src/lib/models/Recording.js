@@ -102,7 +102,7 @@ export default class Recording {
    * @return {Range90k}                Resulting range
    */
   range90k(trimmedAgainst = null) {
-    let result = new Range90k(this.startTime90k, this.endTime90k);
+    const result = new Range90k(this.startTime90k, this.endTime90k);
     return trimmedAgainst ? result.trimmed(trimmedAgainst) : result;
   }
   /**

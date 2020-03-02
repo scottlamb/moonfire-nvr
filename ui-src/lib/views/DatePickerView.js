@@ -83,11 +83,11 @@ export default class DatePickerView {
   _initWithOptions(options = null) {
     this._alive = true;
     options =
-      options !== null
-        ? options
-        : {
-            disabled: true,
-          };
+      options !== null ?
+        options :
+        {
+          disabled: true,
+        };
     this._pickerElement.datepicker(options);
   }
 

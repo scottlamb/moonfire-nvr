@@ -79,7 +79,7 @@ export default class RecordingsView {
    * @param  {jQuery} parent Parent to which new DOM is attached, or null
    */
   constructor(camera, streamType, recordingFormatter, trimmed = false,
-              parent = null) {
+      parent = null) {
     this._cameraName = camera.shortName;
     this._cameraRange = camera.range90k;
     this._formatter = recordingFormatter;
@@ -107,17 +107,17 @@ export default class RecordingsView {
   _createElement(id, cameraName, streamType) {
     const tab = $('<tbody>').attr('id', id);
     tab.append(
-      $('<tr class="name">').append($('<th colspan=6/>')
-                            .text(cameraName + ' ' + streamType)),
-      $('<tr class="hdr">').append(
-        $(
-          _columnOrder
-            .map((name) => '<th>' + _columnLabels[name] + '</th>')
-            .join('')
-        )
-      ),
-      $('</tr>'),
-      $('<tr class="loading"><td colspan=6>loading...</td></tr>').hide()
+        $('<tr class="name">').append($('<th colspan=6/>')
+            .text(cameraName + ' ' + streamType)),
+        $('<tr class="hdr">').append(
+            $(
+                _columnOrder
+                    .map((name) => '<th>' + _columnLabels[name] + '</th>')
+                    .join('')
+            )
+        ),
+        $('</tr>'),
+        $('<tr class="loading"><td colspan=6>loading...</td></tr>').hide()
     );
     return tab;
   }
@@ -136,8 +136,8 @@ export default class RecordingsView {
     this._element.children('tr.r').each((rowIndex, row) => {
       const values = this._formatter.format(recordings[rowIndex], trimRange);
       $(row)
-        .children('td')
-        .each((index, element) => $(element).text(values[_columnOrder[index]]));
+          .children('td')
+          .each((i, e) => $(e).text(values[_columnOrder[i]]));
     });
   }
 
@@ -269,7 +269,7 @@ export default class RecordingsView {
     // Remove existing rows, replace with new ones
     $('tr.r', tbody).remove();
     this._recordings.forEach((r) => {
-      let row = $('<tr class="r" />');
+      const row = $('<tr class="r" />');
       row.append(_columnOrder.map(() => $('<td/>')));
       row.on('click', () => {
         console.log('Video clicked');

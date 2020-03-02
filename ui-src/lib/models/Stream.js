@@ -65,9 +65,9 @@ export default class Stream {
    */
   get range90k() {
     return new Range90k(
-      this.json_.minStartTime90k,
-      this.json_.maxEndTime90k,
-      this.json_.totalDuration90k
+        this.json_.minStartTime90k,
+        this.json_.maxEndTime90k,
+        this.json_.totalDuration90k
     );
   }
 
@@ -94,11 +94,11 @@ export default class Stream {
    */
   get days() {
     return new Map(
-      Object.entries(this.json_.days).map(function(t) {
-        let [k, v] = t;
-        v = new Range90k(v.startTime90k, v.endTime90k, v.totalDuration90k);
-        return [k, v];
-      })
+        Object.entries(this.json_.days).map(function(t) {
+          let [k, v] = t;
+          v = new Range90k(v.startTime90k, v.endTime90k, v.totalDuration90k);
+          return [k, v];
+        })
     );
   }
 }

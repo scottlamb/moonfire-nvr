@@ -70,7 +70,7 @@ export default class TimeStamp90kFormatter {
   formatSameDayShortened(ts1, ts2) {
     let ts1Formatted = this.formatTimeStamp90k(ts1);
     let ts2Formatted = this.formatTimeStamp90k(ts2);
-    let timePos = this._formatter.formatStr.indexOf('T');
+    const timePos = this._formatter.formatStr.indexOf('T');
     if (timePos != -1) {
       const datePortion = ts1Formatted.substr(0, timePos);
       ts1Formatted = datePortion + ' ' + ts1Formatted.substr(timePos + 1);

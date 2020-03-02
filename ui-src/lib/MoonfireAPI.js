@@ -93,8 +93,8 @@ export default class MoonfireAPI {
       query.split90k = split90k;
     }
     return this._builder.makeUrl(
-      'cameras/' + cameraUUID + '/' + streamType + '/recordings',
-      query
+        'cameras/' + cameraUUID + '/' + streamType + '/recordings',
+        query
     );
   }
 
@@ -109,7 +109,7 @@ export default class MoonfireAPI {
    * @return {String}                 Constructed url
    */
   videoPlayUrl(cameraUUID, streamType, recording, trimmedRange,
-               timestampTrack = true) {
+      timestampTrack = true) {
     let sParam = recording.startId;
     if (recording.endId !== undefined) {
       sParam += '-' + recording.endId;

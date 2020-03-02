@@ -65,7 +65,7 @@ export default class VideoDialogView {
   attach(domElement) {
     this._videoElement = $('<video controls preload="auto" autoplay="true" />');
     this._dialogElement = $('<div class="playdialog" />').append(
-      this._videoElement
+        this._videoElement
     );
     $(domElement).append(this._dialogElement);
     return this;

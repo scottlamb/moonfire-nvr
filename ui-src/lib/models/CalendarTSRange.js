@@ -138,9 +138,9 @@ export default class CalendarTSRange {
    * @return {Range90k} Range object or null if don't have start and end
    */
   range90k() {
-    return this.hasRange()
-      ? new Range90k(this.startTime90k, this.endTime90k)
-      : null;
+    return this.hasRange() ?
+      new Range90k(this.startTime90k, this.endTime90k) :
+      null;
   }
 
   /**
@@ -167,9 +167,9 @@ export default class CalendarTSRange {
    */
   _setRangeTime(range, dateStr, timeStr, dateOnlyThenEndOfDay) {
     const newTs90k = this._timeParser.parseDateTime90k(
-      dateStr,
-      timeStr,
-      dateOnlyThenEndOfDay
+        dateStr,
+        timeStr,
+        dateOnlyThenEndOfDay
     );
     if (newTs90k !== null) {
       range.dateStr = dateStr;

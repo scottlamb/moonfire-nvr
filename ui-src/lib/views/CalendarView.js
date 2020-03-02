@@ -57,11 +57,11 @@ function minMaxDates(streamViews) {
    * have at least one recording available (allDates).
    */
   const allDates = new Set(
-    [].concat(
-      ...streamViews
-        .filter((v) => v.enabled)
-        .map((v) => Array.from(v.stream.days.keys()))
-    )
+      [].concat(
+          ...streamViews
+              .filter((v) => v.enabled)
+              .map((v) => Array.from(v.stream.days.keys()))
+      )
   );
   return [
     allDates,
@@ -161,7 +161,7 @@ export default class CalendarView {
     const fromPickerView = this._fromPickerView;
     const toPickerView = this._toPickerView;
     const beforeShowDay = function(date) {
-      let dateStr = date.toISOString().substr(0, 10);
+      const dateStr = date.toISOString().substr(0, 10);
       return [dateSet.has(dateStr), '', ''];
     };
 
@@ -226,9 +226,9 @@ export default class CalendarView {
     const pickerElement = event.currentTarget;
     const newTimeStr = pickerElement.value;
     const selectedRange = this._selectedRange;
-    const parsedTS = isEnd
-      ? selectedRange.setEndTime(newTimeStr)
-      : selectedRange.setStartTime(newTimeStr);
+    const parsedTS = isEnd ?
+      selectedRange.setEndTime(newTimeStr) :
+      selectedRange.setStartTime(newTimeStr);
     if (parsedTS === null) {
       console.warn('bad time change');
       $(pickerElement).addClass('ui-state-error');
@@ -236,7 +236,7 @@ export default class CalendarView {
     }
     $(pickerElement).removeClass('ui-state-error');
     console.log(
-      (isEnd ? 'End' : 'Start') +
+        (isEnd ? 'End' : 'Start') +
         ' time changed to: ' +
         parsedTS +
         ' (' +
@@ -261,9 +261,9 @@ export default class CalendarView {
        * changes. We need to determine a new selected range and activiate it.
        * Doing so will then also inform the change listener.
        */
-      const endDate = isSameDay
-        ? this.selectedRange.start.dateStr
-        : this.selectedRange.end.dateStr;
+      const endDate = isSameDay ?
+        this.selectedRange.start.dateStr :
+        this.selectedRange.end.dateStr;
       this._updateRangeDates(this.selectedRange.start.dateStr, endDate);
       this._sameDay = isSameDay;
 
@@ -334,7 +334,7 @@ export default class CalendarView {
   initializeWith(streamViews) {
     this._streamViews = streamViews;
     [this._availableDates, this._minDateStr, this._maxDateStr] = minMaxDates(
-      streamViews
+        streamViews
     );
     this._configureDatePickers();
 

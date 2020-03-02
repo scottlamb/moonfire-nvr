@@ -72,7 +72,7 @@ let loginDialog = null;
  *
  * @type {String}
  */
-let timeFmt = 'YYYY-MM-DD HH:mm:ss';
+const timeFmt = 'YYYY-MM-DD HH:mm:ss';
 
 /**
  * Currently active time formatter.
@@ -128,24 +128,24 @@ function onSelectVideo(nvrSettingsView, camera, streamType, range, recording) {
   console.log('Recording clicked: ', recording);
   const trimmedRange = recording.range90k(nvrSettingsView.trim ? range : null);
   const url = api.videoPlayUrl(
-    camera.uuid,
-    streamType,
-    recording,
-    trimmedRange,
-    nvrSettingsView.timeStampTrack
+      camera.uuid,
+      streamType,
+      recording,
+      trimmedRange,
+      nvrSettingsView.timeStampTrack
   );
   const [
     formattedStart,
     formattedEnd,
   ] = timeFormatter90k.formatSameDayShortened(
-    trimmedRange.startTime90k,
-    trimmedRange.endTime90k
+      trimmedRange.startTime90k,
+      trimmedRange.endTime90k
   );
   const videoTitle =
     camera.shortName + ', ' + formattedStart + ' to ' + formattedEnd;
   new VideoDialogView()
-    .attach($('body'))
-    .play(videoTitle, recording.videoSampleEntryWidth / 4, url);
+      .attach($('body'))
+      .play(videoTitle, recording.videoSampleEntryWidth / 4, url);
 }
 
 /**
@@ -159,18 +159,18 @@ function fetch(selectedRange, videoLength) {
     return;
   }
   console.log(
-    'Fetching> ' +
+      'Fetching> ' +
       selectedRange.formatTimeStamp90k(selectedRange.startTime90k) +
       ' to ' +
       selectedRange.formatTimeStamp90k(selectedRange.endTime90k)
   );
-  for (let streamView of streamViews) {
-    let url = api.recordingsUrl(
-      streamView.camera.uuid,
-      streamView.streamType,
-      selectedRange.startTime90k,
-      selectedRange.endTime90k,
-      videoLength
+  for (const streamView of streamViews) {
+    const url = api.recordingsUrl(
+        streamView.camera.uuid,
+        streamView.streamType,
+        selectedRange.startTime90k,
+        selectedRange.endTime90k,
+        videoLength
     );
     if (streamView.recordingsReq !== null) {
       /*
@@ -181,7 +181,7 @@ function fetch(selectedRange, videoLength) {
       streamView.recordingsReq.abort();
     }
     streamView.delayedShowLoading(500);
-    let r = api.request(url);
+    const r = api.request(url);
     streamView.recordingsUrl = url;
     streamView.recordingsReq = r;
     streamView.recordingsRange = selectedRange.range90k();
@@ -189,20 +189,20 @@ function fetch(selectedRange, videoLength) {
       streamView.recordingsReq = null;
     });
     r
-      .then(function(data /* , status, req */) {
+        .then(function(data /* , status, req */) {
         // Sort recordings in descending order.
-        data.recordings.sort(function(a, b) {
-          return b.startId - a.startId;
+          data.recordings.sort(function(a, b) {
+            return b.startId - a.startId;
+          });
+          console.log(
+              'Fetched results for "%s-%s" > updating recordings',
+              streamView.camera.shortName, streamView.streamType
+          );
+          streamView.recordingsJSON = data.recordings;
+        })
+        .catch(function(data, status, err) {
+          console.error(url, ' load failed: ', status, ': ', err);
         });
-        console.log(
-          'Fetched results for "%s-%s" > updating recordings',
-          streamView.camera.shortName, streamView.streamType
-        );
-        streamView.recordingsJSON = data.recordings;
-      })
-      .catch(function(data, status, err) {
-        console.error(url, ' load failed: ', status, ': ', err);
-      });
   }
 }
 
@@ -213,21 +213,21 @@ function fetch(selectedRange, videoLength) {
  *         or null.
  */
 function updateSession(session) {
-  let sessionBar = $('#session');
+  const sessionBar = $('#session');
   sessionBar.empty();
   if (session === null || session === undefined) {
     sessionBar.hide();
     return;
   }
   sessionBar.append($('<span id="session-username" />').text(session.username));
-  let logout = $('<a>logout</a>');
+  const logout = $('<a>logout</a>');
   logout.click(() => {
     api
-      .logout(session.csrf)
-      .done(() => {
-        onReceivedTopLevel(null);
-        loginDialog.dialog('open');
-      });
+        .logout(session.csrf)
+        .done(() => {
+          onReceivedTopLevel(null);
+          loginDialog.dialog('open');
+        });
   });
   sessionBar.append(' | ', logout);
   sessionBar.show();
@@ -274,10 +274,10 @@ function onReceivedTopLevel(data) {
   videos.empty();
 
   streamViews = [];
-  let streamSelectorCameras = [];
+  const streamSelectorCameras = [];
   for (const cameraJson of data.cameras) {
     const camera = new Camera(cameraJson);
-    let cameraStreams = {};
+    const cameraStreams = {};
     Object.keys(camera.streams).forEach((streamType) => {
       const sv = new StreamView(
           camera,
@@ -288,11 +288,11 @@ function onReceivedTopLevel(data) {
       sv.onRecordingClicked = (recordingModel) => {
         console.log('Recording clicked', recordingModel);
         onSelectVideo(
-          nvrSettingsView,
-          camera,
-          streamType,
-          calendarView.selectedRange,
-          recordingModel
+            nvrSettingsView,
+            camera,
+            streamType,
+            calendarView.selectedRange,
+            recordingModel
         );
       };
       streamViews.push(sv);
@@ -321,10 +321,10 @@ function sendLoginRequest() {
     return;
   }
 
-  let username = $('#login-username').val();
-  let password = $('#login-password').val();
-  let submit = $('#login-submit');
-  let error = $('#login-error');
+  const username = $('#login-username').val();
+  const password = $('#login-password').val();
+  const submit = $('#login-submit');
+  const error = $('#login-error');
 
   error.empty();
   error.removeClass('ui-state-highlight');
@@ -332,36 +332,36 @@ function sendLoginRequest() {
   loginDialog.pending = true;
   console.info('logging in as', username);
   api
-    .login(username, password)
-    .done(() => {
-      console.info('login successful');
-      loginDialog.dialog('close');
-      sendTopLevelRequest();
-    })
-    .catch((e) => {
-      console.info('login failed:', e);
-      error.show();
-      error.addClass('ui-state-highlight');
-      error.text(e.responseText);
-    })
-    .always(() => {
-      submit.button('option', 'disabled', false);
-      loginDialog.pending = false;
-    });
+      .login(username, password)
+      .done(() => {
+        console.info('login successful');
+        loginDialog.dialog('close');
+        sendTopLevelRequest();
+      })
+      .catch((e) => {
+        console.info('login failed:', e);
+        error.show();
+        error.addClass('ui-state-highlight');
+        error.text(e.responseText);
+      })
+      .always(() => {
+        submit.button('option', 'disabled', false);
+        loginDialog.pending = false;
+      });
 }
 
 /** Sends the top-level api request. */
 function sendTopLevelRequest() {
   api
-    .request(api.nvrUrl(true))
-    .done((data) => onReceivedTopLevel(data))
-    .catch((e) => {
-      console.error('NVR load exception: ', e);
-      onReceivedTopLevel(null);
-      if (e.status == 401) {
-        loginDialog.dialog('open');
-      }
-    });
+      .request(api.nvrUrl(true))
+      .done((data) => onReceivedTopLevel(data))
+      .catch((e) => {
+        console.error('NVR load exception: ', e);
+        onReceivedTopLevel(null);
+        if (e.status == 401) {
+          loginDialog.dialog('open');
+        }
+      });
 }
 
 /**

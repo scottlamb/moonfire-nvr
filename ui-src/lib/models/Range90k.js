@@ -37,7 +37,7 @@ import Range from './Range';
  *
  * @type {WeakMap}
  */
-let _range = new WeakMap();
+const _range = new WeakMap();
 
 /**
  * Class like Range to represent ranges over timestamps in 90k format.
@@ -94,8 +94,8 @@ export default class Range90k {
    */
   trimmed(against) {
     return new Range90k(
-      Math.max(this.startTime90k, against.startTime90k),
-      Math.min(this.endTime90k, against.endTime90k)
+        Math.max(this.startTime90k, against.startTime90k),
+        Math.min(this.endTime90k, against.endTime90k)
     );
   }
 

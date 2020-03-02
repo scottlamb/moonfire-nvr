@@ -53,7 +53,7 @@ export default class StreamSelectorView {
 
     if (cameras.length !== 0) {
       // Add a header row.
-      let hdr = $('<tr/>').append($('<th/>'));
+      const hdr = $('<tr/>').append($('<th/>'));
       for (const streamType of allStreamTypes) {
         hdr.append($('<th/>').text(streamType));
       }
@@ -61,7 +61,7 @@ export default class StreamSelectorView {
     }
 
     this._cameras.forEach((c) => {
-      let row = $('<tr/>').append($('<td>').text(c.camera.shortName));
+      const row = $('<tr/>').append($('<td>').text(c.camera.shortName));
       let firstStreamType = true;
       for (const streamType of allStreamTypes) {
         const streamView = c.streamViews[streamType];
@@ -69,7 +69,9 @@ export default class StreamSelectorView {
           row.append('<td/>');
         } else {
           const id = 'cam-' + c.camera.uuid + '-' + streamType;
-          let cb = $('<input type="checkbox">').attr('name', id).attr('id', id);
+          const cb = $('<input type="checkbox">')
+              .attr('name', id)
+              .attr('id', id);
 
           // Only the first stream type for each camera should be checked
           // initially.
