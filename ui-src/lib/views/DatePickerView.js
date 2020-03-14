@@ -60,7 +60,7 @@ export default class DatePickerView {
    * @param  {Object} options Options to pass to datepicker
    */
   constructor(parent, options = null) {
-    this._pickerElement = $(parent);
+    this.pickerElement_ = $(parent);
     /*
      * The widget is somewhat peculiar in that its functionality does
      * not exist until it has been called with a settings/options argument
@@ -68,7 +68,7 @@ export default class DatePickerView {
      * So, unless some are passed in here explicitly, we create a default
      * and disabled date picker.
      */
-    this._initWithOptions(options);
+    this.initWithOptions_(options);
   }
 
   /**
@@ -80,15 +80,15 @@ export default class DatePickerView {
    *
    * @param  {Object} options Options for datepicker, or null to just enable
    */
-  _initWithOptions(options = null) {
-    this._alive = true;
+  initWithOptions_(options = null) {
+    this.alive_ = true;
     options =
       options !== null ?
         options :
         {
           disabled: true,
         };
-    this._pickerElement.datepicker(options);
+    this.pickerElement_.datepicker(options);
   }
 
   /**
@@ -102,26 +102,26 @@ export default class DatePickerView {
    *
    * @return {Any} Function result
    */
-  _apply(...args) {
-    if (!this._alive) {
+  apply_(...args) {
+    if (!this.alive_) {
       console.warn('datepicker not constructed yet [%s]', this.domId);
     }
-    return this._pickerElement.datepicker(...args);
+    return this.pickerElement_.datepicker(...args);
   }
 
   /**
    * Activate the datepicker if not already attached.
    *
-   * Basically calls _initWithOptions({disabled: disabled}), but only if not
+   * Basically calls initWithOptions_({disabled: disabled}), but only if not
    * already attached. Otherwise just sets the disabled status.
    *
    * @param  {Boolean} disabled True if datepicker needs to be disabled
    */
   activate(disabled = true) {
-    if (this._alive) {
+    if (this.alive_) {
       this.disabled = disabled;
     } else {
-      this._initWithOptions({
+      this.initWithOptions_({
         disabled: disabled,
       });
     }
@@ -133,7 +133,7 @@ export default class DatePickerView {
    * @return {jQuery} jQuery element
    */
   get element() {
-    return this._pickerElement;
+    return this.pickerElement_;
   }
 
   /**
@@ -153,10 +153,10 @@ export default class DatePickerView {
      * settings, when the picker is not alive. That really should translate
      * to a constructor call to the datepicker.
      */
-    if (!this._alive && args.length === 0 && typeof arg0 === 'object') {
-      return this._initWithOptions(arg0);
+    if (!this.alive_ && args.length === 0 && typeof arg0 === 'object') {
+      return this.initWithOptions_(arg0);
     }
-    return this._apply('option', arg0, ...args);
+    return this.apply_('option', arg0, ...args);
   }
 
   /**
@@ -176,7 +176,7 @@ export default class DatePickerView {
    * @return {Boolean}
    */
   get isDisabled() {
-    return this._apply('isDisabled');
+    return this.apply_('isDisabled');
   }
 
   /**
@@ -194,7 +194,7 @@ export default class DatePickerView {
    * @return {Date} Selected date
    */
   get date() {
-    return this._apply('getDate');
+    return this.apply_('getDate');
   }
 
   /**
@@ -203,7 +203,7 @@ export default class DatePickerView {
    * @param  {String|Date} date Desired date as string or Date
    */
   set date(date) {
-    this._apply('setDate', date);
+    this.apply_('setDate', date);
   }
 
   /**
@@ -262,28 +262,28 @@ export default class DatePickerView {
    * @param {varargs} dialogArgs Variable argument list
    */
   dialog(...dialogArgs) {
-    this._apply('option', dialogArgs);
+    this.apply_('option', dialogArgs);
   }
 
   /**
    * Make the picker visible.
    */
   show() {
-    this._apply('show');
+    this.apply_('show');
   }
 
   /**
    * Hide the picker.
    */
   hide() {
-    this._apply('hide');
+    this.apply_('hide');
   }
 
   /**
    * Refresh the picker.
    */
   refresh() {
-    this._apply('refresh');
+    this.apply_('refresh');
   }
 
   /**
@@ -293,8 +293,8 @@ export default class DatePickerView {
    * Sets the status in this object to !alive.
    */
   destroy() {
-    this._alive = true;
-    this._apply('destroy');
-    this._alive = false;
+    this.alive_ = true;
+    this.apply_('destroy');
+    this.alive_ = false;
   }
 }

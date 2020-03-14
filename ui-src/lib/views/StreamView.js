@@ -60,7 +60,7 @@ export default class StreamView {
         trimmed,
         recordingsParent
     );
-    this._enabled = true;
+    this.enabled_ = true;
     this.recordingsUrl = null;
     this.recordingsReq = null;
   }
@@ -71,7 +71,7 @@ export default class StreamView {
    * @return {Boolean}
    */
   get enabled() {
-    return this._enabled;
+    return this.enabled_;
   }
 
   /**
@@ -80,7 +80,7 @@ export default class StreamView {
    * @param  {Boolean} enabled Whether view should be enabled
    */
   set enabled(enabled) {
-    this._enabled = enabled;
+    this.enabled_ = enabled;
     this.recordingsView.show = enabled;
     console.log('Stream %s-%s %s', this.camera.shortName, this.streamType,
                 this.enabled ? 'enabled' : 'disabled');

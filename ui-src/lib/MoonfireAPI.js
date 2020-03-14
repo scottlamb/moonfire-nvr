@@ -59,7 +59,7 @@ export default class MoonfireAPI {
     url.hostname = host;
     url.port = port;
     console.log('API: ' + url.origin + url.pathname);
-    this._builder = new URLBuilder(url.origin + url.pathname, relativeUrls);
+    this.builder_ = new URLBuilder(url.origin + url.pathname, relativeUrls);
   }
 
   /**
@@ -70,7 +70,7 @@ export default class MoonfireAPI {
    * @return {String}       Constructed url
    */
   nvrUrl(days = true) {
-    return this._builder.makeUrl('', {days: days});
+    return this.builder_.makeUrl('', {days: days});
   }
 
   /**
@@ -92,7 +92,7 @@ export default class MoonfireAPI {
     if (split90k != Infinity) {
       query.split90k = split90k;
     }
-    return this._builder.makeUrl(
+    return this.builder_.makeUrl(
         'cameras/' + cameraUUID + '/' + streamType + '/recordings',
         query
     );
@@ -135,7 +135,7 @@ export default class MoonfireAPI {
       s: sParam,
       ts: timestampTrack,
     });
-    return this._builder.makeUrl('cameras/' + cameraUUID + '/' + streamType +
+    return this.builder_.makeUrl('cameras/' + cameraUUID + '/' + streamType +
                                  '/view.mp4', {
       s: sParam,
       ts: timestampTrack,
@@ -167,7 +167,7 @@ export default class MoonfireAPI {
    * @return {Request}
    */
   login(username, password) {
-    return $.ajax(this._builder.makeUrl('login'), {
+    return $.ajax(this.builder_.makeUrl('login'), {
       data: JSON.stringify({
         username: username,
         password: password,
@@ -185,7 +185,7 @@ export default class MoonfireAPI {
    * @return {Request}
    */
   logout(csrf) {
-    return $.ajax(this._builder.makeUrl('logout'), {
+    return $.ajax(this.builder_.makeUrl('logout'), {
       data: JSON.stringify({
         csrf: csrf,
       }),

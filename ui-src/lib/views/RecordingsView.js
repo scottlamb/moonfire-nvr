@@ -80,20 +80,20 @@ export default class RecordingsView {
    */
   constructor(camera, streamType, recordingFormatter, trimmed = false,
       parent = null) {
-    this._cameraName = camera.shortName;
-    this._cameraRange = camera.range90k;
-    this._formatter = recordingFormatter;
+    this.cameraName_ = camera.shortName;
+    this.cameraRange_ = camera.range90k;
+    this.formatter_ = recordingFormatter;
 
     const id = `tab-${camera.uuid}-${streamType}`;
-    this._element = this._createElement(id, camera.shortName, streamType);
-    this._trimmed = trimmed;
-    this._recordings = null;
-    this._recordingsRange = null;
-    this._clickHandler = null;
+    this.element_ = this.createElement_(id, camera.shortName, streamType);
+    this.trimmed_ = trimmed;
+    this.recordings_ = null;
+    this.recordingsRange_ = null;
+    this.clickHandler_ = null;
     if (parent) {
-      parent.append(this._element);
+      parent.append(this.element_);
     }
-    this._timeoutId = null;
+    this.timeoutId_ = null;
   }
 
   /**
@@ -104,7 +104,7 @@ export default class RecordingsView {
    * @param  {String} streamType "main" or "sub"
    * @return {jQuery} Partial DOM as jQuery object
    */
-  _createElement(id, cameraName, streamType) {
+  createElement_(id, cameraName, streamType) {
     const tab = $('<tbody>').attr('id', id);
     tab.append(
         $('<tr class="name">').append($('<th colspan=6/>')
@@ -130,11 +130,11 @@ export default class RecordingsView {
    * @param  {Array} newRecordings
    * @param  {Boolean} trimmed  True if timestamps should be trimmed
    */
-  _updateRecordings() {
-    const trimRange = this._trimmed ? this.recordingsRange : null;
-    const recordings = this._recordings;
-    this._element.children('tr.r').each((rowIndex, row) => {
-      const values = this._formatter.format(recordings[rowIndex], trimRange);
+  updateRecordings_() {
+    const trimRange = this.trimmed_ ? this.recordingsRange : null;
+    const recordings = this.recordings_;
+    this.element_.children('tr.r').each((rowIndex, row) => {
+      const values = this.formatter_.format(recordings[rowIndex], trimRange);
       $(row)
           .children('td')
           .each((i, e) => $(e).text(values[_columnOrder[i]]));
@@ -151,7 +151,7 @@ export default class RecordingsView {
    * @return {Range90k} Currently remembered range
    */
   get recordingsRange() {
-    return this._recordingsRange ? this._recordingsRange.clone() : null;
+    return this.recordingsRange_ ? this.recordingsRange_.clone() : null;
   }
 
   /**
@@ -160,7 +160,7 @@ export default class RecordingsView {
    * @param  {Range90k} range90k Range to remember
    */
   set recordingsRange(range90k) {
-    this._recordingsRange = range90k ? range90k.clone() : null;
+    this.recordingsRange_ = range90k ? range90k.clone() : null;
   }
 
   /**
@@ -169,7 +169,7 @@ export default class RecordingsView {
    * @return {Boolean}
    */
   get trimmed() {
-    return this._trimmed;
+    return this.trimmed_;
   }
 
   /**
@@ -178,9 +178,9 @@ export default class RecordingsView {
    * @param  {Boolean} value True if trimming desired
    */
   set trimmed(value) {
-    if (value != this._trimmed) {
-      this._trimmed = value;
-      this._updateRecordings();
+    if (value != this.trimmed_) {
+      this.trimmed_ = value;
+      this.updateRecordings_();
     }
   }
 
@@ -190,7 +190,7 @@ export default class RecordingsView {
    * @param  {Boolean} show True for show, false for hide
    */
   set show(show) {
-    const sel = this._element;
+    const sel = this.element_;
     if (show) {
       sel.show();
     } else {
@@ -204,13 +204,13 @@ export default class RecordingsView {
    * @param  {Boolean} show True if indicator should be showing
    */
   set showLoading(show) {
-    const loading = $('tr.loading', this._element);
+    const loading = $('tr.loading', this.element_);
     if (show) {
       loading.show();
     } else {
-      if (this._timeoutId) {
-        clearTimeout(this._timeoutId);
-        this._timeoutId = null;
+      if (this.timeoutId_) {
+        clearTimeout(this.timeoutId_);
+        this.timeoutId_ = null;
       }
       loading.hide();
     }
@@ -223,7 +223,7 @@ export default class RecordingsView {
    * @param  {Number} timeOutMs Delay (in ms) before indicator should appear
    */
   delayedShowLoading(timeOutMs) {
-    this._timeoutId = setTimeout(() => (this.showLoading = true), timeOutMs);
+    this.timeoutId_ = setTimeout(() => (this.showLoading = true), timeOutMs);
   }
 
   /**
@@ -236,8 +236,8 @@ export default class RecordingsView {
    */
   set timeFormat(formatStr) {
     // Change the formatter and update recordings (view)
-    this._formatter.timeFormat = formatStr;
-    this._updateRecordings();
+    this.formatter_.timeFormat = formatStr;
+    this.updateRecordings_();
   }
 
   /**
@@ -248,7 +248,7 @@ export default class RecordingsView {
    * @param  {Function} h Handler to be called.
    */
   set onRecordingClicked(h) {
-    this._clickHandler = h;
+    this.clickHandler_ = h;
   }
 
   /**
@@ -261,27 +261,27 @@ export default class RecordingsView {
   set recordingsJSON(recordingsJSON) {
     this.showLoading = false;
     // Store as model objects
-    this._recordings = recordingsJSON.recordings.map(function(r) {
+    this.recordings_ = recordingsJSON.recordings.map(function(r) {
       const vse = recordingsJSON.videoSampleEntries[r.videoSampleEntryId];
       return new Recording(r, vse);
     });
 
-    const tbody = this._element;
+    const tbody = this.element_;
     // Remove existing rows, replace with new ones
     $('tr.r', tbody).remove();
-    this._recordings.forEach((r) => {
+    this.recordings_.forEach((r) => {
       const row = $('<tr class="r" />');
       row.append(_columnOrder.map(() => $('<td/>')));
       row.on('click', () => {
         console.log('Video clicked');
-        if (this._clickHandler !== null) {
+        if (this.clickHandler_ !== null) {
           console.log('Video clicked handler call');
-          this._clickHandler(r);
+          this.clickHandler_(r);
         }
       });
       tbody.append(row);
     });
     // Cause formatting and date to be put in the rows
-    this._updateRecordings();
+    this.updateRecordings_();
   }
 }

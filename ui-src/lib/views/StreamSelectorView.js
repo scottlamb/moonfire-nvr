@@ -49,7 +49,7 @@ export default class StreamSelectorView {
    * @param {jQuery} parent jQuery parent element to append to
    */
   constructor(cameras, parent) {
-    this._cameras = cameras;
+    this.cameras_ = cameras;
 
     if (cameras.length !== 0) {
       // Add a header row.
@@ -60,7 +60,7 @@ export default class StreamSelectorView {
       parent.append(hdr);
     }
 
-    this._cameras.forEach((c) => {
+    this.cameras_.forEach((c) => {
       const row = $('<tr/>').append($('<td>').text(c.camera.shortName));
       let firstStreamType = true;
       for (const streamType of allStreamTypes) {
@@ -81,8 +81,8 @@ export default class StreamSelectorView {
 
           cb.change((e) => {
             streamView.enabled = e.target.checked;
-            if (this._onChangeHandler) {
-              this._onChangeHandler();
+            if (this.onChangeHandler_) {
+              this.onChangeHandler_();
             }
           });
           row.append($('<td/>').append(cb));
@@ -91,11 +91,11 @@ export default class StreamSelectorView {
       parent.append(row);
     });
 
-    this._onChangeHandler = null;
+    this.onChangeHandler_ = null;
   }
 
   /** @param {function()} handler a handler to run after toggling a stream */
   set onChange(handler) {
-    this._onChangeHandler = handler;
+    this.onChangeHandler_ = handler;
   }
 }

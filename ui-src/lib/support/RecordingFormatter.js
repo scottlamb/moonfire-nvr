@@ -59,8 +59,8 @@ export default class RecordingFormatter {
    * @param  {String} tz        Timezone
    */
   constructor(formatStr, tz) {
-    this._timeFormatter = new TimeFormatter(formatStr, tz);
-    this._singleDateStr = null;
+    this.timeFormatter_ = new TimeFormatter(formatStr, tz);
+    this.singleDateStr_ = null;
   }
 
   /**
@@ -69,7 +69,7 @@ export default class RecordingFormatter {
    * @param  {String} formatStr Time format string
    */
   set timeFormat(formatStr) {
-    this._timeFormatter = new TimeFormatter(formatStr, this._timeFormatter.tz);
+    this.timeFormatter_ = new TimeFormatter(formatStr, this.timeFormatter_.tz);
   }
 
   /**
@@ -85,8 +85,8 @@ export default class RecordingFormatter {
     const duration = recording.duration;
     const trimmedRange = recording.range90k(trimRange);
     return {
-      start: this._timeFormatter.formatTimeStamp90k(trimmedRange.startTime90k),
-      end: this._timeFormatter.formatTimeStamp90k(trimmedRange.endTime90k),
+      start: this.timeFormatter_.formatTimeStamp90k(trimmedRange.startTime90k),
+      end: this.timeFormatter_.formatTimeStamp90k(trimmedRange.endTime90k),
       resolution:
         recording.videoSampleEntryWidth +
         'x' +

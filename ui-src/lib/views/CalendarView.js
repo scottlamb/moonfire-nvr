@@ -105,12 +105,12 @@ export default class CalendarView {
   } = {}) {
     // Lookup all by id, check and remember
     [
-      this._fromPickerView,
-      this._toPickerView,
-      this._sameDayElement,
-      this._otherDayElement,
-      this._startTimeElement,
-      this._endTimeElement,
+      this.fromPickerView_,
+      this.toPickerView_,
+      this.sameDayElement_,
+      this.otherDayElement_,
+      this.startTimeElement_,
+      this.endTimeElement_,
     ] = [
       fromPickerId,
       toPickerId,
@@ -125,20 +125,20 @@ export default class CalendarView {
       }
       return el;
     });
-    this._fromPickerView = new DatePickerView(this._fromPickerView);
-    this._toPickerView = new DatePickerView(this._toPickerView);
-    this._timeFormatter = new TimeStamp90kFormatter(timeZone);
-    this._timeParser = new Time90kParser(timeZone);
-    this._selectedRange = new CalendarTSRange(timeZone);
-    this._sameDay = true; // Start in single day view
-    this._sameDayElement.prop('checked', this._sameDay);
-    this._otherDayElement.prop('checked', !this._sameDay);
-    this._availableDates = null;
-    this._minDateStr = null;
-    this._maxDateStr = null;
-    this._singleDateStr = null;
-    this._streamViews = null;
-    this._rangeChangedHandler = null;
+    this.fromPickerView_ = new DatePickerView(this.fromPickerView_);
+    this.toPickerView_ = new DatePickerView(this.toPickerView_);
+    this.timeFormatter_ = new TimeStamp90kFormatter(timeZone);
+    this.timeParser_ = new Time90kParser(timeZone);
+    this.selectedRange_ = new CalendarTSRange(timeZone);
+    this.sameDay_ = true; // Start in single day view
+    this.sameDayElement_.prop('checked', this.sameDay_);
+    this.otherDayElement_.prop('checked', !this.sameDay_);
+    this.availableDates_ = null;
+    this.minDateStr_ = null;
+    this.maxDateStr_ = null;
+    this.singleDateStr_ = null;
+    this.streamViews_ = null;
+    this.rangeChangedHandler_ = null;
   }
 
   /**
@@ -147,31 +147,31 @@ export default class CalendarView {
    * @param  {String} tz New timezone
    */
   set tz(tz) {
-    this._timeParser.tz = tz;
+    this.timeParser_.tz = tz;
   }
 
   /**
    * (Re)configure the datepickers and other calendar range inputs to reflect
    * available dates.
    */
-  _configureDatePickers() {
-    const dateSet = this._availableDates;
-    const minDateStr = this._minDateStr;
-    const maxDateStr = this._maxDateStr;
-    const fromPickerView = this._fromPickerView;
-    const toPickerView = this._toPickerView;
+  configureDatePickers_() {
+    const dateSet = this.availableDates_;
+    const minDateStr = this.minDateStr_;
+    const maxDateStr = this.maxDateStr_;
+    const fromPickerView = this.fromPickerView_;
+    const toPickerView = this.toPickerView_;
     const beforeShowDay = function(date) {
       const dateStr = date.toISOString().substr(0, 10);
       return [dateSet.has(dateStr), '', ''];
     };
 
-    if (this._sameDay) {
+    if (this.sameDay_) {
       fromPickerView.option({
         dateFormat: DatePickerView.datepicker.ISO_8601,
         minDate: minDateStr,
         maxDate: maxDateStr,
         onSelect: (dateStr /* , picker */) =>
-          this._updateRangeDates(dateStr, dateStr),
+          this.updateRangeDates_(dateStr, dateStr),
         beforeShowDay: beforeShowDay,
         disabled: false,
       });
@@ -183,7 +183,7 @@ export default class CalendarView {
         minDate: minDateStr,
         onSelect: (dateStr /* , picker */) => {
           toPickerView.minDate = this.fromDateISO;
-          this._updateRangeDates(dateStr, this.toDateISO);
+          this.updateRangeDates_(dateStr, this.toDateISO);
         },
         beforeShowDay: beforeShowDay,
         disabled: false,
@@ -194,7 +194,7 @@ export default class CalendarView {
         maxDate: maxDateStr,
         onSelect: (dateStr /* , picker */) => {
           fromPickerView.maxDate = this.toDateISO;
-          this._updateRangeDates(this.fromDateISO, dateStr);
+          this.updateRangeDates_(this.fromDateISO, dateStr);
         },
         beforeShowDay: beforeShowDay,
         disabled: false,
@@ -207,9 +207,9 @@ export default class CalendarView {
   /**
    * Call an installed handler (if any) to inform that range has changed.
    */
-  _informRangeChange() {
-    if (this._rangeChangedHandler !== null) {
-      this._rangeChangedHandler(this._selectedRange);
+  informRangeChange_() {
+    if (this.rangeChangedHandler_ !== null) {
+      this.rangeChangedHandler_(this.selectedRange_);
     }
   }
 
@@ -222,10 +222,10 @@ export default class CalendarView {
    * @param  {event}  event       DOM event that triggered us
    * @param  {Boolean} isEnd      True if this is for end time
    */
-  _pickerTimeChanged(event, isEnd) {
+  pickerTimeChanged_(event, isEnd) {
     const pickerElement = event.currentTarget;
     const newTimeStr = pickerElement.value;
-    const selectedRange = this._selectedRange;
+    const selectedRange = this.selectedRange_;
     const parsedTS = isEnd ?
       selectedRange.setEndTime(newTimeStr) :
       selectedRange.setStartTime(newTimeStr);
@@ -240,10 +240,10 @@ export default class CalendarView {
         ' time changed to: ' +
         parsedTS +
         ' (' +
-        this._timeFormatter.formatTimeStamp90k(parsedTS) +
+        this.timeFormatter_.formatTimeStamp90k(parsedTS) +
         ')'
     );
-    this._informRangeChange();
+    this.informRangeChange_();
   }
 
   /**
@@ -253,9 +253,9 @@ export default class CalendarView {
    *
    * @param {Boolean} isSameDay True if the same day radio button was activated
    */
-  _pickerSameDayChanged(isSameDay) {
+  pickerSameDayChanged_(isSameDay) {
     // Prevent change if not real change (can happen on initial setup)
-    if (this._sameDay != isSameDay) {
+    if (this.sameDay_ != isSameDay) {
       /**
        * This is called when the status of the same/other day radio buttons
        * changes. We need to determine a new selected range and activiate it.
@@ -264,11 +264,11 @@ export default class CalendarView {
       const endDate = isSameDay ?
         this.selectedRange.start.dateStr :
         this.selectedRange.end.dateStr;
-      this._updateRangeDates(this.selectedRange.start.dateStr, endDate);
-      this._sameDay = isSameDay;
+      this.updateRangeDates_(this.selectedRange.start.dateStr, endDate);
+      this.sameDay_ = isSameDay;
 
       // Switch between single day and multi-day
-      this._configureDatePickers();
+      this.configureDatePickers_();
     }
   }
 
@@ -281,8 +281,8 @@ export default class CalendarView {
    * @param  {String} startDateStr New starting date
    * @param  {String} endDateStr   New ending date
    */
-  _updateRangeDates(startDateStr, endDateStr) {
-    const newRange = this._selectedRange;
+  updateRangeDates_(startDateStr, endDateStr) {
+    const newRange = this.selectedRange_;
     const originalStart = Object.assign({}, newRange.start);
     const originalEnd = Object.assign({}, newRange.end);
     newRange.setStartDate(startDateStr);
@@ -300,7 +300,7 @@ export default class CalendarView {
       !isSameRange(newRange.end, originalEnd)
     ) {
       console.log('New range: ' + startDateStr + ' - ' + endDateStr);
-      this._informRangeChange();
+      this.informRangeChange_();
     }
   }
 
@@ -309,18 +309,18 @@ export default class CalendarView {
    * time input boxes as both need to result in an update of the calendar
    * view.
    */
-  _wireControls() {
+  wireControls_() {
     // If same day status changed, update the view
-    this._sameDayElement.change(() => this._pickerSameDayChanged(true));
-    this._otherDayElement.change(() => this._pickerSameDayChanged(false));
+    this.sameDayElement_.change(() => this.pickerSameDayChanged_(true));
+    this.otherDayElement_.change(() => this.pickerSameDayChanged_(false));
 
     // Handle changing of a time input (either from or to)
     const handler = (e, isEnd) => {
       console.log('Time changed for: ' + (isEnd ? 'end' : 'start'));
-      this._pickerTimeChanged(e, isEnd);
+      this.pickerTimeChanged_(e, isEnd);
     };
-    this._startTimeElement.change((e) => handler(e, false));
-    this._endTimeElement.change((e) => handler(e, true));
+    this.startTimeElement_.change((e) => handler(e, false));
+    this.endTimeElement_.change((e) => handler(e, true));
   }
 
   /**
@@ -332,18 +332,18 @@ export default class CalendarView {
    * @param  {Iterable} streamViews Collection of camera views
    */
   initializeWith(streamViews) {
-    this._streamViews = streamViews;
-    [this._availableDates, this._minDateStr, this._maxDateStr] = minMaxDates(
+    this.streamViews_ = streamViews;
+    [this.availableDates_, this.minDateStr_, this.maxDateStr_] = minMaxDates(
         streamViews
     );
-    this._configureDatePickers();
+    this.configureDatePickers_();
 
     // Initialize the selected range to the from picker's date
     // if we do not have a selected range yet
     if (!this.selectedRange.hasStart()) {
       const date = this.fromDateISO;
-      this._updateRangeDates(date, date);
-      this._wireControls();
+      this.updateRangeDates_(date, date);
+      this.wireControls_();
     }
   }
 
@@ -357,7 +357,7 @@ export default class CalendarView {
    * @param  {Function} handler Function that will be called
    */
   set onRangeChange(handler) {
-    this._rangeChangedHandler = handler;
+    this.rangeChangedHandler_ = handler;
   }
 
   /**
@@ -366,7 +366,7 @@ export default class CalendarView {
    * @return {Date} Date value of the "to"date picker
    */
   get toDate() {
-    return this._toPickerView.date;
+    return this.toPickerView_.date;
   }
 
   /**
@@ -375,7 +375,7 @@ export default class CalendarView {
    * @return {Date} Date value of the "from"date picker
    */
   get fromDate() {
-    return this._fromPickerView.date;
+    return this.fromPickerView_.date;
   }
 
   /**
@@ -385,7 +385,7 @@ export default class CalendarView {
    * @return {String} Date value (YYYY-MM-D) of the "to" date picker
    */
   get toDateISO() {
-    return this._toPickerView.dateISO;
+    return this.toPickerView_.dateISO;
   }
 
   /**
@@ -395,7 +395,7 @@ export default class CalendarView {
    * @return {String} Date value (YYYY-MM-D) of the "from" date picker
    */
   get fromDateISO() {
-    return this._fromPickerView.dateISO;
+    return this.fromPickerView_.dateISO;
   }
 
   /**
@@ -404,6 +404,6 @@ export default class CalendarView {
    * @return {CalendarTSRange} Range object
    */
   get selectedRange() {
-    return this._selectedRange;
+    return this.selectedRange_;
   }
 }

@@ -46,7 +46,7 @@ export default class TimeStamp90kFormatter {
    * @param  {String} tz Timezone
    */
   constructor(tz) {
-    this._formatter = new TimeFormatter(internalTimeFormat, tz);
+    this.formatter_ = new TimeFormatter(internalTimeFormat, tz);
   }
 
   /**
@@ -56,7 +56,7 @@ export default class TimeStamp90kFormatter {
    * @return {String}        Formatted timestamp
    */
   formatTimeStamp90k(ts90k) {
-    return this._formatter.formatTimeStamp90k(ts90k);
+    return this.formatter_.formatTimeStamp90k(ts90k);
   }
 
   /**
@@ -70,7 +70,7 @@ export default class TimeStamp90kFormatter {
   formatSameDayShortened(ts1, ts2) {
     let ts1Formatted = this.formatTimeStamp90k(ts1);
     let ts2Formatted = this.formatTimeStamp90k(ts2);
-    const timePos = this._formatter.formatStr.indexOf('T');
+    const timePos = this.formatter_.formatStr.indexOf('T');
     if (timePos != -1) {
       const datePortion = ts1Formatted.substr(0, timePos);
       ts1Formatted = datePortion + ' ' + ts1Formatted.substr(timePos + 1);

@@ -63,11 +63,11 @@ export default class VideoDialogView {
    * @return {VideoDialogView} Returns "this" for chaining.
    */
   attach(domElement) {
-    this._videoElement = $('<video controls preload="auto" autoplay="true" />');
-    this._dialogElement = $('<div class="playdialog" />').append(
-        this._videoElement
+    this.videoElement_ = $('<video controls preload="auto" autoplay="true" />');
+    this.dialogElement_ = $('<div class="playdialog" />').append(
+        this.videoElement_
     );
-    $(domElement).append(this._dialogElement);
+    $(domElement).append(this.dialogElement_);
     return this;
   }
 
@@ -80,21 +80,21 @@ export default class VideoDialogView {
    * @return {VideoDialogView}       Returns "this" for chaining.
    */
   play(title, width, url) {
-    this._dialogElement.dialog({
+    this.dialogElement_.dialog({
       title: title,
       width: width,
       close: () => {
-        const videoDOMElement = this._videoElement[0];
+        const videoDOMElement = this.videoElement_[0];
         videoDOMElement.pause();
         videoDOMElement.src = ''; // Remove current source to stop loading
-        this._videoElement = null;
-        this._dialogElement.remove();
-        this._dialogElement = null;
+        this.videoElement_ = null;
+        this.dialogElement_.remove();
+        this.dialogElement_ = null;
       },
     });
     // Now that dialog is up, set the src so video starts
     console.log('Video url: ' + url);
-    this._videoElement.attr('src', url);
+    this.videoElement_.attr('src', url);
     return this;
   }
 }

@@ -57,8 +57,8 @@ export default class TimeFormatter {
    * @param  {String} tz        Timezone, e.g. "America/Los_Angeles"
    */
   constructor(formatStr, tz) {
-    this._formatStr = formatStr || defaultTimeFormat;
-    this._tz = tz;
+    this.formatStr_ = formatStr || defaultTimeFormat;
+    this.tz_ = tz;
   }
 
   /**
@@ -67,7 +67,7 @@ export default class TimeFormatter {
    * @return {String} Format specification string
    */
   get formatStr() {
-    return this._formatStr;
+    return this.formatStr_;
   }
 
   /**
@@ -76,7 +76,7 @@ export default class TimeFormatter {
    * @return {String} Timezone
    */
   get tz() {
-    return this._tz;
+    return this.tz_;
   }
 
   /**
@@ -103,7 +103,7 @@ export default class TimeFormatter {
    * @return {String}        Formatted timestamp
    */
   formatTimeStamp90k(ts90k) {
-    let format = this._formatStr;
+    let format = this.formatStr_;
     const ms = ts90k / 90.0;
     const fracFmt = 'FFFFF';
     const fracLoc = format.indexOf(fracFmt);
@@ -114,6 +114,6 @@ export default class TimeFormatter {
         String(100000 + frac).substr(1) +
         format.substr(fracLoc + fracFmt.length);
     }
-    return moment.tz(ms, this._tz).format(format);
+    return moment.tz(ms, this.tz_).format(format);
   }
 }

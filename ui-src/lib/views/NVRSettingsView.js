@@ -50,16 +50,16 @@ export default class NVRSettingsView {
     tsTrackId = 'ts',
     timeFmtId = 'timefmt',
   } = {}) {
-    this._ids = {videoLenId, trimCheckId, tsTrackId, timeFmtId};
-    this._videoLength = null;
-    this._videoLengthHandler = null;
-    this._trim = null;
-    this._trimHandler = null;
-    this._timeFmtStr = null;
-    this._timeFmtHandler = null;
-    this._tsTrack = null;
-    this._tsTrackHandler = null;
-    this._wireControls();
+    this.ids_ = {videoLenId, trimCheckId, tsTrackId, timeFmtId};
+    this.videoLength_ = null;
+    this.videoLengthHandler_ = null;
+    this.trim_ = null;
+    this.trimHandler_ = null;
+    this.timeFmtStr_ = null;
+    this.timeFmtHandler_ = null;
+    this.tsTrack_ = null;
+    this.tsTrackHandler_ = null;
+    this.wireControls_();
   }
 
   /**
@@ -70,7 +70,7 @@ export default class NVRSettingsView {
    * @param  {jQuery} selectEl jQuery element for the <select>
    * @return {String}          Value of the selected/first option
    */
-  _findSelectedOrFirst(selectEl) {
+  findSelectedOrFirst_(selectEl) {
     let value = selectEl.find(':selected').val();
     if (!value) {
       value = selectEl.find('option:first-child').val();
@@ -82,42 +82,42 @@ export default class NVRSettingsView {
    * Wire up all controls and handlers.
    *
    */
-  _wireControls() {
-    const videoLengthEl = $(`#${this._ids.videoLenId}`);
-    this._videoLength = this._findSelectedOrFirst(videoLengthEl);
+  wireControls_() {
+    const videoLengthEl = $(`#${this.ids_.videoLenId}`);
+    this.videoLength_ = this.findSelectedOrFirst_(videoLengthEl);
     videoLengthEl.change((e) => {
       const newValueStr = e.currentTarget.value;
-      this._videoLength =
+      this.videoLength_ =
         newValueStr == 'infinite' ? Infinity : Number(newValueStr);
-      if (this._videoLengthHandler) {
-        this._videoLengthHandler(this._videoLength);
+      if (this.videoLengthHandler_) {
+        this.videoLengthHandler_(this.videoLength_);
       }
     });
 
-    const trimEl = $(`#${this._ids.trimCheckId}`);
-    this._trim = trimEl.is(':checked');
+    const trimEl = $(`#${this.ids_.trimCheckId}`);
+    this.trim_ = trimEl.is(':checked');
     trimEl.change((e) => {
-      this._trim = e.currentTarget.checked;
-      if (this._trimHandler) {
-        this._trimHandler(this._trim);
+      this.trim_ = e.currentTarget.checked;
+      if (this.trimHandler_) {
+        this.trimHandler_(this.trim_);
       }
     });
 
-    const timeFmtEl = $(`#${this._ids.timeFmtId}`);
-    this._timeFmtStr = this._findSelectedOrFirst(timeFmtEl);
+    const timeFmtEl = $(`#${this.ids_.timeFmtId}`);
+    this.timeFmtStr_ = this.findSelectedOrFirst_(timeFmtEl);
     timeFmtEl.change((e) => {
-      this._timeFmtStr = e.target.value;
-      if (this._timeFmtHandler) {
-        this._timeFmtHandler(this._timeFmtStr);
+      this.timeFmtStr_ = e.target.value;
+      if (this.timeFmtHandler_) {
+        this.timeFmtHandler_(this.timeFmtStr_);
       }
     });
 
-    const trackEl = $(`#${this._ids.tsTrackId}`);
-    this._tsTrack = trackEl.is(':checked');
+    const trackEl = $(`#${this.ids_.tsTrackId}`);
+    this.tsTrack_ = trackEl.is(':checked');
     trackEl.change((e) => {
-      this._tsTrack = e.target.checked;
-      if (this._tsTrackHandler) {
-        this._tsTrackHandler(this._tsTrack);
+      this.tsTrack_ = e.target.checked;
+      if (this.tsTrackHandler_) {
+        this.tsTrackHandler_(this.tsTrack_);
       }
     });
   }
@@ -128,7 +128,7 @@ export default class NVRSettingsView {
    * @return {Number} Video length value
    */
   get videoLength() {
-    return this._videoLength;
+    return this.videoLength_;
   }
 
   /**
@@ -137,7 +137,7 @@ export default class NVRSettingsView {
    * @return {String} Format string
    */
   get timeFormatString() {
-    return this._timeFmtStr;
+    return this.timeFmtStr_;
   }
 
   /**
@@ -146,7 +146,7 @@ export default class NVRSettingsView {
    * @return {Boolean}
    */
   get trim() {
-    return this._trim;
+    return this.trim_;
   }
 
   /**
@@ -155,7 +155,7 @@ export default class NVRSettingsView {
    * @return {Boolean}
    */
   get timeStampTrack() {
-    return this._tsTrack;
+    return this.tsTrack_;
   }
 
   /**
@@ -166,7 +166,7 @@ export default class NVRSettingsView {
    * @param  {Function} handler Format change handler
    */
   set onTimeFormatChange(handler) {
-    this._timeFmtHandler = handler;
+    this.timeFmtHandler_ = handler;
   }
 
   /**
@@ -177,7 +177,7 @@ export default class NVRSettingsView {
    * @param  {Function} handler Video Length change handler
    */
   set onVideoLengthChange(handler) {
-    this._videoLengthHandler = handler;
+    this.videoLengthHandler_ = handler;
   }
 
   /**
@@ -188,7 +188,7 @@ export default class NVRSettingsView {
    * @param  {Function} handler Trim change handler
    */
   set onTrimChange(handler) {
-    this._trimHandler = handler;
+    this.trimHandler_ = handler;
   }
 
   /**
@@ -200,6 +200,6 @@ export default class NVRSettingsView {
    * @param  {Function} handler Timestamp track change handler
    */
   set onTimeStampTrackChange(handler) {
-    this._tsTrackHandler = handler;
+    this.tsTrackHandler_ = handler;
   }
 }

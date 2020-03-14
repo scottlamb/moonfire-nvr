@@ -44,8 +44,8 @@ export default class URLBuilder {
    * @param  {Boolean} relative True if relative urls desired
    */
   constructor(base, relative = true) {
-    this._baseUrl = base;
-    this._relative = relative;
+    this.baseUrl_ = base;
+    this.relative_ = relative;
   }
 
   /**
@@ -58,7 +58,7 @@ export default class URLBuilder {
    * @param {Object} query Object with parameter name/value pairs
    * @return {URL} URL where query params have been added
    */
-  _addQuery(url, query = {}) {
+  addQuery_(url, query = {}) {
     Object.entries(query).forEach(([k, v]) => url.searchParams.set(k, v));
     return url;
   }
@@ -74,8 +74,8 @@ export default class URLBuilder {
    * @return {String}       Formatted url, relative if so configured
    */
   makeUrl(path, query = {}) {
-    const url = new URL(path || '', this._baseUrl);
-    this._addQuery(url, query);
-    return this._relative ? url.pathname + url.search : url.href;
+    const url = new URL(path || '', this.baseUrl_);
+    this.addQuery_(url, query);
+    return this.relative_ ? url.pathname + url.search : url.href;
   }
 }

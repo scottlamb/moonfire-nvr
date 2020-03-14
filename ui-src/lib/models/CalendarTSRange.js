@@ -53,11 +53,11 @@ export default class CalendarTSRange {
    * @param  {String} timeZone Desired timezone, e.g. 'America/Los_Angeles'
    */
   constructor(timeZone) {
-    this._start = {dateStr: null, timeStr: '', ts90k: null};
-    this._end = {dateStr: null, timeStr: '', ts90k: null};
+    this.start_ = {dateStr: null, timeStr: '', ts90k: null};
+    this.end_ = {dateStr: null, timeStr: '', ts90k: null};
     // Don't need to keep timezone, but need parser and formatter
-    this._timeFormatter = new TimeStamp90kFormatter(timeZone);
-    this._timeParser = new Time90kParser(timeZone);
+    this.timeFormatter_ = new TimeStamp90kFormatter(timeZone);
+    this.timeParser_ = new Time90kParser(timeZone);
   }
 
   /**
@@ -93,7 +93,7 @@ export default class CalendarTSRange {
    * @return {object} Object containing dateStr, timeStr, and ts90k components
    */
   get start() {
-    return this._start;
+    return this.start_;
   }
 
   /**
@@ -102,7 +102,7 @@ export default class CalendarTSRange {
    * @return {object} Object containing dateStr, timeStr, and ts90k components
    */
   get end() {
-    return this._end;
+    return this.end_;
   }
 
   /**
@@ -165,8 +165,8 @@ export default class CalendarTSRange {
    *                                        not present in the range.
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
-  _setRangeTime(range, dateStr, timeStr, dateOnlyThenEndOfDay) {
-    const newTs90k = this._timeParser.parseDateTime90k(
+  setRangeTime_(range, dateStr, timeStr, dateOnlyThenEndOfDay) {
+    const newTs90k = this.timeParser_.parseDateTime90k(
         dateStr,
         timeStr,
         dateOnlyThenEndOfDay
@@ -189,7 +189,7 @@ export default class CalendarTSRange {
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setStartDate(dateStr) {
-    return this._setRangeTime(this._start, dateStr, this._start.timeStr, false);
+    return this.setRangeTime_(this.start_, dateStr, this.start_.timeStr, false);
   }
 
   /**
@@ -201,7 +201,7 @@ export default class CalendarTSRange {
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setStartTime(timeStr) {
-    return this._setRangeTime(this._start, this._start.dateStr, timeStr, false);
+    return this.setRangeTime_(this.start_, this.start_.dateStr, timeStr, false);
   }
 
   /**
@@ -213,7 +213,7 @@ export default class CalendarTSRange {
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setEndDate(dateStr) {
-    return this._setRangeTime(this._end, dateStr, this._end.timeStr, true);
+    return this.setRangeTime_(this.end_, dateStr, this.end_.timeStr, true);
   }
 
   /**
@@ -225,7 +225,7 @@ export default class CalendarTSRange {
    * @return {Number} New timestamp if succesfully parsed, null otherwise
    */
   setEndTime(timeStr) {
-    return this._setRangeTime(this._end, this._end.dateStr, timeStr, true);
+    return this.setRangeTime_(this.end_, this.end_.dateStr, timeStr, true);
   }
 
   /**
@@ -236,6 +236,6 @@ export default class CalendarTSRange {
    * @return {String}       Formatted string
    */
   formatTimeStamp90k(ts90k) {
-    return this._timeFormatter.formatTimeStamp90k(ts90k);
+    return this.timeFormatter_.formatTimeStamp90k(ts90k);
   }
 }
