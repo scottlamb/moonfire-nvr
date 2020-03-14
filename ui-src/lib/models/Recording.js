@@ -53,8 +53,8 @@ export default class Recording {
     this.openId = recordingJson.openId;
 
     /** @const {?number} */
-    this.firstUncommitted = recordingJson.firstUncommitted !== undefined
-        ? recordingJson.firstUncommitted : null;
+    this.firstUncommitted = recordingJson.firstUncommitted !== undefined ?
+        recordingJson.firstUncommitted : null;
 
     /** @const {!boolean} */
     this.growing = recordingJson.growing || false;
