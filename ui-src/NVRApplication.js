@@ -198,7 +198,7 @@ function fetch(selectedRange, videoLength) {
               'Fetched results for "%s-%s" > updating recordings',
               streamView.camera.shortName, streamView.streamType
           );
-          streamView.recordingsJSON = data.recordings;
+          streamView.recordingsJSON = data;
         })
         .catch(function(data, status, err) {
           console.error(url, ' load failed: ', status, ': ', err);

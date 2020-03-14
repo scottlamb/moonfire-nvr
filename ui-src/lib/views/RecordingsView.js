@@ -256,13 +256,14 @@ export default class RecordingsView {
    *
    * The data is expected to be an array with recording objects.
    *
-   * @param  {String} recordingsJSON JSON data (array)
+   * @param  {object} recordingsJSON JSON data (object)
    */
   set recordingsJSON(recordingsJSON) {
     this.showLoading = false;
     // Store as model objects
-    this._recordings = recordingsJSON.map(function(r) {
-      return new Recording(r);
+    this._recordings = recordingsJSON.recordings.map(function(r) {
+      const vse = recordingsJSON.videoSampleEntries[r.videoSampleEntryId];
+      return new Recording(r, vse);
     });
 
     const tbody = this._element;

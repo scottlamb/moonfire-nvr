@@ -246,7 +246,7 @@ Example response:
 
 ### `GET /api/cameras/<uuid>/<stream>/recordings`
 
-Returns information about recordings, in descending order.
+Returns information about recordings.
 
 Valid request parameters:
 
@@ -259,8 +259,8 @@ Valid request parameters:
     server should return a `continue` key which is expected to be returned on
     following requests.)
 
-In the property `recordings`, returns a list of recordings in arbitrary order.
-Each recording object has the following properties:
+Returns a JSON object. Under the key `recordings` is an array of recordings in
+arbitrary order. Each recording object has the following properties:
 
 *   `startId`. The id of this recording, which can be used with `/view.mp4`
     to retrieve its content.
@@ -289,12 +289,23 @@ Each recording object has the following properties:
 *   `endTime90k`: the end time of the given recording. Note this may be
     greater than the requested `endTime90k` if this recording was ongoing at
     the requested time.
-*   `sampleFileBytes`
-*   `videoSampleEntrySha1`
-*   `videoSampleEntryWidth`
-*   `videoSampleEntryHeight`
+*   `videoSampleEntryId`: a reference to an entry in the `videoSampleEntries`
+    map. These ids are strings so that they can serve as JSON object keys.
 *   `videoSamples`: the number of samples (aka frames) of video in this
     recording.
+
+Under the property `videoSampleEntries`, an object mapping ids to objects with
+the following properties:
+
+*   `sha1`: a SHA-1 hash of the ISO/IEC 14496-12 section 8.5.2
+    `VisualSampleEntry` bytes. The actual bytes can be retrieved, wrapped into
+    an initialization segment `.mp4`, at the URL `/api/init/<sha1>.mp4`.
+*   `width`: the stored width in pixels.
+*   `height`: the stored height in pixels.
+*   `pixelHSpacing`: the relative width of a pixel, as in a ISO/IEC 14496-12
+    section 12.1.4.3 `PixelAspectRatioBox`. If absent, assumed to be 1.
+*   `pixelVSpacing`: the relative height of a pixel, as in a ISO/IEC 14496-12
+    section 12.1.4.3 `PixelAspectRatioBox`. If absent, assumed to be 1.
 
 Example request URI (with added whitespace between parameters):
 
@@ -314,9 +325,7 @@ Example response:
       "startTime90k": 130985461191810,
       "endTime90k": 130985466591817,
       "sampleFileBytes": 8405564,
-      "videoSampleEntrySha1": "81710c9c51a02cc95439caa8dd3bc12b77ffe767",
-      "videoSampleEntryWidth": 1280,
-      "videoSampleEntryHeight": 720,
+      "videoSampleEntryId": "1",
     },
     {
       "endTime90k": 130985461191810,
@@ -324,7 +333,13 @@ Example response:
     },
     ...
   ],
-  "continue": "<opaque blob>",
+  "videoSampleEntries": {
+    "1": {
+      "sha1": "81710c9c51a02cc95439caa8dd3bc12b77ffe767",
+      "width": 1280,
+      "height": 720
+    }
+  },
 }
 ```
 

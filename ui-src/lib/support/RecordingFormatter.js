@@ -91,7 +91,7 @@ export default class RecordingFormatter {
         recording.videoSampleEntryWidth +
         'x' +
         recording.videoSampleEntryHeight,
-      frameRate: frameRateFmt.format(recording.frameCount / duration),
+      frameRate: frameRateFmt.format(recording.videoSamples / duration),
       size: sizeFmt.format(recording.sampleFileBytes / 1048576) + ' MB',
       rate:
         sizeFmt.format(recording.sampleFileBytes / duration * 0.000008) +

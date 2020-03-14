@@ -39,51 +39,46 @@ export default class Recording {
   /**
    * Accept JSON data to be encapsulated
    *
-   * @param  {object} recordingJson JSON for a recording
+   * @param {object} recordingJson JSON for a recording
+   * @param {object} videoSampleEntryJson JSON for a video sample entry
    */
-  constructor(recordingJson) {
-    this.json_ = recordingJson;
-  }
+  constructor(recordingJson, videoSampleEntryJson) {
+    /** @const {!number} */
+    this.startId = recordingJson.startId;
 
-  /** @return {Number} */
-  get startId() {
-    return this.json_.startId;
-  }
+    /** @const {?number} */
+    this.endId = recordingJson.endId !== undefined ? recordingJson.endId : null;
 
-  /** @return {Number} */
-  get endId() {
-    return this.json_.endId;
-  }
+    /** @const {!number} */
+    this.openId = recordingJson.openId;
 
-  /** @return {Number} */
-  get openId() {
-    return this.json_.openId;
-  }
+    /** @const {?number} */
+    this.firstUncommitted = recordingJson.firstUncommitted !== undefined
+        ? recordingJson.firstUncommitted : null;
 
-  /** @return {Number} or undefined */
-  get firstUncommitted() {
-    return this.json_.firstUncommitted;
-  }
+    /** @const {!boolean} */
+    this.growing = recordingJson.growing || false;
 
-  /** @return {Boolean} or undefined */
-  get growing() {
-    return this.json_.growing;
-  }
+    /** @const {!number} */
+    this.startTime90k = recordingJson.startTime90k;
 
-  /**
-   * Return start time of recording in 90k units.
-   * @return {Number} Time in units of 90k parts of a second
-   */
-  get startTime90k() {
-    return this.json_.startTime90k;
-  }
+    /** @const {!number} */
+    this.endTime90k = recordingJson.endTime90k;
 
-  /**
-   * Return end time of recording in 90k units.
-   * @return {Number} Time in units of 90k parts of a second
-   */
-  get endTime90k() {
-    return this.json_.endTime90k;
+    /** @const {!number} */
+    this.sampleFileBytes = recordingJson.sampleFileBytes;
+
+    /** @const {!number} */
+    this.videoSamples = recordingJson.videoSamples;
+
+    /** @const {!string} */
+    this.videoSampleEntrySha1 = videoSampleEntryJson.sha1;
+
+    /** @const {!number} */
+    this.videoSampleEntryWidth = videoSampleEntryJson.width;
+
+    /** @const {!number} */
+    this.videoSampleEntryHeight = videoSampleEntryJson.height;
   }
 
   /**
@@ -91,7 +86,7 @@ export default class Recording {
    * @return {Number} Time in units of 90k parts of a second
    */
   get duration90k() {
-    return this.json_.endTime90k - this.json_.startTime90k;
+    return this.endTime90k - this.startTime90k;
   }
 
   /**
@@ -111,50 +106,5 @@ export default class Recording {
    */
   get duration() {
     return this.duration90k / 90000;
-  }
-
-  /**
-   * Get the number of bytes used by sample storage.
-   *
-   * @return {Number} Total bytes used
-   */
-  get sampleFileBytes() {
-    return this.json_.sampleFileBytes;
-  }
-
-  /**
-   * Get the number of video samples (frames) for the recording.
-   *
-   * @return {Number} Total bytes used
-   */
-  get frameCount() {
-    return this.json_.videoSamples;
-  }
-
-  /**
-   * Get the has for the video samples.
-   *
-   * @return {String} Hash
-   */
-  get videoSampleEntryHash() {
-    return this.json_.videoSampleEntrySha1;
-  }
-
-  /**
-   * Get the width of the frame(s) of the video samples.
-   *
-   * @return {Number} Width in pixels
-   */
-  get videoSampleEntryWidth() {
-    return this.json_.videoSampleEntryWidth;
-  }
-
-  /**
-   * Get the height of the frame(s) of the video samples.
-   *
-   * @return {Number} Height in pixels
-   */
-  get videoSampleEntryHeight() {
-    return this.json_.videoSampleEntryHeight;
   }
 }

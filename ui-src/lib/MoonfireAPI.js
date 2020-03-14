@@ -111,10 +111,10 @@ export default class MoonfireAPI {
   videoPlayUrl(cameraUUID, streamType, recording, trimmedRange,
       timestampTrack = true) {
     let sParam = recording.startId;
-    if (recording.endId !== undefined) {
+    if (recording.endId !== null) {
       sParam += '-' + recording.endId;
     }
-    if (recording.firstUncommitted !== undefined) {
+    if (recording.firstUncommitted !== null) {
       sParam += '@' + recording.openId; // disambiguate.
     }
     let rel = '';
@@ -124,7 +124,7 @@ export default class MoonfireAPI {
     rel += '-';
     if (recording.endTime90k > trimmedRange.endTime90k) {
       rel += trimmedRange.endTime90k - recording.startTime90k;
-    } else if (recording.growing !== undefined) {
+    } else if (recording.growing) {
       // View just the portion described by recording.
       rel += recording.endTime90k - recording.startTime90k;
     }

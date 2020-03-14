@@ -372,9 +372,31 @@ impl<'a> TopLevel<'a> {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub struct ListRecordings {
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct ListRecordings<'a> {
     pub recordings: Vec<Recording>,
+
+    // There are likely very few video sample entries for a given stream in a given day, so
+    // representing with an unordered Vec (and having O(n) insert-if-absent) is probably better
+    // than dealing with a HashSet's code bloat.
+    #[serde(serialize_with = "ListRecordings::serialize_video_sample_entries")]
+    pub video_sample_entries: (&'a db::LockedDatabase, Vec<i32>),
+}
+
+impl<'a> ListRecordings<'a> {
+    fn serialize_video_sample_entries<S>(video_sample_entries: &(&db::LockedDatabase, Vec<i32>),
+                                         serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        let (db, ref v) = *video_sample_entries;
+        let mut map = serializer.serialize_map(Some(v.len()))?;
+        for id in v {
+            map.serialize_entry(
+                id,
+                &VideoSampleEntry::from(&db.video_sample_entries_by_id().get(id).unwrap()))?;
+        }
+        map.end()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -384,7 +406,7 @@ pub struct Recording {
     pub end_time_90k: i64,
     pub sample_file_bytes: i64,
     pub video_samples: i64,
-    pub video_sample_entry_sha1: String,
+    pub video_sample_entry_id: String,
     pub start_id: i32,
     pub open_id: u32,
 
@@ -393,9 +415,25 @@ pub struct Recording {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_id: Option<i32>,
-    pub video_sample_entry_width: u16,
-    pub video_sample_entry_height: u16,
 
     #[serde(skip_serializing_if = "Not::not")]
     pub growing: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct VideoSampleEntry {
+    pub sha1: String,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl VideoSampleEntry {
+    fn from(e: &db::VideoSampleEntry) -> Self {
+        Self {
+            sha1: base::strutil::hex(&e.sha1),
+            width: e.width,
+            height: e.height,
+        }
+    }
 }

@@ -344,35 +344,36 @@ impl ServiceInner {
             }
             (time, split)
         };
-        let mut out = json::ListRecordings{recordings: Vec::new()};
-        {
-            let db = self.db.lock();
-            let camera = db.get_camera(uuid)
-                           .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
-                                                         format!("no such camera {}", uuid)))?;
-            let stream_id = camera.streams[type_.index()]
-                .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
-                                              format!("no such stream {}/{}", uuid, type_)))?;
-            db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
-                let end = row.ids.end - 1;  // in api, ids are inclusive.
-                let vse = db.video_sample_entries_by_id().get(&row.video_sample_entry_id).unwrap();
-                out.recordings.push(json::Recording {
-                    start_id: row.ids.start,
-                    end_id: if end == row.ids.start { None } else { Some(end) },
-                    start_time_90k: row.time.start.0,
-                    end_time_90k: row.time.end.0,
-                    sample_file_bytes: row.sample_file_bytes,
-                    open_id: row.open_id,
-                    first_uncommitted: row.first_uncommitted,
-                    video_samples: row.video_samples,
-                    video_sample_entry_width: vse.width,
-                    video_sample_entry_height: vse.height,
-                    video_sample_entry_sha1: strutil::hex(&vse.sha1),
-                    growing: row.growing,
-                });
-                Ok(())
-            }).map_err(internal_server_err)?;
-        }
+        let db = self.db.lock();
+        let mut out = json::ListRecordings {
+            recordings: Vec::new(),
+            video_sample_entries: (&db, Vec::new()),
+        };
+        let camera = db.get_camera(uuid)
+                       .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
+                                                     format!("no such camera {}", uuid)))?;
+        let stream_id = camera.streams[type_.index()]
+            .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
+                                          format!("no such stream {}/{}", uuid, type_)))?;
+        db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
+            let end = row.ids.end - 1;  // in api, ids are inclusive.
+            out.recordings.push(json::Recording {
+                start_id: row.ids.start,
+                end_id: if end == row.ids.start { None } else { Some(end) },
+                start_time_90k: row.time.start.0,
+                end_time_90k: row.time.end.0,
+                sample_file_bytes: row.sample_file_bytes,
+                open_id: row.open_id,
+                first_uncommitted: row.first_uncommitted,
+                video_samples: row.video_samples,
+                video_sample_entry_id: row.video_sample_entry_id.to_string(),
+                growing: row.growing,
+            });
+            if !out.video_sample_entries.1.contains(&row.video_sample_entry_id) {
+                out.video_sample_entries.1.push(row.video_sample_entry_id);
+            }
+            Ok(())
+        }).map_err(internal_server_err)?;
         serve_json(req, &out)
     }
 
