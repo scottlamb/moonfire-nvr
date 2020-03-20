@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -65,13 +65,13 @@ use fnv::{FnvHashMap, FnvHashSet};
 use itertools::Itertools;
 use log::{error, info, trace};
 use lru_cache::LruCache;
-use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
 use protobuf::prelude::MessageField;
 use rusqlite::{named_params, params};
 use smallvec::SmallVec;
-use std::collections::{BTreeMap, VecDeque};
 use std::cell::RefCell;
+use std::collections::{BTreeMap, VecDeque};
+use std::convert::TryInto;
 use std::cmp;
 use std::fmt::Write as _;
 use std::io::Write;
@@ -85,7 +85,7 @@ use time;
 use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
-pub const EXPECTED_VERSION: i32 = 5;
+pub const EXPECTED_VERSION: i32 = 6;
 
 const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
     select
@@ -97,8 +97,10 @@ const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
 "#;
 
 const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &'static str = r#"
-    insert into video_sample_entry (sha1,  width,  height,  rfc6381_codec, data)
-                            values (:sha1, :width, :height, :rfc6381_codec, :data)
+    insert into video_sample_entry (sha1,  width,  height,  pasp_h_spacing,  pasp_v_spacing,
+                                    rfc6381_codec, data)
+                            values (:sha1, :width, :height, :pasp_h_spacing, :pasp_v_spacing,
+                                    :rfc6381_codec, :data)
 "#;
 
 const UPDATE_NEXT_RECORDING_ID_SQL: &'static str =
@@ -126,12 +128,27 @@ impl rusqlite::types::FromSql for VideoIndex {
 /// the codec, width, height, etc.
 #[derive(Debug)]
 pub struct VideoSampleEntry {
+    pub id: i32,
+    pub sha1: [u8; 20],
+
+    // Fields matching VideoSampleEntryToInsert below.
+
     pub data: Vec<u8>,
     pub rfc6381_codec: String,
-    pub id: i32,
     pub width: u16,
     pub height: u16,
-    pub sha1: [u8; 20],
+    pub pasp_h_spacing: u16,
+    pub pasp_v_spacing: u16,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct VideoSampleEntryToInsert {
+    pub data: Vec<u8>,
+    pub rfc6381_codec: String,
+    pub width: u16,
+    pub height: u16,
+    pub pasp_h_spacing: u16,
+    pub pasp_v_spacing: u16,
 }
 
 /// A row used in `list_recordings_by_time` and `list_recordings_by_id`.
@@ -1344,6 +1361,8 @@ impl LockedDatabase {
                 sha1,
                 width,
                 height,
+                pasp_h_spacing,
+                pasp_v_spacing,
                 rfc6381_codec,
                 data
             from
@@ -1358,15 +1377,17 @@ impl LockedDatabase {
                 bail!("video sample entry id {} has sha1 {} of wrong length", id, sha1_vec.len());
             }
             sha1.copy_from_slice(&sha1_vec);
-            let data: Vec<u8> = row.get(5)?;
+            let data: Vec<u8> = row.get(7)?;
 
             self.video_sample_entries_by_id.insert(id, Arc::new(VideoSampleEntry {
-                id: id as i32,
-                width: row.get::<_, i32>(2)? as u16,
-                height: row.get::<_, i32>(3)? as u16,
+                id,
+                width: row.get::<_, i32>(2)?.try_into()?,
+                height: row.get::<_, i32>(3)?.try_into()?,
+                pasp_h_spacing: row.get::<_, i32>(4)?.try_into()?,
+                pasp_v_spacing: row.get::<_, i32>(5)?.try_into()?,
                 sha1,
                 data,
-                rfc6381_codec: row.get(4)?,
+                rfc6381_codec: row.get(6)?,
             }));
         }
         info!("Loaded {} video sample entries",
@@ -1509,21 +1530,21 @@ impl LockedDatabase {
 
     /// Inserts the specified video sample entry if absent.
     /// On success, returns the id of a new or existing row.
-    pub fn insert_video_sample_entry(&mut self, width: u16, height: u16, data: Vec<u8>,
-                                     rfc6381_codec: String) -> Result<i32, Error> {
-        let sha1 = hash::hash(hash::MessageDigest::sha1(), &data)?;
-        let mut sha1_bytes = [0u8; 20];
-        sha1_bytes.copy_from_slice(&sha1);
+    pub fn insert_video_sample_entry(&mut self, entry: VideoSampleEntryToInsert)
+        -> Result<i32, Error> {
+        let sha1 = crate::sha1(&entry.data)?;
 
         // Check if it already exists.
         // There shouldn't be too many entries, so it's fine to enumerate everything.
         for (&id, v) in &self.video_sample_entries_by_id {
-            if v.sha1 == sha1_bytes {
-                // The width and height should match given that they're also specified within data
-                // and thus included in the just-compared hash.
-                if v.width != width || v.height != height {
-                    bail!("database entry for {:?} is {}x{}, not {}x{}",
-                          &sha1[..], v.width, v.height, width, height);
+            if v.sha1 == sha1 {
+                // A hash collision (different data with the same hash) is unlikely.
+                // The other fields are derived from data, so differences there indicate a bug.
+                if v.width != entry.width || v.height != entry.height ||
+                    v.pasp_h_spacing != entry.pasp_h_spacing ||
+                    v.pasp_v_spacing != entry.pasp_v_spacing {
+                    bail!("video_sample_entry SHA-1 {} mismatch: existing entry {:?}, new {:?}",
+                          base::strutil::hex(&sha1[..]), v, &entry);
                 }
                 return Ok(id);
             }
@@ -1531,21 +1552,25 @@ impl LockedDatabase {
 
         let mut stmt = self.conn.prepare_cached(INSERT_VIDEO_SAMPLE_ENTRY_SQL)?;
         stmt.execute_named(named_params!{
-            ":sha1": &sha1_bytes[..],
-            ":width": i32::from(width),
-            ":height": i32::from(height),
-            ":rfc6381_codec": &rfc6381_codec,
-            ":data": &data,
+            ":sha1": &sha1[..],
+            ":width": i32::from(entry.width),
+            ":height": i32::from(entry.height),
+            ":pasp_h_spacing": i32::from(entry.pasp_h_spacing),
+            ":pasp_v_spacing": i32::from(entry.pasp_v_spacing),
+            ":rfc6381_codec": &entry.rfc6381_codec,
+            ":data": &entry.data,
         })?;
 
         let id = self.conn.last_insert_rowid() as i32;
         self.video_sample_entries_by_id.insert(id, Arc::new(VideoSampleEntry {
             id,
-            width,
-            height,
-            sha1: sha1_bytes,
-            data,
-            rfc6381_codec,
+            width: entry.width,
+            height: entry.height,
+            pasp_h_spacing: entry.pasp_h_spacing,
+            pasp_v_spacing: entry.pasp_v_spacing,
+            sha1,
+            data: entry.data,
+            rfc6381_codec: entry.rfc6381_codec,
         }));
 
         Ok(id)
@@ -2215,20 +2240,20 @@ mod tests {
     fn test_version_too_old() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (4, 0, '');").unwrap();
+        c.execute_batch("delete from version; insert into version values (5, 0, '');").unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(e.to_string().starts_with(
-                "Database schema version 4 is too old (expected 5)"), "got: {:?}", e);
+                "Database schema version 5 is too old (expected 6)"), "got: {:?}", e);
     }
 
     #[test]
     fn test_version_too_new() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (6, 0, '');").unwrap();
+        c.execute_batch("delete from version; insert into version values (7, 0, '');").unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(e.to_string().starts_with(
-                "Database schema version 6 is too new (expected 5)"), "got: {:?}", e);
+                "Database schema version 7 is too new (expected 6)"), "got: {:?}", e);
     }
 
     /// Basic test of running some queries on a fresh database.
@@ -2308,9 +2333,14 @@ mod tests {
 
         // TODO: assert_eq!(db.lock().list_garbage(sample_file_dir_id).unwrap(), &[]);
 
-        let vse_id = db.lock().insert_video_sample_entry(
-            1920, 1080, include_bytes!("testdata/avc1").to_vec(),
-            "avc1.4d0029".to_owned()).unwrap();
+        let vse_id = db.lock().insert_video_sample_entry(VideoSampleEntryToInsert {
+            width: 1920,
+            height: 1080,
+            pasp_h_spacing: 1,
+            pasp_v_spacing: 1,
+            data: include_bytes!("testdata/avc1").to_vec(),
+            rfc6381_codec: "avc1.4d0029".to_owned(),
+        }).unwrap();
         assert!(vse_id > 0, "vse_id = {}", vse_id);
 
         // Inserting a recording should succeed and advance the next recording id.

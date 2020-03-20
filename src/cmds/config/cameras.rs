@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2017 The Moonfire NVR Authors
+// Copyright (C) 2017-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -108,7 +108,7 @@ fn press_test_inner(url: &Url) -> Result<String, Error> {
         redacted_url: url.as_str(),  // don't need redaction in config UI.
     })?;
     let extra_data = stream.get_extra_data()?;
-    Ok(format!("{}x{} video stream", extra_data.width, extra_data.height))
+    Ok(format!("{}x{} video stream", extra_data.entry.width, extra_data.entry.height))
 }
 
 fn press_test(siv: &mut Cursive, t: db::StreamType) {

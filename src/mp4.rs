@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -107,7 +107,7 @@ use std::time::SystemTime;
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `FileBuilder` options. Incrementing this value will
 /// cause the etag to change as well.
-const FORMAT_VERSION: [u8; 1] = [0x06];
+const FORMAT_VERSION: [u8; 1] = [0x07];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
 const NORMAL_FTYP_BOX: &'static [u8] = &[
@@ -1827,9 +1827,8 @@ mod tests {
         // 2015-04-26 00:00:00 UTC.
         const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
         let extra_data = input.get_extra_data().unwrap();
-        let video_sample_entry_id = db.db.lock().insert_video_sample_entry(
-            extra_data.width, extra_data.height, extra_data.sample_entry,
-            extra_data.rfc6381_codec).unwrap();
+        let video_sample_entry_id =
+            db.db.lock().insert_video_sample_entry(extra_data.entry).unwrap();
         let dir = db.dirs_by_stream_id.get(&TEST_STREAM_ID).unwrap();
         let mut output = writer::Writer::new(dir, &db.db, &db.syncer_channel, TEST_STREAM_ID,
                                              video_sample_entry_id);
@@ -2195,8 +2194,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4).await;
-        assert_eq!("17376879bcf872dd4ad1197225a32d5473fb0dc6", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"953dcf1a61debe785d5dec3ae2d3992a819b68ae\"";
+        assert_eq!("2ea2cb354503b9d50d028af00bddcd23d6651f28", strutil::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "\"7b55d0bd4370712bf1a7549f6383ca51b1eb97e9\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2216,8 +2215,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4).await;
-        assert_eq!("1cd90e0b49747cc54c953153d6709f2fb5df6b14", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"736655313f10747528a663190517620cdffea6d0\"";
+        assert_eq!("ec79a2d2362b3ae9dec18762c78c8c60932b4ff0", strutil::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "\"f17085373bbee7d2ffc99046575a1ef28f8134e0\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2237,8 +2236,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4).await;
-        assert_eq!("49893e3997da6bc625a04b09abf4b1ddbe0bc85d", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"e87ed99dea31b7c4d1e9186045abaf5ac3c2d2f8\"";
+        assert_eq!("26e5989211456a0de493e146e2cda7a89a3b485e", strutil::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "\"c48b2819f74b090d89c27fa615ab34e445a4b322\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2258,8 +2257,8 @@ mod tests {
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
         let sha1 = digest(&mp4).await;
-        assert_eq!("0615feaa3c50a7889fb0e6842de3bd3d3143bc78", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"6f0d21a6027b0e444f404a68527dbf5c9a5c1a26\"";
+        assert_eq!("d182fb5c9402ec863527b22526e152dccba82c4a", strutil::hex(&sha1[..]));
+        const EXPECTED_ETAG: &'static str = "\"48da7c8f9c15c318ef91ae00148356b3247b671f\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();

@@ -15,9 +15,11 @@ path = "lib.rs"
 base = { package = "moonfire-base", path = "../base" }
 base64 = "0.11.0"
 blake2-rfc = "0.2.18"
+byteorder = "1.0"
 cstr = "0.1.7"
 failure = "0.1.1"
 fnv = "1.0"
+h264-reader = { git = "https://github.com/dholroyd/h264-reader" }
 lazy_static = "1.0"
 libc = "0.2"
 libpasta = "0.1.0-rc2"

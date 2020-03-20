@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -146,8 +146,14 @@ impl<C: Clocks + Clone> TestDb<C> {
                                                 -> db::ListRecordingsRow {
         use crate::recording::{self, TIME_UNITS_PER_SEC};
         let mut db = self.db.lock();
-        let video_sample_entry_id = db.insert_video_sample_entry(
-            1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
+        let video_sample_entry_id = db.insert_video_sample_entry(db::VideoSampleEntryToInsert {
+            width: 1920,
+            height: 1080,
+            pasp_h_spacing: 1,
+            pasp_v_spacing: 1,
+            data: [0u8; 100].to_vec(),
+            rfc6381_codec: "avc1.000000".to_owned(),
+        }).unwrap();
         let (id, _) = db.add_recording(TEST_STREAM_ID, db::RecordingToInsert {
             start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
             video_sample_entry_id,
@@ -169,8 +175,14 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
     let mut data = Vec::new();
     data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
     let mut db = db.lock();
-    let video_sample_entry_id = db.insert_video_sample_entry(
-        1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
+    let video_sample_entry_id = db.insert_video_sample_entry(db::VideoSampleEntryToInsert {
+        width: 1920,
+        height: 1080,
+        pasp_h_spacing: 1,
+        pasp_v_spacing: 1,
+        data: [0u8; 100].to_vec(),
+        rfc6381_codec: "avc1.000000".to_owned(),
+    }).unwrap();
     let mut recording = db::RecordingToInsert {
         sample_file_bytes: 30104460,
         start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),

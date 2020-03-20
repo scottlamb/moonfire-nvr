@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors
+// Copyright (C) 2018-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -847,7 +847,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Drop for Writer<'a, C, D> {
 #[cfg(test)]
 mod tests {
     use base::clock::{Clocks, SimulatedClocks};
-    use crate::db::{self, CompositeId};
+    use crate::db::{self, CompositeId, VideoSampleEntryToInsert};
     use crate::recording;
     use parking_lot::Mutex;
     use log::{trace, warn};
@@ -1000,8 +1000,14 @@ mod tests {
         }]).unwrap();
 
         // Setup: add a 3-byte recording.
-        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(
-            1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
+        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(VideoSampleEntryToInsert {
+            width: 1920,
+            height: 1080,
+            pasp_h_spacing: 1,
+            pasp_v_spacing: 1,
+            data: [0u8; 100].to_vec(),
+            rfc6381_codec: "avc1.000000".to_owned(),
+        }).unwrap();
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
         let f = MockFile::new();
@@ -1083,8 +1089,14 @@ mod tests {
     fn write_path_retries() {
         testutil::init();
         let mut h = new_harness(0);
-        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(
-            1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
+        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(VideoSampleEntryToInsert {
+            width: 1920,
+            height: 1080,
+            pasp_h_spacing: 1,
+            pasp_v_spacing: 1,
+            data: [0u8; 100].to_vec(),
+            rfc6381_codec: "avc1.000000".to_owned(),
+        }).unwrap();
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
         h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1), Box::new(|_id| Err(nix_eio()))));
@@ -1147,8 +1159,14 @@ mod tests {
         }]).unwrap();
 
         // Setup: add a 3-byte recording.
-        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(
-            1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
+        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(VideoSampleEntryToInsert {
+            width: 1920,
+            height: 1080,
+            pasp_h_spacing: 1,
+            pasp_v_spacing: 1,
+            data: [0u8; 100].to_vec(),
+            rfc6381_codec: "avc1.000000".to_owned(),
+        }).unwrap();
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
         let f = MockFile::new();
@@ -1238,8 +1256,14 @@ mod tests {
         h.db.clocks().sleep(time::Duration::seconds(1));
 
         // Setup: add a 3-byte recording.
-        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(
-            1920, 1080, [0u8; 100].to_vec(), "avc1.000000".to_owned()).unwrap();
+        let video_sample_entry_id = h.db.lock().insert_video_sample_entry(VideoSampleEntryToInsert {
+            width: 1920,
+            height: 1080,
+            pasp_h_spacing: 1,
+            pasp_v_spacing: 1,
+            data: [0u8; 100].to_vec(),
+            rfc6381_codec: "avc1.000000".to_owned(),
+        }).unwrap();
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
         let f1 = MockFile::new();

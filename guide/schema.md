@@ -195,7 +195,7 @@ The general upgrade procedure applies to this upgrade.
 ### Version 1 to version 2 to version 3
 
 This upgrade affects the sample file directory as well as the database. Thus,
-the restore procedure written above of simply copying back the databae is
+the restore procedure written above of simply copying back the database is
 insufficient. To do a full restore, you would need to back up and restore the
 sample file directory as well. This directory is considerably larger, so
 consider an alternate procedure of crossing your fingers, and being prepared
@@ -225,10 +225,10 @@ Version 3 adds over version 1:
 
 ### Version 3 to version 4 to version 5
 
-This upgrade affects only the SQLite database.
+This upgrade affects the SQLite database and the sample file directory's
+`meta` files.
 
-Version 4 represents a half-finished upgrade from version 3 to version 5; it
-is never used.
+Version 4 represents a half-finished upgrade from version 3 to version 5.
 
 Version 5 adds over version 3:
 
@@ -240,3 +240,16 @@ Version 5 adds over version 3:
     the `moonfire-nvr config` subcommand.
 *   the ability to recover from a completely full sample file directory (#65)
     without manual intervention.
+
+### Version 6 (under development on the `new-schema` branch)
+
+This upgrade affects only the SQLite database.
+
+Version 6 adds over version 5:
+
+*   metadata about the pixel aspect ratio to properly support
+    [anamorphic](https://en.wikipedia.org/wiki/Anamorphic_widescreen) "sub"
+    streams.
+
+Before it is finalized, it likely will also add a schema for [object
+detection](https://en.wikipedia.org/wiki/Object_detection).

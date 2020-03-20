@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -122,9 +122,7 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
         let extra_data = stream.get_extra_data()?;
         let video_sample_entry_id = {
             let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
-            self.db.lock().insert_video_sample_entry(extra_data.width, extra_data.height,
-                                                     extra_data.sample_entry,
-                                                     extra_data.rfc6381_codec)?
+            self.db.lock().insert_video_sample_entry(extra_data.entry)?
         };
         debug!("{}: video_sample_entry_id={}", self.short_name, video_sample_entry_id);
         let mut seen_key_frame = false;

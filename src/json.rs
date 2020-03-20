@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -426,6 +426,8 @@ pub struct VideoSampleEntry {
     pub sha1: String,
     pub width: u16,
     pub height: u16,
+    pub pasp_h_spacing: u16,
+    pub pasp_v_spacing: u16,
 }
 
 impl VideoSampleEntry {
@@ -434,6 +436,8 @@ impl VideoSampleEntry {
             sha1: base::strutil::hex(&e.sha1),
             width: e.width,
             height: e.height,
+            pasp_h_spacing: e.pasp_h_spacing,
+            pasp_v_spacing: e.pasp_v_spacing,
         }
     }
 }

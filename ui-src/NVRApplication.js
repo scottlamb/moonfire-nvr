@@ -1,7 +1,7 @@
 // vim: set et sw=2 ts=2:
 //
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors
+// Copyright (C) 2018-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -143,9 +143,16 @@ function onSelectVideo(nvrSettingsView, camera, streamType, range, recording) {
   );
   const videoTitle =
     camera.shortName + ', ' + formattedStart + ' to ' + formattedEnd;
+  let width = recording.videoSampleEntryWidth *
+              recording.videoSampleEntryPaspHSpacing /
+              recording.videoSampleEntryPaspVSpacing;
+  const maxWidth = window.innerWidth * 3 / 4;
+  while (width > maxWidth) {
+    width /= 2;
+  }
   new VideoDialogView()
       .attach($('body'))
-      .play(videoTitle, recording.videoSampleEntryWidth / 4, url);
+      .play(videoTitle, width, url);
 }
 
 /**

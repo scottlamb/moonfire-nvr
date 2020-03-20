@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -46,6 +46,7 @@ mod v1_to_v2;
 mod v2_to_v3;
 mod v3_to_v4;
 mod v4_to_v5;
+mod v5_to_v6;
 
 const UPGRADE_NOTES: &'static str =
     concat!("upgraded using moonfire-db ", env!("CARGO_PKG_VERSION"));
@@ -72,6 +73,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
         v2_to_v3::run,
         v3_to_v4::run,
         v4_to_v5::run,
+        v5_to_v6::run,
     ];
 
     {
@@ -158,7 +160,31 @@ mod tests {
     use crate::compare;
     use crate::testutil;
     use failure::{ResultExt, format_err};
+    use fnv::FnvHashMap;
     use super::*;
+
+    const BAD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY: &[u8] =
+        b"\x00\x00\x00\x84\x61\x76\x63\x31\x00\x00\
+          \x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+          \x00\x00\x00\x00\x00\x00\x01\x40\x00\xf0\x00\x48\x00\x00\x00\x48\
+          \x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\
+          \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+          \x00\x00\x00\x00\x00\x00\x00\x00\x00\x18\xff\xff\x00\x00\x00\x2e\
+          \x61\x76\x63\x43\x01\x4d\x40\x1e\xff\xe1\x00\x17\x67\x4d\x40\x1e\
+          \x9a\x66\x0a\x0f\xff\x35\x01\x01\x01\x40\x00\x00\xfa\x00\x00\x03\
+          \x01\xf4\x01\x01\x00\x04\x68\xee\x3c\x80";
+
+    const GOOD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY: &[u8] =
+        b"\x00\x00\x00\x9f\x61\x76\x63\x31\x00\x00\x00\x00\x00\x00\x00\x01\
+          \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+          \x02\xc0\x01\xe0\x00\x48\x00\x00\x00\x48\x00\x00\x00\x00\x00\x00\
+          \x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+          \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+          \x00\x00\x00\x18\xff\xff\x00\x00\x00\x49\x61\x76\x63\x43\x01\x64\
+          \x00\x16\xff\xe1\x00\x31\x67\x64\x00\x16\xac\x1b\x1a\x80\xb0\x3d\
+          \xff\xff\x00\x28\x00\x21\x6e\x0c\x0c\x0c\x80\x00\x01\xf4\x00\x00\
+          \x27\x10\x74\x30\x07\xd0\x00\x07\xa1\x25\xde\x5c\x68\x60\x0f\xa0\
+          \x00\x0f\x42\x4b\xbc\xb8\x50\x01\x00\x05\x68\xee\x38\x30\x00";
 
     fn new_conn() -> Result<rusqlite::Connection, Error> {
         let conn = rusqlite::Connection::open_in_memory()?;
@@ -194,9 +220,19 @@ mod tests {
         "#)?;
         upgraded.execute(r#"
             insert into video_sample_entry (id, sha1, width, height, data)
-                                    values (1, X'3BA3EDE1BD93B7BCB7AB5BD099C047701451B822',
-                                            1920, 1080, ?);
-        "#, params![testutil::TEST_VIDEO_SAMPLE_ENTRY_DATA])?;
+                                    values (1, ?, 1920, 1080, ?);
+        "#, params![&crate::sha1(testutil::TEST_VIDEO_SAMPLE_ENTRY_DATA).unwrap()[..],
+                    testutil::TEST_VIDEO_SAMPLE_ENTRY_DATA])?;
+        upgraded.execute(r#"
+            insert into video_sample_entry (id, sha1, width, height, data)
+                                    values (2, ?, 320, 240, ?);
+        "#, params![&crate::sha1(BAD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY).unwrap()[..],
+                    BAD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY])?;
+        upgraded.execute(r#"
+            insert into video_sample_entry (id, sha1, width, height, data)
+                                    values (3, ?, 704, 480, ?);
+        "#, params![&crate::sha1(GOOD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY).unwrap()[..],
+                    GOOD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY])?;
         upgraded.execute_batch(r#"
             insert into recording (id, camera_id, sample_file_bytes, start_time_90k, duration_90k,
                                    local_time_delta_90k, video_samples, video_sync_samples,
@@ -216,7 +252,8 @@ mod tests {
                                   (2, None),  // transitional; don't compare schemas.
                                   (3, Some(include_str!("v3.sql"))),
                                   (4, None),  // transitional; don't compare schemas.
-                                  (5, Some(include_str!("../schema.sql")))] {
+                                  (5, Some(include_str!("v5.sql"))),
+                                  (6, Some(include_str!("../schema.sql")))] {
             upgrade(&Args {
                 flag_sample_file_dir: Some(&path),
                 flag_preset_journal: "delete",
@@ -231,6 +268,28 @@ mod tests {
                 // anything left over.
                 assert!(!garbage.exists());
                 std::fs::File::create(&garbage)?;
+            }
+            if *ver == 6 {
+                // Check that the pasp was set properly.
+                let mut stmt = upgraded.prepare(r#"
+                    select
+                      id,
+                      pasp_h_spacing,
+                      pasp_v_spacing
+                    from
+                      video_sample_entry
+                "#)?;
+                let mut rows = stmt.query(params![])?;
+                let mut pasp_by_id = FnvHashMap::default();
+                while let Some(row) = rows.next()? {
+                    let id: i32 = row.get(0)?;
+                    let pasp_h_spacing: i32 = row.get(1)?;
+                    let pasp_v_spacing: i32 = row.get(2)?;
+                    pasp_by_id.insert(id, (pasp_h_spacing, pasp_v_spacing));
+                }
+                assert_eq!(pasp_by_id.get(&1), Some(&(1, 1)));
+                assert_eq!(pasp_by_id.get(&2), Some(&(4, 3)));
+                assert_eq!(pasp_by_id.get(&3), Some(&(40, 33)));
             }
         }
 

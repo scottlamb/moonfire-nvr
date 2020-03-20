@@ -1,5 +1,5 @@
 -- This file is part of Moonfire NVR, a security camera network video recorder.
--- Copyright (C) 2016-2020 The Moonfire NVR Authors
+-- Copyright (C) 2016 The Moonfire NVR Authors
 --
 -- This program is free software: you can redistribute it and/or modify
 -- it under the terms of the GNU General Public License as published by
@@ -312,12 +312,7 @@ create table video_sample_entry (
 
   -- The serialized box, including the leading length and box type (avcC in
   -- the case of H.264).
-  data blob not null check (length(data) > 86),
-
-  -- Pixel aspect ratio, if known. As defined in ISO/IEC 14496-12 section
-  -- 12.1.4.
-  pasp_h_spacing integer not null default 1 check (pasp_h_spacing > 0),
-  pasp_v_spacing integer not null default 1 check (pasp_v_spacing > 0)
+  data blob not null check (length(data) > 86)
 );
 
 create table user (
@@ -499,4 +494,4 @@ create table signal_change (
 );
 
 insert into version (id, unix_time,                           notes)
-             values (6,  cast(strftime('%s', 'now') as int), 'db creation');
+             values (5,  cast(strftime('%s', 'now') as int), 'db creation');

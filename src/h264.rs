@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -40,10 +40,11 @@
 //! through ffmpeg's own generated `.mp4` file. Extracting just this part of their `.mp4` files
 //! would be more trouble than it's worth.
 
-use byteorder::{BigEndian, WriteBytesExt};
-use failure::{Error, bail};
+use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
+use failure::{Error, bail, format_err};
 use lazy_static::lazy_static;
 use regex::bytes::Regex;
+use std::convert::TryFrom;
 
 // See ISO/IEC 14496-10 table 7-1 - NAL unit type codes, syntax element categories, and NAL unit
 // type classes.
@@ -52,8 +53,38 @@ const NAL_UNIT_PIC_PARAMETER_SET: u8 = 8;
 
 const NAL_UNIT_TYPE_MASK: u8 = 0x1F;  // bottom 5 bits of first byte of unit.
 
+// For certain common sub stream anamorphic resolutions, add a pixel aspect ratio box.
+const PIXEL_ASPECT_RATIOS: [((u16, u16), (u16, u16)); 4] = [
+    ((320, 240), ( 4,  3)),
+    ((352, 240), (40, 33)),
+    ((640, 480), ( 4,  3)),
+    ((704, 480), (40, 33)),
+];
+
+/// Get the pixel aspect ratio to use if none is specified.
+///
+/// The Dahua IPC-HDW5231R-Z sets the aspect ratio in the H.264 SPS (correctly) for both square and
+/// non-square pixels. The Hikvision DS-2CD2032-I doesn't set it, even though the sub stream's
+/// pixels aren't square. So define a default based on the pixel dimensions to use if the camera
+/// doesn't tell us what to do.
+///
+/// Note that at least in the case of .mp4 muxing, we don't need to fix up the underlying SPS.
+/// SPS; PixelAspectRatioBox's definition says that it overrides the H.264-level declaration.
+fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
+    let dims = (width, height);
+    for r in &PIXEL_ASPECT_RATIOS {
+        if r.0 == dims {
+            return r.1;
+        }
+    }
+    (1, 1)
+}
+
 /// Decodes a H.264 Annex B byte stream into NAL units. Calls `f` for each NAL unit in the byte
 /// stream. Aborts if `f` returns error.
+///
+/// Note `f` is called with the encoded NAL form, not the RBSP. The NAL header byte and any
+/// emulation prevention bytes will be present.
 ///
 /// See ISO/IEC 14496-10 section B.2: Byte stream NAL unit decoding process.
 /// This is a relatively simple, unoptimized implementation.
@@ -92,13 +123,34 @@ fn parse_annex_b_extra_data(data: &[u8]) -> Result<(&[u8], &[u8]), Error> {
     }
 }
 
+/// Decodes a NAL unit (minus header byte) into its RBSP.
+/// Stolen from h264-reader's src/avcc.rs. This shouldn't last long, see:
+/// <https://github.com/dholroyd/h264-reader/issues/4>.
+fn decode(encoded: &[u8]) -> Vec<u8> {
+    struct NalRead(Vec<u8>);
+    use h264_reader::Context;
+    use h264_reader::nal::NalHandler;
+    impl NalHandler for NalRead {
+        type Ctx = ();
+        fn start(&mut self, _ctx: &mut Context<Self::Ctx>, _header: h264_reader::nal::NalHeader) {}
+
+        fn push(&mut self, _ctx: &mut Context<Self::Ctx>, buf: &[u8]) {
+            self.0.extend_from_slice(buf)
+        }
+
+        fn end(&mut self, _ctx: &mut Context<Self::Ctx>) {}
+    }
+    let mut decode = h264_reader::rbsp::RbspDecoder::new(NalRead(vec![]));
+    let mut ctx = Context::new(());
+    decode.push(&mut ctx, encoded);
+    let read = decode.into_handler();
+    read.0
+}
+
 /// Parsed representation of ffmpeg's "extradata".
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExtraData {
-    pub sample_entry: Vec<u8>,
-    pub rfc6381_codec: String,
-    pub width: u16,
-    pub height: u16,
+    pub entry: db::VideoSampleEntryToInsert,
 
     /// True iff sample data should be transformed from Annex B format to AVC format via a call to
     /// `transform_sample_data`. (The assumption is that if the extra data was in Annex B format,
@@ -109,38 +161,44 @@ pub struct ExtraData {
 impl ExtraData {
     /// Parses "extradata" from ffmpeg. This data may be in either Annex B format or AVC format.
     pub fn parse(extradata: &[u8], width: u16, height: u16) -> Result<ExtraData, Error> {
-        let mut sps_and_pps = None;
+        let raw_sps_and_pps;
         let need_transform;
-        let avcc_len = if extradata.starts_with(b"\x00\x00\x00\x01") ||
+        let ctx;
+        let sps_owner;
+        let sps; // reference to either within ctx or to sps_owner.
+        if extradata.starts_with(b"\x00\x00\x00\x01") ||
                           extradata.starts_with(b"\x00\x00\x01") {
             // ffmpeg supplied "extradata" in Annex B format.
             let (s, p) = parse_annex_b_extra_data(extradata)?;
-            sps_and_pps = Some((s, p));
+            let rbsp = decode(&s[1..]);
+            sps_owner = h264_reader::nal::sps::SeqParameterSet::from_bytes(&rbsp)
+                .map_err(|e| format_err!("Bad SPS: {:?}", e))?;
+            sps = &sps_owner;
+            raw_sps_and_pps = Some((s, p));
             need_transform = true;
-
-            // This magic value is checked at the end of the function;
-            // unit tests confirm its accuracy.
-            19 + s.len() + p.len()
         } else {
             // Assume "extradata" holds an AVCDecoderConfiguration.
             need_transform = false;
-            8 + extradata.len()
+            raw_sps_and_pps = None;
+            let avcc = h264_reader::avcc::AvcDecoderConfigurationRecord::try_from(extradata)
+                .map_err(|e| format_err!("Bad AvcDecoderConfigurationRecord: {:?}", e))?;
+            if avcc.num_of_sequence_parameter_sets() != 1 {
+                bail!("Multiple SPSs!");
+            }
+            ctx = avcc.create_context(())
+                .map_err(|e| format_err!("Can't load SPS+PPS: {:?}", e))?;
+            sps = ctx.sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())
+                .ok_or_else(|| format_err!("No SPS 0"))?;
         };
-        let sps_and_pps = sps_and_pps;
-        let need_transform = need_transform;
 
-        // This magic value is also checked at the end.
-        let avc1_len = 86 + avcc_len;
-
-        let mut sample_entry = Vec::with_capacity(avc1_len);
+        let mut sample_entry = Vec::with_capacity(256);
 
         // This is a concatenation of the following boxes/classes.
 
         // SampleEntry, ISO/IEC 14496-12 section 8.5.2.
         let avc1_len_pos = sample_entry.len();
-        sample_entry.write_u32::<BigEndian>(avc1_len as u32)?;  // length
-        // type + reserved + data_reference_index = 1
-        sample_entry.extend_from_slice(b"avc1\x00\x00\x00\x00\x00\x00\x00\x01");
+        // length placeholder + type + reserved + data_reference_index = 1
+        sample_entry.extend_from_slice(b"\x00\x00\x00\x00avc1\x00\x00\x00\x00\x00\x00\x00\x01");
 
         // VisualSampleEntry, ISO/IEC 14496-12 section 12.1.3.
         sample_entry.extend_from_slice(&[0; 16]);  // pre-defined + reserved
@@ -165,12 +223,9 @@ impl ExtraData {
         // AVCSampleEntry, ISO/IEC 14496-15 section 5.3.4.1.
         // AVCConfigurationBox, ISO/IEC 14496-15 section 5.3.4.1.
         let avcc_len_pos = sample_entry.len();
-        sample_entry.write_u32::<BigEndian>(avcc_len as u32)?;  // length
-        sample_entry.extend_from_slice(b"avcC");
+        sample_entry.extend_from_slice(b"\x00\x00\x00\x00avcC");
 
-        let avc_decoder_config_len = if let Some((sps, pps)) = sps_and_pps {
-            let before = sample_entry.len();
-
+        if let Some((sps, pps)) = raw_sps_and_pps {
             // Create the AVCDecoderConfiguration, ISO/IEC 14496-15 section 5.2.4.1.
             // The beginning of the AVCDecoderConfiguration takes a few values from
             // the SPS (ISO/IEC 14496-10 section 7.3.2.1.1). One caveat: that section
@@ -192,37 +247,52 @@ impl ExtraData {
             // ffmpeg's ff_isom_write_avcc has the same limitation, so it's probably
             // fine. This next byte is a reserved 0b111 + a 5-bit # of SPSs (1).
             sample_entry.push(0xe1);
-            sample_entry.write_u16::<BigEndian>(sps.len() as u16)?;
+            sample_entry.write_u16::<BigEndian>(u16::try_from(sps.len())?)?;
             sample_entry.extend_from_slice(sps);
             sample_entry.push(1);  // # of PPSs.
-            sample_entry.write_u16::<BigEndian>(pps.len() as u16)?;
+            sample_entry.write_u16::<BigEndian>(u16::try_from(pps.len())?)?;
             sample_entry.extend_from_slice(pps);
 
-            if sample_entry.len() - avcc_len_pos != avcc_len {
-                bail!("internal error: anticipated AVCConfigurationBox \
-                       length {}, but was actually {}; sps length {}, pps length {}",
-                      avcc_len, sample_entry.len() - avcc_len_pos, sps.len(), pps.len());
-            }
-            sample_entry.len() - before
         } else {
             sample_entry.extend_from_slice(extradata);
-            extradata.len()
         };
 
-        if sample_entry.len() - avc1_len_pos != avc1_len {
-            bail!("internal error: anticipated AVCSampleEntry length \
-                   {}, but was actually {}; AVCDecoderConfiguration length {}",
-                  avc1_len, sample_entry.len() - avc1_len_pos, avc_decoder_config_len);
+        // Fix up avc1 and avcC box lengths.
+        let cur_pos = sample_entry.len();
+        BigEndian::write_u32(&mut sample_entry[avcc_len_pos .. avcc_len_pos + 4],
+                             u32::try_from(cur_pos - avcc_len_pos)?);
+
+        // PixelAspectRatioBox, ISO/IEC 14496-12 section 12.1.4.2.
+        // Write a PixelAspectRatioBox if necessary, as the sub streams can be be anamorphic.
+        let pasp = sps.vui_parameters.as_ref()
+                                     .and_then(|v| v.aspect_ratio_info.as_ref())
+                                     .and_then(|a| a.clone().get())
+                                     .unwrap_or_else(|| default_pixel_aspect_ratio(width, height));
+        if pasp != (1, 1) {
+            sample_entry.extend_from_slice(b"\x00\x00\x00\x10pasp");  // length + box name
+            sample_entry.write_u32::<BigEndian>(pasp.0.into())?;
+            sample_entry.write_u32::<BigEndian>(pasp.1.into())?;
         }
+
+        let cur_pos = sample_entry.len();
+        BigEndian::write_u32(&mut sample_entry[avc1_len_pos .. avc1_len_pos + 4],
+                             u32::try_from(cur_pos - avc1_len_pos)?);
+
         let profile_idc = sample_entry[103];
         let constraint_flags = sample_entry[104];
         let level_idc = sample_entry[105];
-        let codec = format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags, level_idc);
+
+        let rfc6381_codec =
+            format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags, level_idc);
         Ok(ExtraData {
-            sample_entry,
-            rfc6381_codec: codec,
-            width,
-            height,
+            entry: db::VideoSampleEntryToInsert {
+                data: sample_entry,
+                rfc6381_codec,
+                width,
+                height,
+                pasp_h_spacing: pasp.0,
+                pasp_v_spacing: pasp.1,
+            },
             need_transform,
         })
     }
@@ -303,21 +373,21 @@ mod tests {
     fn test_sample_entry_from_avc_decoder_config() {
         testutil::init();
         let e = super::ExtraData::parse(&AVC_DECODER_CONFIG_TEST_INPUT, 1280, 720).unwrap();
-        assert_eq!(&e.sample_entry[..], &TEST_OUTPUT[..]);
-        assert_eq!(e.width, 1280);
-        assert_eq!(e.height, 720);
+        assert_eq!(&e.entry.data[..], &TEST_OUTPUT[..]);
+        assert_eq!(e.entry.width, 1280);
+        assert_eq!(e.entry.height, 720);
+        assert_eq!(e.entry.rfc6381_codec, "avc1.4d001f");
         assert_eq!(e.need_transform, false);
-        assert_eq!(e.rfc6381_codec, "avc1.4d001f");
     }
 
     #[test]
     fn test_sample_entry_from_annex_b() {
         testutil::init();
         let e = super::ExtraData::parse(&ANNEX_B_TEST_INPUT, 1280, 720).unwrap();
-        assert_eq!(e.width, 1280);
-        assert_eq!(e.height, 720);
+        assert_eq!(e.entry.width, 1280);
+        assert_eq!(e.entry.height, 720);
+        assert_eq!(e.entry.rfc6381_codec, "avc1.4d001f");
         assert_eq!(e.need_transform, true);
-        assert_eq!(e.rfc6381_codec, "avc1.4d001f");
     }
 
     #[test]

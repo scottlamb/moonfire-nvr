@@ -156,6 +156,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
+name = "bitreader"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fa7f0adf37cd5472c978a1ff4be89c1880a923d10df4cfef6a10855a666e09b"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "blake2-rfc"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -842,6 +851,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "h264-reader"
+version = "0.3.0"
+source = "git+https://github.com/dholroyd/h264-reader#40863110d31bc37d924e69f6b3e4228e51ea8702"
+dependencies = [
+ "bitreader",
+ "memchr",
+]
+
+[[package]]
 name = "heck"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1236,9 +1254,11 @@ version = "0.0.1"
 dependencies = [
  "base64 0.11.0",
  "blake2-rfc",
+ "byteorder",
  "cstr",
  "failure",
  "fnv",
+ "h264-reader",
  "itertools",
  "lazy_static",
  "libc",
@@ -1286,6 +1306,7 @@ dependencies = [
  "failure",
  "fnv",
  "futures",
+ "h264-reader",
  "http",
  "http-serve",
  "hyper",
