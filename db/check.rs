@@ -40,7 +40,7 @@ use fnv::FnvHashMap;
 use log::error;
 use nix::fcntl::AtFlags;
 use protobuf::prelude::MessageField;
-use rusqlite::types::ToSql;
+use rusqlite::params;
 use crate::schema;
 use std::os::unix::io::AsRawFd;
 
@@ -69,7 +69,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
         "#)?;
         let mut garbage_stmt = conn.prepare_cached(
             "select composite_id from garbage where sample_file_dir_id = ?")?;
-        let mut rows = dir_stmt.query(&[] as &[&dyn ToSql])?;
+        let mut rows = dir_stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let mut meta = schema::DirMeta::default();
             let dir_id: i32 = row.get(0)?;
@@ -88,7 +88,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
             // Open the directory (checking its metadata) and hold it open (for the lock).
             let dir = dir::SampleFileDir::open(&dir_path, &meta)?;
             let mut streams = read_dir(&dir, opts)?;
-            let mut rows = garbage_stmt.query(&[&dir_id])?;
+            let mut rows = garbage_stmt.query(params![dir_id])?;
             while let Some(row) = rows.next()? {
                 let id = CompositeId(row.get(0)?);
                 let s = streams.entry(id.stream()).or_insert_with(Stream::default);
@@ -103,7 +103,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
         let mut stmt = conn.prepare(r#"
             select id, sample_file_dir_id from stream where sample_file_dir_id is not null
         "#)?;
-        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
+        let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let stream_id = row.get(0)?;
             let dir_id = row.get(1)?;
@@ -234,7 +234,7 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
             where
               composite_id between ? and ?
         "#)?;
-        let mut rows = stmt.query(&[&start.0, &end.0])?;
+        let mut rows = stmt.query(params![start.0, end.0])?;
         while let Some(row) = rows.next()? {
             let id = CompositeId(row.get(0)?);
             let s = RecordingSummary {
@@ -261,7 +261,7 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
             where
               composite_id between ? and ?
         "#)?;
-        let mut rows = stmt.query(&[&start.0, &end.0])?;
+        let mut rows = stmt.query(params![start.0, end.0])?;
         while let Some(row) = rows.next()? {
             let id = CompositeId(row.get(0)?);
             let video_index: Vec<u8> = row.get(1)?;
@@ -288,7 +288,7 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
             where
               composite_id between ? and ?
         "#)?;
-        let mut rows = stmt.query(&[&start.0, &end.0])?;
+        let mut rows = stmt.query(params![start.0, end.0])?;
         while let Some(row) = rows.next()? {
             let id = CompositeId(row.get(0)?);
             stream.entry(id.recording())

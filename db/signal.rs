@@ -537,7 +537,7 @@ impl State {
                     ])?;
                 },
                 Entry::Vacant(_) => {
-                    d_stmt.execute(&[t.0])?;
+                    d_stmt.execute(params![t.0])?;
                 },
             }
         }

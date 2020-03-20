@@ -34,7 +34,7 @@ use crate::db::{self, CompositeId, FromSqlUuid};
 use failure::{Error, ResultExt, bail};
 use fnv::FnvHashSet;
 use crate::recording;
-use rusqlite::types::ToSql;
+use rusqlite::{named_params, params};
 use std::ops::Range;
 use uuid::Uuid;
 
@@ -125,10 +125,11 @@ pub(crate) fn list_recordings_by_time(
     conn: &rusqlite::Connection, stream_id: i32, desired_time: Range<recording::Time>,
     f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_TIME_SQL)?;
-    let rows = stmt.query_named(&[
-        (":stream_id", &stream_id),
-        (":start_time_90k", &desired_time.start.0),
-        (":end_time_90k", &desired_time.end.0)])?;
+    let rows = stmt.query_named(named_params!{
+        ":stream_id": stream_id,
+        ":start_time_90k": desired_time.start.0,
+        ":end_time_90k": desired_time.end.0,
+    })?;
     list_recordings_inner(rows, f)
 }
 
@@ -137,10 +138,10 @@ pub(crate) fn list_recordings_by_id(
     conn: &rusqlite::Connection, stream_id: i32, desired_ids: Range<i32>,
     f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>) -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_ID_SQL)?;
-    let rows = stmt.query_named(&[
-        (":start", &CompositeId::new(stream_id, desired_ids.start).0),
-        (":end", &CompositeId::new(stream_id, desired_ids.end).0),
-    ])?;
+    let rows = stmt.query_named(named_params!{
+        ":start": CompositeId::new(stream_id, desired_ids.start).0,
+        ":end": CompositeId::new(stream_id, desired_ids.end).0,
+    })?;
     list_recordings_inner(rows, f)
 }
 
@@ -165,7 +166,7 @@ fn list_recordings_inner(mut rows: rusqlite::Rows,
 }
 
 pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
-    Ok(conn.query_row("select uuid from meta", &[] as &[&dyn ToSql], |row| -> rusqlite::Result<Uuid> {
+    Ok(conn.query_row("select uuid from meta", params![], |row| -> rusqlite::Result<Uuid> {
         let uuid: FromSqlUuid = row.get(0)?;
         Ok(uuid.0)
     })?)
@@ -183,19 +184,19 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
                                :video_samples, :video_sync_samples,
                                :video_sample_entry_id)
     "#).with_context(|e| format!("can't prepare recording insert: {}", e))?;
-    stmt.execute_named(&[
-        (":composite_id", &id.0),
-        (":stream_id", &(id.stream() as i64)),
-        (":open_id", &o.id),
-        (":run_offset", &r.run_offset),
-        (":flags", &r.flags),
-        (":sample_file_bytes", &r.sample_file_bytes),
-        (":start_time_90k", &r.start.0),
-        (":duration_90k", &r.duration_90k),
-        (":video_samples", &r.video_samples),
-        (":video_sync_samples", &r.video_sync_samples),
-        (":video_sample_entry_id", &r.video_sample_entry_id),
-    ]).with_context(|e| format!("unable to insert recording for recording {} {:#?}: {}",
+    stmt.execute_named(named_params!{
+        ":composite_id": id.0,
+        ":stream_id": i64::from(id.stream()),
+        ":open_id": o.id,
+        ":run_offset": r.run_offset,
+        ":flags": r.flags,
+        ":sample_file_bytes": r.sample_file_bytes,
+        ":start_time_90k": r.start.0,
+        ":duration_90k": r.duration_90k,
+        ":video_samples": r.video_samples,
+        ":video_sync_samples": r.video_sync_samples,
+        ":video_sample_entry_id": r.video_sample_entry_id,
+    }).with_context(|e| format!("unable to insert recording for recording {} {:#?}: {}",
                                 id, r, e))?;
 
     let mut stmt = tx.prepare_cached(r#"
@@ -207,20 +208,20 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
         0 => None,
         _ => Some(r.local_time_delta.0),
     };
-    stmt.execute_named(&[
-        (":composite_id", &id.0),
-        (":local_time_delta_90k", &delta),
-        (":sample_file_sha1", &sha1),
-    ]).with_context(|e| format!("unable to insert recording_integrity for {:#?}: {}", r, e))?;
+    stmt.execute_named(named_params!{
+        ":composite_id": id.0,
+        ":local_time_delta_90k": delta,
+        ":sample_file_sha1": sha1,
+    }).with_context(|e| format!("unable to insert recording_integrity for {:#?}: {}", r, e))?;
 
     let mut stmt = tx.prepare_cached(r#"
         insert into recording_playback (composite_id,  video_index)
                                 values (:composite_id, :video_index)
     "#).with_context(|e| format!("can't prepare recording_playback insert: {}", e))?;
-    stmt.execute_named(&[
-        (":composite_id", &id.0),
-        (":video_index", &r.video_index),
-    ]).with_context(|e| format!("unable to insert recording_playback for {:#?}: {}", r, e))?;
+    stmt.execute_named(named_params!{
+        ":composite_id": id.0,
+        ":video_index": &r.video_index,
+    }).with_context(|e| format!("unable to insert recording_playback for {:#?}: {}", r, e))?;
 
     Ok(())
 }
@@ -261,15 +262,15 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
           :start <= composite_id and
           composite_id < :end
     "#)?;
-    let n = insert.execute_named(&[
-        (":sample_file_dir_id", &sample_file_dir_id),
-        (":start", &ids.start.0),
-        (":end", &ids.end.0),
-    ])?;
-    let p: &[(&str, &dyn rusqlite::types::ToSql)] = &[
-        (":start", &ids.start.0),
-        (":end", &ids.end.0),
-    ];
+    let n = insert.execute_named(named_params!{
+        ":sample_file_dir_id": sample_file_dir_id,
+        ":start": ids.start.0,
+        ":end": ids.end.0,
+    })?;
+    let p = named_params!{
+        ":start": ids.start.0,
+        ":end": ids.end.0,
+    };
     let n1 = del1.execute_named(p)?;
     if n1 != n {
         bail!("inserted {} garbage rows but deleted {} recording_playback rows!", n, n1);
@@ -292,7 +293,7 @@ pub(crate) fn mark_sample_files_deleted(tx: &rusqlite::Transaction, ids: &[Compo
     if ids.is_empty() { return Ok(()); }
     let mut stmt = tx.prepare_cached("delete from garbage where composite_id = ?")?;
     for &id in ids {
-        let changes = stmt.execute(&[&id.0])?;
+        let changes = stmt.execute(params![id.0])?;
         if changes != 1 {
             // panic rather than return error. Errors get retried indefinitely, but there's no
             // recovery from this condition.
@@ -311,7 +312,7 @@ pub(crate) fn get_range(conn: &rusqlite::Connection, stream_id: i32)
                         -> Result<Option<Range<recording::Time>>, Error> {
     // The minimum is straightforward, taking advantage of the start_time_90k index.
     let mut stmt = conn.prepare_cached(STREAM_MIN_START_SQL)?;
-    let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
+    let mut rows = stmt.query_named(named_params!{":stream_id": stream_id})?;
     let min_start = match rows.next()? {
         Some(row) => recording::Time(row.get(0)?),
         None => return Ok(None),
@@ -322,7 +323,7 @@ pub(crate) fn get_range(conn: &rusqlite::Connection, stream_id: i32)
     // last MAX_RECORDING_DURATION must be examined in order to take advantage of the
     // start_time_90k index.
     let mut stmt = conn.prepare_cached(STREAM_MAX_START_SQL)?;
-    let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
+    let mut rows = stmt.query_named(named_params!{":stream_id": stream_id})?;
     let mut maxes_opt = None;
     while let Some(row) = rows.next()? {
         let row_start = recording::Time(row.get(0)?);
@@ -363,10 +364,10 @@ pub(crate) fn list_oldest_recordings(conn: &rusqlite::Connection, start: Composi
                                      f: &mut dyn FnMut(db::ListOldestRecordingsRow) -> bool)
     -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_OLDEST_RECORDINGS_SQL)?;
-    let mut rows = stmt.query_named(&[
-        (":start", &start.0),
-        (":end", &CompositeId::new(start.stream() + 1, 0).0),
-    ])?;
+    let mut rows = stmt.query_named(named_params!{
+        ":start": start.0,
+        ":end": CompositeId::new(start.stream() + 1, 0).0,
+    })?;
     while let Some(row) = rows.next()? {
         let should_continue = f(db::ListOldestRecordingsRow {
             id: CompositeId(row.get(0)?),

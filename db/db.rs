@@ -68,7 +68,7 @@ use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
 use protobuf::prelude::MessageField;
-use rusqlite::types::ToSql;
+use rusqlite::{named_params, params};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, VecDeque};
 use std::cell::RefCell;
@@ -584,7 +584,7 @@ fn init_recordings(conn: &mut rusqlite::Connection, stream_id: i32, camera: &Cam
         where
           stream_id = :stream_id
     "#)?;
-    let mut rows = stmt.query_named(&[(":stream_id", &stream_id)])?;
+    let mut rows = stmt.query_named(named_params!{":stream_id": stream_id})?;
     let mut i = 0;
     while let Some(row) = rows.next()? {
         let start = recording::Time(row.get(0)?);
@@ -681,7 +681,7 @@ impl StreamStateChanger {
                     let mut stmt = tx.prepare_cached(r#"
                         delete from stream where id = ?
                     "#)?;
-                    if stmt.execute(&[&sid])? != 1 {
+                    if stmt.execute(params![sid])? != 1 {
                         bail!("missing stream {}", sid);
                     }
                     streams.push((sid, None));
@@ -696,13 +696,13 @@ impl StreamStateChanger {
                         where
                             id = :id
                     "#)?;
-                    let rows = stmt.execute_named(&[
-                        (":rtsp_url", &sc.rtsp_url),
-                        (":record", &sc.record),
-                        (":flush_if_sec", &sc.flush_if_sec),
-                        (":sample_file_dir_id", &sc.sample_file_dir_id),
-                        (":id", &sid),
-                    ])?;
+                    let rows = stmt.execute_named(named_params!{
+                        ":rtsp_url": &sc.rtsp_url,
+                        ":record": sc.record,
+                        ":flush_if_sec": sc.flush_if_sec,
+                        ":sample_file_dir_id": sc.sample_file_dir_id,
+                        ":id": sid,
+                    })?;
                     if rows != 1 {
                         bail!("missing stream {}", sid);
                     }
@@ -722,14 +722,14 @@ impl StreamStateChanger {
                                 values (:camera_id, :sample_file_dir_id, :type, :rtsp_url, :record,
                                         0,            :flush_if_sec, 1)
                 "#)?;
-                stmt.execute_named(&[
-                    (":camera_id", &camera_id),
-                    (":sample_file_dir_id", &sc.sample_file_dir_id),
-                    (":type", &type_.as_str()),
-                    (":rtsp_url", &sc.rtsp_url),
-                    (":record", &sc.record),
-                    (":flush_if_sec", &sc.flush_if_sec),
-                ])?;
+                stmt.execute_named(named_params!{
+                    ":camera_id": camera_id,
+                    ":sample_file_dir_id": sc.sample_file_dir_id,
+                    ":type": type_.as_str(),
+                    ":rtsp_url": &sc.rtsp_url,
+                    ":record": sc.record,
+                    ":flush_if_sec": sc.flush_if_sec,
+                })?;
                 let id = tx.last_insert_rowid() as i32;
                 sids[i] = Some(id);
                 let sc = mem::replace(*sc, StreamChange::default());
@@ -918,10 +918,10 @@ impl LockedDatabase {
                 }
                 if s.synced_recordings > 0 {
                     new_ranges.entry(stream_id).or_insert(None);
-                    stmt.execute_named(&[
-                        (":stream_id", &stream_id),
-                        (":next_recording_id", &(s.next_recording_id + s.synced_recordings as i32)),
-                    ])?;
+                    stmt.execute_named(named_params!{
+                        ":stream_id": stream_id,
+                        ":next_recording_id": s.next_recording_id + s.synced_recordings as i32,
+                    })?;
                 }
 
                 // Process deletions.
@@ -955,10 +955,10 @@ impl LockedDatabase {
         {
             let mut stmt = tx.prepare_cached(
                 r"update open set duration_90k = ?, end_time_90k = ? where id = ?")?;
-            let rows = stmt.execute(&[
-                &(recording::Time::new(clocks.monotonic()) - self.open_monotonic).0 as &dyn ToSql,
-                &recording::Time::new(clocks.realtime()).0,
-                &o.id,
+            let rows = stmt.execute(params![
+                (recording::Time::new(clocks.monotonic()) - self.open_monotonic).0,
+                recording::Time::new(clocks.realtime()).0,
+                o.id,
             ])?;
             if rows != 1 {
                 bail!("unable to find current open {}", o.id);
@@ -1107,7 +1107,7 @@ impl LockedDatabase {
                 update sample_file_dir set last_complete_open_id = ? where id = ?
             "#)?;
             for &id in in_progress.keys() {
-                if stmt.execute(&[&o.id as &dyn ToSql, &id])? != 1 {
+                if stmt.execute(params![o.id, id])? != 1 {
                     bail!("unable to update dir {}", id);
                 }
             }
@@ -1302,7 +1302,7 @@ impl LockedDatabase {
         }
         trace!("cache miss for recording {}", id);
         let mut stmt = self.conn.prepare_cached(GET_RECORDING_PLAYBACK_SQL)?;
-        let mut rows = stmt.query_named(&[(":composite_id", &id.0)])?;
+        let mut rows = stmt.query_named(named_params!{":composite_id": id.0})?;
         if let Some(row) = rows.next()? {
             let video_index: VideoIndex = row.get(0)?;
             let result = f(&RecordingPlayback { video_index: &video_index.0[..] });
@@ -1349,7 +1349,7 @@ impl LockedDatabase {
             from
                 video_sample_entry
         "#)?;
-        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
+        let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let mut sha1 = [0u8; 20];
@@ -1388,7 +1388,7 @@ impl LockedDatabase {
             from
               sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
         "#)?;
-        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
+        let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let dir_uuid: FromSqlUuid = row.get(2)?;
@@ -1429,7 +1429,7 @@ impl LockedDatabase {
             from
               camera;
         "#)?;
-        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
+        let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let uuid: FromSqlUuid = row.get(1)?;
@@ -1467,7 +1467,7 @@ impl LockedDatabase {
             from
               stream;
         "#)?;
-        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
+        let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let type_: String = row.get(1)?;
@@ -1530,13 +1530,13 @@ impl LockedDatabase {
         }
 
         let mut stmt = self.conn.prepare_cached(INSERT_VIDEO_SAMPLE_ENTRY_SQL)?;
-        stmt.execute_named(&[
-            (":sha1", &&sha1_bytes[..]),
-            (":width", &(width as i64)),
-            (":height", &(height as i64)),
-            (":rfc6381_codec", &rfc6381_codec),
-            (":data", &data),
-        ])?;
+        stmt.execute_named(named_params!{
+            ":sha1": &sha1_bytes[..],
+            ":width": i32::from(width),
+            ":height": i32::from(height),
+            ":rfc6381_codec": &rfc6381_codec,
+            ":data": &data,
+        })?;
 
         let id = self.conn.last_insert_rowid() as i32;
         self.video_sample_entries_by_id.insert(id, Arc::new(VideoSampleEntry {
@@ -1572,7 +1572,7 @@ impl LockedDatabase {
         self.conn.execute(r#"
             insert into sample_file_dir (path, uuid, last_complete_open_id)
                                  values (?,    ?,    ?)
-        "#, &[&path as &dyn ToSql, &uuid_bytes, &o.id])?;
+        "#, params![&path, uuid_bytes, o.id])?;
         let id = self.conn.last_insert_rowid() as i32;
         use ::std::collections::btree_map::Entry;
         let e = self.sample_file_dirs_by_id.entry(id);
@@ -1624,7 +1624,7 @@ impl LockedDatabase {
         meta.in_progress_open = mem::replace(&mut meta.last_complete_open,
                                              ::protobuf::SingularPtrField::none());
         dir.write_meta(&meta)?;
-        if self.conn.execute("delete from sample_file_dir where id = ?", &[&dir_id])? != 1 {
+        if self.conn.execute("delete from sample_file_dir where id = ?", params![dir_id])? != 1 {
             bail!("missing database row for dir {}", dir_id);
         }
         d.remove_entry();
@@ -1645,14 +1645,14 @@ impl LockedDatabase {
                             values (:uuid, :short_name, :description, :onvif_host, :username,
                                     :password)
             "#)?;
-            stmt.execute_named(&[
-                (":uuid", &uuid_bytes),
-                (":short_name", &camera.short_name),
-                (":description", &camera.description),
-                (":onvif_host", &camera.onvif_host),
-                (":username", &camera.username),
-                (":password", &camera.password),
-            ])?;
+            stmt.execute_named(named_params!{
+                ":uuid": uuid_bytes,
+                ":short_name": &camera.short_name,
+                ":description": &camera.description,
+                ":onvif_host": &camera.onvif_host,
+                ":username": &camera.username,
+                ":password": &camera.password,
+            })?;
             camera_id = tx.last_insert_rowid() as i32;
             streams = StreamStateChanger::new(&tx, camera_id, None, &self.streams_by_id,
                                          &mut camera)?;
@@ -1694,14 +1694,14 @@ impl LockedDatabase {
                 where
                     id = :id
             "#)?;
-            let rows = stmt.execute_named(&[
-                (":id", &camera_id),
-                (":short_name", &camera.short_name),
-                (":description", &camera.description),
-                (":onvif_host", &camera.onvif_host),
-                (":username", &camera.username),
-                (":password", &camera.password),
-            ])?;
+            let rows = stmt.execute_named(named_params!{
+                ":id": camera_id,
+                ":short_name": &camera.short_name,
+                ":description": &camera.description,
+                ":onvif_host": &camera.onvif_host,
+                ":username": &camera.username,
+                ":password": &camera.password,
+            })?;
             if rows != 1 {
                 bail!("Camera {} missing from database", camera_id);
             }
@@ -1730,14 +1730,14 @@ impl LockedDatabase {
                 if stream.range.is_some() {
                     bail!("Can't remove camera {}; has recordings.", id);
                 }
-                let rows = stream_stmt.execute_named(&[(":id", stream_id)])?;
+                let rows = stream_stmt.execute_named(named_params!{":id": stream_id})?;
                 if rows != 1 {
                     bail!("Stream {} missing from database", id);
                 }
                 streams_to_delete.push(*stream_id);
             }
             let mut cam_stmt = tx.prepare_cached(r"delete from camera where id = :id")?;
-            let rows = cam_stmt.execute_named(&[(":id", &id)])?;
+            let rows = cam_stmt.execute_named(named_params!{":id": id})?;
             if rows != 1 {
                 bail!("Camera {} missing from database", id);
             }
@@ -1767,11 +1767,11 @@ impl LockedDatabase {
                     bail!("can't set limit for stream {} to {}; must be >= 0",
                           c.stream_id, c.new_limit);
                 }
-                let rows = stmt.execute_named(&[
-                    (":record", &c.new_record),
-                    (":retain", &c.new_limit),
-                    (":id", &c.stream_id),
-                ])?;
+                let rows = stmt.execute_named(named_params!{
+                    ":record": c.new_record,
+                    ":retain": c.new_limit,
+                    ":id": c.stream_id,
+                })?;
                 if rows != 1 {
                     bail!("no such stream {}", c.stream_id);
                 }
@@ -1845,15 +1845,15 @@ impl LockedDatabase {
 /// Note this doesn't set journal options, so that it can be used on in-memory databases for
 /// test code.
 pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
-    conn.execute("pragma foreign_keys = on", &[] as &[&dyn ToSql])?;
-    conn.execute("pragma fullfsync = on", &[] as &[&dyn ToSql])?;
-    conn.execute("pragma synchronous = 2", &[] as &[&dyn ToSql])?;
+    conn.execute("pragma foreign_keys = on", params![])?;
+    conn.execute("pragma fullfsync = on", params![])?;
+    conn.execute("pragma synchronous = 2", params![])?;
     let tx = conn.transaction()?;
     tx.execute_batch(include_str!("schema.sql"))?;
     {
         let uuid = ::uuid::Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
-        tx.execute("insert into meta (uuid) values (?)", &[&uuid_bytes])?;
+        tx.execute("insert into meta (uuid) values (?)", params![uuid_bytes])?;
     }
     tx.commit()?;
     Ok(())
@@ -1866,11 +1866,11 @@ pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
 pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Error> {
     let ver_tables: i32 = conn.query_row_and_then(
         "select count(*) from sqlite_master where name = 'version'",
-        &[] as &[&dyn ToSql], |row| row.get(0))?;
+        params![], |row| row.get(0))?;
     if ver_tables == 0 {
         return Ok(None);
     }
-    Ok(Some(conn.query_row_and_then("select max(id) from version", &[] as &[&dyn ToSql],
+    Ok(Some(conn.query_row_and_then("select max(id) from version", params![],
                                     |row| row.get(0))?))
 }
 
@@ -1908,9 +1908,9 @@ impl<C: Clocks + Clone> Database<C> {
     /// Creates the database from a caller-supplied SQLite connection.
     pub fn new(clocks: C, conn: rusqlite::Connection,
                read_write: bool) -> Result<Database<C>, Error> {
-        conn.execute("pragma foreign_keys = on", &[] as &[&dyn ToSql])?;
-        conn.execute("pragma fullfsync = on", &[] as &[&dyn ToSql])?;
-        conn.execute("pragma synchronous = 2", &[] as &[&dyn ToSql])?;
+        conn.execute("pragma foreign_keys = on", params![])?;
+        conn.execute("pragma fullfsync = on", params![])?;
+        conn.execute("pragma synchronous = 2", params![])?;
         {
             let ver = get_schema_version(&conn)?.ok_or_else(|| format_err!(
                     "no such table: version. \
@@ -1940,7 +1940,7 @@ impl<C: Clocks + Clone> Database<C> {
             let mut stmt = conn.prepare(" insert into open (uuid, start_time_90k) values (?, ?)")?;
             let uuid = Uuid::new_v4();
             let uuid_bytes = &uuid.as_bytes()[..];
-            stmt.execute(&[&uuid_bytes as &dyn ToSql, &real.0])?;
+            stmt.execute(params![uuid_bytes, real.0])?;
             Some(Open {
                 id: conn.last_insert_rowid() as u32,
                 uuid,

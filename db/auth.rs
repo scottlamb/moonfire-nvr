@@ -38,7 +38,7 @@ use lazy_static::lazy_static;
 use libpasta;
 use parking_lot::Mutex;
 use protobuf::Message;
-use rusqlite::{Connection, Transaction, types::ToSql};
+use rusqlite::{Connection, Transaction, params};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -355,7 +355,7 @@ impl State {
             from
                 user
         "#)?;
-        let mut rows = stmt.query(&[] as &[&dyn ToSql])?;
+        let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let name: String = row.get(1)?;
@@ -476,10 +476,10 @@ impl State {
 
     pub fn delete_user(&mut self, conn: &mut Connection, id: i32) -> Result<(), Error> {
         let tx = conn.transaction()?;
-        tx.execute("delete from user_session where user_id = ?", &[&id])?;
+        tx.execute("delete from user_session where user_id = ?", params![id])?;
         {
             let mut user_stmt = tx.prepare_cached("delete from user where id = ?")?;
-            if user_stmt.execute(&[&id])? != 1 {
+            if user_stmt.execute(params![id])? != 1 {
                 bail!("user {} not found", id);
             }
         }
@@ -636,13 +636,13 @@ impl State {
             "#)?;
             let addr = req.addr_buf();
             let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
-            stmt.execute(&[
-                &req.when_sec as &dyn ToSql,
-                &req.user_agent,
-                &addr,
-                &(reason as i32),
-                &detail,
-                &&hash.0[..],
+            stmt.execute(params![
+                req.when_sec,
+                req.user_agent,
+                addr,
+                reason as i32,
+                detail,
+                &hash.0[..],
             ])?;
             s.revocation = req;
             s.revocation_reason = Some(reason as i32);
@@ -740,7 +740,7 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Erro
         where
             session_id_hash = ?
     "#)?;
-    let mut rows = stmt.query(&[&&hash.0[..]])?;
+    let mut rows = stmt.query(params![&hash.0[..]])?;
     let row = rows.next()?.ok_or_else(|| format_err!("no such session"))?;
     let creation_addr: FromSqlIpAddr = row.get(8)?;
     let revocation_addr: FromSqlIpAddr = row.get(11)?;

@@ -94,7 +94,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
             tx.execute(r#"
                 insert into version (id, unix_time, notes)
                              values (?, cast(strftime('%s', 'now') as int32), ?)
-            "#, params![&(ver + 1), &UPGRADE_NOTES])?;
+            "#, params![ver + 1, UPGRADE_NOTES])?;
             tx.commit()?;
         }
     }
