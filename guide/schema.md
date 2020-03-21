@@ -252,8 +252,7 @@ Version 6 adds over version 5:
     streams.
 *   hashes in Blake3 rather than older SHA-1 (for file integrity checksums)
     or Blake2b (for sessions).
+*   a preliminary schema for [object
+    detection](https://en.wikipedia.org/wiki/Object_detection).
 
-On upgrading to this version, sessions will be wiped.
-
-Before it is finalized, it likely will also add a schema for [object
-detection](https://en.wikipedia.org/wiki/Object_detection).
+On upgrading to this version, sessions will be revoked.

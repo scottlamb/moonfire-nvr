@@ -226,8 +226,8 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
     Ok(())
 }
 
-/// Tranfers the given recording range from the `recording` and `recording_playback` tables to the
-/// `garbage` table. `sample_file_dir_id` is assumed to be correct.
+/// Transfers the given recording range from the `recording` and associated tables to the `garbage`
+/// table. `sample_file_dir_id` is assumed to be correct.
 ///
 /// Returns the number of recordings which were deleted.
 pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: i32,
@@ -244,19 +244,25 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
           :start <= composite_id and
           composite_id < :end
     "#)?;
-    let mut del1 = tx.prepare_cached(r#"
+    let mut del_playback = tx.prepare_cached(r#"
         delete from recording_playback
         where
           :start <= composite_id and
           composite_id < :end
     "#)?;
-    let mut del2 = tx.prepare_cached(r#"
+    let mut del_integrity = tx.prepare_cached(r#"
         delete from recording_integrity
         where
           :start <= composite_id and
           composite_id < :end
     "#)?;
-    let mut del3 = tx.prepare_cached(r#"
+    let mut del_detection = tx.prepare_cached(r#"
+        delete from recording_object_detection
+        where
+          :start <= composite_id and
+          composite_id < :end
+    "#)?;
+    let mut del_main = tx.prepare_cached(r#"
         delete from recording
         where
           :start <= composite_id and
@@ -271,17 +277,20 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
         ":start": ids.start.0,
         ":end": ids.end.0,
     };
-    let n1 = del1.execute_named(p)?;
-    if n1 != n {
-        bail!("inserted {} garbage rows but deleted {} recording_playback rows!", n, n1);
+    let n_playback = del_playback.execute_named(p)?;
+    if n_playback != n {
+        bail!("inserted {} garbage rows but deleted {} recording_playback rows!", n, n_playback);
     }
-    let n2 = del2.execute_named(p)?;
-    if n2 > n {  // fewer is okay; recording_integrity is optional.
-        bail!("inserted {} garbage rows but deleted {} recording_integrity rows!", n, n2);
+    let n_integrity = del_integrity.execute_named(p)?;
+    if n_integrity > n {  // fewer is okay; recording_integrity is optional.
+        bail!("inserted {} garbage rows but deleted {} recording_integrity rows!", n, n_integrity);
     }
-    let n3 = del3.execute_named(p)?;
-    if n3 != n {
-        bail!("deleted {} recording rows but {} recording_playback rows!", n3, n);
+    // Any number of object detection rows is okay, as there can be zero or more models per
+    // recording.
+    del_detection.execute_named(p)?;
+    let n_main = del_main.execute_named(p)?;
+    if n_main != n {
+        bail!("inserted {} garbage rows but deleted {} recording rows!", n, n_main);
     }
     Ok(n)
 }

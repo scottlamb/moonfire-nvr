@@ -209,6 +209,27 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           revocation_reason_detail = 'Blake2b->Blake3 upgrade'
         where
           revocation_reason is null;
+
+        create table object_detection_model (
+          id integer primary key,
+          uuid blob unique not null check (length(uuid) = 16),
+          name text not null,
+          data blob
+        );
+
+        create table object_detection_label (
+          id integer primary key,
+          uuid blob unique not null check (length(uuid) = 16),
+          name text unique not null,
+          color text
+        );
+
+        create table recording_object_detection (
+          composite_id integer not null references recording (composite_id),
+          model_id integer not null references object_detection_model (id),
+          frame_data blob not null,
+          primary key (composite_id, model_id)
+        );
     "#)?;
     Ok(())
 }
