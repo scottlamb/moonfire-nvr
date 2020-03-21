@@ -20,6 +20,7 @@ members = ["base", "db", "ffmpeg"]
 [dependencies]
 base = { package = "moonfire-base", path = "base" }
 base64 = "0.11.0"
+blake3 = "0.2.2"
 bytes = "0.5.3"
 byteorder = "1.0"
 cstr = "0.1.7"
@@ -41,7 +42,6 @@ memchr = "2.0.2"
 memmap = "0.7"
 mylog = { git = "https://github.com/scottlamb/mylog" }
 nix = "0.16.1"
-openssl = "0.10"
 parking_lot = { version = "0.9", features = [] }
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
 reffers = "0.6.0"

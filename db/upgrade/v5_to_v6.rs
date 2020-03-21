@@ -74,33 +74,42 @@ fn parse(data: &[u8]) -> Result<AvcDecoderConfigurationRecord, Error> {
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     // These create statements match the schema.sql when version 5 was the latest.
     tx.execute_batch(r#"
-        alter table video_sample_entry add column pasp_h_spacing integer not null default 1 check (pasp_h_spacing > 0);
-        alter table video_sample_entry add column pasp_v_spacing integer not null default 1 check (pasp_v_spacing > 0);
+        alter table video_sample_entry rename to old_video_sample_entry;
+
+        create table video_sample_entry (
+          id integer primary key,
+          width integer not null check (width > 0),
+          height integer not null check (height > 0),
+          rfc6381_codec text not null,
+          data blob not null check (length(data) > 86),
+          pasp_h_spacing integer not null default 1 check (pasp_h_spacing > 0),
+          pasp_v_spacing integer not null default 1 check (pasp_v_spacing > 0)
+        );
     "#)?;
 
-    let mut update = tx.prepare(r#"
-        update video_sample_entry
-        set data = :data,
-            sha1 = :sha1,
-            pasp_h_spacing = :pasp_h_spacing,
-            pasp_v_spacing = :pasp_v_spacing
-        where id = :id
+    let mut insert = tx.prepare(r#"
+        insert into video_sample_entry (id,  width,  height,  rfc6381_codec,  data,
+                                        pasp_h_spacing,  pasp_v_spacing)
+                                values (:id, :width, :height, :rfc6381_codec, :data,
+                                        :pasp_h_spacing, :pasp_v_spacing)
     "#)?;
     let mut stmt = tx.prepare(r#"
         select
           id,
           width,
           height,
+          rfc6381_codec,
           data
         from
-          video_sample_entry
+          old_video_sample_entry
     "#)?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let id: i32 = row.get(0)?;
         let width: u16 = row.get::<_, i32>(1)?.try_into()?;
         let height: u16 = row.get::<_, i32>(2)?.try_into()?;
-        let mut data: Vec<u8> = row.get(3)?;
+        let rfc6381_codec: &str = row.get_raw_checked(3)?.as_str()?;
+        let mut data: Vec<u8> = row.get(4)?;
         let avcc = parse(&data)?;
         if avcc.num_of_sequence_parameter_sets() != 1 {
             bail!("Multiple SPSs!");
@@ -121,13 +130,85 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             BigEndian::write_u32(&mut data[0..4], u32::try_from(len)?);
         }
 
-        update.execute_named(named_params!{
+        insert.execute_named(named_params!{
             ":id": id,
+            ":width": width,
+            ":height": height,
+            ":rfc6381_codec": rfc6381_codec,
             ":data": &data,
-            ":sha1": &crate::sha1(&data)?[..],
             ":pasp_h_spacing": pasp.0,
             ":pasp_v_spacing": pasp.1,
         })?;
     }
+    tx.execute_batch(r#"
+        alter table recording rename to old_recording;
+        create table recording (
+          composite_id integer primary key,
+          open_id integer not null,
+          stream_id integer not null references stream (id),
+          run_offset integer not null,
+          flags integer not null,
+          sample_file_bytes integer not null check (sample_file_bytes > 0),
+          start_time_90k integer not null check (start_time_90k > 0),
+          duration_90k integer not null
+              check (duration_90k >= 0 and duration_90k < 5*60*90000),
+          video_samples integer not null check (video_samples > 0),
+          video_sync_samples integer not null check (video_sync_samples > 0),
+          video_sample_entry_id integer references video_sample_entry (id),
+          check (composite_id >> 32 = stream_id)
+        );
+        insert into recording select * from old_recording;
+        drop index recording_cover;
+        create index recording_cover on recording (
+          stream_id,
+          start_time_90k,
+          open_id,
+          duration_90k,
+          video_samples,
+          video_sync_samples,
+          video_sample_entry_id,
+          sample_file_bytes,
+          run_offset,
+          flags
+        );
+
+
+        alter table recording_integrity rename to old_recording_integrity;
+        create table recording_integrity (
+          composite_id integer primary key references recording (composite_id),
+          local_time_delta_90k integer,
+          local_time_since_open_90k integer,
+          wall_time_delta_90k integer,
+          sample_file_blake3 blob check (length(sample_file_blake3) <= 32)
+        );
+        insert into recording_integrity
+        select
+          composite_id,
+          local_time_delta_90k,
+          local_time_since_open_90k,
+          wall_time_delta_90k,
+          null
+        from
+          old_recording_integrity;
+
+        alter table recording_playback rename to old_recording_playback;
+        create table recording_playback (
+          composite_id integer primary key references recording (composite_id),
+          video_index blob not null check (length(video_index) > 0)
+        );
+        insert into recording_playback select * from old_recording_playback;
+
+        drop table old_recording_playback;
+        drop table old_recording_integrity;
+        drop table old_recording;
+        drop table old_video_sample_entry;
+
+        update user_session
+        set
+          revocation_reason = 1,
+          revocation_reason_detail = 'Blake2b->Blake3 upgrade'
+        where
+          revocation_reason is null;
+    "#)?;
     Ok(())
 }

@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use base::clock::Clocks;
-use base::{ErrorKind, bail_t, strutil};
+use base::{ErrorKind, bail_t};
 use bytes::Bytes;
 use crate::body::{Body, BoxedError};
 use crate::json;
@@ -79,7 +79,7 @@ type BoxedFuture = Box<dyn Future<Output = Result<Response<Body>, BoxedError>> +
 enum Path {
     TopLevel,                                         // "/api/"
     Request,                                          // "/api/request"
-    InitSegment([u8; 20], bool),                      // "/api/init/<sha1>.mp4{.txt}"
+    InitSegment(i32, bool),                           // "/api/init/<id>.mp4{.txt}"
     Camera(Uuid),                                     // "/api/cameras/<uuid>/"
     Signals,                                          // "/api/signals"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
@@ -114,11 +114,13 @@ impl Path {
             } else {
                 (false, path)
             };
-            if path.len() != 50 || !path.ends_with(".mp4") {
+            if !path.ends_with(".mp4") {
                 return Path::NotFound;
             }
-            if let Ok(sha1) = strutil::dehex(&path.as_bytes()[6..46]) {
-                return Path::InitSegment(sha1, debug);
+            let id_start = "/init/".len();
+            let id_end = path.len() - ".mp4".len();
+            if let Ok(id) = i32::from_str(&path[id_start .. id_end]) {
+                return Path::InitSegment(id, debug);
             }
             return Path::NotFound;
         }
@@ -377,23 +379,20 @@ impl ServiceInner {
         serve_json(req, &out)
     }
 
-    fn init_segment(&self, sha1: [u8; 20], debug: bool, req: &Request<::hyper::Body>)
+    fn init_segment(&self, id: i32, debug: bool, req: &Request<::hyper::Body>)
                     -> ResponseResult {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
         let db = self.db.lock();
-        for ent in db.video_sample_entries_by_id().values() {
-            if ent.sha1 == sha1 {
-                builder.append_video_sample_entry(ent.clone());
-                let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())
-                    .map_err(from_base_error)?;
-                if debug {
-                    return Ok(plain_response(StatusCode::OK, format!("{:#?}", mp4)));
-                } else {
-                    return Ok(http_serve::serve(mp4, req));
-                }
-            }
+        let ent = db.video_sample_entries_by_id().get(&id)
+            .ok_or_else(|| not_found("not such init segment"))?;
+        builder.append_video_sample_entry(ent.clone());
+        let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())
+            .map_err(from_base_error)?;
+        if debug {
+            Ok(plain_response(StatusCode::OK, format!("{:#?}", mp4)))
+        } else {
+            Ok(http_serve::serve(mp4, req))
         }
-        Err(not_found("no such init segment"))
     }
 
     fn stream_view_mp4(&self, req: &Request<::hyper::Body>, caller: Caller, uuid: Uuid,
@@ -959,9 +958,7 @@ impl Service {
             let mut rows = 0;
             db.list_recordings_by_id(stream_id, live.recording .. live.recording+1, &mut |r| {
                 rows += 1;
-                let vse = db.video_sample_entries_by_id().get(&r.video_sample_entry_id)
-                            .unwrap();
-                vse_id = Some(strutil::hex(&vse.sha1));
+                vse_id = Some(r.video_sample_entry_id);
                 start = Some(r.start);
                 builder.append(&db, r, live.off_90k.clone())?;
                 Ok(())
@@ -982,14 +979,14 @@ impl Service {
             X-Recording-Start: {}\r\n\
             X-Recording-Id: {}.{}\r\n\
             X-Time-Range: {}-{}\r\n\
-            X-Video-Sample-Entry-Sha1: {}\r\n\r\n",
+            X-Video-Sample-Entry-Id: {}\r\n\r\n",
             mime_type.to_str().unwrap(),
             start.0,
             open_id,
             live.recording,
             live.off_90k.start,
             live.off_90k.end,
-            &vse_id);
+            vse_id);
         let mut v = /*Pin::from(*/hdr.into_bytes()/*)*/;
         mp4.append_into_vec(&mut v).await?;
         //let v = Pin::into_inner();
@@ -1181,18 +1178,9 @@ mod tests {
         let cam_uuid = Uuid::parse_str("35144640-ff1e-4619-b0d5-4c74c185741c").unwrap();
         assert_eq!(Path::decode("/foo"), Path::Static);
         assert_eq!(Path::decode("/api/"), Path::TopLevel);
-        assert_eq!(Path::decode("/api/init/07cec464126825088ea86a07eddd6a00afa71559.mp4"),
-                   Path::InitSegment([0x07, 0xce, 0xc4, 0x64, 0x12, 0x68, 0x25, 0x08, 0x8e, 0xa8,
-                                      0x6a, 0x07, 0xed, 0xdd, 0x6a, 0x00, 0xaf, 0xa7, 0x15, 0x59],
-                                     false));
-        assert_eq!(Path::decode("/api/init/07cec464126825088ea86a07eddd6a00afa71559.mp4.txt"),
-                   Path::InitSegment([0x07, 0xce, 0xc4, 0x64, 0x12, 0x68, 0x25, 0x08, 0x8e, 0xa8,
-                                      0x6a, 0x07, 0xed, 0xdd, 0x6a, 0x00, 0xaf, 0xa7, 0x15, 0x59],
-                                     true));
-        assert_eq!(Path::decode("/api/init/000000000000000000000000000000000000000x.mp4"),
-                   Path::NotFound);  // non-hexadigit
-        assert_eq!(Path::decode("/api/init/000000000000000000000000000000000000000.mp4"),
-                   Path::NotFound);  // too short
+        assert_eq!(Path::decode("/api/init/42.mp4"), Path::InitSegment(42, false));
+        assert_eq!(Path::decode("/api/init/42.mp4.txt"), Path::InitSegment(42, true));
+        assert_eq!(Path::decode("/api/init/x.mp4"), Path::NotFound);  // non-digit
         assert_eq!(Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/"),
                    Path::Camera(cam_uuid));
         assert_eq!(Path::decode("/api/cameras/asdf/"), Path::NotFound);

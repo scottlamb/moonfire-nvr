@@ -76,7 +76,7 @@
 //! * mdat (media data container)
 //! ```
 
-use base::{strutil, Error, ErrorKind, ResultExt, bail_t, format_err_t};
+use base::{Error, ErrorKind, ResultExt, bail_t, format_err_t};
 use bytes::{Buf, BytesMut};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use crate::body::{Chunk, BoxedError, wrap_error};
@@ -89,7 +89,6 @@ use http::header::HeaderValue;
 use http_serve;
 use log::{debug, error, trace, warn};
 use memmap;
-use openssl::hash;
 use parking_lot::Once;
 use reffers::ARefss;
 use crate::slices::{self, Slices};
@@ -788,20 +787,19 @@ impl FileBuilder {
                  dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>)
                  -> Result<File, Error> {
         let mut max_end = None;
-        let mut etag = hash::Hasher::new(hash::MessageDigest::sha1())
-            .err_kind(ErrorKind::Internal)?;
-        etag.update(&FORMAT_VERSION[..]).err_kind(ErrorKind::Internal)?;
+        let mut etag = blake3::Hasher::new();
+        etag.update(&FORMAT_VERSION[..]);
         if self.include_timestamp_subtitle_track {
-            etag.update(b":ts:").err_kind(ErrorKind::Internal)?;
+            etag.update(b":ts:");
         }
         if let Some(cd) = self.content_disposition.as_ref() {
-            etag.update(b":cd:").err_kind(ErrorKind::Internal)?;
-            etag.update(cd.as_bytes()).err_kind(ErrorKind::Internal)?;
+            etag.update(b":cd:");
+            etag.update(cd.as_bytes());
         }
         match self.type_ {
             Type::Normal => {},
-            Type::InitSegment => etag.update(b":init:").err_kind(ErrorKind::Internal)?,
-            Type::MediaSegment => etag.update(b":media:").err_kind(ErrorKind::Internal)?,
+            Type::InitSegment => { etag.update(b":init:"); },
+            Type::MediaSegment => { etag.update(b":media:"); },
         };
         for s in &mut self.segments {
             let d = &s.s.desired_range_90k;
@@ -830,7 +828,7 @@ impl FileBuilder {
             cursor.write_u32::<BigEndian>(s.s.open_id).err_kind(ErrorKind::Internal)?;
             cursor.write_i32::<BigEndian>(d.start).err_kind(ErrorKind::Internal)?;
             cursor.write_i32::<BigEndian>(d.end).err_kind(ErrorKind::Internal)?;
-            etag.update(cursor.into_inner()).err_kind(ErrorKind::Internal)?;
+            etag.update(cursor.into_inner());
         }
         let max_end = match max_end {
             None => 0,
@@ -888,7 +886,7 @@ impl FileBuilder {
         debug!("slices: {:?}", self.body.slices);
         let last_modified = ::std::time::UNIX_EPOCH +
                             ::std::time::Duration::from_secs(max_end as u64);
-        let etag = etag.finish().err_kind(ErrorKind::Internal)?;
+        let etag = etag.finalize();
         Ok(File(Arc::new(FileInner {
             db,
             dirs_by_stream_id,
@@ -898,7 +896,7 @@ impl FileBuilder {
             video_sample_entries: self.video_sample_entries,
             initial_sample_byte_pos,
             last_modified,
-            etag: HeaderValue::try_from(format!("\"{}\"", &strutil::hex(&etag)))
+            etag: HeaderValue::try_from(format!("\"{}\"", etag.to_hex().as_str()))
                   .expect("hex string should be valid UTF-8"),
             content_disposition: self.content_disposition,
         })))
@@ -1588,7 +1586,7 @@ impl fmt::Debug for File {
 ///      to verify the output is byte-for-byte as expected.
 #[cfg(test)]
 mod tests {
-    use base::{clock::RealClocks, strutil};
+    use base::clock::RealClocks;
     use bytes::Buf;
     use byteorder::{BigEndian, ByteOrder};
     use crate::stream::{self, Opener, Stream};
@@ -1597,7 +1595,6 @@ mod tests {
     use db::writer;
     use futures::stream::TryStreamExt;
     use log::info;
-    use openssl::hash;
     use http_serve::{self, Entity};
     use std::fs;
     use std::ops::Range;
@@ -1620,19 +1617,18 @@ mod tests {
         .unwrap();
     }
 
-    /// Returns the SHA-1 digest of the given `Entity`.
-    async fn digest<E: http_serve::Entity>(e: &E) -> hash::DigestBytes
+    /// Returns the Blake3 digest of the given `Entity`.
+    async fn digest<E: http_serve::Entity>(e: &E) -> blake3::Hash
     where E::Error : ::std::fmt::Debug {
         Pin::from(e.get_range(0 .. e.len()))
-         .try_fold(hash::Hasher::new(hash::MessageDigest::sha1()).unwrap(), |mut sha1, chunk| {
+         .try_fold(blake3::Hasher::new(), |mut hasher, chunk| {
              let c: &[u8] = chunk.bytes();
-             sha1.update(c).unwrap();
-             futures::future::ok::<_, E::Error>(sha1)
+             hasher.update(c);
+             futures::future::ok::<_, E::Error>(hasher)
          })
          .await
          .unwrap()
-         .finish()
-         .unwrap()
+         .finalize()
     }
 
     /// Information used within `BoxCursor` to describe a box on the stack.
@@ -2193,9 +2189,11 @@ mod tests {
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
-        let sha1 = digest(&mp4).await;
-        assert_eq!("2ea2cb354503b9d50d028af00bddcd23d6651f28", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"7b55d0bd4370712bf1a7549f6383ca51b1eb97e9\"";
+        let hash = digest(&mp4).await;
+        assert_eq!("e95f2d261cdebac5b9983abeea59e8eb053dc4efac866722544c665d9de7c49d",
+                   hash.to_hex().as_str());
+        const EXPECTED_ETAG: &'static str =
+            "\"16d80691792326c314990b15f1f0387e1dd12119614fea3ecaeca88325f6000b\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2214,9 +2212,11 @@ mod tests {
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
-        let sha1 = digest(&mp4).await;
-        assert_eq!("ec79a2d2362b3ae9dec18762c78c8c60932b4ff0", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"f17085373bbee7d2ffc99046575a1ef28f8134e0\"";
+        let hash = digest(&mp4).await;
+        assert_eq!("77e09be8ee5ca353ca56f9a80bb7420680713c80a0831d236fac45a96aa3b3d4",
+                   hash.to_hex().as_str());
+        const EXPECTED_ETAG: &'static str =
+            "\"932883a0d7c5e464c9f1b1a62d36db670631eee7c1eefc74deb331c1f623affb\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2235,9 +2235,11 @@ mod tests {
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
-        let sha1 = digest(&mp4).await;
-        assert_eq!("26e5989211456a0de493e146e2cda7a89a3b485e", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"c48b2819f74b090d89c27fa615ab34e445a4b322\"";
+        let hash = digest(&mp4).await;
+        assert_eq!("f9807cfc6b96a399f3a5ad62d090f55a18543a9eeb1f48d59f86564ffd9b1e84",
+                   hash.to_hex().as_str());
+        const EXPECTED_ETAG: &'static str =
+            "\"53e9e33e28bafb6af8cee2f8b71d7751874a83a3aa7782396878b3caeacec526\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2256,9 +2258,11 @@ mod tests {
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
         // combine ranges from the new format with ranges from the old format.
-        let sha1 = digest(&mp4).await;
-        assert_eq!("d182fb5c9402ec863527b22526e152dccba82c4a", strutil::hex(&sha1[..]));
-        const EXPECTED_ETAG: &'static str = "\"48da7c8f9c15c318ef91ae00148356b3247b671f\"";
+        let hash = digest(&mp4).await;
+        assert_eq!("5211104e1fdfe3bbc0d7d7d479933940305ff7f23201e97308db23a022ee6339",
+                   hash.to_hex().as_str());
+        const EXPECTED_ETAG: &'static str =
+            "\"f77e81297b5ca9d1c1dcf0d0f8eebbdea8d41b4c8af1917f9d3fe84de6e68a5b\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();

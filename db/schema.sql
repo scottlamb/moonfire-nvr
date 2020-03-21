@@ -258,8 +258,9 @@ create table recording_integrity (
   -- TODO: fill this in!
   wall_time_delta_90k integer,
 
-  -- The sha1 hash of the contents of the sample file.
-  sample_file_sha1 blob check (length(sample_file_sha1) <= 20)
+  -- The (possibly truncated) raw blake3 hash of the contents of the sample
+  -- file.
+  sample_file_blake3 blob check (length(sample_file_blake3) <= 32)
 );
 
 -- Large fields for a recording which are needed ony for playback.
@@ -299,11 +300,8 @@ create table garbage (
 create table video_sample_entry (
   id integer primary key,
 
-  -- A SHA-1 hash of |bytes|.
-  sha1 blob unique not null check (length(sha1) = 20),
-
   -- The width and height in pixels; must match values within
-  -- |sample_entry_bytes|.
+  -- `sample_entry_bytes`.
   width integer not null check (width > 0),
   height integer not null check (height > 0),
 
@@ -354,10 +352,10 @@ create table user (
 -- elsewhere), which holds the session id and an encrypted sequence number for
 -- replay protection.
 create table user_session (
-  -- The session id is a 48-byte blob. This is the unencoded, unsalted Blake2b-192
-  -- (24 bytes) of the unencoded session id. Much like `password_hash`, a
-  -- hash is used here so that a leaked database backup can't be trivially used
-  -- to steal credentials.
+  -- The session id is a 48-byte blob. This is the unsalted Blake3 (32 bytes)
+  -- of the unencoded session id. Much like `password_hash`, a hash is used here
+  -- so that a leaked database backup can't be trivially used to steal
+  -- credentials.
   session_id_hash blob primary key not null,
 
   user_id integer references user (id) not null,
@@ -395,6 +393,7 @@ create table user_session (
   -- A value indicating the reason for revocation, with optional additional
   -- text detail. Enumeration values:
   -- 0: logout link clicked (i.e. from within the session itself)
+  -- 1: obsoleted by a change in hashing algorithm (eg schema 5->6 upgrade)
   --
   -- This might be extended for a variety of other reasons:
   -- x: user revoked (while authenticated in another way)

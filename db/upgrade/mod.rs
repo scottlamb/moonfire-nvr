@@ -220,19 +220,16 @@ mod tests {
         "#)?;
         upgraded.execute(r#"
             insert into video_sample_entry (id, sha1, width, height, data)
-                                    values (1, ?, 1920, 1080, ?);
-        "#, params![&crate::sha1(testutil::TEST_VIDEO_SAMPLE_ENTRY_DATA).unwrap()[..],
-                    testutil::TEST_VIDEO_SAMPLE_ENTRY_DATA])?;
+                values (1, X'0000000000000000000000000000000000000000', 1920, 1080, ?);
+        "#, params![testutil::TEST_VIDEO_SAMPLE_ENTRY_DATA])?;
         upgraded.execute(r#"
             insert into video_sample_entry (id, sha1, width, height, data)
-                                    values (2, ?, 320, 240, ?);
-        "#, params![&crate::sha1(BAD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY).unwrap()[..],
-                    BAD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY])?;
+                values (2, X'0000000000000000000000000000000000000001', 320, 240, ?);
+        "#, params![BAD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY])?;
         upgraded.execute(r#"
             insert into video_sample_entry (id, sha1, width, height, data)
-                                    values (3, ?, 704, 480, ?);
-        "#, params![&crate::sha1(GOOD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY).unwrap()[..],
-                    GOOD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY])?;
+                values (3, X'0000000000000000000000000000000000000002', 704, 480, ?);
+        "#, params![GOOD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY])?;
         upgraded.execute_batch(r#"
             insert into recording (id, camera_id, sample_file_bytes, start_time_90k, duration_90k,
                                    local_time_delta_90k, video_samples, video_sync_samples,

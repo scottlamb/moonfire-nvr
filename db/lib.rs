@@ -51,12 +51,3 @@ pub mod testutil;
 pub use crate::db::*;
 pub use crate::schema::Permissions;
 pub use crate::signal::Signal;
-
-use openssl::hash;
-
-fn sha1(input: &[u8]) -> Result<[u8; 20], failure::Error> {
-    let sha1 = hash::hash(hash::MessageDigest::sha1(), &input)?;
-    let mut sha1_bytes = [0u8; 20];
-    sha1_bytes.copy_from_slice(&sha1);
-    Ok(sha1_bytes)
-}

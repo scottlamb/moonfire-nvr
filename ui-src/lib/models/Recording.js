@@ -71,9 +71,6 @@ export default class Recording {
     /** @const {!number} */
     this.videoSamples = recordingJson.videoSamples;
 
-    /** @const {!string} */
-    this.videoSampleEntrySha1 = videoSampleEntryJson.sha1;
-
     /** @const {!number} */
     this.videoSampleEntryWidth = videoSampleEntryJson.width;
 

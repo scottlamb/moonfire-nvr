@@ -200,10 +200,10 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
                                 id, r, e))?;
 
     let mut stmt = tx.prepare_cached(r#"
-        insert into recording_integrity (composite_id,  local_time_delta_90k,  sample_file_sha1)
-                                 values (:composite_id, :local_time_delta_90k, :sample_file_sha1)
+        insert into recording_integrity (composite_id,  local_time_delta_90k,  sample_file_blake3)
+                                 values (:composite_id, :local_time_delta_90k, :sample_file_blake3)
     "#).with_context(|e| format!("can't prepare recording_integrity insert: {}", e))?;
-    let sha1 = &r.sample_file_sha1[..];
+    let blake3 = r.sample_file_blake3.as_ref().map(|b| &b[..]);
     let delta = match r.run_offset {
         0 => None,
         _ => Some(r.local_time_delta.0),
@@ -211,7 +211,7 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
     stmt.execute_named(named_params!{
         ":composite_id": id.0,
         ":local_time_delta_90k": delta,
-        ":sample_file_sha1": sha1,
+        ":sample_file_blake3": blake3,
     }).with_context(|e| format!("unable to insert recording_integrity for {:#?}: {}", r, e))?;
 
     let mut stmt = tx.prepare_cached(r#"

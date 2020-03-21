@@ -40,7 +40,6 @@ use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use parking_lot::Mutex;
 use log::{debug, trace, warn};
-use openssl::hash;
 use std::cmp::Ordering;
 use std::cmp;
 use std::io;
@@ -563,7 +562,7 @@ struct InnerWriter<F: FileWriter> {
     /// segments have been sent out. Initially 0.
     completed_live_segment_off_90k: i32,
 
-    hasher: hash::Hasher,
+    hasher: blake3::Hasher,
 
     /// The start time of this segment, based solely on examining the local clock after frames in
     /// this segment were received. Frames can suffer from various kinds of delay (initial
@@ -688,7 +687,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             e: recording::SampleIndexEncoder::new(),
             id,
             completed_live_segment_off_90k: 0,
-            hasher: hash::Hasher::new(hash::MessageDigest::sha1())?,
+            hasher: blake3::Hasher::new(),
             local_start: recording::Time(i64::max_value()),
             adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
             unflushed_sample: None,
@@ -757,7 +756,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             len: pkt.len() as i32,
             is_key,
         });
-        w.hasher.update(pkt).unwrap();
+        w.hasher.update(pkt);
         Ok(())
     }
 
@@ -797,8 +796,7 @@ impl<F: FileWriter> InnerWriter<F> {
             None => (self.adjuster.adjust(0), db::RecordingFlags::TrailingZero as i32),
             Some(p) => (self.adjuster.adjust((p - unflushed.pts_90k) as i32), 0),
         };
-        let mut sha1_bytes = [0u8; 20];
-        sha1_bytes.copy_from_slice(&self.hasher.finish().unwrap()[..]);
+        let blake3 = self.hasher.finalize();
         let (local_time_delta, run_offset, end);
         let d = self.add_sample(last_sample_duration, unflushed.len, unflushed.is_key,
                                 unflushed.local_time)?;
@@ -814,7 +812,7 @@ impl<F: FileWriter> InnerWriter<F> {
             l.flags = flags;
             local_time_delta = self.local_start - l.start;
             l.local_time_delta = local_time_delta;
-            l.sample_file_sha1 = sha1_bytes;
+            l.sample_file_blake3 = Some(blake3.as_bytes().clone());
             total_duration = recording::Duration(l.duration_90k as i64);
             run_offset = l.run_offset;
             end = l.start + total_duration;

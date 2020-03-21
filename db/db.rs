@@ -97,9 +97,9 @@ const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
 "#;
 
 const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &'static str = r#"
-    insert into video_sample_entry (sha1,  width,  height,  pasp_h_spacing,  pasp_v_spacing,
+    insert into video_sample_entry (width,  height,  pasp_h_spacing,  pasp_v_spacing,
                                     rfc6381_codec, data)
-                            values (:sha1, :width, :height, :pasp_h_spacing, :pasp_v_spacing,
+                            values (:width, :height, :pasp_h_spacing, :pasp_v_spacing,
                                     :rfc6381_codec, :data)
 "#;
 
@@ -129,7 +129,6 @@ impl rusqlite::types::FromSql for VideoIndex {
 #[derive(Debug)]
 pub struct VideoSampleEntry {
     pub id: i32,
-    pub sha1: [u8; 20],
 
     // Fields matching VideoSampleEntryToInsert below.
 
@@ -234,7 +233,7 @@ pub struct RecordingToInsert {
     pub video_sync_samples: i32,
     pub video_sample_entry_id: i32,
     pub video_index: Vec<u8>,
-    pub sample_file_sha1: [u8; 20],
+    pub sample_file_blake3: Option<[u8; 32]>,
 }
 
 impl RecordingToInsert {
@@ -1358,7 +1357,6 @@ impl LockedDatabase {
         let mut stmt = self.conn.prepare(r#"
             select
                 id,
-                sha1,
                 width,
                 height,
                 pasp_h_spacing,
@@ -1371,23 +1369,16 @@ impl LockedDatabase {
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
-            let mut sha1 = [0u8; 20];
-            let sha1_vec: Vec<u8> = row.get(1)?;
-            if sha1_vec.len() != 20 {
-                bail!("video sample entry id {} has sha1 {} of wrong length", id, sha1_vec.len());
-            }
-            sha1.copy_from_slice(&sha1_vec);
-            let data: Vec<u8> = row.get(7)?;
+            let data: Vec<u8> = row.get(6)?;
 
             self.video_sample_entries_by_id.insert(id, Arc::new(VideoSampleEntry {
                 id,
-                width: row.get::<_, i32>(2)?.try_into()?,
-                height: row.get::<_, i32>(3)?.try_into()?,
-                pasp_h_spacing: row.get::<_, i32>(4)?.try_into()?,
-                pasp_v_spacing: row.get::<_, i32>(5)?.try_into()?,
-                sha1,
+                width: row.get::<_, i32>(1)?.try_into()?,
+                height: row.get::<_, i32>(2)?.try_into()?,
+                pasp_h_spacing: row.get::<_, i32>(3)?.try_into()?,
+                pasp_v_spacing: row.get::<_, i32>(4)?.try_into()?,
                 data,
-                rfc6381_codec: row.get(6)?,
+                rfc6381_codec: row.get(5)?,
             }));
         }
         info!("Loaded {} video sample entries",
@@ -1532,19 +1523,16 @@ impl LockedDatabase {
     /// On success, returns the id of a new or existing row.
     pub fn insert_video_sample_entry(&mut self, entry: VideoSampleEntryToInsert)
         -> Result<i32, Error> {
-        let sha1 = crate::sha1(&entry.data)?;
 
         // Check if it already exists.
         // There shouldn't be too many entries, so it's fine to enumerate everything.
         for (&id, v) in &self.video_sample_entries_by_id {
-            if v.sha1 == sha1 {
-                // A hash collision (different data with the same hash) is unlikely.
-                // The other fields are derived from data, so differences there indicate a bug.
+            if v.data == entry.data {
+                // The other fields are derived from data, so differences indicate a bug.
                 if v.width != entry.width || v.height != entry.height ||
                     v.pasp_h_spacing != entry.pasp_h_spacing ||
                     v.pasp_v_spacing != entry.pasp_v_spacing {
-                    bail!("video_sample_entry SHA-1 {} mismatch: existing entry {:?}, new {:?}",
-                          base::strutil::hex(&sha1[..]), v, &entry);
+                    bail!("video_sample_entry id {}: existing entry {:?}, new {:?}", id, v, &entry);
                 }
                 return Ok(id);
             }
@@ -1552,7 +1540,6 @@ impl LockedDatabase {
 
         let mut stmt = self.conn.prepare_cached(INSERT_VIDEO_SAMPLE_ENTRY_SQL)?;
         stmt.execute_named(named_params!{
-            ":sha1": &sha1[..],
             ":width": i32::from(entry.width),
             ":height": i32::from(entry.height),
             ":pasp_h_spacing": i32::from(entry.pasp_h_spacing),
@@ -1568,7 +1555,6 @@ impl LockedDatabase {
             height: entry.height,
             pasp_h_spacing: entry.pasp_h_spacing,
             pasp_v_spacing: entry.pasp_v_spacing,
-            sha1,
             data: entry.data,
             rfc6381_codec: entry.rfc6381_codec,
         }));
@@ -2356,7 +2342,7 @@ mod tests {
             video_sync_samples: 1,
             video_sample_entry_id: vse_id,
             video_index: [0u8; 100].to_vec(),
-            sample_file_sha1: [0u8; 20],
+            sample_file_blake3: None,
         };
         let id = {
             let mut db = db.lock();

@@ -14,7 +14,7 @@ path = "lib.rs"
 [dependencies]
 base = { package = "moonfire-base", path = "../base" }
 base64 = "0.11.0"
-blake2-rfc = "0.2.18"
+blake3 = "0.2.2"
 byteorder = "1.0"
 cstr = "0.1.7"
 failure = "0.1.1"
@@ -28,11 +28,11 @@ lru-cache = "0.1"
 mylog = { git = "https://github.com/scottlamb/mylog" }
 nix = "0.16.1"
 odds = { version = "0.3.1", features = ["std-vec"] }
-openssl = "0.10"
 parking_lot = { version = "0.9", features = [] }
 prettydiff = "0.3.1"
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
 regex = "1.0"
+ring = "0.14.6"
 rusqlite = "0.21.0"
 smallvec = "1.0"
 tempdir = "0.3"

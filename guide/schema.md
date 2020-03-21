@@ -250,6 +250,10 @@ Version 6 adds over version 5:
 *   metadata about the pixel aspect ratio to properly support
     [anamorphic](https://en.wikipedia.org/wiki/Anamorphic_widescreen) "sub"
     streams.
+*   hashes in Blake3 rather than older SHA-1 (for file integrity checksums)
+    or Blake2b (for sessions).
+
+On upgrading to this version, sessions will be wiped.
 
 Before it is finalized, it likely will also add a schema for [object
 detection](https://en.wikipedia.org/wiki/Object_detection).

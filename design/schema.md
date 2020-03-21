@@ -522,7 +522,7 @@ The snippet below is a illustrative excerpt of the SQLite schema; see
       camera_id integer references camera (id) not null,
 
       sample_file_uuid blob unique not null,
-      sample_file_sha1 blob,
+      sample_file_blake3 blob,
       sample_file_size integer,
 
       -- The starting time and duration of the recording, in 90 kHz units since
@@ -540,11 +540,10 @@ The snippet below is a illustrative excerpt of the SQLite schema; see
     -- A concrete box derived from a ISO/IEC 14496-12 section 8.5.2
     -- VisualSampleEntry box. Describes the codec, width, height, etc.
     create table visual_sample_entry (
-      -- A SHA-1 hash of |bytes|.
-      sha1 blob primary key,
+      id integerprimary key,
 
       -- The width and height in pixels; must match values within
-      |sample_entry_bytes|.
+      -- `sample_entry_bytes`.
       width integer,
       height integer,
 

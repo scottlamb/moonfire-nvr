@@ -30,7 +30,6 @@
 
 use log::info;
 use base::strutil;
-use blake2_rfc::blake2b::blake2b;
 use crate::schema::Permissions;
 use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
@@ -38,6 +37,7 @@ use lazy_static::lazy_static;
 use libpasta;
 use parking_lot::Mutex;
 use protobuf::Message;
+use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::{Connection, Transaction, params};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -204,6 +204,7 @@ pub enum SessionFlags {
 #[derive(Copy, Clone)]
 pub enum RevocationReason {
     LoggedOut = 1,
+    AlgorithmChange = 2,
 }
 
 #[derive(Debug, Default)]
@@ -230,9 +231,9 @@ pub struct Session {
 
 impl Session {
     pub fn csrf(&self) -> SessionHash {
-        let r = blake2b(24, b"csrf", &self.seed.0[..]);
+        let r = blake3::keyed_hash(&self.seed.0, b"csrf");
         let mut h = SessionHash([0u8; 24]);
-        h.0.copy_from_slice(r.as_bytes());
+        h.0.copy_from_slice(&r.as_bytes()[0..24]);
         h
     }
 }
@@ -253,9 +254,9 @@ impl RawSessionId {
     }
 
     pub fn hash(&self) -> SessionHash {
-        let r = blake2b(24, &[], &self.0[..]);
+        let r = blake3::hash(&self.0[..]);
         let mut h = SessionHash([0u8; 24]);
-        h.0.copy_from_slice(r.as_bytes());
+        h.0.copy_from_slice(&r.as_bytes()[0..24]);
         h
     }
 }
@@ -276,8 +277,8 @@ impl fmt::Debug for RawSessionId {
 
 /// A Blake2b-256 (48 bytes) of data associated with the session.
 /// This is currently used in two ways:
-/// *   the csrf token is a blake2b drived from the session's seed. This is put into the `sc`
-///     cookie.
+/// *   the csrf token is a truncated blake3 derived from the session's seed. This is put into the
+///     `sc` cookie.
 /// *   the 48-byte session id is hashed to be used as a database key.
 #[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
 pub struct SessionHash(pub [u8; 24]);
@@ -333,6 +334,8 @@ pub(crate) struct State {
     /// evict the oldest when its size exceeds a threshold. Or just evict everything on every flush
     /// (and accept more frequent database accesses).
     sessions: FnvHashMap<SessionHash, Session>,
+
+    rand: SystemRandom,
 }
 
 impl State {
@@ -341,6 +344,7 @@ impl State {
             users_by_id: BTreeMap::new(),
             users_by_name: BTreeMap::new(),
             sessions: FnvHashMap::default(),
+            rand: ring::rand::SystemRandom::new(),
         };
         let mut stmt = conn.prepare(r#"
             select
@@ -525,7 +529,7 @@ impl State {
             u.dirty = true;
         }
         let password_id = u.password_id;
-        State::make_session_int(conn, req, u, domain, Some(password_id), session_flags,
+        State::make_session_int(&self.rand, conn, req, u, domain, Some(password_id), session_flags,
                             &mut self.sessions, u.permissions.clone())
     }
 
@@ -537,19 +541,20 @@ impl State {
         if u.disabled() {
             bail!("user is disabled");
         }
-        State::make_session_int(conn, creation, u, domain, None, flags, &mut self.sessions,
-                                permissions)
+        State::make_session_int(&self.rand, conn, creation, u, domain, None, flags,
+                                &mut self.sessions, permissions)
     }
 
-    fn make_session_int<'s>(conn: &Connection, creation: Request, user: &mut User,
-                            domain: Option<Vec<u8>>, creation_password_id: Option<i32>, flags: i32,
+    fn make_session_int<'s>(rand: &SystemRandom, conn: &Connection, creation: Request,
+                            user: &mut User, domain: Option<Vec<u8>>,
+                            creation_password_id: Option<i32>, flags: i32,
                             sessions: &'s mut FnvHashMap<SessionHash, Session>,
                             permissions: Permissions)
                             -> Result<(RawSessionId, &'s Session), Error> {
         let mut session_id = RawSessionId::new();
-        ::openssl::rand::rand_bytes(&mut session_id.0).unwrap();
+        rand.fill(&mut session_id.0).unwrap();
         let mut seed = [0u8; 32];
-        ::openssl::rand::rand_bytes(&mut seed).unwrap();
+        rand.fill(&mut seed).unwrap();
         let hash = session_id.hash();
         let mut stmt = conn.prepare_cached(r#"
             insert into user_session (session_id_hash,  user_id,  seed,  flags,  domain,

@@ -423,7 +423,6 @@ pub struct Recording {
 #[derive(Debug, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct VideoSampleEntry {
-    pub sha1: String,
     pub width: u16,
     pub height: u16,
     pub pasp_h_spacing: u16,
@@ -433,7 +432,6 @@ pub struct VideoSampleEntry {
 impl VideoSampleEntry {
     fn from(e: &db::VideoSampleEntry) -> Self {
         Self {
-            sha1: base::strutil::hex(&e.sha1),
             width: e.width,
             height: e.height,
             pasp_h_spacing: e.pasp_h_spacing,
