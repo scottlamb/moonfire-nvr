@@ -1300,6 +1300,7 @@ dependencies = [
 [[package]]
 name = "moonfire-ffmpeg"
 version = "0.0.1"
+source = "git+https://github.com/scottlamb/moonfire-ffmpeg#c517aa782867c8b882524a2d21361753ca845f06"
 dependencies = [
  "cc",
  "libc",

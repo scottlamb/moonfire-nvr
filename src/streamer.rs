@@ -236,7 +236,7 @@ mod tests {
     }
 
     impl<'a> Stream for ProxyingStream<'a> {
-        fn get_next(&mut self) -> Result<ffmpeg::Packet, ffmpeg::Error> {
+        fn get_next(&mut self) -> Result<ffmpeg::avcodec::Packet, ffmpeg::Error> {
             if self.pkts_left == 0 {
                 return Err(ffmpeg::Error::eof());
             }

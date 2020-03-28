@@ -15,7 +15,7 @@ nightly = ["db/nightly", "parking_lot/nightly", "smallvec/union"]
 bundled = ["rusqlite/bundled"]
 
 [workspace]
-members = ["base", "db", "ffmpeg"]
+members = ["base", "db"]
 
 [dependencies]
 base = { package = "moonfire-base", path = "base" }
@@ -28,7 +28,7 @@ cursive = "0.14.0"
 db = { package = "moonfire-db", path = "db" }
 docopt = "1.0"
 failure = "0.1.1"
-ffmpeg = { package = "moonfire-ffmpeg", path = "ffmpeg" }
+ffmpeg = { package = "moonfire-ffmpeg", git = "https://github.com/scottlamb/moonfire-ffmpeg" }
 futures = "0.3"
 fnv = "1.0"
 h264-reader = { git = "https://github.com/dholroyd/h264-reader" }

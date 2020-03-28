@@ -34,6 +34,7 @@ use failure::{Error, bail};
 use ffmpeg;
 use lazy_static::lazy_static;
 use log::{debug, info, warn};
+use std::convert::TryFrom;
 use std::ffi::CString;
 use std::result::Result;
 
@@ -61,29 +62,25 @@ pub trait Opener<S : Stream> : Sync {
 
 pub trait Stream {
     fn get_extra_data(&self) -> Result<h264::ExtraData, Error>;
-    fn get_next<'p>(&'p mut self) -> Result<ffmpeg::Packet<'p>, ffmpeg::Error>;
+    fn get_next<'p>(&'p mut self) -> Result<ffmpeg::avcodec::Packet<'p>, ffmpeg::Error>;
 }
 
 pub struct Ffmpeg {}
 
 impl Ffmpeg {
     fn new() -> Ffmpeg {
-        START.call_once(|| {
-            ffmpeg::Ffmpeg::new();
-            //ffmpeg::init().unwrap();
-            //ffmpeg::format::network::init();
-        });
+        START.call_once(|| { ffmpeg::Ffmpeg::new(); });
         Ffmpeg{}
     }
 }
 
 impl Opener<FfmpegStream> for Ffmpeg {
     fn open(&self, src: Source) -> Result<FfmpegStream, Error> {
-        use ffmpeg::InputFormatContext;
+        use ffmpeg::avformat::InputFormatContext;
         let (mut input, discard_first) = match src {
             #[cfg(test)]
             Source::File(filename) => {
-                let mut open_options = ffmpeg::Dictionary::new();
+                let mut open_options = ffmpeg::avutil::Dictionary::new();
 
                 // Work around https://github.com/scottlamb/moonfire-nvr/issues/10
                 open_options.set(cstr!("advanced_editlist"), cstr!("false")).unwrap();
@@ -97,7 +94,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
                 (i, false)
             }
             Source::Rtsp{url, redacted_url} => {
-                let mut open_options = ffmpeg::Dictionary::new();
+                let mut open_options = ffmpeg::avutil::Dictionary::new();
                 open_options.set(cstr!("rtsp_transport"), cstr!("tcp")).unwrap();
                 open_options.set(cstr!("user-agent"), cstr!("moonfire-nvr")).unwrap();
                 // 10-second socket timeout, in microseconds.
@@ -150,7 +147,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
 }
 
 pub struct FfmpegStream {
-    input: ffmpeg::InputFormatContext,
+    input: ffmpeg::avformat::InputFormatContext,
     video_i: usize,
 }
 
@@ -166,10 +163,12 @@ impl Stream for FfmpegStream {
         if !codec_id.is_h264() {
             bail!("stream's video codec {:?} is not h264", codec_id);
         }
-        h264::ExtraData::parse(codec.extradata(), codec.width() as u16, codec.height() as u16)
+        let dims = codec.dims();
+        h264::ExtraData::parse(codec.extradata(), u16::try_from(dims.width)?,
+                               u16::try_from(dims.height)?)
     }
 
-    fn get_next<'i>(&'i mut self) -> Result<ffmpeg::Packet<'i>, ffmpeg::Error> {
+    fn get_next<'i>(&'i mut self) -> Result<ffmpeg::avcodec::Packet<'i>, ffmpeg::Error> {
         loop {
             let p = self.input.read_frame()?;
             if p.stream_index() == self.video_i {
