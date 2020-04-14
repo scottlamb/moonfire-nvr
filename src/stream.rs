@@ -61,6 +61,7 @@ pub trait Opener<S : Stream> : Sync {
 }
 
 pub trait Stream {
+    fn get_video_codecpar(&self) -> ffmpeg::avcodec::InputCodecParameters<'_>;
     fn get_extra_data(&self) -> Result<h264::ExtraData, Error>;
     fn get_next<'p>(&'p mut self) -> Result<ffmpeg::avcodec::Packet<'p>, ffmpeg::Error>;
 }
@@ -147,11 +148,15 @@ impl Opener<FfmpegStream> for Ffmpeg {
 }
 
 pub struct FfmpegStream {
-    input: ffmpeg::avformat::InputFormatContext,
+    input: ffmpeg::avformat::InputFormatContext<'static>,
     video_i: usize,
 }
 
 impl Stream for FfmpegStream {
+    fn get_video_codecpar(&self) -> ffmpeg::avcodec::InputCodecParameters {
+        self.input.streams().get(self.video_i).codecpar()
+    }
+
     fn get_extra_data(&self) -> Result<h264::ExtraData, Error> {
         let video = self.input.streams().get(self.video_i);
         let tb = video.time_base();

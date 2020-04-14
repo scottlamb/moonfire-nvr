@@ -1300,7 +1300,7 @@ dependencies = [
 [[package]]
 name = "moonfire-ffmpeg"
 version = "0.0.1"
-source = "git+https://github.com/scottlamb/moonfire-ffmpeg#c517aa782867c8b882524a2d21361753ca845f06"
+source = "git+https://github.com/scottlamb/moonfire-ffmpeg#8082cc870334a6ef01420bf87b1d1ec6d14a9878"
 dependencies = [
  "cc",
  "libc",
@@ -1335,6 +1335,7 @@ dependencies = [
  "moonfire-base",
  "moonfire-db",
  "moonfire-ffmpeg",
+ "moonfire-tflite",
  "mylog",
  "nix",
  "parking_lot",
@@ -1353,6 +1354,16 @@ dependencies = [
  "tokio-tungstenite",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "moonfire-tflite"
+version = "0.0.1"
+source = "git+https://github.com/scottlamb/moonfire-tflite#b86940ef5b3a5b2583e52c1d494477cae7dac7c8"
+dependencies = [
+ "cc",
+ "libc",
+ "log",
 ]
 
 [[package]]

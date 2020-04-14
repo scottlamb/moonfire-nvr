@@ -33,6 +33,37 @@
 use log::{error, info};
 use serde::Deserialize;
 
+#[cfg(feature = "analytics")]
+mod analytics;
+
+/// Stub implementation of analytics module when not compiled with TensorFlow Lite.
+#[cfg(not(feature = "analytics"))]
+mod analytics {
+    use failure::{Error, bail};
+
+    pub struct ObjectDetector;
+
+    impl ObjectDetector {
+        pub fn new() -> Result<std::sync::Arc<ObjectDetector>, Error> {
+            bail!("Recompile with --features=analytics for object detection.");
+        }
+    }
+
+    pub struct ObjectDetectorStream;
+
+    impl ObjectDetectorStream {
+        pub fn new(_par: ffmpeg::avcodec::InputCodecParameters<'_>,
+                   _detector: &ObjectDetector) -> Result<Self, Error> {
+            unimplemented!();
+        }
+
+        pub fn process_frame(&mut self, _pkt: &ffmpeg::avcodec::Packet<'_>,
+                             _detector: &ObjectDetector) -> Result<(), Error> {
+            unimplemented!();
+        }
+    }
+}
+
 mod body;
 mod cmds;
 mod h264;

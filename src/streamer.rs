@@ -63,13 +63,16 @@ pub struct Streamer<'a, C, S> where C: Clocks + Clone, S: 'a + stream::Stream {
     short_name: String,
     url: Url,
     redacted_url: Url,
+    detector: Option<Arc<crate::analytics::ObjectDetector>>,
 }
 
 impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::Stream {
     pub fn new<'b>(env: &Environment<'a, 'b, C, S>, dir: Arc<dir::SampleFileDir>,
                    syncer_channel: writer::SyncerChannel<::std::fs::File>,
                    stream_id: i32, c: &Camera, s: &Stream, rotate_offset_sec: i64,
-                   rotate_interval_sec: i64) -> Result<Self, Error> {
+                   rotate_interval_sec: i64,
+                   detector: Option<Arc<crate::analytics::ObjectDetector>>)
+                   -> Result<Self, Error> {
         let mut url = Url::parse(&s.rtsp_url)?;
         let mut redacted_url = url.clone();
         if !c.username.is_empty() {
@@ -80,16 +83,17 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
         }
         Ok(Streamer {
             shutdown: env.shutdown.clone(),
-            rotate_offset_sec: rotate_offset_sec,
-            rotate_interval_sec: rotate_interval_sec,
+            rotate_offset_sec,
+            rotate_interval_sec,
             db: env.db.clone(),
             dir,
-            syncer_channel: syncer_channel,
+            syncer_channel,
             opener: env.opener,
-            stream_id: stream_id,
+            stream_id,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
             url,
             redacted_url,
+            detector,
         })
     }
 
@@ -119,6 +123,11 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
         };
         let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();
         // TODO: verify width/height.
+        let mut detector_stream = match self.detector.as_ref() {
+            None => None,
+            Some(od) => Some(crate::analytics::ObjectDetectorStream::new(
+                stream.get_video_codecpar(), &od)?),
+        };
         let extra_data = stream.get_extra_data()?;
         let video_sample_entry_id = {
             let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
@@ -143,6 +152,9 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
             } else if !seen_key_frame {
                 debug!("{}: have first key frame", self.short_name);
                 seen_key_frame = true;
+            }
+            if let (Some(a_s), Some(a)) = (detector_stream.as_mut(), self.detector.as_ref()) {
+                a_s.process_frame(&pkt, &a)?;
             }
             let frame_realtime = clocks.monotonic() + realtime_offset;
             let local_time = recording::Time::new(frame_realtime);
@@ -273,6 +285,10 @@ mod tests {
             Ok(pkt)
         }
 
+        fn get_video_codecpar(&self) -> ffmpeg::avcodec::InputCodecParameters<'_> {
+            self.inner.get_video_codecpar()
+        }
+
         fn get_extra_data(&self) -> Result<h264::ExtraData, Error> { self.inner.get_extra_data() }
     }
 
@@ -355,7 +371,7 @@ mod tests {
             let s = l.streams_by_id().get(&testutil::TEST_STREAM_ID).unwrap();
             let dir = db.dirs_by_stream_id.get(&testutil::TEST_STREAM_ID).unwrap().clone();
             stream = super::Streamer::new(&env, dir, db.syncer_channel.clone(),
-                                          testutil::TEST_STREAM_ID, camera, s, 0, 3).unwrap();
+                                          testutil::TEST_STREAM_ID, camera, s, 0, 3, None).unwrap();
         }
         stream.run();
         assert!(opener.streams.lock().is_empty());

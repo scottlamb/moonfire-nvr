@@ -81,6 +81,8 @@ Options:
                            your proxy server is configured to set them and that
                            no untrusted requests bypass the proxy server.
                            You may want to specify --http-addr=127.0.0.1:8080.
+    --object-detection     Perform object detection on SUB streams.
+                           Note: requires compilation with --feature=analytics.
 "#;
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +93,7 @@ struct Args {
     flag_read_only: bool,
     flag_allow_unauthenticated_permissions: Option<String>,
     flag_trust_forward_hdrs: bool,
+    flag_object_detection: bool,
 }
 
 fn trim_zoneinfo(p: &str) -> &str {
@@ -176,6 +179,11 @@ pub async fn run() -> Result<(), Error> {
     let db = Arc::new(db::Database::new(clocks.clone(), conn, !args.flag_read_only).unwrap());
     info!("Database is loaded.");
 
+    let object_detector = match args.flag_object_detection {
+        false => None,
+        true => Some(crate::analytics::ObjectDetector::new()?),
+    };
+
     {
         let mut l = db.lock();
         let dirs_to_open: Vec<_> =
@@ -252,10 +260,15 @@ pub async fn run() -> Result<(), Error> {
             };
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let syncer = syncers.get(&sample_file_dir_id).unwrap();
+            let object_detector = match stream.type_ {
+                db::StreamType::SUB => object_detector.as_ref().map(|a| Arc::clone(a)),
+                _ => None,
+            };
             let mut streamer = streamer::Streamer::new(&env, syncer.dir.clone(),
                                                        syncer.channel.clone(), *id, camera, stream,
                                                        rotate_offset_sec,
-                                                       streamer::ROTATE_INTERVAL_SEC)?;
+                                                       streamer::ROTATE_INTERVAL_SEC,
+                                                       object_detector)?;
             info!("Starting streamer for {}", streamer.short_name());
             let name = format!("s-{}", streamer.short_name());
             streamers.push(thread::Builder::new().name(name).spawn(move|| {
