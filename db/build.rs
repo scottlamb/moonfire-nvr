@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2019 The Moonfire NVR Authors
+// Copyright (C) 2019-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -29,8 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 fn main() {
-    //let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    protobuf_codegen_pure::Args::new()
+    protobuf_codegen_pure::Codegen::new()
         .out_dir(".")
         .inputs(&["proto/schema.proto"])
         .include("proto")

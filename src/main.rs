@@ -112,7 +112,7 @@ fn main() {
         .build();
     h.clone().install().unwrap();
 
-    if let Err(e) = { let _a = h.r#async(); args.run() } {
+    if let Err(e) = { let _a = h.async_scope(); args.run() } {
         error!("{:?}", e);
         ::std::process::exit(1);
     }

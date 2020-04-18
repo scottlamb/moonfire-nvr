@@ -12,7 +12,7 @@ path = "lib.rs"
 [dependencies]
 libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }
-parking_lot = { version = "0.9", features = [] }
+parking_lot = { version = "0.10", features = [] }
 
 [build-dependencies]
 cc = "1.0"

@@ -24,18 +24,18 @@ libpasta = "0.1.0-rc2"
 log = "0.4"
 lru-cache = "0.1"
 mylog = { git = "https://github.com/scottlamb/mylog" }
-nix = "0.16.1"
-odds = { version = "0.3.1", features = ["std-vec"] }
+nix = "0.17.0"
+odds = { version = "0.4.0", features = ["std-vec"] }
 openssl = "0.10"
-parking_lot = { version = "0.9", features = [] }
+parking_lot = { version = "0.10", features = [] }
 prettydiff = "0.3.1"
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
-rusqlite = "0.21.0"
+rusqlite = "0.22.0"
 smallvec = "1.0"
 tempdir = "0.3"
 time = "0.1"
 uuid = { version = "0.8", features = ["std", "v4"] }
-itertools = "0.8.0"
+itertools = "0.9.0"
 
 [build-dependencies]
 protobuf-codegen-pure = { git = "https://github.com/stepancheg/rust-protobuf" }

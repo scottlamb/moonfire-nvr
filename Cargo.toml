@@ -25,9 +25,7 @@ byteorder = "1.0"
 cstr = "0.1.7"
 cursive = "0.14.0"
 db = { package = "moonfire-db", path = "db" }
-#structopt = "0.3.13"
 structopt = { version = "0.3.13", features = ["default", "wrap_help"] }
-# default     = ["suggestions", "color", "vec_map", "derive", "std", "cargo"]
 
 failure = "0.1.1"
 ffmpeg = { package = "moonfire-ffmpeg", path = "ffmpeg" }
@@ -42,19 +40,19 @@ log = { version = "0.4", features = ["release_max_level_info"] }
 memchr = "2.0.2"
 memmap = "0.7"
 mylog = { git = "https://github.com/scottlamb/mylog" }
-nix = "0.16.1"
+nix = "0.17.0"
 nom = "5.1.1"
 openssl = "0.10"
-parking_lot = { version = "0.9", features = [] }
+parking_lot = { version = "0.10", features = [] }
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
 reffers = "0.6.0"
 ring = "0.14.6"
-rusqlite = "0.21.0"
+rusqlite = "0.22.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = "1.0"
 time = "0.1"
-tokio = { version = "0.2.0", features = ["blocking", "macros", "rt-threaded", "signal"] }
+tokio = { version = "0.2.0", features = ["blocking", "macros", "parking_lot", "rt-threaded", "signal"] }
 tokio-tungstenite = "0.10.1"
 url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }
