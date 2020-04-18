@@ -42,6 +42,7 @@ use rusqlite::{Connection, Transaction, params};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 
 lazy_static! {
@@ -57,7 +58,7 @@ pub(crate) fn set_test_config() {
         Arc::new(libpasta::Config::with_primitive(libpasta::primitives::Bcrypt::new(2)));
 }
 
-enum UserFlags {
+enum UserFlag {
     Disabled = 1,
 }
 
@@ -91,7 +92,7 @@ impl User {
     }
 
     pub fn has_password(&self) -> bool { self.password_hash.is_some() }
-    fn disabled(&self) -> bool { (self.flags & UserFlags::Disabled as i32) != 0 }
+    fn disabled(&self) -> bool { (self.flags & UserFlag::Disabled as i32) != 0 }
 }
 
 /// A change to a user.
@@ -132,7 +133,7 @@ impl UserChange {
     }
 
     pub fn disable(&mut self) {
-        self.flags |= UserFlags::Disabled as i32;
+        self.flags |= UserFlag::Disabled as i32;
     }
 }
 
@@ -194,11 +195,27 @@ impl rusqlite::types::FromSql for FromSqlIpAddr {
     }
 }
 
-pub enum SessionFlags {
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum SessionFlag {
     HttpOnly = 1,
     Secure = 2,
     SameSite = 4,
     SameSiteStrict = 8,
+}
+
+impl FromStr for SessionFlag {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "http-only" => Ok(Self::HttpOnly),
+            "secure" => Ok(Self::Secure),
+            "same-site" => Ok(Self::SameSite),
+            "same-site-strict" => Ok(Self::SameSiteStrict),
+            _ => bail!("No such session flag {:?}", s),
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -210,7 +227,7 @@ pub enum RevocationReason {
 #[derive(Debug, Default)]
 pub struct Session {
     user_id: i32,
-    flags: i32,  // bitmask of SessionFlags enum values
+    flags: i32,  // bitmask of SessionFlag enum values
     domain: Option<Vec<u8>>,
     description: Option<String>,
     seed: Seed,

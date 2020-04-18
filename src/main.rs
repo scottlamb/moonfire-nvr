@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -31,7 +31,7 @@
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
 use log::{error, info};
-use serde::Deserialize;
+use structopt::StructOpt;
 
 #[cfg(feature = "analytics")]
 mod analytics;
@@ -74,39 +74,53 @@ mod stream;
 mod streamer;
 mod web;
 
-/// Commandline usage string. This is in the particular format expected by the `docopt` crate.
-/// Besides being printed on --help or argument parsing error, it's actually parsed to define the
-/// allowed commandline arguments and their defaults.
-const USAGE: &'static str = "
-Usage: moonfire-nvr <command> [<args>...]
-       moonfire-nvr (--help | --version)
+#[derive(StructOpt)]
+#[structopt(name="moonfire-nvr", about="security camera network video recorder")]
+enum Args {
+    /// Checks database integrity (like fsck).
+    Check(cmds::check::Args),
 
-Options:
-    -h, --help             Show this message.
-    --version              Show the version of moonfire-nvr.
+    /// Interactively edits configuration.
+    Config(cmds::config::Args),
 
-Commands:
-    check                  Check database integrity
-    init                   Initialize a database
-    run                    Run the daemon: record from cameras and serve HTTP
-    shell                  Start an interactive shell to modify the database
-    ts                     Translate human-readable and numeric timestamps
-    upgrade                Upgrade the database to the latest schema
-";
+    /// Initializes a database.
+    Init(cmds::init::Args),
 
-/// Commandline arguments corresponding to `USAGE`; automatically filled by the `docopt` crate.
-#[derive(Debug, Deserialize)]
-struct Args {
-    arg_command: Option<cmds::Command>,
+    /// Logs in a user, returning the session cookie.
+    ///
+    /// This is a privileged command that directly accesses the database. It doesn't check the
+    /// user's password and even can be used to create sessions with permissions the user doesn't
+    /// have.
+    Login(cmds::login::Args),
+
+    /// Runs the server, saving recordings and allowing web access.
+    Run(cmds::run::Args),
+
+    /// Runs a SQLite3 shell on Moonfire NVR's index database.
+    ///
+    /// Note this locks the database to prevent simultaneous access with a running server. The
+    /// server maintains cached state which could be invalidated otherwise.
+    Sql(cmds::sql::Args),
+
+    /// Translates between integer and human-readable timestamps.
+    Ts(cmds::ts::Args),
+
+    /// Upgrades to the latest database schema.
+    Upgrade(cmds::upgrade::Args),
 }
 
-fn version() -> String {
-    let major = option_env!("CARGO_PKG_VERSION_MAJOR");
-    let minor = option_env!("CARGO_PKG_VERSION_MAJOR");
-    let patch = option_env!("CARGO_PKG_VERSION_MAJOR");
-    match (major, minor, patch) {
-        (Some(major), Some(minor), Some(patch)) => format!("{}.{}.{}", major, minor, patch),
-        _ => "".to_owned(),
+impl Args {
+    fn run(&self) -> Result<(), failure::Error> {
+        match self {
+            Args::Check(ref a) => cmds::check::run(a),
+            Args::Config(ref a) => cmds::config::run(a),
+            Args::Init(ref a) => cmds::init::run(a),
+            Args::Login(ref a) => cmds::login::run(a),
+            Args::Run(ref a) => cmds::run::run(a),
+            Args::Sql(ref a) => cmds::sql::run(a),
+            Args::Ts(ref a) => cmds::ts::run(a),
+            Args::Upgrade(ref a) => cmds::upgrade::run(a),
+        }
     }
 }
 
@@ -119,14 +133,7 @@ fn parse_fmt<S: AsRef<str>>(fmt: S) -> Option<mylog::Format> {
 }
 
 fn main() {
-    // Parse commandline arguments.
-    // (Note this differs from cmds::parse_args in that it specifies options_first.)
-    let args: Args = docopt::Docopt::new(USAGE)
-                                    .and_then(|d| d.options_first(true)
-                                                   .version(Some(version()))
-                                                   .deserialize())
-                                    .unwrap_or_else(|e| e.exit());
-
+    let args = Args::from_args();
     let mut h = mylog::Builder::new()
         .set_format(::std::env::var("MOONFIRE_FORMAT")
                     .ok()
@@ -136,7 +143,7 @@ fn main() {
         .build();
     h.clone().install().unwrap();
 
-    if let Err(e) = { let _a = h.r#async(); args.arg_command.unwrap().run() } {
+    if let Err(e) = { let _a = h.r#async(); args.run() } {
         error!("{:?}", e);
         ::std::process::exit(1);
     }

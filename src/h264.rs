@@ -42,8 +42,6 @@
 
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use failure::{Error, bail, format_err};
-use lazy_static::lazy_static;
-use regex::bytes::Regex;
 use std::convert::TryFrom;
 
 // See ISO/IEC 14496-10 table 7-1 - NAL unit type codes, syntax element categories, and NAL unit
@@ -91,15 +89,28 @@ fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
 ///
 /// TODO: detect invalid byte streams. For example, several 0x00s not followed by a 0x01, a stream
 /// stream not starting with 0x00 0x00 0x00 0x01, or an empty NAL unit.
-fn decode_h264_annex_b<'a, F>(data: &'a [u8], mut f: F) -> Result<(), Error>
+fn decode_h264_annex_b<'a, F>(mut data: &'a [u8], mut f: F) -> Result<(), Error>
 where F: FnMut(&'a [u8]) -> Result<(), Error> {
-    lazy_static! {
-        static ref START_CODE: Regex = Regex::new(r"(\x00{2,}\x01)").unwrap();
-    }
-    for unit in START_CODE.split(data) {
-        if !unit.is_empty() {
-            f(unit)?;
+    let start_code = &b"\x00\x00\x01"[..];
+    use nom::FindSubstring;
+    'outer: while let Some(pos) = data.find_substring(start_code) {
+        let mut unit = &data[0..pos];
+        data = &data[pos + start_code.len() ..];
+        // Have zero or more bytes that end in a start code. Strip out any trailing 0x00s and
+        // process the unit if there's anything left.
+        loop {
+            match unit.last() {
+                None => continue 'outer,
+                Some(b) if *b == 0 => { unit = &unit[..unit.len()-1]; },
+                Some(_) => break,
+            }
         }
+        f(unit)?;
+    }
+
+    // No remaining start codes; likely a unit left.
+    if !data.is_empty() {
+        f(data)?;
     }
     Ok(())
 }

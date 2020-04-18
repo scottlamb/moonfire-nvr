@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -30,31 +30,19 @@
 
 use failure::Error;
 use log::info;
-use serde::Deserialize;
+use structopt::StructOpt;
+use std::path::PathBuf;
 
-static USAGE: &'static str = r#"
-Initializes a database.
-
-Usage:
-
-    moonfire-nvr init [options]
-    moonfire-nvr init --help
-
-Options:
-
-    --db-dir=DIR           Set the directory holding the SQLite3 index database.
-                           This is typically on a flash device.
-                           [default: /var/lib/moonfire-nvr/db]
-"#;
-
-#[derive(Debug, Deserialize)]
-struct Args {
-    flag_db_dir: String,
+#[derive(StructOpt)]
+pub struct Args {
+    /// Directory holding the SQLite3 index database.
+    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
+                parse(from_os_str))]
+    db_dir: PathBuf,
 }
 
-pub fn run() -> Result<(), Error> {
-    let args: Args = super::parse_args(USAGE)?;
-    let (_db_dir, mut conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::Create)?;
+pub fn run(args: &Args) -> Result<(), Error> {
+    let (_db_dir, mut conn) = super::open_conn(&args.db_dir, super::OpenMode::Create)?;
 
     // Check if the database has already been initialized.
     let cur_ver = db::get_schema_version(&conn)?;

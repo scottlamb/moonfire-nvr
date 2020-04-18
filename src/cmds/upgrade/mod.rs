@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -33,45 +33,38 @@
 /// See `guide/schema.md` for more information.
 
 use failure::Error;
-use serde::Deserialize;
+use structopt::StructOpt;
 
-const USAGE: &'static str = r#"
-Upgrade to the latest database schema.
-
-Usage: moonfire-nvr upgrade [options]
-
-Options:
-    -h, --help             Show this message.
-    --db-dir=DIR           Set the directory holding the SQLite3 index database.
-                           This is typically on a flash device.
-                           [default: /var/lib/moonfire-nvr/db]
-    --sample-file-dir=DIR  When upgrading from schema version 1 to 2, the sample file directory.
-                           This is typically on a hard drive.
-    --preset-journal=MODE  Resets the SQLite journal_mode to the specified mode
-                           prior to the upgrade. The default, delete, is
-                           recommended. off is very dangerous but may be
-                           desirable in some circumstances. See guide/schema.md
-                           for more information. The journal mode will be reset
-                           to wal after the upgrade.
-                           [default: delete]
-    --no-vacuum            Skips the normal post-upgrade vacuum operation.
-"#;
-
-#[derive(Debug, Deserialize)]
+#[derive(StructOpt)]
 pub struct Args {
-    flag_db_dir: String,
-    flag_sample_file_dir: Option<String>,
-    flag_preset_journal: String,
-    flag_no_vacuum: bool,
+    #[structopt(long,
+                help = "Directory holding the SQLite3 index database.",
+                default_value = "/var/lib/moonfire-nvr/db",
+                parse(from_os_str))]
+    db_dir: std::path::PathBuf,
+
+    #[structopt(help = "When upgrading from schema version 1 to 2, the sample file directory.",
+                long, parse(from_os_str))]
+    sample_file_dir: Option<std::path::PathBuf>,
+
+    #[structopt(help = "Resets the SQLite journal_mode to the specified mode prior to the \
+                        upgrade. The default, delete, is recommended. off is very dangerous \
+                        but may be desirable in some circumstances. See guide/schema.md for \
+                        more information. The journal mode will be reset to wal after the \
+                        upgrade.",
+                long, default_value = "delete")]
+    preset_journal: String,
+
+    #[structopt(help = "Skips the normal post-upgrade vacuum operation.", long)]
+    no_vacuum: bool,
 }
 
-pub fn run() -> Result<(), Error> {
-    let args: Args = super::parse_args(USAGE)?;
-    let (_db_dir, mut conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
+pub fn run(args: &Args) -> Result<(), Error> {
+    let (_db_dir, mut conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
 
     db::upgrade::run(&db::upgrade::Args {
-        flag_sample_file_dir: args.flag_sample_file_dir.as_ref().map(|s| s.as_str()),
-        flag_preset_journal: &args.flag_preset_journal,
-        flag_no_vacuum: args.flag_no_vacuum,
+        sample_file_dir: args.sample_file_dir.as_ref().map(std::path::PathBuf::as_path),
+        preset_journal: &args.preset_journal,
+        no_vacuum: args.no_vacuum,
     }, &mut conn)
 }

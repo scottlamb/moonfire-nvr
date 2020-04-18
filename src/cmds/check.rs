@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors
+// Copyright (C) 2018-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -32,36 +32,25 @@
 
 use db::check;
 use failure::Error;
-use serde::Deserialize;
+use std::path::PathBuf;
+use structopt::StructOpt;
 
-static USAGE: &'static str = r#"
-Checks database integrity.
+#[derive(StructOpt)]
+pub struct Args {
+    /// Directory holding the SQLite3 index database.
+    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
+                parse(from_os_str))]
+    db_dir: PathBuf,
 
-Usage:
-
-    moonfire-nvr check [options]
-    moonfire-nvr check --help
-
-Options:
-
-    --db-dir=DIR           Set the directory holding the SQLite3 index database.
-                           This is typically on a flash device.
-                           [default: /var/lib/moonfire-nvr/db]
-    --compare-lens         Compare sample file lengths on disk to the database.
-"#;
-
-#[derive(Debug, Deserialize)]
-struct Args {
-    flag_db_dir: String,
-    flag_compare_lens: bool,
+    /// Compare sample file lengths on disk to the database.
+    #[structopt(long)]
+    compare_lens: bool,
 }
 
-pub fn run() -> Result<(), Error> {
-    let args: Args = super::parse_args(USAGE)?;
-
+pub fn run(args: &Args) -> Result<(), Error> {
     // TODO: ReadOnly should be sufficient but seems to fail.
-    let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
+    let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     check::run(&conn, &check::Options {
-        compare_lens: args.flag_compare_lens,
+        compare_lens: args.compare_lens,
     })
 }

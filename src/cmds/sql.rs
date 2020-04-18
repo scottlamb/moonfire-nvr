@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2019 The Moonfire NVR Authors
+// Copyright (C) 2019-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -31,45 +31,43 @@
 //! Subcommand to run a SQLite shell.
 
 use failure::Error;
-use serde::Deserialize;
+use std::ffi::OsString;
+use std::path::PathBuf;
 use std::process::Command;
 use super::OpenMode;
+use structopt::StructOpt;
 
-static USAGE: &'static str = r#"
-Runs a SQLite shell on the Moonfire NVR database with locking.
+#[derive(StructOpt)]
+pub struct Args {
+    /// Directory holding the SQLite3 index database.
+    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
+                parse(from_os_str))]
+    db_dir: PathBuf,
 
-Usage:
+    /// Opens the database in read-only mode and locks it only for shared access.
+    ///
+    /// This can be run simultaneously with "moonfire-nvr run --read-only".
+    #[structopt(long)]
+    read_only: bool,
 
-    moonfire-nvr sql [options] [--] [<arg>...]
-    moonfire-nvr sql --help
-
-Positional arguments will be passed to sqlite3. Use the -- separator to pass
-sqlite3 options, as in "moonfire-nvr sql -- -line 'select username from user'".
-
-Options:
-
-    --db-dir=DIR           Set the directory holding the SQLite3 index database.
-                           This is typically on a flash device.
-                           [default: /var/lib/moonfire-nvr/db]
-    --read-only            Accesses the database in read-only mode.
-"#;
-
-#[derive(Debug, Deserialize)]
-struct Args {
-    flag_db_dir: String,
-    flag_read_only: bool,
-    arg_arg: Vec<String>,
+    /// Arguments to pass to sqlite3.
+    ///
+    /// Use the -- separator to pass sqlite3 options, as in
+    /// "moonfire-nvr sql -- -line 'select username from user'".
+    #[structopt(parse(from_os_str))]
+    arg: Vec<OsString>,
 }
 
-pub fn run() -> Result<(), Error> {
-    let args: Args = super::parse_args(USAGE)?;
-
-    let mode = if args.flag_read_only { OpenMode::ReadWrite } else { OpenMode::ReadOnly };
-    let _db_dir = super::open_dir(&args.flag_db_dir, mode)?;
-    let mut db = format!("file:{}/db", &args.flag_db_dir);
-    if args.flag_read_only {
-        db.push_str("?mode=ro");
+pub fn run(args: &Args) -> Result<(), Error> {
+    let mode = if args.read_only { OpenMode::ReadOnly } else { OpenMode::ReadWrite };
+    let _db_dir = super::open_dir(&args.db_dir, mode)?;
+    let mut db = OsString::new();
+    db.push("file:");
+    db.push(&args.db_dir);
+    db.push("/db");
+    if args.read_only {
+        db.push("?mode=ro");
     }
-    Command::new("sqlite3").arg(&db).args(&args.arg_arg).status()?;
+    Command::new("sqlite3").arg(&db).args(&args.arg).status()?;
     Ok(())
 }

@@ -34,7 +34,6 @@ use bytes::Bytes;
 use crate::body::{Body, BoxedError};
 use crate::json;
 use crate::mp4;
-use base64;
 use bytes::{BufMut, BytesMut};
 use core::borrow::Borrow;
 use core::str::FromStr;
@@ -46,12 +45,12 @@ use futures::sink::SinkExt;
 use futures::future::{self, Future, TryFutureExt};
 use futures::stream::StreamExt;
 use http::{Request, Response, status::StatusCode};
-use http_serve;
 use http::header::{self, HeaderValue};
-use lazy_static::lazy_static;
 use log::{debug, info, warn};
-use regex::Regex;
-use serde_json;
+use nom::IResult;
+use nom::bytes::complete::{take_while1, tag};
+use nom::combinator::{all_consuming, map, map_res, opt};
+use nom::sequence::{preceded, tuple};
 use std::collections::HashMap;
 use std::cmp;
 use std::fs;
@@ -63,14 +62,6 @@ use std::sync::Arc;
 use tokio_tungstenite::tungstenite;
 use url::form_urlencoded;
 use uuid::Uuid;
-
-lazy_static! {
-    /// Regex used to parse the `s` query parameter to `view.mp4`.
-    /// As described in `design/api.md`, this is of the form
-    /// `START_ID[-END_ID][@OPEN_ID][.[REL_START_TIME]-[REL_END_TIME]]`.
-    static ref SEGMENTS_RE: Regex =
-        Regex::new(r"^(\d+)(-\d+)?(@\d+)?(?:\.(\d+)?-(\d+)?)?$").unwrap();
-}
 
 type BoxedFuture = Box<dyn Future<Output = Result<Response<Body>, BoxedError>> +
                        Sync + Send + 'static>;
@@ -204,41 +195,48 @@ struct Segments {
     end_time: Option<i64>,
 }
 
+fn num<'a, T: FromStr>() -> impl Fn(&'a str) -> IResult<&'a str, T> {
+    map_res(take_while1(|c: char| c.is_ascii_digit()), FromStr::from_str)
+}
+
 impl Segments {
-    pub fn parse(input: &str) -> Result<Segments, ()> {
-        let caps = SEGMENTS_RE.captures(input).ok_or(())?;
-        let ids_start = i32::from_str(caps.get(1).unwrap().as_str()).map_err(|_| ())?;
-        let ids_end = match caps.get(2) {
-            Some(m) => i32::from_str(&m.as_str()[1..]).map_err(|_| ())?,
-            None => ids_start,
-        } + 1;
-        let open_id = match caps.get(3) {
-            Some(m) => Some(u32::from_str(&m.as_str()[1..]).map_err(|_| ())?),
-            None => None,
-        };
-        if ids_start < 0 || ids_end <= ids_start {
+    /// Parses the `s` query parameter to `view.mp4` as described in `design/api.md`.
+    /// Doesn't do any validation.
+    fn parse(i: &str) -> IResult<&str, Segments> {
+        // Parse START_ID[-END_ID] into Range<i32>.
+        // Note that END_ID is inclusive, but Ranges are half-open.
+        let (i, ids) = map(tuple((num::<i32>(), opt(preceded(tag("-"), num::<i32>())))),
+                           |(start, end)| start .. end.unwrap_or(start) + 1)(i)?;
+
+        // Parse [@OPEN_ID] into Option<u32>.
+        let (i, open_id) = opt(preceded(tag("@"), num::<u32>()))(i)?;
+
+        // Parse [.[REL_START_TIME]-[REL_END_TIME]] into (i64, Option<i64>).
+        let (i, (start_time, end_time)) = map(
+            opt(preceded(tag("."), tuple((opt(num::<i64>()), tag("-"), opt(num::<i64>()))))),
+            |t| {
+                t.map(|(s, _, e)| (s.unwrap_or(0), e))
+                 .unwrap_or((0, None))
+            })(i)?;
+
+        Ok((i, Segments { ids, open_id, start_time, end_time, }))
+    }
+}
+
+impl FromStr for Segments {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (_, s) = all_consuming(Segments::parse)(s).map_err(|_| ())?;
+        if s.ids.end <= s.ids.start {
             return Err(());
         }
-        let start_time = caps.get(4).map_or(Ok(0), |m| i64::from_str(m.as_str())).map_err(|_| ())?;
-        if start_time < 0 {
-            return Err(());
+        if let Some(e) = s.end_time {
+            if e < s.start_time {
+                return Err(());
+            }
         }
-        let end_time = match caps.get(5) {
-            Some(v) => {
-                let e = i64::from_str(v.as_str()).map_err(|_| ())?;
-                if e <= start_time {
-                    return Err(());
-                }
-                Some(e)
-            },
-            None => None
-        };
-        Ok(Segments {
-            ids: ids_start .. ids_end,
-            open_id,
-            start_time,
-            end_time,
-        })
+        Ok(s)
     }
 }
 
@@ -421,7 +419,7 @@ impl ServiceInner {
                 let (key, value) = (key.borrow(), value.borrow());
                 match key {
                     "s" => {
-                        let s = Segments::parse(value).map_err(
+                        let s = Segments::from_str(value).map_err(
                             |()| plain_response(StatusCode::BAD_REQUEST,
                                                 format!("invalid s parameter: {}", value)))?;
                         debug!("stream_view_mp4: appending s={:?}", s);
@@ -587,10 +585,10 @@ impl ServiceInner {
         }.to_owned();
         let mut l = self.db.lock();
         let is_secure = self.is_secure(req);
-        let flags = (auth::SessionFlags::HttpOnly as i32) |
-                    (auth::SessionFlags::SameSite as i32) |
-                    (auth::SessionFlags::SameSiteStrict as i32) |
-                    if is_secure { auth::SessionFlags::Secure as i32 } else { 0 };
+        let flags = (auth::SessionFlag::HttpOnly as i32) |
+                    (auth::SessionFlag::SameSite as i32) |
+                    (auth::SessionFlag::SameSiteStrict as i32) |
+                    if is_secure { auth::SessionFlag::Secure as i32 } else { 0 };
         let (sid, _) = l.login_by_password(authreq, &r.username, r.password, Some(domain),
             flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
@@ -796,7 +794,7 @@ async fn with_json_body(mut req: Request<hyper::Body>)
 
 pub struct Config<'a> {
     pub db: Arc<db::Database>,
-    pub ui_dir: Option<&'a str>,
+    pub ui_dir: Option<&'a std::path::Path>,
     pub trust_forward_hdrs: bool,
     pub time_zone_name: String,
     pub allow_unauthenticated_permissions: Option<db::Permissions>,
@@ -839,12 +837,12 @@ impl Service {
         })))
     }
 
-    fn fill_ui_files(dir: &str, files: &mut HashMap<String, UiFile>) {
+    fn fill_ui_files(dir: &std::path::Path, files: &mut HashMap<String, UiFile>) {
         let r = match fs::read_dir(dir) {
             Ok(r) => r,
             Err(e) => {
                 warn!("Unable to search --ui-dir={}; will serve no static files. Error was: {}",
-                      dir, e);
+                      dir.display(), e);
                 return;
             }
         };
@@ -1075,6 +1073,7 @@ mod tests {
     use futures::future::FutureExt;
     use log::info;
     use std::collections::HashMap;
+    use std::str::FromStr;
     use super::Segments;
 
     struct Server {
@@ -1221,25 +1220,25 @@ mod tests {
     fn test_segments() {
         testutil::init();
         assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 0, end_time: None},
-                   Segments::parse("1").unwrap());
+                   Segments::from_str("1").unwrap());
         assert_eq!(Segments{ids: 1..2, open_id: Some(42), start_time: 0, end_time: None},
-                   Segments::parse("1@42").unwrap());
+                   Segments::from_str("1@42").unwrap());
         assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 26, end_time: None},
-                   Segments::parse("1.26-").unwrap());
+                   Segments::from_str("1.26-").unwrap());
         assert_eq!(Segments{ids: 1..2, open_id: Some(42), start_time: 26, end_time: None},
-                   Segments::parse("1@42.26-").unwrap());
+                   Segments::from_str("1@42.26-").unwrap());
         assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 0, end_time: Some(42)},
-                   Segments::parse("1.-42").unwrap());
+                   Segments::from_str("1.-42").unwrap());
         assert_eq!(Segments{ids: 1..2, open_id: None, start_time: 26, end_time: Some(42)},
-                   Segments::parse("1.26-42").unwrap());
+                   Segments::from_str("1.26-42").unwrap());
         assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 0, end_time: None},
-                   Segments::parse("1-5").unwrap());
+                   Segments::from_str("1-5").unwrap());
         assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 26, end_time: None},
-                   Segments::parse("1-5.26-").unwrap());
+                   Segments::from_str("1-5.26-").unwrap());
         assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 0, end_time: Some(42)},
-                   Segments::parse("1-5.-42").unwrap());
+                   Segments::from_str("1-5.-42").unwrap());
         assert_eq!(Segments{ids: 1..6, open_id: None, start_time: 26, end_time: Some(42)},
-                   Segments::parse("1-5.26-42").unwrap());
+                   Segments::from_str("1-5.26-42").unwrap());
     }
 
     #[tokio::test]

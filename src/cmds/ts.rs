@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -29,21 +29,22 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use failure::Error;
-use serde::Deserialize;
+use structopt::StructOpt;
 
-const USAGE: &'static str = r#"
-Usage: moonfire-nvr ts <ts>...
-       moonfire-nvr ts --help
-"#;
-
-#[derive(Debug, Deserialize)]
-struct Args {
-    arg_ts: Vec<String>,
+#[derive(StructOpt)]
+pub struct Args {
+    /// Timestamp(s) to translate.
+    ///
+    /// May be either an integer or an RFC-3339-like string:
+    /// YYYY-mm-dd[THH:MM[:SS[:FFFFF]]][{Z,{+,-,}HH:MM}].
+    ///
+    /// Eg: 142913484000000, 2020-04-26, 2020-04-26T12:00:00:00000-07:00.
+    #[structopt(required = true)]
+    timestamps: Vec<String>,
 }
 
-pub fn run() -> Result<(), Error> {
-    let arg: Args = super::parse_args(&USAGE)?;
-    for timestamp in &arg.arg_ts {
+pub fn run(args: &Args) -> Result<(), Error> {
+    for timestamp in &args.timestamps {
         let t = db::recording::Time::parse(timestamp)?;
         println!("{} == {}", t, t.0);
     }
