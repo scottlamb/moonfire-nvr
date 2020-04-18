@@ -25,7 +25,10 @@ byteorder = "1.0"
 cstr = "0.1.7"
 cursive = "0.14.0"
 db = { package = "moonfire-db", path = "db" }
-docopt = "1.0"
+#structopt = "0.3.13"
+structopt = { version = "0.3.13", features = ["default", "wrap_help"] }
+# default     = ["suggestions", "color", "vec_map", "derive", "std", "cargo"]
+
 failure = "0.1.1"
 ffmpeg = { package = "moonfire-ffmpeg", path = "ffmpeg" }
 futures = "0.3"

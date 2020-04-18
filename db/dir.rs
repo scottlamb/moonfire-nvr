@@ -41,7 +41,7 @@ use log::warn;
 use protobuf::Message;
 use nix::{NixPath, fcntl::{FlockArg, OFlag}, sys::stat::Mode};
 use nix::sys::statvfs::Statvfs;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -104,16 +104,14 @@ impl Drop for Fd {
 
 impl Fd {
     /// Opens the given path as a directory.
-    pub fn open(path: &str, mkdir: bool) -> Result<Fd, nix::Error> {
-        let cstring = CString::new(path).map_err(|_| nix::Error::InvalidPath)?;
+    pub fn open<P: ?Sized + NixPath>(path: &P, mkdir: bool) -> Result<Fd, nix::Error> {
         if mkdir {
-            match nix::unistd::mkdir(cstring.as_c_str(), nix::sys::stat::Mode::S_IRWXU) {
+            match nix::unistd::mkdir(path, nix::sys::stat::Mode::S_IRWXU) {
                 Ok(()) | Err(nix::Error::Sys(nix::errno::Errno::EEXIST)) => {},
                 Err(e) => return Err(e),
             }
         }
-        let fd = nix::fcntl::open(cstring.as_c_str(), OFlag::O_DIRECTORY | OFlag::O_RDONLY,
-                                  Mode::empty())?;
+        let fd = nix::fcntl::open(path, OFlag::O_DIRECTORY | OFlag::O_RDONLY, Mode::empty())?;
         Ok(Fd(fd))
     }
 

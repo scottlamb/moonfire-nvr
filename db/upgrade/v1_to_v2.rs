@@ -42,7 +42,7 @@ use uuid::Uuid;
 
 pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     let sample_file_path =
-        args.flag_sample_file_dir
+        args.sample_file_dir
             .ok_or_else(|| format_err!("--sample-file-dir required when upgrading from \
                                         schema version 1 to 2."))?;
 
@@ -122,6 +122,9 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
     }
     dir::write_meta(d.as_raw_fd(), &meta)?;
 
+    let sample_file_path = sample_file_path.to_str()
+        .ok_or_else(|| format_err!("sample file dir {} is not a valid string",
+                                   sample_file_path.display()))?;
     tx.execute(r#"
         insert into sample_file_dir (path,  uuid, last_complete_open_id)
                              values (?,     ?,    ?)
@@ -293,7 +296,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
 /// *   optional: reserved sample file uuids.
 /// *   optional: meta and meta-tmp from half-completed update attempts.
 /// *   forbidden: anything else.
-fn verify_dir_contents(sample_file_path: &str, dir: &mut nix::dir::Dir,
+fn verify_dir_contents(sample_file_path: &std::path::Path, dir: &mut nix::dir::Dir,
                        tx: &rusqlite::Transaction) -> Result<(), Error> {
     // Build a hash of the uuids found in the directory.
     let n: i64 = tx.query_row(r#"
@@ -337,7 +340,7 @@ fn verify_dir_contents(sample_file_path: &str, dir: &mut nix::dir::Dir,
         while let Some(row) = rows.next()? {
             let uuid: crate::db::FromSqlUuid = row.get(0)?;
             if !files.remove(&uuid.0) {
-                bail!("{} is missing from dir {}!", uuid.0, sample_file_path);
+                bail!("{} is missing from dir {}!", uuid.0, sample_file_path.display());
             }
         }
     }
@@ -360,7 +363,7 @@ fn verify_dir_contents(sample_file_path: &str, dir: &mut nix::dir::Dir,
 
     if !files.is_empty() {
         bail!("{} unexpected sample file uuids in dir {}: {:?}!",
-              files.len(), sample_file_path, files);
+              files.len(), sample_file_path.display(), files);
     }
     Ok(())
 }

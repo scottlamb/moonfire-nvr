@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -33,18 +33,59 @@ use crate::stream;
 use crate::streamer;
 use crate::web;
 use db::{dir, writer};
-use failure::{Error, ResultExt, bail};
+use failure::{Error, bail};
 use fnv::FnvHashMap;
 use futures::future::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use log::{info, warn};
-use serde::Deserialize;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use structopt::StructOpt;
 use tokio;
 use tokio::signal::unix::{SignalKind, signal};
+
+#[derive(StructOpt)]
+pub struct Args {
+    /// Directory holding the SQLite3 index database.
+    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
+                parse(from_os_str))]
+    db_dir: PathBuf,
+
+    /// Directory holding user interface files (.html, .js, etc).
+    #[structopt(default_value = "/usr/local/lib/moonfire-nvr/ui", value_name="path",
+                parse(from_os_str))]
+    ui_dir: std::path::PathBuf,
+
+    /// Bind address for unencrypted HTTP server.
+    #[structopt(long, default_value = "0.0.0.0:8080", parse(try_from_str))]
+    http_addr: std::net::SocketAddr,
+
+    /// Open the database in read-only mode and disables recording.
+    ///
+    /// Note this is incompatible with authentication, so you'll likely want to specify
+    /// --allow_unauthenticated_permissions.
+    #[structopt(long)]
+    read_only: bool,
+
+    /// Allow unauthenticated access to the web interface, with the given permissions (may be
+    /// empty). Should be a text Permissions protobuf such as "view_videos: true".
+    ///
+    /// Note that even an empty string allows some basic access that would be rejected if the
+    /// argument were omitted.
+    #[structopt(long, parse(try_from_str = protobuf::text_format::parse_from_str))]
+    allow_unauthenticated_permissions: Option<db::Permissions>,
+
+    /// Trust X-Real-IP: and X-Forwarded-Proto: headers on the incoming request.
+    ///
+    /// Set this only after ensuring your proxy server is configured to set them and that no
+    /// untrusted requests bypass the proxy server. You may want to specify
+    /// --http-addr=127.0.0.1:8080.
+    #[structopt(long)]
+    trust_forward_hdrs: bool,
+}
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
 // They seem to be correct for Linux and macOS at least.
@@ -54,44 +95,6 @@ const ZONEINFO_PATHS: [&'static str; 2] = [
     "/usr/share/zoneinfo/",       // Linux, macOS < High Sierra
     "/var/db/timezone/zoneinfo/"  // macOS High Sierra
 ];
-
-const USAGE: &'static str = r#"
-Usage: moonfire-nvr run [options]
-
-Options:
-    -h, --help             Show this message.
-    --db-dir=DIR           Set the directory holding the SQLite3 index database.
-                           This is typically on a flash device.
-                           [default: /var/lib/moonfire-nvr/db]
-    --ui-dir=DIR           Set the directory with the user interface files
-                           (.html, .js, etc).
-                           [default: /usr/local/lib/moonfire-nvr/ui]
-    --http-addr=ADDR       Set the bind address for the unencrypted HTTP server.
-                           [default: 0.0.0.0:8080]
-    --read-only            Forces read-only mode / disables recording.
-    --allow-unauthenticated-permissions=PERMISSIONS
-                           Allow unauthenticated access to the web interface,
-                           with the given permissions (may be empty).
-                           PERMISSIONS should be a text Permissions protobuf
-                           such as "view_videos: true". NOTE: even an empty
-                           string allows some basic access that would be
-                           rejected if the argument were omitted.
-    --trust-forward-hdrs   Trust X-Real-IP: and X-Forwarded-Proto: headers on
-                           the incoming request. Set this only after ensuring
-                           your proxy server is configured to set them and that
-                           no untrusted requests bypass the proxy server.
-                           You may want to specify --http-addr=127.0.0.1:8080.
-"#;
-
-#[derive(Debug, Deserialize)]
-struct Args {
-    flag_db_dir: String,
-    flag_http_addr: String,
-    flag_ui_dir: String,
-    flag_read_only: bool,
-    flag_allow_unauthenticated_permissions: Option<String>,
-    flag_trust_forward_hdrs: bool,
-}
 
 fn trim_zoneinfo(p: &str) -> &str {
     for zp in &ZONEINFO_PATHS {
@@ -167,13 +170,12 @@ struct Syncer {
 }
 
 #[tokio::main]
-pub async fn run() -> Result<(), Error> {
-    let args: Args = super::parse_args(USAGE)?;
+pub async fn run(args: &Args) -> Result<(), Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
-        &args.flag_db_dir,
-        if args.flag_read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
-    let db = Arc::new(db::Database::new(clocks.clone(), conn, !args.flag_read_only).unwrap());
+        &args.db_dir,
+        if args.read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
+    let db = Arc::new(db::Database::new(clocks.clone(), conn, !args.read_only).unwrap());
     info!("Database is loaded.");
 
     {
@@ -186,22 +188,18 @@ pub async fn run() -> Result<(), Error> {
 
     let time_zone_name = resolve_zone()?;
     info!("Resolved timezone: {}", &time_zone_name);
-    let allow_unauthenticated_permissions = args.flag_allow_unauthenticated_permissions
-        .map(|s| protobuf::text_format::parse_from_str(&s))
-        .transpose()
-        .context("Unable to parse --allow-unauthenticated-permissions")?;
     let s = web::Service::new(web::Config {
         db: db.clone(),
-        ui_dir: Some(&args.flag_ui_dir),
-        allow_unauthenticated_permissions,
-        trust_forward_hdrs: args.flag_trust_forward_hdrs,
+        ui_dir: Some(&args.ui_dir),
+        allow_unauthenticated_permissions: args.allow_unauthenticated_permissions.clone(),
+        trust_forward_hdrs: args.trust_forward_hdrs,
         time_zone_name,
     })?;
 
     // Start a streamer for each stream.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));
     let mut streamers = Vec::new();
-    let syncers = if !args.flag_read_only {
+    let syncers = if !args.read_only {
         let l = db.lock();
         let mut dirs = FnvHashMap::with_capacity_and_hasher(
             l.sample_file_dirs_by_id().len(), Default::default());
@@ -267,14 +265,13 @@ pub async fn run() -> Result<(), Error> {
     } else { None };
 
     // Start the web interface.
-    let addr = args.flag_http_addr.parse().unwrap();
     let make_svc = make_service_fn(move |_conn| {
         futures::future::ok::<_, std::convert::Infallible>(service_fn({
             let mut s = s.clone();
             move |req| Pin::from(s.serve(req))
         }))
     });
-    let server = ::hyper::server::Server::bind(&addr)
+    let server = ::hyper::server::Server::bind(&args.http_addr)
         .tcp_nodelay(true)
         .serve(make_svc);
 

@@ -38,36 +38,24 @@ use cursive::Cursive;
 use cursive::views;
 use db;
 use failure::Error;
-use serde::Deserialize;
+use std::path::PathBuf;
 use std::sync::Arc;
+use structopt::StructOpt;
 
 mod cameras;
 mod dirs;
 mod users;
 
-static USAGE: &'static str = r#"
-Interactive configuration editor.
-
-Usage:
-
-    moonfire-nvr config [options]
-    moonfire-nvr config --help
-
-Options:
-
-    --db-dir=DIR           Set the directory holding the SQLite3 index database.
-                           This is typically on a flash device.
-                           [default: /var/lib/moonfire-nvr/db]
-"#;
-
-#[derive(Debug, Deserialize)]
-struct Args {
-    flag_db_dir: String,
+#[derive(StructOpt)]
+pub struct Args {
+    /// Directory holding the SQLite3 index database.
+    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
+                parse(from_os_str))]
+    db_dir: PathBuf,
 }
 
-pub fn run() -> Result<(), Error> {
-    let args: Args = super::parse_args(USAGE)?;
-    let (_db_dir, conn) = super::open_conn(&args.flag_db_dir, super::OpenMode::ReadWrite)?;
+pub fn run(args: &Args) -> Result<(), Error> {
+    let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     let clocks = clock::RealClocks {};
     let db = Arc::new(db::Database::new(clocks, conn, true)?);
 

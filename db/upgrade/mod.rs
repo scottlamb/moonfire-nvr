@@ -52,9 +52,9 @@ const UPGRADE_NOTES: &'static str =
 
 #[derive(Debug)]
 pub struct Args<'a> {
-    pub flag_sample_file_dir: Option<&'a str>,
-    pub flag_preset_journal: &'a str,
-    pub flag_no_vacuum: bool,
+    pub sample_file_dir: Option<&'a std::path::Path>,
+    pub preset_journal: &'a str,
+    pub no_vacuum: bool,
 }
 
 fn set_journal_mode(conn: &rusqlite::Connection, requested: &str) -> Result<(), Error> {
@@ -86,7 +86,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
             bail!("Database is at negative version {}!", old_ver);
         }
         info!("Upgrading database from version {} to version {}...", old_ver, target_ver);
-        set_journal_mode(&conn, args.flag_preset_journal)?;
+        set_journal_mode(&conn, args.preset_journal)?;
         for ver in old_ver .. target_ver {
             info!("...from version {} to version {}", ver, ver + 1);
             let tx = conn.transaction()?;
@@ -118,7 +118,7 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     // WAL is the preferred journal mode for normal operation; it reduces the number of syncs
     // without compromising safety.
     set_journal_mode(&conn, "wal")?;
-    if !args.flag_no_vacuum {
+    if !args.no_vacuum {
         info!("...vacuuming database after upgrade.");
         conn.execute_batch(r#"
             pragma page_size = 16384;
@@ -157,7 +157,7 @@ impl NixPath for UuidPath {
 mod tests {
     use crate::compare;
     use crate::testutil;
-    use failure::{ResultExt, format_err};
+    use failure::ResultExt;
     use super::*;
 
     fn new_conn() -> Result<rusqlite::Connection, Error> {
@@ -183,7 +183,7 @@ mod tests {
     fn upgrade_and_compare() -> Result<(), Error> {
         testutil::init();
         let tmpdir = tempdir::TempDir::new("moonfire-nvr-test")?;
-        let path = tmpdir.path().to_str().ok_or_else(|| format_err!("invalid UTF-8"))?.to_owned();
+        //let path = tmpdir.path().to_str().ok_or_else(|| format_err!("invalid UTF-8"))?.to_owned();
         let mut upgraded = new_conn()?;
         upgraded.execute_batch(include_str!("v0.sql"))?;
         upgraded.execute_batch(r#"
@@ -218,9 +218,9 @@ mod tests {
                                   (4, None),  // transitional; don't compare schemas.
                                   (5, Some(include_str!("../schema.sql")))] {
             upgrade(&Args {
-                flag_sample_file_dir: Some(&path),
-                flag_preset_journal: "delete",
-                flag_no_vacuum: false,
+                sample_file_dir: Some(&tmpdir.path()),
+                preset_journal: "delete",
+                no_vacuum: false,
             }, *ver, &mut upgraded).context(format!("upgrading to version {}", ver))?;
             if let Some(f) = fresh_sql {
                 compare(&upgraded, *ver, f)?;

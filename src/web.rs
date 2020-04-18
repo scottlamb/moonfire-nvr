@@ -588,10 +588,10 @@ impl ServiceInner {
         }.to_owned();
         let mut l = self.db.lock();
         let is_secure = self.is_secure(req);
-        let flags = (auth::SessionFlags::HttpOnly as i32) |
-                    (auth::SessionFlags::SameSite as i32) |
-                    (auth::SessionFlags::SameSiteStrict as i32) |
-                    if is_secure { auth::SessionFlags::Secure as i32 } else { 0 };
+        let flags = (auth::SessionFlag::HttpOnly as i32) |
+                    (auth::SessionFlag::SameSite as i32) |
+                    (auth::SessionFlag::SameSiteStrict as i32) |
+                    if is_secure { auth::SessionFlag::Secure as i32 } else { 0 };
         let (sid, _) = l.login_by_password(authreq, &r.username, r.password, Some(domain),
             flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
@@ -797,7 +797,7 @@ async fn with_json_body(mut req: Request<hyper::Body>)
 
 pub struct Config<'a> {
     pub db: Arc<db::Database>,
-    pub ui_dir: Option<&'a str>,
+    pub ui_dir: Option<&'a std::path::Path>,
     pub trust_forward_hdrs: bool,
     pub time_zone_name: String,
     pub allow_unauthenticated_permissions: Option<db::Permissions>,
@@ -840,12 +840,12 @@ impl Service {
         })))
     }
 
-    fn fill_ui_files(dir: &str, files: &mut HashMap<String, UiFile>) {
+    fn fill_ui_files(dir: &std::path::Path, files: &mut HashMap<String, UiFile>) {
         let r = match fs::read_dir(dir) {
             Ok(r) => r,
             Err(e) => {
                 warn!("Unable to search --ui-dir={}; will serve no static files. Error was: {}",
-                      dir, e);
+                      dir.display(), e);
                 return;
             }
         };
