@@ -28,10 +28,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use lazy_static::lazy_static;
-use regex::Regex;
+use nom::IResult;
+use nom::branch::alt;
+use nom::bytes::complete::{tag, take_while1};
+use nom::character::complete::space0;
+use nom::combinator::{map, map_res, opt};
+use nom::sequence::{delimited, tuple};
 use std::fmt::Write as _;
-use std::str::FromStr as _;
 
 static MULTIPLIERS: [(char, u64); 4] = [
     // (suffix character, power of 2)
@@ -58,32 +61,33 @@ pub fn encode_size(mut raw: i64) -> String {
     encoded
 }
 
+fn decode_sizepart(input: &str) -> IResult<&str, i64> {
+    map(
+        tuple((
+            map_res(take_while1(|c: char| c.is_ascii_digit()),
+                    |input: &str| i64::from_str_radix(input, 10)),
+            opt(alt((
+                nom::combinator::value(1<<40, tag("T")),
+                nom::combinator::value(1<<30, tag("G")),
+                nom::combinator::value(1<<20, tag("M")),
+                nom::combinator::value(1<<10, tag("K"))
+            )))
+        )),
+        |(n, opt_unit)| n * opt_unit.unwrap_or(1)
+    )(input)
+}
+
+fn decode_size_internal(input: &str) -> IResult<&str, i64> {
+    nom::multi::fold_many1(
+        delimited(space0, decode_sizepart, space0),
+        0,
+        |sum, i| sum + i)(input)
+}
+
 /// Decodes a human-readable size as output by encode_size.
 pub fn decode_size(encoded: &str) -> Result<i64, ()> {
-    let mut decoded = 0i64;
-    lazy_static! {
-        static ref RE: Regex = Regex::new(r"\s*([0-9]+)([TGMK])?,?\s*").unwrap();
-    }
-    let mut last_pos = 0;
-    for cap in RE.captures_iter(encoded) {
-        let whole_cap = cap.get(0).unwrap();
-        if whole_cap.start() > last_pos {
-            return Err(());
-        }
-        last_pos = whole_cap.end();
-        let mut piece = i64::from_str(&cap[1]).map_err(|_| ())?;
-        if let Some(m) = cap.get(2) {
-            let m = m.as_str().as_bytes()[0] as char;
-            for &(some_m, n) in &MULTIPLIERS {
-                if some_m == m {
-                    piece *= 1i64<<n;
-                    break;
-                }
-            }
-        }
-        decoded += piece;
-    }
-    if last_pos < encoded.len() {
+    let (remaining, decoded) = decode_size_internal(encoded).map_err(|_e| ())?;
+    if !remaining.is_empty() {
         return Err(());
     }
     Ok(decoded)
@@ -130,6 +134,7 @@ mod tests {
     #[test]
     fn test_decode() {
         assert_eq!(super::decode_size("100M").unwrap(), 100i64 << 20);
+        assert_eq!(super::decode_size("100M 42").unwrap(), (100i64 << 20) + 42);
     }
 
     #[test]
