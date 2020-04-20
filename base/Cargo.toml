@@ -16,6 +16,6 @@ failure = "0.1.1"
 lazy_static = "1.0"
 libc = "0.2"
 log = "0.4"
-parking_lot = { version = "0.9", features = [] }
+parking_lot = { version = "0.10", features = [] }
 nom = "5.1.1"
 time = "0.1"
