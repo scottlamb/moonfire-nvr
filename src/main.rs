@@ -31,6 +31,7 @@
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
 use log::{error, info};
+use std::str::FromStr;
 use structopt::StructOpt;
 
 mod body;
@@ -93,20 +94,12 @@ impl Args {
     }
 }
 
-fn parse_fmt<S: AsRef<str>>(fmt: S) -> Option<mylog::Format> {
-    match fmt.as_ref() {
-        "google" => Some(mylog::Format::Google),
-        "google-systemd" => Some(mylog::Format::GoogleSystemd),
-        _ => None,
-    }
-}
-
 fn main() {
     let args = Args::from_args();
     let mut h = mylog::Builder::new()
         .set_format(::std::env::var("MOONFIRE_FORMAT")
-                    .ok()
-                    .and_then(parse_fmt)
+                    .map_err(|_| ())
+                    .and_then(|s| mylog::Format::from_str(&s))
                     .unwrap_or(mylog::Format::Google))
         .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or("info".to_owned()))
         .build();
