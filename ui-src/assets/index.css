@@ -1,11 +1,29 @@
+@media only screen and (max-width: 720px) {
+  #nav {
+    float: none;
+    display: none;
+  }
+}
+
 body {
   font-family: Arial, Helvetica, sans-serif;
+}
+#top {
+  width: 100%;
+  padding-bottom: 2ex;
+}
+#toggle-nav {
+  font-size: 1.25em;
+  cursor: pointer;
 }
 #nav {
   float: left;
 }
 #session {
   float: right;
+}
+#logout {
+  cursor: pointer;
 }
 
 #datetime .ui-datepicker {
