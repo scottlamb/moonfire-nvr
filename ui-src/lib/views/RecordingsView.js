@@ -112,7 +112,7 @@ export default class RecordingsView {
         $('<tr class="hdr">').append(
             $(
                 _columnOrder
-                    .map((name) => '<th>' + _columnLabels[name] + '</th>')
+                    .map((name) => `<th class="${name}">${_columnLabels[name]}</th>`)
                     .join('')
             )
         ),
@@ -271,7 +271,7 @@ export default class RecordingsView {
     $('tr.r', tbody).remove();
     this.recordings_.forEach((r) => {
       const row = $('<tr class="r" />');
-      row.append(_columnOrder.map(() => $('<td/>')));
+      row.append(_columnOrder.map((c) => $(`<td class="${c}"/>`)));
       row.on('click', () => {
         console.log('Video clicked');
         if (this.clickHandler_ !== null) {

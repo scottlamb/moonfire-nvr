@@ -3,9 +3,12 @@
 <html lang="en">
   <head>
     <title>Moonfire NVR</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
   </head>
   <body>
-    <div id="session">
+    <div id="top">
+      <a id="toggle-nav">&#x2630;</a>
+      <span id="session"></div>
     </div>
     <div id="nav">
       <form action="#">
@@ -16,14 +19,15 @@
         <fieldset id="datetime">
           <legend>Date &amp; Time Range</legend>
           <div id="from">
-             <div id="start-date"></div>
-             <div id="st">
-           <label for="start-time">Time:</label>
-            <input id="start-time" name="start-time" type="text" title="Starting
-            time within the day. Blank for the beginning of the day. Otherwise
-            HH:mm[:ss[:FFFFF]][+-HH:mm], where F is 90,000ths of a second.
-            Timezone is normally left out; it's useful once a year during the
-            ambiguous times of the &quot;fall back&quot; hour."></div>
+            <div id="start-date"></div>
+            <label for="start-time">Time:</label>
+            <input id="start-time" name="start-time" type="text"
+            max-length="20"
+            title="Starting time within the day. Blank for the beginning of
+            the day. Otherwise HH:mm[:ss[:FFFFF]][+-HH:mm], where F is
+            90,000ths of a second. Timezone is normally left out; it's useful
+            once a year during the ambiguous times of the &quot;fall
+            back&quot; hour.">
           </div>
           <div id="range">Range:
             <input type="radio" name="end-date-type" id="end-date-same" checked>
@@ -33,12 +37,12 @@
           </div>
           <div id="to">
             <div id="end-date"></div>
-           <label for="start-time">Time:</label>
-            <input id="end-time" name="end-time" type="text" title="Ending
-            time within the day. Blank for the end of the day. Otherwise
-            HH:mm[:ss[:FFFFF]][+-HH:mm], where F is 90,000ths of a second.
-            Timezone is normally left out; it's useful once a year during the
-            ambiguous times of the &quot;fall back&quot; hour.">
+            <label for="end-time">Time:</label>
+            <input id="end-time" name="end-time" type="text" max-length="20"
+            title="Ending time within the day. Blank for the end of the day.
+            Otherwise HH:mm[:ss[:FFFFF]][+-HH:mm], where F is 90,000ths of a
+            second. Timezone is normally left out; it's useful once a year
+            during the ambiguous times of the &quot;fall back&quot; hour.">
           </div>
         </fieldset>
         <fieldset>

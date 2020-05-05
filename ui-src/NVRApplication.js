@@ -143,9 +143,14 @@ function onSelectVideo(nvrSettingsView, camera, streamType, range, recording) {
   );
   const videoTitle =
     camera.shortName + ', ' + formattedStart + ' to ' + formattedEnd;
+  const maxWidth = window.innerWidth / 2;
+  let width = recording.videoSampleEntryWidth;
+  while (width > maxWidth) {
+    width /= 2;
+  }
   new VideoDialogView()
       .attach($('body'))
-      .play(videoTitle, recording.videoSampleEntryWidth / 4, url);
+      .play(videoTitle, width, url);
 }
 
 /**
@@ -220,7 +225,7 @@ function updateSession(session) {
     return;
   }
   sessionBar.append($('<span id="session-username" />').text(session.username));
-  const logout = $('<a>logout</a>');
+  const logout = $('<a id="logout">logout</a>');
   logout.click(() => {
     api
         .logout(session.csrf)
@@ -377,6 +382,11 @@ export default class NVRApplication {
    * Start the application.
    */
   start() {
+    let nav = $('#nav');
+
+    $('#toggle-nav').click(() => {
+      nav.toggle('slide');
+    });
     loginDialog = $('#login').dialog({
       autoOpen: false,
       modal: true,
