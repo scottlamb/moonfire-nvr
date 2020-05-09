@@ -9,7 +9,7 @@
     "lint": "eslint ui-src"
   },
   "dependencies": {
-    "jquery": "^3.2.1",
+    "jquery": "^3.5.0",
     "jquery-ui": "^1.12.1",
     "moment-timezone": "^0.5.13"
   },
