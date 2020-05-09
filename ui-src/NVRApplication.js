@@ -382,7 +382,7 @@ export default class NVRApplication {
    * Start the application.
    */
   start() {
-    let nav = $('#nav');
+    const nav = $('#nav');
 
     $('#toggle-nav').click(() => {
       nav.toggle('slide');

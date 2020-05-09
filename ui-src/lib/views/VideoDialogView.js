@@ -103,10 +103,10 @@ export default class VideoDialogView {
     if (narrowWindow) {
       console.log('Narrow window; starting video in full-screen mode.');
       videoDomElement.requestFullscreen();
-      videoDomElement.addEventListener('fullscreenchange', (event) => {
+      videoDomElement.addEventListener('fullscreenchange', () => {
         if (document.fullscreenElement !== videoDomElement) {
           console.log('Closing video because user exited full-screen mode.');
-          this.dialogElement_.dialog("close");
+          this.dialogElement_.dialog('close');
         }
       });
     }

@@ -112,7 +112,8 @@ export default class RecordingsView {
         $('<tr class="hdr">').append(
             $(
                 _columnOrder
-                    .map((name) => `<th class="${name}">${_columnLabels[name]}</th>`)
+                    .map((name) =>
+                      `<th class="${name}">${_columnLabels[name]}</th>`)
                     .join('')
             )
         ),

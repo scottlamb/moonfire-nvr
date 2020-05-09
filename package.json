@@ -5,7 +5,8 @@
   },
   "scripts": {
     "start": "webpack-dev-server --mode development --config webpack/dev.config.js --progress",
-    "build": "webpack --mode production --config webpack/prod.config.js"
+    "build": "webpack --mode production --config webpack/prod.config.js",
+    "lint": "eslint ui-src"
   },
   "dependencies": {
     "jquery": "^3.2.1",
