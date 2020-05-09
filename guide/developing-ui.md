@@ -44,7 +44,7 @@ The configuration understands these environment variables:
 | :------------------ | :------------------------------------------ | :----------------------- |
 | `MOONFIRE_URL`      | base URL of the backing Moonfire NVR server | `http://localhost:8080/` |
 | `MOONFIRE_DEV_PORT` | port to listen on                           | 3000                     |
-| `MOONFIRE_DEV_HOST` | base URL of the backing Moonfire NVR server | `localhost` (1)          |
+| `MOONFIRE_DEV_HOST` | host/IP to listen on (or `0.0.0.0`)         | `localhost` (1)          |
 
 (1) Moonfire NVR's `webpack/dev.config.js` has no default value for
 `MOONFIRE_DEV_HOST`. `webpack-dev-server` itself has a default of `localhost`,
