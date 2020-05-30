@@ -33,7 +33,6 @@
 import NVRApplication from './NVRApplication';
 
 import $ from 'jquery';
-import './favicon.ico';
 
 // On document load, start application
 $(function() {

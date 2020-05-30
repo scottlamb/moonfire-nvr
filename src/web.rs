@@ -42,21 +42,20 @@ use db::dir::SampleFileDir;
 use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use futures::sink::SinkExt;
-use futures::future::{self, Future, TryFutureExt};
+use futures::future::{self, Either, Future, TryFutureExt, err};
 use futures::stream::StreamExt;
 use http::{Request, Response, status::StatusCode};
 use http::header::{self, HeaderValue};
+use http_serve::dir::FsDir;
 use log::{debug, info, warn};
+use memchr::memchr;
 use nom::IResult;
 use nom::bytes::complete::{take_while1, tag};
 use nom::combinator::{all_consuming, map, map_res, opt};
 use nom::sequence::{preceded, tuple};
-use std::collections::HashMap;
 use std::cmp;
-use std::fs;
 use std::net::IpAddr;
 use std::ops::Range;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio_tungstenite::tungstenite;
@@ -238,15 +237,6 @@ impl FromStr for Segments {
     }
 }
 
-/// A user interface file (.html, .js, etc).
-/// The list of files is loaded into the server at startup; this makes path canonicalization easy.
-/// The files themselves are opened on every request so they can be changed during development.
-#[derive(Debug)]
-struct UiFile {
-    mime: HeaderValue,
-    path: PathBuf,
-}
-
 struct Caller {
     permissions: db::Permissions,
     session: Option<json::Session>,
@@ -257,8 +247,8 @@ impl Caller {
 
 struct ServiceInner {
     db: Arc<db::Database>,
+    ui_dir: Option<Arc<FsDir>>,
     dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
-    ui_files: HashMap<String, UiFile>,
     time_zone_name: String,
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
@@ -524,15 +514,39 @@ impl ServiceInner {
         Ok(http_serve::serve(mp4, req))
     }
 
-    fn static_file(&self, req: &Request<::hyper::Body>, path: &str) -> ResponseResult {
-        let s = self.ui_files.get(path).ok_or_else(|| not_found("no such static file"))?;
-        let f = tokio::task::block_in_place(move || {
-            fs::File::open(&s.path).map_err(internal_server_err)
-        })?;
-        let mut hdrs = http::HeaderMap::new();
-        hdrs.insert(header::CONTENT_TYPE, s.mime.clone());
-        let e = http_serve::ChunkedReadFile::new(f, hdrs).map_err(internal_server_err)?;
-        Ok(http_serve::serve(e, &req))
+    fn static_file(&self, req: Request<hyper::Body>)
+        -> impl Future<Output = ResponseResult> + 'static {
+        let dir = match self.ui_dir.clone() {
+            None => {
+                return Either::Left(
+                    err(not_found("--ui-dir not configured; no static files available.")))
+            },
+            Some(d) => d,
+        };
+        Either::Right(async move {
+            let static_req = match StaticFileRequest::parse(req.uri().path()) {
+                None => return Err(not_found("static file not found")),
+                Some(r) => r,
+            };
+            let f = dir.get(static_req.path, req.headers());
+            let node = f.await
+                .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
+                    not_found("no such static file")
+                } else {
+                    internal_server_err(e)
+                })?;
+            let mut hdrs = http::HeaderMap::new();
+            node.add_encoding_headers(&mut hdrs);
+            hdrs.insert(header::CACHE_CONTROL, HeaderValue::from_static(if static_req.immutable {
+                // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#Caching_static_assets
+                "public, max-age=604800, immutable"
+            } else {
+                "public"
+            }));
+            hdrs.insert(header::CONTENT_TYPE, HeaderValue::from_static(static_req.mime));
+            let e = node.into_file_entity(hdrs).map_err(internal_server_err)?;
+            Ok(http_serve::serve(e, &req))
+        })
     }
 
     fn authreq(&self, req: &Request<::hyper::Body>) -> auth::Request {
@@ -580,7 +594,7 @@ impl ServiceInner {
         let authreq = self.authreq(req);
         let host = req.headers().get(header::HOST).ok_or_else(|| bad_req("missing Host header!"))?;
         let host = host.as_bytes();
-        let domain = match ::memchr::memchr(b':', host) {
+        let domain = match memchr(b':', host) {
             Some(colon) => &host[0..colon],
             None => host,
         }.to_owned();
@@ -804,13 +818,32 @@ pub struct Config<'a> {
 #[derive(Clone)]
 pub struct Service(Arc<ServiceInner>);
 
+/// Useful HTTP `Cache-Control` values to set on successful (HTTP 200) API responses.
+enum CacheControl {
+    /// For endpoints which have private data that may change from request to request.
+    PrivateDynamic,
+
+    /// For endpoints which rarely change for a given URL.
+    /// E.g., a fixed segment of video. The underlying video logically never changes; there may
+    /// rarely be some software change to the actual bytes (which would result in a new etag) so
+    /// (unlike the content-hashed static content) it's not entirely immutable.
+    PrivateStatic,
+
+    None,
+}
+
 impl Service {
     pub fn new(config: Config) -> Result<Self, Error> {
-        let mut ui_files = HashMap::new();
+        let mut ui_dir = None;
         if let Some(d) = config.ui_dir {
-            Service::fill_ui_files(d, &mut ui_files);
+            match FsDir::builder().for_path(&d) {
+                Err(e) => {
+                    warn!("Unable to load --ui-dir={}; will serve no static files: {}",
+                          d.display(), e);
+                },
+                Ok(d) => ui_dir = Some(d),
+            };
         }
-        debug!("UI files: {:#?}", ui_files);
         let dirs_by_stream_id = {
             let l = config.db.lock();
             let mut d =
@@ -831,52 +864,11 @@ impl Service {
         Ok(Service(Arc::new(ServiceInner {
             db: config.db,
             dirs_by_stream_id,
-            ui_files,
+            ui_dir,
             allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
             trust_forward_hdrs: config.trust_forward_hdrs,
             time_zone_name: config.time_zone_name,
         })))
-    }
-
-    fn fill_ui_files(dir: &std::path::Path, files: &mut HashMap<String, UiFile>) {
-        let r = match fs::read_dir(dir) {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("Unable to search --ui-dir={}; will serve no static files. Error was: {}",
-                      dir.display(), e);
-                return;
-            }
-        };
-        for e in r {
-            let e = match e {
-                Ok(e) => e,
-                Err(e) => {
-                    warn!("Error searching UI directory; may be missing files. Error was: {}", e);
-                    continue;
-                },
-            };
-            let (p, mime) = match e.file_name().to_str() {
-                Some(n) if n == "index.html" => ("/".to_owned(), "text/html"),
-                Some(n) if n.ends_with(".html") => (format!("/{}", n), "text/html"),
-                Some(n) if n.ends_with(".ico") => (format!("/{}", n), "image/vnd.microsoft.icon"),
-                Some(n) if n.ends_with(".js") => (format!("/{}", n), "text/javascript"),
-                Some(n) if n.ends_with(".map") => (format!("/{}", n), "text/javascript"),
-                Some(n) if n.ends_with(".png") => (format!("/{}", n), "image/png"),
-                Some(n) => {
-                    warn!("UI directory file {:?} has unknown extension; skipping", n);
-                    continue;
-                },
-                None => {
-                    warn!("UI directory file {:?} is not a valid UTF-8 string; skipping",
-                          e.file_name());
-                    continue;
-                },
-            };
-            files.insert(p, UiFile {
-                mime: HeaderValue::from_static(mime),
-                path: e.path(),
-            });
-        }
     }
 
     fn stream_live_m4s(&self, req: Request<::hyper::Body>, caller: Caller, uuid: Uuid,
@@ -972,9 +964,9 @@ impl Service {
         let start = start.unwrap();
         use http_serve::Entity;
         let mp4 = builder.build(self.0.db.clone(), self.0.dirs_by_stream_id.clone())?;
-        let mut hdrs = http::header::HeaderMap::new();
+        let mut hdrs = header::HeaderMap::new();
         mp4.add_headers(&mut hdrs);
-        let mime_type = hdrs.get(http::header::CONTENT_TYPE).unwrap();
+        let mime_type = hdrs.get(header::CONTENT_TYPE).unwrap();
         let hdr = format!(
             "Content-Type: {}\r\n\
             X-Recording-Start: {}\r\n\
@@ -1011,19 +1003,27 @@ impl Service {
     }
 
     pub fn serve(&mut self, req: Request<::hyper::Body>) -> BoxedFuture {
-        fn wrap<R>(is_private: bool, r: R) -> BoxedFuture
+        fn wrap<R>(cache_hdr: CacheControl, r: R) -> BoxedFuture
         where R: Future<Output = Result<Response<Body>, Response<Body>>> + Send + Sync + 'static {
             return Box::new(r.or_else(|e| futures::future::ok(e)).map_ok(move |mut r| {
-                if is_private {
-                    r.headers_mut().insert("Cache-Control", HeaderValue::from_static("private"));
+                match cache_hdr {
+                    CacheControl::PrivateStatic => {
+                        r.headers_mut().insert(header::CACHE_CONTROL,
+                                               HeaderValue::from_static("private, max-age=3600"));
+                    },
+                    CacheControl::PrivateDynamic => {
+                        r.headers_mut().insert(header::CACHE_CONTROL,
+                                               HeaderValue::from_static("private, no-cache"));
+                    },
+                    CacheControl::None => {},
                 }
                 r
             }))
         }
 
-        fn wrap_r(is_private: bool, r: ResponseResult)
+        fn wrap_r(cache_hdr: CacheControl, r: ResponseResult)
                -> Box<dyn Future<Output = Result<Response<Body>, BoxedError>> + Send + Sync + 'static> {
-            return wrap(is_private, future::ready(r))
+            return wrap(cache_hdr, future::ready(r))
         }
 
         let p = Path::decode(req.uri().path());
@@ -1037,36 +1037,82 @@ impl Service {
             Err(e) => return Box::new(future::ok(from_base_error(e))),
         };
         match p {
-            Path::InitSegment(sha1, debug) => wrap_r(true, self.0.init_segment(sha1, debug, &req)),
-            Path::TopLevel => wrap_r(true, self.0.top_level(&req, caller)),
-            Path::Request => wrap_r(true, self.0.request(&req)),
-            Path::Camera(uuid) => wrap_r(true, self.0.camera(&req, uuid)),
+            Path::InitSegment(sha1, debug) => {
+                wrap_r(CacheControl::PrivateStatic, self.0.init_segment(sha1, debug, &req))
+            },
+            Path::TopLevel => wrap_r(CacheControl::PrivateDynamic, self.0.top_level(&req, caller)),
+            Path::Request => wrap_r(CacheControl::PrivateDynamic, self.0.request(&req)),
+            Path::Camera(uuid) => wrap_r(CacheControl::PrivateDynamic, self.0.camera(&req, uuid)),
             Path::StreamRecordings(uuid, type_) => {
-                wrap_r(true, self.0.stream_recordings(&req, uuid, type_))
+                wrap_r(CacheControl::PrivateDynamic, self.0.stream_recordings(&req, uuid, type_))
             },
             Path::StreamViewMp4(uuid, type_, debug) => {
-                wrap_r(true, self.0.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::Normal,
-                                                    debug))
+                wrap_r(CacheControl::PrivateStatic,
+                       self.0.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::Normal, debug))
             },
             Path::StreamViewMp4Segment(uuid, type_, debug) => {
-                wrap_r(true, self.0.stream_view_mp4(&req, caller, uuid, type_,
-                                                    mp4::Type::MediaSegment, debug))
+                wrap_r(CacheControl::PrivateStatic,
+                       self.0.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::MediaSegment,
+                                              debug))
             },
             Path::StreamLiveMp4Segments(uuid, type_) => {
-                wrap_r(true, self.stream_live_m4s(req, caller, uuid, type_))
+                wrap_r(CacheControl::PrivateDynamic, self.stream_live_m4s(req, caller, uuid, type_))
             },
-            Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
-            Path::Login => wrap(true, with_json_body(req).and_then({
+            Path::NotFound => wrap(CacheControl::PrivateDynamic,
+                                   future::err(not_found("path not understood"))),
+            Path::Login => wrap(CacheControl::PrivateDynamic, with_json_body(req).and_then({
                 let s = self.clone();
                 move |(req, b)| future::ready(s.0.login(&req, b))
             })),
-            Path::Logout => wrap(true, with_json_body(req).and_then({
+            Path::Logout => wrap(CacheControl::PrivateDynamic, with_json_body(req).and_then({
                 let s = self.clone();
                 move |(req, b)| future::ready(s.0.logout(&req, b))
             })),
-            Path::Signals => wrap(true, Pin::from(self.signals(req, caller))),
-            Path::Static => wrap_r(false, self.0.static_file(&req, req.uri().path())),
+            Path::Signals => wrap(CacheControl::PrivateDynamic,
+                                  Pin::from(self.signals(req, caller))),
+            Path::Static => wrap(CacheControl::None, self.0.static_file(req))
         }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct StaticFileRequest<'a> {
+    path: &'a str,
+    immutable: bool,
+    mime: &'static str,
+}
+
+impl<'a> StaticFileRequest<'a> {
+    fn parse(path: &'a str) -> Option<Self> {
+        if !path.starts_with("/") {
+            return None;
+        }
+
+        let (path, immutable) = match &path[1..] {
+            "" => ("index.html", false),
+            p => (p, true),
+        };
+
+        let last_dot = match path.rfind('.') {
+            None => return None,
+            Some(d) => d,
+        };
+        let ext = &path[last_dot+1..];
+        let mime = match ext {
+            "html" => "text/html",
+            "ico" => "image/x-icon",
+            "js" | "map" => "text/javascript",
+            "json" => "application/json",
+            "png" => "image/png",
+            "webapp" => "application/x-web-app-manifest+json",
+            _ => return None
+        };
+
+        Some(StaticFileRequest {
+            path,
+            immutable,
+            mime,
+        })
     }
 }
 
@@ -1077,7 +1123,7 @@ mod tests {
     use log::info;
     use std::collections::HashMap;
     use std::str::FromStr;
-    use super::Segments;
+    use super::{Segments, StaticFileRequest};
 
     struct Server {
         db: TestDb<base::clock::RealClocks>,
@@ -1226,6 +1272,24 @@ mod tests {
         assert_eq!(Path::decode("/api/logout"), Path::Logout);
         assert_eq!(Path::decode("/api/signals"), Path::Signals);
         assert_eq!(Path::decode("/api/junk"), Path::NotFound);
+    }
+
+    #[test]
+    fn static_file() {
+        testutil::init();
+        let r = StaticFileRequest::parse("/jquery-ui.b6d3d46c828800e78499.js").unwrap();
+        assert_eq!(r, StaticFileRequest {
+            path: "jquery-ui.b6d3d46c828800e78499.js",
+            mime: "text/javascript",
+            immutable: true,
+        });
+
+        let r = StaticFileRequest::parse("/").unwrap();
+        assert_eq!(r, StaticFileRequest {
+            path: "index.html",
+            mime: "text/html",
+            immutable: false,
+        });
     }
 
     #[test]

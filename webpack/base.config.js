@@ -1,7 +1,7 @@
 // vim: set et sw=2 ts=2:
 //
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors
+// Copyright (C) 2018-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -32,6 +32,7 @@
 
 const path = require('path');
 const webpack = require('webpack');
+const FaviconsWebpackPlugin = require('favicons-webpack-plugin')
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
@@ -39,7 +40,7 @@ module.exports = {
     nvr: './ui-src/index.js',
   },
   output: {
-    filename: '[name].bundle.js',
+    filename: '[name].[chunkhash].js',
     path: path.resolve('./ui-dist/'),
     publicPath: '/',
   },
@@ -63,15 +64,11 @@ module.exports = {
       },
       {
         test: /\.png$/,
-        use: ['file-loader'],
-      },
-      {
-        test: /\.ico$/,
         use: [
           {
             loader: 'file-loader',
             options: {
-              name: '[name].[ext]',
+              name: '[name].[contenthash].[ext]',
             },
           },
         ],
@@ -86,9 +83,7 @@ module.exports = {
   plugins: [
     new webpack.IgnorePlugin(/\.\/locale$/),
     new HtmlWebpackPlugin({
-      title: 'Moonfire NVR',
-      filename: 'index.html',
-      template: './ui-src/assets/index.html',
+      template: './ui-src/index.html',
     }),
     new webpack.NormalModuleReplacementPlugin(
       /node_modules\/moment\/moment\.js$/,
@@ -98,5 +93,16 @@ module.exports = {
       /node_modules\/moment-timezone\/index\.js$/,
       './builds/moment-timezone-with-data-2012-2022.min.js'
     ),
+    new FaviconsWebpackPlugin({
+      logo: './ui-src/favicon.svg',
+      mode: 'webapp',
+      devMode: 'light',
+      prefix: 'favicons-[hash]/',
+      favicons: {
+        coast: false,
+        windows: false,
+        yandex: false,
+      },
+    }),
   ],
 };
