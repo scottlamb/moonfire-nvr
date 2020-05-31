@@ -843,7 +843,7 @@ dependencies = [
 [[package]]
 name = "http-serve"
 version = "0.2.2"
-source = "git+https://github.com/scottlamb/http-serve?branch=dir#be4a4039b0bf70c951ee56e2d08d63d48dd5dbb3"
+source = "git+https://github.com/scottlamb/http-serve?branch=dir#efde86035aedf6c623c11d1125aa256a3e99e6a2"
 dependencies = [
  "bytes",
  "flate2",
