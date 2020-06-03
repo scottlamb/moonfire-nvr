@@ -46,7 +46,7 @@ import 'jquery-ui/themes/base/tooltip.css';
 import 'jquery-ui/themes/base/theme.css';
 
 // This causes our custom css to be loaded after the above!
-import './assets/index.css';
+import './index.css';
 
 // Get ui widgets themselves
 import 'jquery-ui/ui/widgets/tooltip';
@@ -384,7 +384,7 @@ export default class NVRApplication {
    * Start the application.
    */
   start() {
-    let nav = $('#nav');
+    const nav = $('#nav');
 
     $('#toggle-nav').click(() => {
       nav.toggle('slide');

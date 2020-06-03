@@ -52,7 +52,7 @@ export default class VideoDialogView {
    * This does not attach the player to the DOM anywhere! In fact, construction
    * of the necessary video element is delayed until an attach is requested.
    * Since the close of the video removes all traces of it in the DOM, this
-   * apprach allows repeated use by calling attach again!
+   * approach allows repeated use by calling attach again!
    */
   constructor() {}
 
@@ -80,13 +80,13 @@ export default class VideoDialogView {
    * @return {VideoDialogView}       Returns "this" for chaining.
    */
   play(title, width, url) {
+    const videoDomElement = this.videoElement_[0];
     this.dialogElement_.dialog({
       title: title,
       width: width,
       close: () => {
-        const videoDOMElement = this.videoElement_[0];
-        videoDOMElement.pause();
-        videoDOMElement.src = ''; // Remove current source to stop loading
+        videoDomElement.pause();
+        videoDomElement.src = ''; // Remove current source to stop loading
         this.videoElement_ = null;
         this.dialogElement_.remove();
         this.dialogElement_ = null;
@@ -95,6 +95,21 @@ export default class VideoDialogView {
     // Now that dialog is up, set the src so video starts
     console.log('Video url: ' + url);
     this.videoElement_.attr('src', url);
+
+    // On narrow displays (as defined by index.css), play videos in
+    // full-screen mode. When the user exits full-screen mode, close the
+    // dialog.
+    const narrowWindow = $('#nav').css('float') == 'none';
+    if (narrowWindow) {
+      console.log('Narrow window; starting video in full-screen mode.');
+      videoDomElement.requestFullscreen();
+      videoDomElement.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement !== videoDomElement) {
+          console.log('Closing video because user exited full-screen mode.');
+          this.dialogElement_.dialog('close');
+        }
+      });
+    }
     return this;
   }
 }

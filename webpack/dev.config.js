@@ -44,6 +44,9 @@ module.exports = merge(baseConfig, {
     minimize: false,
     namedChunks: true,
   },
+  output: {
+    filename: '[name].[hash].js',
+  },
   devServer: {
     inline: true,
     port: process.env.MOONFIRE_DEV_PORT || 3000,

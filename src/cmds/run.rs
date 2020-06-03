@@ -39,7 +39,6 @@ use futures::future::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use log::{info, warn};
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -199,13 +198,13 @@ pub async fn run(args: &Args) -> Result<(), Error> {
 
     let time_zone_name = resolve_zone()?;
     info!("Resolved timezone: {}", &time_zone_name);
-    let s = web::Service::new(web::Config {
+    let svc = Arc::new(web::Service::new(web::Config {
         db: db.clone(),
         ui_dir: Some(&args.ui_dir),
         allow_unauthenticated_permissions: args.allow_unauthenticated_permissions.clone(),
         trust_forward_hdrs: args.trust_forward_hdrs,
         time_zone_name,
-    })?;
+    })?);
 
     // Start a streamer for each stream.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));
@@ -283,8 +282,8 @@ pub async fn run(args: &Args) -> Result<(), Error> {
     // Start the web interface.
     let make_svc = make_service_fn(move |_conn| {
         futures::future::ok::<_, std::convert::Infallible>(service_fn({
-            let mut s = s.clone();
-            move |req| Pin::from(s.serve(req))
+            let svc = Arc::clone(&svc);
+            move |req| Arc::clone(&svc).serve(req)
         }))
     });
     let server = ::hyper::server::Server::bind(&args.http_addr)

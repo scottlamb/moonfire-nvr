@@ -146,16 +146,14 @@ export default class MoonfireAPI {
    * Start a new AJAX request with the specified URL.
    *
    * @param  {String} url     URL to use
-   * @param  {String} cacheOk True if cached results are OK
    * @return {Request}        jQuery request type
    */
-  request(url, cacheOk = false) {
+  request(url) {
     return $.ajax(url, {
       dataType: 'json',
       headers: {
         Accept: 'application/json',
       },
-      cache: cacheOk,
     });
   }
 

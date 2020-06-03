@@ -31,13 +31,13 @@ matrix:
       script:
         - yarn
         - yarn build
-        - node_modules/eslint/bin/eslint.js ui-src
+        - yarn lint
     - language: node_js
       node_js: "lts/*"
       script:
         - yarn
         - yarn build
-        - node_modules/eslint/bin/eslint.js ui-src
+        - yarn lint
   allow_failures:
     - rust: nightly
 cache:

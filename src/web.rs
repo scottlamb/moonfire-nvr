@@ -31,7 +31,7 @@
 use base::clock::Clocks;
 use base::{ErrorKind, bail_t};
 use bytes::Bytes;
-use crate::body::{Body, BoxedError};
+use crate::body::Body;
 use crate::json;
 use crate::mp4;
 use bytes::{BufMut, BytesMut};
@@ -42,29 +42,23 @@ use db::dir::SampleFileDir;
 use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use futures::sink::SinkExt;
-use futures::future::{self, Future, TryFutureExt};
 use futures::stream::StreamExt;
 use http::{Request, Response, status::StatusCode};
 use http::header::{self, HeaderValue};
+use http_serve::dir::FsDir;
 use log::{debug, info, warn};
+use memchr::memchr;
 use nom::IResult;
 use nom::bytes::complete::{take_while1, tag};
 use nom::combinator::{all_consuming, map, map_res, opt};
 use nom::sequence::{preceded, tuple};
-use std::collections::HashMap;
 use std::cmp;
-use std::fs;
 use std::net::IpAddr;
 use std::ops::Range;
-use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio_tungstenite::tungstenite;
 use url::form_urlencoded;
 use uuid::Uuid;
-
-type BoxedFuture = Box<dyn Future<Output = Result<Response<Body>, BoxedError>> +
-                       Sync + Send + 'static>;
 
 #[derive(Debug, Eq, PartialEq)]
 enum Path {
@@ -240,30 +234,9 @@ impl FromStr for Segments {
     }
 }
 
-/// A user interface file (.html, .js, etc).
-/// The list of files is loaded into the server at startup; this makes path canonicalization easy.
-/// The files themselves are opened on every request so they can be changed during development.
-#[derive(Debug)]
-struct UiFile {
-    mime: HeaderValue,
-    path: PathBuf,
-}
-
 struct Caller {
     permissions: db::Permissions,
     session: Option<json::Session>,
-}
-
-impl Caller {
-}
-
-struct ServiceInner {
-    db: Arc<db::Database>,
-    dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
-    ui_files: HashMap<String, UiFile>,
-    time_zone_name: String,
-    allow_unauthenticated_permissions: Option<db::Permissions>,
-    trust_forward_hdrs: bool,
 }
 
 type ResponseResult = Result<Response<Body>, Response<Body>>;
@@ -278,7 +251,306 @@ fn serve_json<T: serde::ser::Serialize>(req: &Request<hyper::Body>, out: &T) -> 
     Ok(resp)
 }
 
-impl ServiceInner {
+fn csrf_matches(csrf: &str, session: auth::SessionHash) -> bool {
+    let mut b64 = [0u8; 32];
+    session.encode_base64(&mut b64);
+    ::ring::constant_time::verify_slices_are_equal(&b64[..], csrf.as_bytes()).is_ok()
+}
+
+/// Extracts `s` cookie from the HTTP request. Does not authenticate.
+fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
+    let hdr = match req.headers().get(header::COOKIE) {
+        None => return None,
+        Some(c) => c,
+    };
+    for mut cookie in hdr.as_bytes().split(|&b| b == b';') {
+        if cookie.starts_with(b" ") {
+            cookie = &cookie[1..];
+        }
+        if cookie.starts_with(b"s=") {
+            let s = &cookie[2..];
+            if let Ok(s) = auth::RawSessionId::decode_base64(s) {
+                return Some(s);
+            }
+        }
+    }
+    None
+}
+
+/// Extracts an `application/json` POST body from a request.
+///
+/// This returns the request body as bytes rather than performing
+/// deserialization. Keeping the bytes allows the caller to use a `Deserialize`
+/// that borrows from the bytes.
+async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, Response<Body>> {
+    if *req.method() != http::method::Method::POST {
+        return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected"));
+    }
+    let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
+        Some(t) if t == "application/json" => true,
+        Some(t) if t == "application/json; charset=UTF-8" => true,
+          _ => false,
+    };
+    if !correct_mime_type {
+        return Err(bad_req("expected application/json request body"));
+    }
+    let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
+    hyper::body::to_bytes(b).await
+        .map_err(|e| internal_server_err(format_err!("unable to read request body: {}", e)))
+}
+
+pub struct Config<'a> {
+    pub db: Arc<db::Database>,
+    pub ui_dir: Option<&'a std::path::Path>,
+    pub trust_forward_hdrs: bool,
+    pub time_zone_name: String,
+    pub allow_unauthenticated_permissions: Option<db::Permissions>,
+}
+
+pub struct Service {
+    db: Arc<db::Database>,
+    ui_dir: Option<Arc<FsDir>>,
+    dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
+    time_zone_name: String,
+    allow_unauthenticated_permissions: Option<db::Permissions>,
+    trust_forward_hdrs: bool,
+}
+
+/// Useful HTTP `Cache-Control` values to set on successful (HTTP 200) API responses.
+enum CacheControl {
+    /// For endpoints which have private data that may change from request to request.
+    PrivateDynamic,
+
+    /// For endpoints which rarely change for a given URL.
+    /// E.g., a fixed segment of video. The underlying video logically never changes; there may
+    /// rarely be some software change to the actual bytes (which would result in a new etag) so
+    /// (unlike the content-hashed static content) it's not entirely immutable.
+    PrivateStatic,
+
+    None,
+}
+
+impl Service {
+    pub fn new(config: Config) -> Result<Self, Error> {
+        let mut ui_dir = None;
+        if let Some(d) = config.ui_dir {
+            match FsDir::builder().for_path(&d) {
+                Err(e) => {
+                    warn!("Unable to load --ui-dir={}; will serve no static files: {}",
+                          d.display(), e);
+                },
+                Ok(d) => ui_dir = Some(d),
+            };
+        }
+        let dirs_by_stream_id = {
+            let l = config.db.lock();
+            let mut d =
+                FnvHashMap::with_capacity_and_hasher(l.streams_by_id().len(), Default::default());
+            for (&id, s) in l.streams_by_id().iter() {
+                let dir_id = match s.sample_file_dir_id {
+                    Some(d) => d,
+                    None => continue,
+                };
+                d.insert(id, l.sample_file_dirs_by_id()
+                              .get(&dir_id)
+                              .unwrap()
+                              .get()?);
+            }
+            Arc::new(d)
+        };
+
+        Ok(Service {
+            db: config.db,
+            dirs_by_stream_id,
+            ui_dir,
+            allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
+            trust_forward_hdrs: config.trust_forward_hdrs,
+            time_zone_name: config.time_zone_name,
+        })
+    }
+
+    fn stream_live_m4s(self: Arc<Self>, req: Request<::hyper::Body>, caller: Caller, uuid: Uuid,
+                       stream_type: db::StreamType) -> ResponseResult {
+        if !caller.permissions.view_video {
+            return Err(plain_response(StatusCode::UNAUTHORIZED, "view_video required"));
+        }
+
+        let stream_id;
+        let open_id;
+        let (sub_tx, sub_rx) = futures::channel::mpsc::unbounded();
+        {
+            let mut db = self.db.lock();
+            open_id = match db.open {
+                None => return Err(plain_response(
+                        StatusCode::PRECONDITION_FAILED,
+                        "database is read-only; there are no live streams")),
+                Some(o) => o.id,
+            };
+            let camera = db.get_camera(uuid)
+                           .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
+                                                         format!("no such camera {}", uuid)))?;
+            stream_id = camera.streams[stream_type.index()]
+                .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
+                                              format!("no such stream {}/{}", uuid,
+                                                      stream_type)))?;
+            db.watch_live(stream_id, Box::new(move |l| sub_tx.unbounded_send(l).is_ok()))
+                .expect("stream_id refed by camera");
+        }
+
+        let (parts, body) = req.into_parts();
+        let req = Request::from_parts(parts, ());
+        let response = tungstenite::handshake::server::create_response(&req)
+            .map_err(|e| bad_req(e.to_string()))?;
+        let (parts, ()) = response.into_parts();
+
+        tokio::spawn(self.stream_live_m4s_ws(stream_id, open_id, body, sub_rx));
+
+        Ok(Response::from_parts(parts, Body::from("")))
+    }
+
+    async fn stream_live_m4s_ws(
+        self: Arc<Self>, stream_id: i32, open_id: u32, body: hyper::Body,
+        mut sub_rx: futures::channel::mpsc::UnboundedReceiver<db::LiveSegment>) {
+        let upgraded = match body.on_upgrade().await {
+            Ok(u) => u,
+            Err(e) => {
+                warn!("Unable to upgrade stream to websocket: {}", e);
+                return;
+            },
+        };
+        let mut ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+            upgraded,
+            tungstenite::protocol::Role::Server,
+            None,
+        ).await;
+        loop {
+            let live = match sub_rx.next().await {
+                Some(l) => l,
+                None => return,
+            };
+            if let Err(e) = self.stream_live_m4s_chunk(open_id, stream_id, &mut ws, live).await {
+                info!("Dropping WebSocket after error: {}", e);
+                return;
+            }
+        }
+    }
+
+    async fn stream_live_m4s_chunk(
+        &self, open_id: u32, stream_id: i32,
+        ws: &mut tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>,
+        live: db::LiveSegment) -> Result<(), Error> {
+        let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
+        let mut vse_id = None;
+        let mut start = None;
+        {
+            let db = self.db.lock();
+            let mut rows = 0;
+            db.list_recordings_by_id(stream_id, live.recording .. live.recording+1, &mut |r| {
+                rows += 1;
+                vse_id = Some(r.video_sample_entry_id);
+                start = Some(r.start);
+                builder.append(&db, r, live.off_90k.clone())?;
+                Ok(())
+            })?;
+            if rows != 1 {
+                bail_t!(Internal, "unable to find {:?}", live);
+            }
+        }
+        let vse_id = vse_id.unwrap();
+        let start = start.unwrap();
+        use http_serve::Entity;
+        let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
+        let mut hdrs = header::HeaderMap::new();
+        mp4.add_headers(&mut hdrs);
+        let mime_type = hdrs.get(header::CONTENT_TYPE).unwrap();
+        let hdr = format!(
+            "Content-Type: {}\r\n\
+            X-Recording-Start: {}\r\n\
+            X-Recording-Id: {}.{}\r\n\
+            X-Time-Range: {}-{}\r\n\
+            X-Video-Sample-Entry-Id: {}\r\n\r\n",
+            mime_type.to_str().unwrap(),
+            start.0,
+            open_id,
+            live.recording,
+            live.off_90k.start,
+            live.off_90k.end,
+            &vse_id);
+        let mut v = /*Pin::from(*/hdr.into_bytes()/*)*/;
+        mp4.append_into_vec(&mut v).await?;
+        //let v = Pin::into_inner();
+        ws.send(tungstenite::Message::Binary(v)).await?;
+        Ok(())
+    }
+
+    async fn signals(&self, req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
+        use http::method::Method;
+        match *req.method() {
+            Method::POST => self.post_signals(req, caller).await,
+            Method::GET | Method::HEAD => self.get_signals(&req),
+            _ => Err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
+                                    "POST, GET, or HEAD expected")),
+        }
+    }
+
+    async fn serve_inner(self: Arc<Self>, req: Request<::hyper::Body>, p: Path, caller: Caller)
+                         -> ResponseResult {
+        let (cache, mut response) = match p {
+            Path::InitSegment(sha1, debug) => {
+                (CacheControl::PrivateStatic, self.init_segment(sha1, debug, &req)?)
+            },
+            Path::TopLevel => (CacheControl::PrivateDynamic, self.top_level(&req, caller)?),
+            Path::Request => (CacheControl::PrivateDynamic, self.request(&req)?),
+            Path::Camera(uuid) => (CacheControl::PrivateDynamic, self.camera(&req, uuid)?),
+            Path::StreamRecordings(uuid, type_) => {
+                (CacheControl::PrivateDynamic, self.stream_recordings(&req, uuid, type_)?)
+            },
+            Path::StreamViewMp4(uuid, type_, debug) => {
+                (CacheControl::PrivateStatic,
+                 self.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::Normal, debug)?)
+            },
+            Path::StreamViewMp4Segment(uuid, type_, debug) => {
+                (CacheControl::PrivateStatic,
+                 self.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::MediaSegment, debug)?)
+            },
+            Path::StreamLiveMp4Segments(uuid, type_) => {
+                (CacheControl::PrivateDynamic, self.stream_live_m4s(req, caller, uuid, type_)?)
+            },
+            Path::NotFound => return Err(not_found("path not understood")),
+            Path::Login => (CacheControl::PrivateDynamic, self.login(req).await?),
+            Path::Logout => (CacheControl::PrivateDynamic, self.logout(req).await?),
+            Path::Signals => (CacheControl::PrivateDynamic, self.signals(req, caller).await?),
+            Path::Static => (CacheControl::None, self.static_file(req).await?)
+        };
+        match cache {
+            CacheControl::PrivateStatic => {
+                response.headers_mut().insert(header::CACHE_CONTROL,
+                                              HeaderValue::from_static("private, max-age=3600"));
+            },
+            CacheControl::PrivateDynamic => {
+                response.headers_mut().insert(header::CACHE_CONTROL,
+                                              HeaderValue::from_static("private, no-cache"));
+            },
+            CacheControl::None => {},
+        }
+        Ok(response)
+    }
+
+    pub async fn serve(self: Arc<Self>, req: Request<::hyper::Body>)
+                       -> Result<Response<Body>, std::convert::Infallible> {
+        let p = Path::decode(req.uri().path());
+        let always_allow_unauthenticated = match p {
+            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static => true,
+            _ => false,
+        };
+        debug!("request on: {}: {:?}", req.uri(), p);
+        let caller = match self.authenticate(&req, always_allow_unauthenticated) {
+            Ok(c) => c,
+            Err(e) => return Ok(from_base_error(e)),
+        };
+        Ok(self.serve_inner(req, p, caller).await.unwrap_or_else(|e| e))
+    }
+
     fn top_level(&self, req: &Request<::hyper::Body>, caller: Caller) -> ResponseResult {
         let mut days = false;
         let mut camera_configs = false;
@@ -523,14 +795,30 @@ impl ServiceInner {
         Ok(http_serve::serve(mp4, req))
     }
 
-    fn static_file(&self, req: &Request<::hyper::Body>, path: &str) -> ResponseResult {
-        let s = self.ui_files.get(path).ok_or_else(|| not_found("no such static file"))?;
-        let f = tokio::task::block_in_place(move || {
-            fs::File::open(&s.path).map_err(internal_server_err)
-        })?;
+    async fn static_file(&self, req: Request<hyper::Body>) -> ResponseResult {
+        let dir = self.ui_dir.clone()
+            .ok_or_else(|| not_found("--ui-dir not configured; no static files available."))?;
+        let static_req = match StaticFileRequest::parse(req.uri().path()) {
+            None => return Err(not_found("static file not found")),
+            Some(r) => r,
+        };
+        let f = dir.get(static_req.path, req.headers());
+        let node = f.await
+            .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
+                not_found("no such static file")
+            } else {
+                internal_server_err(e)
+            })?;
         let mut hdrs = http::HeaderMap::new();
-        hdrs.insert(header::CONTENT_TYPE, s.mime.clone());
-        let e = http_serve::ChunkedReadFile::new(f, hdrs).map_err(internal_server_err)?;
+        node.add_encoding_headers(&mut hdrs);
+        hdrs.insert(header::CACHE_CONTROL, HeaderValue::from_static(if static_req.immutable {
+            // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#Caching_static_assets
+            "public, max-age=604800, immutable"
+        } else {
+            "public"
+        }));
+        hdrs.insert(header::CONTENT_TYPE, HeaderValue::from_static(static_req.mime));
+        let e = node.into_file_entity(hdrs).map_err(internal_server_err)?;
         Ok(http_serve::serve(e, &req))
     }
 
@@ -573,18 +861,19 @@ impl ServiceInner {
                .unwrap_or(false)
     }
 
-    fn login(&self, req: &Request<::hyper::Body>, body: Bytes) -> ResponseResult {
-        let r: json::LoginRequest = serde_json::from_slice(&body)
+    async fn login(&self, mut req: Request<::hyper::Body>) -> ResponseResult {
+        let r = extract_json_body(&mut req).await?;
+        let r: json::LoginRequest = serde_json::from_slice(&r)
             .map_err(|e| bad_req(e.to_string()))?;
-        let authreq = self.authreq(req);
+        let authreq = self.authreq(&req);
         let host = req.headers().get(header::HOST).ok_or_else(|| bad_req("missing Host header!"))?;
         let host = host.as_bytes();
-        let domain = match ::memchr::memchr(b':', host) {
+        let domain = match memchr(b':', host) {
             Some(colon) => &host[0..colon],
             None => host,
         }.to_owned();
         let mut l = self.db.lock();
-        let is_secure = self.is_secure(req);
+        let is_secure = self.is_secure(&req);
         let flags = (auth::SessionFlag::HttpOnly as i32) |
                     (auth::SessionFlag::SameSite as i32) |
                     (auth::SessionFlag::SameSiteStrict as i32) |
@@ -610,13 +899,14 @@ impl ServiceInner {
             .body(b""[..].into()).unwrap())
     }
 
-    fn logout(&self, req: &Request<hyper::Body>, body: Bytes) -> ResponseResult {
-        let r: json::LogoutRequest = serde_json::from_slice(&body)
+    async fn logout(&self, mut req: Request<hyper::Body>) -> ResponseResult {
+        let r = extract_json_body(&mut req).await?;
+        let r: json::LogoutRequest = serde_json::from_slice(&r)
             .map_err(|e| bad_req(e.to_string()))?;
 
         let mut res = Response::new(b""[..].into());
-        if let Some(sid) = extract_sid(req) {
-            let authreq = self.authreq(req);
+        if let Some(sid) = extract_sid(&req) {
+            let authreq = self.authreq(&req);
             let mut l = self.db.lock();
             let hash = sid.hash();
             let need_revoke = match l.authenticate_session(authreq.clone(), &hash) {
@@ -651,12 +941,13 @@ impl ServiceInner {
         Ok(res)
     }
 
-    fn post_signals(&self, req: &Request<hyper::Body>, caller: Caller, body: Bytes)
-                    -> ResponseResult {
+    async fn post_signals(&self, mut req: Request<hyper::Body>, caller: Caller)
+                          -> ResponseResult {
         if !caller.permissions.update_signals {
             return Err(plain_response(StatusCode::UNAUTHORIZED, "update_signals required"));
         }
-        let r: json::PostSignalsRequest = serde_json::from_slice(&body)
+        let r = extract_json_body(&mut req).await?;
+        let r: json::PostSignalsRequest = serde_json::from_slice(&r)
             .map_err(|e| bad_req(e.to_string()))?;
         let mut l = self.db.lock();
         let now = recording::Time::new(self.db.clocks().realtime());
@@ -669,7 +960,7 @@ impl ServiceInner {
             },
         };
         l.update_signals(start .. end, &r.signal_ids, &r.states).map_err(from_base_error)?;
-        serve_json(req, &json::PostSignalsResponse {
+        serve_json(&req, &json::PostSignalsResponse {
             time_90k: now.0,
         })
     }
@@ -739,331 +1030,44 @@ impl ServiceInner {
     }
 }
 
-fn csrf_matches(csrf: &str, session: auth::SessionHash) -> bool {
-    let mut b64 = [0u8; 32];
-    session.encode_base64(&mut b64);
-    ::ring::constant_time::verify_slices_are_equal(&b64[..], csrf.as_bytes()).is_ok()
+#[derive(Debug, Eq, PartialEq)]
+struct StaticFileRequest<'a> {
+    path: &'a str,
+    immutable: bool,
+    mime: &'static str,
 }
 
-/// Extracts `s` cookie from the HTTP request. Does not authenticate.
-fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
-    let hdr = match req.headers().get(header::COOKIE) {
-        None => return None,
-        Some(c) => c,
-    };
-    for mut cookie in hdr.as_bytes().split(|&b| b == b';') {
-        if cookie.starts_with(b" ") {
-            cookie = &cookie[1..];
+impl<'a> StaticFileRequest<'a> {
+    fn parse(path: &'a str) -> Option<Self> {
+        if !path.starts_with("/") {
+            return None;
         }
-        if cookie.starts_with(b"s=") {
-            let s = &cookie[2..];
-            if let Ok(s) = auth::RawSessionId::decode_base64(s) {
-                return Some(s);
-            }
-        }
-    }
-    None
-}
 
-/// Returns a future separating the request from its JSON body.
-///
-/// If this is not a `POST` or the body's `Content-Type` is not
-/// `application/json`, returns an appropriate error response instead.
-///
-/// Use with `and_then` to chain logic which consumes the form body.
-async fn with_json_body(mut req: Request<hyper::Body>)
-    -> Result<(Request<hyper::Body>, Bytes), Response<Body>> {
-    if *req.method() != http::method::Method::POST {
-        return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected"));
-    }
-    let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
-        Some(t) if t == "application/json" => true,
-        Some(t) if t == "application/json; charset=UTF-8" => true,
-        _ => false,
-    };
-    if !correct_mime_type {
-        return Err(bad_req("expected application/json request body"));
-    }
-    let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
-    match hyper::body::to_bytes(b).await {
-        Ok(b) => Ok((req, b)),
-        Err(e) => Err(internal_server_err(format_err!("unable to read request body: {}", e))),
-    }
-}
-
-
-pub struct Config<'a> {
-    pub db: Arc<db::Database>,
-    pub ui_dir: Option<&'a std::path::Path>,
-    pub trust_forward_hdrs: bool,
-    pub time_zone_name: String,
-    pub allow_unauthenticated_permissions: Option<db::Permissions>,
-}
-
-#[derive(Clone)]
-pub struct Service(Arc<ServiceInner>);
-
-impl Service {
-    pub fn new(config: Config) -> Result<Self, Error> {
-        let mut ui_files = HashMap::new();
-        if let Some(d) = config.ui_dir {
-            Service::fill_ui_files(d, &mut ui_files);
-        }
-        debug!("UI files: {:#?}", ui_files);
-        let dirs_by_stream_id = {
-            let l = config.db.lock();
-            let mut d =
-                FnvHashMap::with_capacity_and_hasher(l.streams_by_id().len(), Default::default());
-            for (&id, s) in l.streams_by_id().iter() {
-                let dir_id = match s.sample_file_dir_id {
-                    Some(d) => d,
-                    None => continue,
-                };
-                d.insert(id, l.sample_file_dirs_by_id()
-                              .get(&dir_id)
-                              .unwrap()
-                              .get()?);
-            }
-            Arc::new(d)
+        let (path, immutable) = match &path[1..] {
+            "" => ("index.html", false),
+            p => (p, true),
         };
 
-        Ok(Service(Arc::new(ServiceInner {
-            db: config.db,
-            dirs_by_stream_id,
-            ui_files,
-            allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
-            trust_forward_hdrs: config.trust_forward_hdrs,
-            time_zone_name: config.time_zone_name,
-        })))
-    }
-
-    fn fill_ui_files(dir: &std::path::Path, files: &mut HashMap<String, UiFile>) {
-        let r = match fs::read_dir(dir) {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("Unable to search --ui-dir={}; will serve no static files. Error was: {}",
-                      dir.display(), e);
-                return;
-            }
+        let last_dot = match path.rfind('.') {
+            None => return None,
+            Some(d) => d,
         };
-        for e in r {
-            let e = match e {
-                Ok(e) => e,
-                Err(e) => {
-                    warn!("Error searching UI directory; may be missing files. Error was: {}", e);
-                    continue;
-                },
-            };
-            let (p, mime) = match e.file_name().to_str() {
-                Some(n) if n == "index.html" => ("/".to_owned(), "text/html"),
-                Some(n) if n.ends_with(".html") => (format!("/{}", n), "text/html"),
-                Some(n) if n.ends_with(".ico") => (format!("/{}", n), "image/vnd.microsoft.icon"),
-                Some(n) if n.ends_with(".js") => (format!("/{}", n), "text/javascript"),
-                Some(n) if n.ends_with(".map") => (format!("/{}", n), "text/javascript"),
-                Some(n) if n.ends_with(".png") => (format!("/{}", n), "image/png"),
-                Some(n) => {
-                    warn!("UI directory file {:?} has unknown extension; skipping", n);
-                    continue;
-                },
-                None => {
-                    warn!("UI directory file {:?} is not a valid UTF-8 string; skipping",
-                          e.file_name());
-                    continue;
-                },
-            };
-            files.insert(p, UiFile {
-                mime: HeaderValue::from_static(mime),
-                path: e.path(),
-            });
-        }
-    }
-
-    fn stream_live_m4s(&self, req: Request<::hyper::Body>, caller: Caller, uuid: Uuid,
-                       stream_type: db::StreamType) -> ResponseResult {
-        if !caller.permissions.view_video {
-            return Err(plain_response(StatusCode::UNAUTHORIZED, "view_video required"));
-        }
-
-        let stream_id;
-        let open_id;
-        let (sub_tx, sub_rx) = futures::channel::mpsc::unbounded();
-        {
-            let mut db = self.0.db.lock();
-            open_id = match db.open {
-                None => return Err(plain_response(
-                        StatusCode::PRECONDITION_FAILED,
-                        "database is read-only; there are no live streams")),
-                Some(o) => o.id,
-            };
-            let camera = db.get_camera(uuid)
-                           .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
-                                                         format!("no such camera {}", uuid)))?;
-            stream_id = camera.streams[stream_type.index()]
-                .ok_or_else(|| plain_response(StatusCode::NOT_FOUND,
-                                              format!("no such stream {}/{}", uuid,
-                                                      stream_type)))?;
-            db.watch_live(stream_id, Box::new(move |l| sub_tx.unbounded_send(l).is_ok()))
-                .expect("stream_id refed by camera");
-        }
-
-        let (parts, body) = req.into_parts();
-        let req = Request::from_parts(parts, ());
-        let response = tungstenite::handshake::server::create_response(&req)
-            .map_err(|e| bad_req(e.to_string()))?;
-        let (parts, ()) = response.into_parts();
-
-        tokio::spawn(self.clone().stream_live_m4s_ws(stream_id, open_id, body, sub_rx));
-
-        Ok(Response::from_parts(parts, Body::from("")))
-    }
-
-    async fn stream_live_m4s_ws(
-        self, stream_id: i32, open_id: u32, body: hyper::Body,
-        mut sub_rx: futures::channel::mpsc::UnboundedReceiver<db::LiveSegment>) {
-        let upgraded = match body.on_upgrade().await {
-            Ok(u) => u,
-            Err(e) => {
-                warn!("Unable to upgrade stream to websocket: {}", e);
-                return;
-            },
+        let ext = &path[last_dot+1..];
+        let mime = match ext {
+            "html" => "text/html",
+            "ico" => "image/x-icon",
+            "js" | "map" => "text/javascript",
+            "json" => "application/json",
+            "png" => "image/png",
+            "webapp" => "application/x-web-app-manifest+json",
+            _ => return None
         };
-        let mut ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
-            upgraded,
-            tungstenite::protocol::Role::Server,
-            None,
-        ).await;
-        loop {
-            let live = match sub_rx.next().await {
-                Some(l) => l,
-                None => return,
-            };
-            if let Err(e) = self.stream_live_m4s_chunk(open_id, stream_id, &mut ws, live).await {
-                info!("Dropping WebSocket after error: {}", e);
-                return;
-            }
-        }
-    }
 
-    async fn stream_live_m4s_chunk(
-        &self, open_id: u32, stream_id: i32,
-        ws: &mut tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>,
-        live: db::LiveSegment) -> Result<(), Error> {
-        let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
-        let mut vse_id = None;
-        let mut start = None;
-        {
-            let db = self.0.db.lock();
-            let mut rows = 0;
-            db.list_recordings_by_id(stream_id, live.recording .. live.recording+1, &mut |r| {
-                rows += 1;
-                vse_id = Some(r.video_sample_entry_id);
-                start = Some(r.start);
-                builder.append(&db, r, live.off_90k.clone())?;
-                Ok(())
-            })?;
-            if rows != 1 {
-                bail_t!(Internal, "unable to find {:?}", live);
-            }
-        }
-        let vse_id = vse_id.unwrap();
-        let start = start.unwrap();
-        use http_serve::Entity;
-        let mp4 = builder.build(self.0.db.clone(), self.0.dirs_by_stream_id.clone())?;
-        let mut hdrs = http::header::HeaderMap::new();
-        mp4.add_headers(&mut hdrs);
-        let mime_type = hdrs.get(http::header::CONTENT_TYPE).unwrap();
-        let hdr = format!(
-            "Content-Type: {}\r\n\
-            X-Recording-Start: {}\r\n\
-            X-Recording-Id: {}.{}\r\n\
-            X-Time-Range: {}-{}\r\n\
-            X-Video-Sample-Entry-Id: {}\r\n\r\n",
-            mime_type.to_str().unwrap(),
-            start.0,
-            open_id,
-            live.recording,
-            live.off_90k.start,
-            live.off_90k.end,
-            vse_id);
-        let mut v = /*Pin::from(*/hdr.into_bytes()/*)*/;
-        mp4.append_into_vec(&mut v).await?;
-        //let v = Pin::into_inner();
-        ws.send(tungstenite::Message::Binary(v)).await?;
-        Ok(())
-    }
-
-    fn signals(&self, req: Request<hyper::Body>, caller: Caller)
-               -> Box<dyn Future<Output = Result<Response<Body>, Response<Body>>> + Send + Sync + 'static> {
-        use http::method::Method;
-        match *req.method() {
-            Method::POST => Box::new(with_json_body(req)
-                                     .and_then({
-                                         let s = self.0.clone();
-                                         move |(req, b)| future::ready(s.post_signals(&req, caller, b))
-                                     })),
-            Method::GET | Method::HEAD => Box::new(future::ready(self.0.get_signals(&req))),
-            _ => Box::new(future::err(plain_response(StatusCode::METHOD_NOT_ALLOWED,
-                                                     "POST, GET, or HEAD expected"))),
-        }
-    }
-
-    pub fn serve(&mut self, req: Request<::hyper::Body>) -> BoxedFuture {
-        fn wrap<R>(is_private: bool, r: R) -> BoxedFuture
-        where R: Future<Output = Result<Response<Body>, Response<Body>>> + Send + Sync + 'static {
-            return Box::new(r.or_else(|e| futures::future::ok(e)).map_ok(move |mut r| {
-                if is_private {
-                    r.headers_mut().insert("Cache-Control", HeaderValue::from_static("private"));
-                }
-                r
-            }))
-        }
-
-        fn wrap_r(is_private: bool, r: ResponseResult)
-               -> Box<dyn Future<Output = Result<Response<Body>, BoxedError>> + Send + Sync + 'static> {
-            return wrap(is_private, future::ready(r))
-        }
-
-        let p = Path::decode(req.uri().path());
-        let always_allow_unauthenticated = match p {
-            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static => true,
-            _ => false,
-        };
-        debug!("request on: {}: {:?}", req.uri(), p);
-        let caller = match self.0.authenticate(&req, always_allow_unauthenticated) {
-            Ok(c) => c,
-            Err(e) => return Box::new(future::ok(from_base_error(e))),
-        };
-        match p {
-            Path::InitSegment(sha1, debug) => wrap_r(true, self.0.init_segment(sha1, debug, &req)),
-            Path::TopLevel => wrap_r(true, self.0.top_level(&req, caller)),
-            Path::Request => wrap_r(true, self.0.request(&req)),
-            Path::Camera(uuid) => wrap_r(true, self.0.camera(&req, uuid)),
-            Path::StreamRecordings(uuid, type_) => {
-                wrap_r(true, self.0.stream_recordings(&req, uuid, type_))
-            },
-            Path::StreamViewMp4(uuid, type_, debug) => {
-                wrap_r(true, self.0.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::Normal,
-                                                    debug))
-            },
-            Path::StreamViewMp4Segment(uuid, type_, debug) => {
-                wrap_r(true, self.0.stream_view_mp4(&req, caller, uuid, type_,
-                                                    mp4::Type::MediaSegment, debug))
-            },
-            Path::StreamLiveMp4Segments(uuid, type_) => {
-                wrap_r(true, self.stream_live_m4s(req, caller, uuid, type_))
-            },
-            Path::NotFound => wrap(true, future::err(not_found("path not understood"))),
-            Path::Login => wrap(true, with_json_body(req).and_then({
-                let s = self.clone();
-                move |(req, b)| future::ready(s.0.login(&req, b))
-            })),
-            Path::Logout => wrap(true, with_json_body(req).and_then({
-                let s = self.clone();
-                move |(req, b)| future::ready(s.0.logout(&req, b))
-            })),
-            Path::Signals => wrap(true, Pin::from(self.signals(req, caller))),
-            Path::Static => wrap_r(false, self.0.static_file(&req, req.uri().path())),
-        }
+        Some(StaticFileRequest {
+            path,
+            immutable,
+            mime,
+        })
     }
 }
 
@@ -1074,7 +1078,8 @@ mod tests {
     use log::info;
     use std::collections::HashMap;
     use std::str::FromStr;
-    use super::Segments;
+    use std::sync::Arc;
+    use super::{Segments, StaticFileRequest};
 
     struct Server {
         db: TestDb<base::clock::RealClocks>,
@@ -1088,17 +1093,17 @@ mod tests {
         fn new(allow_unauthenticated_permissions: Option<db::Permissions>) -> Server {
             let db = TestDb::new(base::clock::RealClocks {});
             let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel::<()>();
-            let service = super::Service::new(super::Config {
+            let service = Arc::new(super::Service::new(super::Config {
                 db: db.db.clone(),
                 ui_dir: None,
                 allow_unauthenticated_permissions,
                 trust_forward_hdrs: true,
                 time_zone_name: "".to_owned(),
-            }).unwrap();
+            }).unwrap());
             let make_svc = hyper::service::make_service_fn(move |_conn| {
                 futures::future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
-                    let mut s = service.clone();
-                    move |req| std::pin::Pin::from(s.serve(req))
+                    let s = Arc::clone(&service);
+                    move |req| Arc::clone(&s).serve(req)
                 }))
             });
             let (tx, rx) = std::sync::mpsc::channel();
@@ -1214,6 +1219,24 @@ mod tests {
         assert_eq!(Path::decode("/api/logout"), Path::Logout);
         assert_eq!(Path::decode("/api/signals"), Path::Signals);
         assert_eq!(Path::decode("/api/junk"), Path::NotFound);
+    }
+
+    #[test]
+    fn static_file() {
+        testutil::init();
+        let r = StaticFileRequest::parse("/jquery-ui.b6d3d46c828800e78499.js").unwrap();
+        assert_eq!(r, StaticFileRequest {
+            path: "jquery-ui.b6d3d46c828800e78499.js",
+            mime: "text/javascript",
+            immutable: true,
+        });
+
+        let r = StaticFileRequest::parse("/").unwrap();
+        assert_eq!(r, StaticFileRequest {
+            path: "index.html",
+            mime: "text/html",
+            immutable: false,
+        });
     }
 
     #[test]
@@ -1364,6 +1387,7 @@ mod bench {
     use db::testutil::{self, TestDb};
     use hyper;
     use lazy_static::lazy_static;
+    use std::sync::Arc;
     use uuid::Uuid;
 
     struct Server {
@@ -1376,17 +1400,17 @@ mod bench {
             let db = TestDb::new(::base::clock::RealClocks {});
             let test_camera_uuid = db.test_camera_uuid;
             testutil::add_dummy_recordings_to_db(&db.db, 1440);
-            let service = super::Service::new(super::Config {
+            let service = Arc::new(super::Service::new(super::Config {
                 db: db.db.clone(),
                 ui_dir: None,
                 allow_unauthenticated_permissions: Some(db::Permissions::default()),
                 trust_forward_hdrs: false,
                 time_zone_name: "".to_owned(),
-            }).unwrap();
+            }).unwrap());
             let make_svc = hyper::service::make_service_fn(move |_conn| {
                 futures::future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
-                    let mut s = service.clone();
-                    move |req| std::pin::Pin::from(s.serve(req))
+                    let s = Arc::clone(&service);
+                    move |req| Arc::clone(&s).serve(req)
                 }))
             });
             let mut rt = tokio::runtime::Runtime::new().unwrap();
