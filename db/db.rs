@@ -1841,13 +1841,25 @@ impl LockedDatabase {
     }
 }
 
+/// Sets pragmas for full database integrity.
+pub(crate) fn set_integrity_pragmas(conn: &mut rusqlite::Connection) -> Result<(), Error> {
+    // Enforce foreign keys. This is on by default with --features=bundled (as rusqlite
+    // compiles the SQLite3 amalgamation with -DSQLITE_DEFAULT_FOREIGN_KEYS=1). Ensure it's
+    // always on. Note that our foreign keys are immediate rather than deferred, so we have to
+    // be careful about the order of operations during the upgrade.
+    conn.execute("pragma foreign_keys = on", params![])?;
+
+    // Make the database actually durable.
+    conn.execute("pragma fullfsync = on", params![])?;
+    conn.execute("pragma synchronous = 3", params![])?;
+    Ok(())
+}
+
 /// Initializes a database.
 /// Note this doesn't set journal options, so that it can be used on in-memory databases for
 /// test code.
 pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
-    conn.execute("pragma foreign_keys = on", params![])?;
-    conn.execute("pragma fullfsync = on", params![])?;
-    conn.execute("pragma synchronous = 2", params![])?;
+    set_integrity_pragmas(conn)?;
     let tx = conn.transaction()?;
     tx.execute_batch(include_str!("schema.sql"))?;
     {
@@ -1906,11 +1918,9 @@ fn operation() -> &'static str { "database operation" }
 
 impl<C: Clocks + Clone> Database<C> {
     /// Creates the database from a caller-supplied SQLite connection.
-    pub fn new(clocks: C, conn: rusqlite::Connection,
+    pub fn new(clocks: C, mut conn: rusqlite::Connection,
                read_write: bool) -> Result<Database<C>, Error> {
-        conn.execute("pragma foreign_keys = on", params![])?;
-        conn.execute("pragma fullfsync = on", params![])?;
-        conn.execute("pragma synchronous = 2", params![])?;
+        set_integrity_pragmas(&mut conn)?;
         {
             let ver = get_schema_version(&conn)?.ok_or_else(|| format_err!(
                     "no such table: version. \
