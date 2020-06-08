@@ -84,11 +84,11 @@ export default class NVRSettingsView {
    */
   wireControls_() {
     const videoLengthEl = $(`#${this.ids_.videoLenId}`);
-    this.videoLength_ = this.findSelectedOrFirst_(videoLengthEl);
+
+    function normalize(v) { return v == 'infinite' ? Infinity : Number(v); }
+    this.videoLength_ = normalize(this.findSelectedOrFirst_(videoLengthEl));
     videoLengthEl.change((e) => {
-      const newValueStr = e.currentTarget.value;
-      this.videoLength_ =
-        newValueStr == 'infinite' ? Infinity : Number(newValueStr);
+      this.videoLength_ = normalize(e.currentTarget.value);
       if (this.videoLengthHandler_) {
         this.videoLengthHandler_(this.videoLength_);
       }
