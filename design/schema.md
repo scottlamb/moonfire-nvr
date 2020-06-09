@@ -386,7 +386,7 @@ Precondition: database open read-write.
 
   1. Remove all sample files (of all three categories described below:
      `recording` table rows, `garbage` table rows, and files with recording
-     ids >= their stream's `next_recording_id`); see "delete a recording"
+     ids >= their stream's `cum_recordings`); see "delete a recording"
      procedure below.
   2. Rewrite the directory metadata with `in_progress_open` set to the current open,
      `last_complete_open` cleared.
@@ -403,7 +403,7 @@ three invariants about sample files:
   2. Exactly one of the following statements is true for every sample file:
         * It has a `recording` table row.
         * It has a `garbage` table row.
-        * Its recording id is greater than or equal to the `next_recording_id`
+        * Its recording id is greater than or equal to the `cum_recordings`
           for its stream.
   3. After an orderly shutdown of Moonfire NVR, there is a `recording` table row
      for every sample file, even if there have been previous crashes.
@@ -441,11 +441,11 @@ These invariants are updated through the following procedure:
 
 1. Acquire a lock to guarantee this is the only Moonfire NVR process running
    against the given database. This lock is not released until program shutdown.
-2. Query `garbage` table and `next_recording_id` field in the `stream` table.
+2. Query `garbage` table and `cum_recordings` field in the `stream` table.
 3. `unlink()` all the sample files associated with garbage rows, ignoring
    `ENOENT`.
 4. For each stream, `unlink()` all the existing files with recording ids >=
-   `next_recording_id`.
+   `cum_recordings`.
 4. `fsync()` the sample file directory.
 5. Delete all rows from the `garbage` table.
 

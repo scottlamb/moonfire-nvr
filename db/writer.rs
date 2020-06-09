@@ -291,7 +291,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
              .iter()
              .filter_map(|(&k, v)| {
                  if v.sample_file_dir_id == Some(dir_id) {
-                    Some((k, v.next_recording_id))
+                    Some((k, v.cum_recordings))
                  } else {
                      None
                  }
@@ -497,7 +497,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
                 }
             };
 
-            if s.next_recording_id <= f.recording.recording() { // not yet committed.
+            if s.cum_recordings <= f.recording.recording() { // not yet committed.
                 break;
             }
 
@@ -1008,7 +1008,7 @@ mod tests {
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
         let f = MockFile::new();
-        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),
+        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 0),
                      Box::new({ let f = f.clone(); move |_id| Ok(f.clone()) })));
         f.expect(MockFileAction::Write(Box::new(|buf| { assert_eq!(buf, b"123"); Ok(3) })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
@@ -1025,13 +1025,13 @@ mod tests {
 
         // Then a 1-byte recording.
         let f = MockFile::new();
-        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 2),
+        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),
                      Box::new({ let f = f.clone(); move |_id| Ok(f.clone()) })));
         f.expect(MockFileAction::Write(Box::new(|buf| { assert_eq!(buf, b"4"); Ok(1) })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
         w.write(b"4", recording::Time(3), 1, true).unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
-        h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 1), Box::new({
+        h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 0), Box::new({
             let db = h.db.clone();
             move |_| {
                 // The drop(w) below should cause the old recording to be deleted (moved to
@@ -1096,9 +1096,9 @@ mod tests {
         }).unwrap();
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
-        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1), Box::new(|_id| Err(nix_eio()))));
+        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 0), Box::new(|_id| Err(nix_eio()))));
         let f = MockFile::new();
-        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),
+        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 0),
                      Box::new({ let f = f.clone(); move |_id| Ok(f.clone()) })));
         f.expect(MockFileAction::Write(Box::new(|buf| {
             assert_eq!(buf, b"1234");
@@ -1167,7 +1167,7 @@ mod tests {
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
         let f = MockFile::new();
-        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),
+        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 0),
                      Box::new({ let f = f.clone(); move |_id| Ok(f.clone()) })));
         f.expect(MockFileAction::Write(Box::new(|buf| { assert_eq!(buf, b"123"); Ok(3) })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
@@ -1185,13 +1185,13 @@ mod tests {
 
         // Then a 1-byte recording.
         let f = MockFile::new();
-        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 2),
+        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),
                      Box::new({ let f = f.clone(); move |_id| Ok(f.clone()) })));
         f.expect(MockFileAction::Write(Box::new(|buf| { assert_eq!(buf, b"4"); Ok(1) })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
         w.write(b"4", recording::Time(3), 1, true).unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
-        h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 1), Box::new({
+        h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 0), Box::new({
             let db = h.db.clone();
             move |_| {
                 // The drop(w) below should cause the old recording to be deleted (moved to
@@ -1208,7 +1208,7 @@ mod tests {
                 Err(nix_eio())  // force a retry.
             }
         })));
-        h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 1), Box::new(|_| Ok(()))));
+        h.dir.expect(MockDirAction::Unlink(CompositeId::new(1, 0), Box::new(|_| Ok(()))));
         h.dir.expect(MockDirAction::Sync(Box::new(|| Err(nix_eio()))));
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
 
@@ -1264,7 +1264,7 @@ mod tests {
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
         let f1 = MockFile::new();
-        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),
+        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 0),
                      Box::new({ let f = f1.clone(); move |_id| Ok(f.clone()) })));
         f1.expect(MockFileAction::Write(Box::new(|buf| { assert_eq!(buf, b"123"); Ok(3) })));
         f1.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
@@ -1285,7 +1285,7 @@ mod tests {
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID,
                                 video_sample_entry_id);
         let f2 = MockFile::new();
-        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 2),
+        h.dir.expect(MockDirAction::Create(CompositeId::new(1, 1),
                      Box::new({ let f = f2.clone(); move |_id| Ok(f.clone()) })));
         f2.expect(MockFileAction::Write(Box::new(|buf| { assert_eq!(buf, b"4"); Ok(1) })));
         f2.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));

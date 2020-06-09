@@ -141,6 +141,38 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         })?;
     }
     tx.execute_batch(r#"
+        alter table stream rename to old_stream;
+        create table stream (
+          id integer primary key,
+          camera_id integer not null references camera (id),
+          sample_file_dir_id integer references sample_file_dir (id),
+          type text not null check (type in ('main', 'sub')),
+          record integer not null check (record in (1, 0)),
+          rtsp_url text not null,
+          retain_bytes integer not null check (retain_bytes >= 0),
+          flush_if_sec integer not null,
+          cum_recordings integer not null check (cum_recordings >= 0),
+          cum_duration_90k integer not null check (cum_duration_90k >= 0),
+          cum_runs integer not null check (cum_runs >= 0),
+          unique (camera_id, type)
+        );
+        insert into stream
+        select
+          s.id,
+          s.camera_id,
+          s.sample_file_dir_id,
+          s.type,
+          s.record,
+          s.rtsp_url,
+          s.retain_bytes,
+          s.flush_if_sec,
+          s.next_recording_id as cum_recordings,
+          coalesce(sum(r.duration_90k), 0) as cum_duration_90k,
+          coalesce(sum(case when r.run_offset = 0 then 1 else 0 end), 0) as cum_runs
+        from
+          old_stream s left join recording r on (s.id = r.stream_id)
+        group by 1;
+
         alter table recording rename to old_recording;
         create table recording (
           composite_id integer primary key,
@@ -150,6 +182,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           flags integer not null,
           sample_file_bytes integer not null check (sample_file_bytes > 0),
           start_time_90k integer not null check (start_time_90k > 0),
+          prev_duration_90k integer not null check (prev_duration_90k >= 0),
+          prev_runs integer not null check (prev_runs >= 0),
           duration_90k integer not null
               check (duration_90k >= 0 and duration_90k < 5*60*90000),
           video_samples integer not null check (video_samples > 0),
@@ -157,7 +191,77 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           video_sample_entry_id integer references video_sample_entry (id),
           check (composite_id >> 32 = stream_id)
         );
-        insert into recording select * from old_recording;
+    "#)?;
+
+    // SQLite added window functions in 3.25.0. macOS still ships SQLite 3.24.0 (no support).
+    // Compute cumulative columns by hand.
+    let mut cur_stream_id = None;
+    let mut cum_duration_90k = 0;
+    let mut cum_runs = 0;
+    let mut stmt = tx.prepare(r#"
+        select
+          composite_id,
+          open_id,
+          stream_id,
+          run_offset,
+          flags,
+          sample_file_bytes,
+          start_time_90k,
+          duration_90k,
+          video_samples,
+          video_sync_samples,
+          video_sample_entry_id
+        from
+          old_recording
+        order by composite_id
+    "#)?;
+    let mut insert = tx.prepare(r#"
+        insert into recording (composite_id, open_id, stream_id, run_offset, flags,
+                               sample_file_bytes, start_time_90k, prev_duration_90k, prev_runs,
+                               duration_90k, video_samples, video_sync_samples,
+                               video_sample_entry_id)
+                       values (:composite_id, :open_id, :stream_id, :run_offset, :flags,
+                               :sample_file_bytes, :start_time_90k, :prev_duration_90k, :prev_runs,
+                               :duration_90k, :video_samples, :video_sync_samples,
+                               :video_sample_entry_id)
+    "#)?;
+    let mut rows = stmt.query(params![])?;
+    while let Some(row) = rows.next()? {
+        let composite_id: i64 = row.get(0)?;
+        let open_id: i32 = row.get(1)?;
+        let stream_id: i32 = row.get(2)?;
+        let run_offset: i32 = row.get(3)?;
+        let flags: i32 = row.get(4)?;
+        let sample_file_bytes: i32 = row.get(5)?;
+        let start_time_90k: i64 = row.get(6)?;
+        let duration_90k: i32 = row.get(7)?;
+        let video_samples: i32 = row.get(8)?;
+        let video_sync_samples: i32 = row.get(9)?;
+        let video_sample_entry_id: i32 = row.get(10)?;
+        if cur_stream_id != Some(stream_id) {
+            cum_duration_90k = 0;
+            cum_runs = 0;
+            cur_stream_id = Some(stream_id);
+        }
+        insert.execute_named(named_params!{
+            ":composite_id": composite_id,
+            ":open_id": open_id,
+            ":stream_id": stream_id,
+            ":run_offset": run_offset,
+            ":flags": flags,
+            ":sample_file_bytes": sample_file_bytes,
+            ":start_time_90k": start_time_90k,
+            ":prev_duration_90k": cum_duration_90k,
+            ":prev_runs": cum_runs,
+            ":duration_90k": duration_90k,
+            ":video_samples": video_samples,
+            ":video_sync_samples": video_sync_samples,
+            ":video_sample_entry_id": video_sample_entry_id,
+        })?;
+        cum_duration_90k += duration_90k;
+        cum_runs += if run_offset == 0 { 1 } else { 0 };
+    }
+    tx.execute_batch(r#"
         drop index recording_cover;
         create index recording_cover on recording (
           stream_id,
@@ -171,7 +275,6 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           run_offset,
           flags
         );
-
 
         alter table recording_integrity rename to old_recording_integrity;
         create table recording_integrity (
@@ -201,6 +304,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         drop table old_recording_playback;
         drop table old_recording_integrity;
         drop table old_recording;
+        drop table old_stream;
         drop table old_video_sample_entry;
 
         update user_session

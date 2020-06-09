@@ -382,7 +382,7 @@ mod tests {
         // 3-second boundaries (such as 2016-04-26 00:00:03), rotation happens somewhat later:
         // * the first rotation is always skipped
         // * the second rotation is deferred until a key frame.
-        assert_eq!(get_frames(&db, CompositeId::new(testutil::TEST_STREAM_ID, 1)), &[
+        assert_eq!(get_frames(&db, CompositeId::new(testutil::TEST_STREAM_ID, 0)), &[
             Frame{start_90k:      0, duration_90k: 90379, is_key:  true},
             Frame{start_90k:  90379, duration_90k: 89884, is_key: false},
             Frame{start_90k: 180263, duration_90k: 89749, is_key: false},
@@ -392,20 +392,20 @@ mod tests {
             Frame{start_90k: 540015, duration_90k: 90021, is_key: false},  // pts_time 6.0001...
             Frame{start_90k: 630036, duration_90k: 89958, is_key: false},
         ]);
-        assert_eq!(get_frames(&db, CompositeId::new(testutil::TEST_STREAM_ID, 2)), &[
+        assert_eq!(get_frames(&db, CompositeId::new(testutil::TEST_STREAM_ID, 1)), &[
             Frame{start_90k:      0, duration_90k: 90011, is_key:  true},
             Frame{start_90k:  90011, duration_90k:     0, is_key: false},
         ]);
         let mut recordings = Vec::new();
-        db.list_recordings_by_id(testutil::TEST_STREAM_ID, 1..3, &mut |r| {
+        db.list_recordings_by_id(testutil::TEST_STREAM_ID, 0..2, &mut |r| {
             recordings.push(r);
             Ok(())
         }).unwrap();
         assert_eq!(2, recordings.len());
-        assert_eq!(1, recordings[0].id.recording());
+        assert_eq!(0, recordings[0].id.recording());
         assert_eq!(recording::Time(128700575999999), recordings[0].start);
         assert_eq!(0, recordings[0].flags);
-        assert_eq!(2, recordings[1].id.recording());
+        assert_eq!(1, recordings[1].id.recording());
         assert_eq!(recording::Time(128700576719993), recordings[1].start);
         assert_eq!(db::RecordingFlags::TrailingZero as i32, recordings[1].flags);
     }

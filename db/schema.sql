@@ -145,10 +145,16 @@ create table stream (
   --   then fails again, forever.
   flush_if_sec integer not null,
 
-  -- The low 32 bits of the next recording id to assign for this stream.
-  -- Typically this is the maximum current recording + 1, but it does
-  -- not decrease if that recording is deleted.
-  next_recording_id integer not null check (next_recording_id >= 0),
+  -- The total number of recordings ever created on this stream, including
+  -- deleted ones. This is used for assigning the next recording id.
+  cum_recordings integer not null check (cum_recordings >= 0),
+
+  -- The total duration of all recordings ever created on this stream.
+  cum_duration_90k integer not null check (cum_duration_90k >= 0),
+
+  -- The total number of runs (recordings with run_offset = 0) ever created
+  -- on this stream.
+  cum_runs integer not null check (cum_runs >= 0),
 
   unique (camera_id, type)
 );
@@ -158,12 +164,13 @@ create table stream (
 create table recording (
   -- The high 32 bits of composite_id are taken from the stream's id, which
   -- improves locality. The low 32 bits are taken from the stream's
-  -- next_recording_id (which should be post-incremented in the same
+  -- cum_recordings (which should be post-incremented in the same
   -- transaction). It'd be simpler to use a "without rowid" table and separate
   -- fields to make up the primary key, but
-  -- <https://www.sqlite.org/withoutrowid.html> points out that "without rowid"
-  -- is not appropriate when the average row size is in excess of 50 bytes.
-  -- recording_cover rows (which match this id format) are typically 1--5 KiB.
+  -- <https://www.sqlite.org/withoutrowid.html> points out that "without
+  -- rowid" is not appropriate when the average row size is in excess of 50
+  -- bytes. recording_cover rows (which match this id format) are typically
+  -- 1--5 KiB.
   composite_id integer primary key,
 
   -- The open in which this was committed to the database. For a given
@@ -172,13 +179,13 @@ create table recording (
   -- This field allows disambiguation in etags and such.
   open_id integer not null references open (id),
 
-  -- This field is redundant with id above, but used to enforce the reference
-  -- constraint and to structure the recording_start_time index.
+  -- This field is redundant with composite_id above, but used to enforce the
+  -- reference constraint and to structure the recording_start_time index.
   stream_id integer not null references stream (id),
 
   -- The offset of this recording within a run. 0 means this was the first
-  -- recording made from a RTSP session. The start of the run has id
-  -- (id-run_offset).
+  -- recording made from a RTSP session. The start of the run has composite_id
+  -- (composite_id-run_offset).
   run_offset integer not null,
 
   -- flags is a bitmask:
@@ -193,8 +200,17 @@ create table recording (
   -- The starting time of the recording, in 90 kHz units since
   -- 1970-01-01 00:00:00 UTC excluding leap seconds. Currently on initial
   -- connection, this is taken from the local system time; on subsequent
-  -- recordings, it exactly matches the previous recording's end time.
+  -- recordings in a run, it exactly matches the previous recording's end
+  -- time.
   start_time_90k integer not null check (start_time_90k > 0),
+
+  -- The total duration of all previous recordings on this stream. This is
+  -- returned in API requests and may be helpful for timestamps in a HTML
+  -- MediaSourceExtensions SourceBuffer.
+  prev_duration_90k integer not null check (prev_duration_90k >= 0),
+
+  -- The total number of previous runs (rows in which run_offset = 0).
+  prev_runs integer not null check (prev_runs >= 0),
 
   -- The duration of the recording, in 90 kHz units.
   duration_90k integer not null
@@ -280,7 +296,7 @@ create table recording_playback (
 
 -- Files which are to be deleted (may or may not still exist).
 -- Note that besides these files, for each stream, any recordings >= its
--- next_recording_id should be discarded on startup.
+-- cum_recordings should be discarded on startup.
 create table garbage (
   -- This is _mostly_ redundant with composite_id, which contains the stream
   -- id and thus a linkage to the sample file directory. Listing it here

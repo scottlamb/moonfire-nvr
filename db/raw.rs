@@ -174,14 +174,15 @@ pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
 
 /// Inserts the specified recording (for from `try_flush` only).
 pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: CompositeId,
-                    r: &db::RecordingToInsert) -> Result<(), Error> {
+                               r: &db::RecordingToInsert) -> Result<(), Error> {
     let mut stmt = tx.prepare_cached(r#"
         insert into recording (composite_id, stream_id, open_id, run_offset, flags,
-                               sample_file_bytes, start_time_90k, duration_90k,
-                               video_samples, video_sync_samples, video_sample_entry_id)
+                               sample_file_bytes, start_time_90k, prev_duration_90k,
+                               prev_runs, duration_90k, video_samples, video_sync_samples,
+                               video_sample_entry_id)
                        values (:composite_id, :stream_id, :open_id, :run_offset, :flags,
-                               :sample_file_bytes, :start_time_90k, :duration_90k,
-                               :video_samples, :video_sync_samples,
+                               :sample_file_bytes, :start_time_90k, :prev_duration_90k,
+                               :prev_runs, :duration_90k, :video_samples, :video_sync_samples,
                                :video_sample_entry_id)
     "#).with_context(|e| format!("can't prepare recording insert: {}", e))?;
     stmt.execute_named(named_params!{
@@ -193,6 +194,8 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
         ":sample_file_bytes": r.sample_file_bytes,
         ":start_time_90k": r.start.0,
         ":duration_90k": r.duration_90k,
+        ":prev_duration_90k": r.prev_duration.0,
+        ":prev_runs": r.prev_runs,
         ":video_samples": r.video_samples,
         ":video_sync_samples": r.video_sync_samples,
         ":video_sample_entry_id": r.video_sample_entry_id,

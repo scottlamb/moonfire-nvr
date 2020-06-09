@@ -1863,7 +1863,8 @@ mod tests {
             let db = tdb.db.lock();
             db.list_recordings_by_time(TEST_STREAM_ID, all_time, &mut |r| {
                 let d = r.duration_90k;
-                assert!(skip_90k + shorten_90k < d);
+                assert!(skip_90k + shorten_90k < d, "skip_90k={} shorten_90k={} r={:?}",
+                        skip_90k, shorten_90k, r);
                 builder.append(&*db, r, skip_90k .. d - shorten_90k).unwrap();
                 Ok(())
             }).unwrap();
@@ -2193,7 +2194,7 @@ mod tests {
         assert_eq!("e95f2d261cdebac5b9983abeea59e8eb053dc4efac866722544c665d9de7c49d",
                    hash.to_hex().as_str());
         const EXPECTED_ETAG: &'static str =
-            "\"16d80691792326c314990b15f1f0387e1dd12119614fea3ecaeca88325f6000b\"";
+            "\"61031ab36449b4d1186e9513b5e40df84e78bfb2807c0035b360437bb905cdd5\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2216,7 +2217,7 @@ mod tests {
         assert_eq!("77e09be8ee5ca353ca56f9a80bb7420680713c80a0831d236fac45a96aa3b3d4",
                    hash.to_hex().as_str());
         const EXPECTED_ETAG: &'static str =
-            "\"932883a0d7c5e464c9f1b1a62d36db670631eee7c1eefc74deb331c1f623affb\"";
+            "\"8e048b22b21c9b93d889e8dfbeeb56fa1b17dc0956190f5c3acc84f6f674089f\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2239,7 +2240,7 @@ mod tests {
         assert_eq!("f9807cfc6b96a399f3a5ad62d090f55a18543a9eeb1f48d59f86564ffd9b1e84",
                    hash.to_hex().as_str());
         const EXPECTED_ETAG: &'static str =
-            "\"53e9e33e28bafb6af8cee2f8b71d7751874a83a3aa7782396878b3caeacec526\"";
+            "\"196192eccd8be2c840dfc4073355efe5c917999641e3d0a2b87e0d2eab40267f\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
@@ -2262,7 +2263,7 @@ mod tests {
         assert_eq!("5211104e1fdfe3bbc0d7d7d479933940305ff7f23201e97308db23a022ee6339",
                    hash.to_hex().as_str());
         const EXPECTED_ETAG: &'static str =
-            "\"f77e81297b5ca9d1c1dcf0d0f8eebbdea8d41b4c8af1917f9d3fe84de6e68a5b\"";
+            "\"9e50099d86ae1c742e65f7a4151c4427f42051a87158405a35b4e5550fd05c30\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();

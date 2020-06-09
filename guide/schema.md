@@ -254,5 +254,9 @@ Version 6 adds over version 5:
     or Blake2b (for sessions).
 *   a preliminary schema for [object
     detection](https://en.wikipedia.org/wiki/Object_detection).
+*   for each recording row, the cumulative total duration and "runs" recorded
+    before it on that stream. This is useful for MediaSourceExtension-based
+    web browser UIs when setting timestamps of video segments in the
+    SourceBuffer.
 
 On upgrading to this version, sessions will be revoked.

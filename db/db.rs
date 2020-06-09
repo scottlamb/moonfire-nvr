@@ -103,8 +103,13 @@ const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &'static str = r#"
                                     :rfc6381_codec, :data)
 "#;
 
-const UPDATE_NEXT_RECORDING_ID_SQL: &'static str =
-    "update stream set next_recording_id = :next_recording_id where id = :stream_id";
+const UPDATE_STREAM_COUNTERS_SQL: &'static str = r#"
+    update stream
+    set cum_recordings = :cum_recordings,
+        cum_duration_90k = :cum_duration_90k,
+        cum_runs = :cum_runs
+    where id = :stream_id
+"#;
 
 pub struct FromSqlUuid(pub Uuid);
 
@@ -220,13 +225,20 @@ pub enum RecordingFlags {
     Uncommitted = 1 << 31,
 }
 
-/// A recording to pass to `insert_recording`.
+/// A recording to pass to `LockedDatabase::add_recording` and `raw::insert_recording`.
 #[derive(Clone, Debug, Default)]
 pub struct RecordingToInsert {
     pub run_offset: i32,
     pub flags: i32,
     pub sample_file_bytes: i32,
     pub start: recording::Time,
+
+    /// Filled in by `add_recording`.
+    pub prev_duration: recording::Duration,
+
+    /// Filled in by `add_recording`.
+    pub prev_runs: i32,
+
     pub duration_90k: i32,  // a recording::Duration, but guaranteed to fit in i32.
     pub local_time_delta: recording::Duration,
     pub video_samples: i32,
@@ -437,22 +449,28 @@ pub struct Stream {
     /// recordings.)
     pub bytes_to_add: i64,
 
-    /// The total duration of recorded data. This may not be `range.end - range.start` due to
-    /// gaps and overlap.
+    /// The total duration of undeleted recorded data. This may not be `range.end - range.start`
+    /// due to gaps and overlap.
     pub duration: recording::Duration,
 
     /// Mapping of calendar day (in the server's time zone) to a summary of recordings on that day.
     pub days: BTreeMap<StreamDayKey, StreamDayValue>,
     pub record: bool,
 
-    /// The `next_recording_id` currently committed to the database.
-    pub(crate) next_recording_id: i32,
+    /// The `cum_recordings` currently committed to the database.
+    pub(crate) cum_recordings: i32,
+
+    /// The `cum_duration_90k` currently committed to the database.
+    cum_duration: recording::Duration,
+
+    /// The `cum_runs` currently committed to the database.
+    cum_runs: i32,
 
     /// The recordings which have been added via `LockedDatabase::add_recording` but have yet to
     /// committed to the database.
     ///
-    /// `uncommitted[i]` uses sample filename `CompositeId::new(id, next_recording_id + 1)`;
-    /// `next_recording_id` should be advanced when one is committed to maintain this invariant.
+    /// `uncommitted[i]` uses sample filename `CompositeId::new(id, cum_recordings + i)`;
+    /// `cum_recordings` should be advanced when one is committed to maintain this invariant.
     ///
     /// TODO: alter the serving path to show these just as if they were already committed.
     uncommitted: VecDeque<Arc<Mutex<RecordingToInsert>>>,
@@ -734,9 +752,11 @@ impl StreamStateChanger {
                 // Insert stream.
                 let mut stmt = tx.prepare_cached(r#"
                     insert into stream (camera_id,  sample_file_dir_id,  type,  rtsp_url,  record,
-                                        retain_bytes, flush_if_sec,  next_recording_id)
+                                        retain_bytes, flush_if_sec,  cum_recordings,
+                                        cum_duration_90k, cum_runs)
                                 values (:camera_id, :sample_file_dir_id, :type, :rtsp_url, :record,
-                                        0,            :flush_if_sec, 1)
+                                        0,            :flush_if_sec, 0,
+                                        0,                0)
                 "#)?;
                 stmt.execute_named(named_params!{
                     ":camera_id": camera_id,
@@ -781,7 +801,9 @@ impl StreamStateChanger {
                         duration: recording::Duration(0),
                         days: BTreeMap::new(),
                         record: sc.record,
-                        next_recording_id: 1,
+                        cum_recordings: 0,
+                        cum_duration: recording::Duration(0),
+                        cum_runs: 0,
                         uncommitted: VecDeque::new(),
                         synced_recordings: 0,
                         on_live_segment: Vec::new(),
@@ -820,18 +842,35 @@ impl LockedDatabase {
     pub fn flushes(&self) -> usize { self.flush_count }
 
     /// Adds a placeholder for an uncommitted recording.
+    ///
     /// The caller should write samples and fill the returned `RecordingToInsert` as it goes
     /// (noting that while holding the lock, it should not perform I/O or acquire the database
     /// lock). Then it should sync to permanent storage and call `mark_synced`. The data will
     /// be written to the database on the next `flush`.
-    pub(crate) fn add_recording(&mut self, stream_id: i32, r: RecordingToInsert)
+    ///
+    /// A call to `add_recording` is also a promise that previous recordings (even if not yet
+    /// synced and committed) won't change.
+    ///
+    /// This fills the `prev_duration` and `prev_runs` fields.
+    pub(crate) fn add_recording(&mut self, stream_id: i32, mut r: RecordingToInsert)
                              -> Result<(CompositeId, Arc<Mutex<RecordingToInsert>>), Error> {
         let stream = match self.streams_by_id.get_mut(&stream_id) {
             None => bail!("no such stream {}", stream_id),
             Some(s) => s,
         };
         let id = CompositeId::new(stream_id,
-                                  stream.next_recording_id + (stream.uncommitted.len() as i32));
+                                  stream.cum_recordings + (stream.uncommitted.len() as i32));
+        match stream.uncommitted.back() {
+            Some(s) => {
+                let l = s.lock();
+                r.prev_duration = l.prev_duration + recording::Duration(l.duration_90k.into());
+                r.prev_runs = l.prev_runs + if l.run_offset == 0 { 1 } else { 0 };
+            },
+            None => {
+                r.prev_duration = stream.cum_duration;
+                r.prev_runs = stream.cum_runs;
+            },
+        };
         let recording = Arc::new(Mutex::new(r));
         stream.uncommitted.push_back(Arc::clone(&recording));
         Ok((id, recording))
@@ -844,10 +883,10 @@ impl LockedDatabase {
             None => bail!("no stream for recording {}", id),
             Some(s) => s,
         };
-        let next_unsynced = stream.next_recording_id + (stream.synced_recordings as i32);
+        let next_unsynced = stream.cum_recordings + (stream.synced_recordings as i32);
         if id.recording() != next_unsynced {
             bail!("can't sync {} when next unsynced recording is {} (next unflushed is {})",
-                  id, next_unsynced, stream.next_recording_id);
+                  id, next_unsynced, stream.cum_recordings);
         }
         if stream.synced_recordings == stream.uncommitted.len() {
             bail!("can't sync un-added recording {}", id);
@@ -924,19 +963,25 @@ impl LockedDatabase {
         let mut new_ranges = FnvHashMap::with_capacity_and_hasher(self.streams_by_id.len(),
                                                                   Default::default());
         {
-            let mut stmt = tx.prepare_cached(UPDATE_NEXT_RECORDING_ID_SQL)?;
+            let mut stmt = tx.prepare_cached(UPDATE_STREAM_COUNTERS_SQL)?;
             for (&stream_id, s) in &self.streams_by_id {
                 // Process additions.
+                let mut new_duration = 0;
+                let mut new_runs = 0;
                 for i in 0..s.synced_recordings {
                     let l = s.uncommitted[i].lock();
                     raw::insert_recording(
-                        &tx, o, CompositeId::new(stream_id, s.next_recording_id + i as i32), &l)?;
+                        &tx, o, CompositeId::new(stream_id, s.cum_recordings + i as i32), &l)?;
+                    new_duration += i64::from(l.duration_90k);
+                    new_runs += if l.run_offset == 0 { 1 } else { 0 };
                 }
                 if s.synced_recordings > 0 {
                     new_ranges.entry(stream_id).or_insert(None);
                     stmt.execute_named(named_params!{
                         ":stream_id": stream_id,
-                        ":next_recording_id": s.next_recording_id + s.synced_recordings as i32,
+                        ":cum_recordings": s.cum_recordings + s.synced_recordings as i32,
+                        ":cum_duration_90k": s.cum_duration.0 + new_duration,
+                        ":cum_runs": s.cum_runs + new_runs,
                     })?;
                 }
 
@@ -1026,10 +1071,14 @@ impl LockedDatabase {
             log.added.reserve(s.synced_recordings);
             for _ in 0..s.synced_recordings {
                 let u = s.uncommitted.pop_front().unwrap();
-                log.added.push(CompositeId::new(stream_id, s.next_recording_id));
-                s.next_recording_id += 1;
+                log.added.push(CompositeId::new(stream_id, s.cum_recordings));
                 let l = u.lock();
-                let end = l.start + recording::Duration(l.duration_90k as i64);
+                s.cum_recordings += 1;
+                let dur = recording::Duration(l.duration_90k.into());
+                s.cum_duration += dur;
+                s.cum_runs += if l.run_offset == 0 { 1 } else { 0 };
+                let end = l.start + dur;
+                info!("range={:?}", l.start .. end);
                 s.add_recording(l.start .. end, l.sample_file_bytes);
             }
             s.synced_recordings = 0;
@@ -1177,7 +1226,7 @@ impl LockedDatabase {
                     if l.start > desired_time.end || end < desired_time.start {
                         continue;  // there's no overlap with the requested range.
                     }
-                    l.to_list_row(CompositeId::new(stream_id, s.next_recording_id + i as i32),
+                    l.to_list_row(CompositeId::new(stream_id, s.cum_recordings + i as i32),
                                   self.open.unwrap().id)
                 } else {
                     continue;
@@ -1196,18 +1245,18 @@ impl LockedDatabase {
             None => bail!("no such stream {}", stream_id),
             Some(s) => s,
         };
-        if desired_ids.start < s.next_recording_id {
+        if desired_ids.start < s.cum_recordings {
             raw::list_recordings_by_id(&self.conn, stream_id, desired_ids.clone(), f)?;
         }
-        if desired_ids.end > s.next_recording_id {
-            let start = cmp::max(0, desired_ids.start - s.next_recording_id) as usize;
-            let end = cmp::min((desired_ids.end - s.next_recording_id) as usize,
+        if desired_ids.end > s.cum_recordings {
+            let start = cmp::max(0, desired_ids.start - s.cum_recordings) as usize;
+            let end = cmp::min((desired_ids.end - s.cum_recordings) as usize,
                                s.uncommitted.len());
             for i in start .. end {
                 let row = {
                     let l = s.uncommitted[i].lock();
                     if l.video_samples > 0 {
-                        l.to_list_row(CompositeId::new(stream_id, s.next_recording_id + i as i32),
+                        l.to_list_row(CompositeId::new(stream_id, s.cum_recordings + i as i32),
                                       self.open.unwrap().id)
                     } else {
                         continue;
@@ -1300,11 +1349,11 @@ impl LockedDatabase {
         let s = self.streams_by_id
                     .get(&id.stream())
                     .ok_or_else(|| format_err!("no stream for {}", id))?;
-        if s.next_recording_id <= id.recording() {
-            let i = id.recording() - s.next_recording_id;
+        if s.cum_recordings <= id.recording() {
+            let i = id.recording() - s.cum_recordings;
             if i as usize >= s.uncommitted.len() {
                 bail!("no such recording {}; latest committed is {}, latest is {}",
-                      id, s.next_recording_id, s.next_recording_id + s.uncommitted.len() as i32);
+                      id, s.cum_recordings, s.cum_recordings + s.uncommitted.len() as i32);
             }
             let l = s.uncommitted[i as usize].lock();
             return f(&RecordingPlayback { video_index: &l.video_index });
@@ -1474,7 +1523,9 @@ impl LockedDatabase {
               rtsp_url,
               retain_bytes,
               flush_if_sec,
-              next_recording_id,
+              cum_recordings,
+              cum_duration_90k,
+              cum_runs,
               record
             from
               stream;
@@ -1507,8 +1558,10 @@ impl LockedDatabase {
                 bytes_to_add: 0,
                 duration: recording::Duration(0),
                 days: BTreeMap::new(),
-                next_recording_id: row.get(7)?,
-                record: row.get(8)?,
+                cum_recordings: row.get(7)?,
+                cum_duration: recording::Duration(row.get(8)?),
+                cum_runs: row.get(9)?,
+                record: row.get(10)?,
                 uncommitted: VecDeque::new(),
                 synced_recordings: 0,
                 on_live_segment: Vec::new(),
@@ -2310,12 +2363,14 @@ mod tests {
         }
         let camera_uuid = { db.lock().cameras_by_id().get(&camera_id).unwrap().uuid };
         assert_no_recordings(&db, camera_uuid);
+        assert_eq!(db.lock().streams_by_id().get(&main_stream_id).unwrap().cum_recordings, 0);
 
         // Closing and reopening the database should present the same contents.
         let conn = db.close();
         let db = Database::new(clock::RealClocks {}, conn, true).unwrap();
         assert_eq!(db.lock().streams_by_id().get(&sub_stream_id).unwrap().flush_if_sec, 2);
         assert_no_recordings(&db, camera_uuid);
+        assert_eq!(db.lock().streams_by_id().get(&main_stream_id).unwrap().cum_recordings, 0);
 
         // TODO: assert_eq!(db.lock().list_garbage(sample_file_dir_id).unwrap(), &[]);
 
@@ -2336,6 +2391,8 @@ mod tests {
             run_offset: 0,
             flags: 0,
             start,
+            prev_duration: recording::Duration(0),
+            prev_runs: 0,
             duration_90k: TIME_UNITS_PER_SEC as i32,
             local_time_delta: recording::Duration(0),
             video_samples: 1,
@@ -2351,7 +2408,7 @@ mod tests {
             db.flush("add test").unwrap();
             id
         };
-        assert_eq!(db.lock().streams_by_id().get(&main_stream_id).unwrap().next_recording_id, 2);
+        assert_eq!(db.lock().streams_by_id().get(&main_stream_id).unwrap().cum_recordings, 1);
 
         // Queries should return the correct result (with caches update on insert).
         assert_single_recording(&db, main_stream_id, &recording);
