@@ -440,15 +440,13 @@ impl Service {
         ws: &mut tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>,
         live: db::LiveSegment) -> Result<(), Error> {
         let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
-        let mut vse_id = None;
-        let mut start = None;
+        let mut row = None;
         {
             let db = self.db.lock();
             let mut rows = 0;
             db.list_recordings_by_id(stream_id, live.recording .. live.recording+1, &mut |r| {
                 rows += 1;
-                vse_id = Some(r.video_sample_entry_id);
-                start = Some(r.start);
+                row = Some(r);
                 builder.append(&db, r, live.off_90k.clone())?;
                 Ok(())
             })?;
@@ -456,29 +454,32 @@ impl Service {
                 bail_t!(Internal, "unable to find {:?}", live);
             }
         }
-        let vse_id = vse_id.unwrap();
-        let start = start.unwrap();
+        let row = row.unwrap();
         use http_serve::Entity;
         let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
         let mut hdrs = header::HeaderMap::new();
         mp4.add_headers(&mut hdrs);
         let mime_type = hdrs.get(header::CONTENT_TYPE).unwrap();
+        let (prev_duration, prev_runs) = row.prev_duration_and_runs.unwrap();
         let hdr = format!(
             "Content-Type: {}\r\n\
             X-Recording-Start: {}\r\n\
             X-Recording-Id: {}.{}\r\n\
             X-Time-Range: {}-{}\r\n\
+            X-Prev-Duration: {}\r\n\
+            X-Runs: {}\r\n\
             X-Video-Sample-Entry-Id: {}\r\n\r\n",
             mime_type.to_str().unwrap(),
-            start.0,
+            row.start.0,
             open_id,
             live.recording,
             live.off_90k.start,
             live.off_90k.end,
-            &vse_id);
-        let mut v = /*Pin::from(*/hdr.into_bytes()/*)*/;
+            prev_duration.0,
+            prev_runs + if row.run_offset == 0 { 1 } else { 0 },
+            &row.video_sample_entry_id);
+        let mut v = hdr.into_bytes();
         mp4.append_into_vec(&mut v).await?;
-        //let v = Pin::into_inner();
         ws.send(tungstenite::Message::Binary(v)).await?;
         Ok(())
     }

@@ -73,7 +73,9 @@ const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
         recording.video_samples,
         recording.video_sync_samples,
         recording.video_sample_entry_id,
-        recording.open_id
+        recording.open_id,
+        recording.prev_duration_90k,
+        recording.prev_runs
     from
         recording
     where
@@ -130,7 +132,7 @@ pub(crate) fn list_recordings_by_time(
         ":start_time_90k": desired_time.start.0,
         ":end_time_90k": desired_time.end.0,
     })?;
-    list_recordings_inner(rows, f)
+    list_recordings_inner(rows, false, f)
 }
 
 /// Lists the specified recordings in ascending order by id.
@@ -142,10 +144,10 @@ pub(crate) fn list_recordings_by_id(
         ":start": CompositeId::new(stream_id, desired_ids.start).0,
         ":end": CompositeId::new(stream_id, desired_ids.end).0,
     })?;
-    list_recordings_inner(rows, f)
+    list_recordings_inner(rows, true, f)
 }
 
-fn list_recordings_inner(mut rows: rusqlite::Rows,
+fn list_recordings_inner(mut rows: rusqlite::Rows, include_prev: bool,
                          f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>)
                          -> Result<(), Error> {
     while let Some(row) = rows.next()? {
@@ -160,6 +162,10 @@ fn list_recordings_inner(mut rows: rusqlite::Rows,
             video_sync_samples: row.get(7)?,
             video_sample_entry_id: row.get(8)?,
             open_id: row.get(9)?,
+            prev_duration_and_runs: match include_prev {
+                false => None,
+                true => Some((recording::Duration(row.get(10)?), row.get(11)?)),
+            },
         })?;
     }
     Ok(())

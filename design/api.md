@@ -401,27 +401,47 @@ same URL minus the `.txt` suffix.
 
 Returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
 media segment][media-segment]. The MIME type will be `video/mp4`, with a
-`codecs` parameter as specified in [RFC 6381][rfc-6381].
+`codecs` parameter as specified in [RFC 6381][rfc-6381]. Note that these
+can't include edit lists, so (unlike `/view.mp4`) the caller must manually
+trim undesired leading portions.
+
+This response will include the following additional headers:
+
+*   `X-Prev-Duration`: the total duration (in 90 kHz units) of all recordings
+    before the first requested recording in the `s` parameter. Browser-based
+    callers may use this to place this at the correct position in the source
+    buffer via `SourceBuffer.timestampOffset`.
+*   `X-Runs`: the cumulative number of "runs" of recordings. If this recording
+    starts a new run, it is included in the count. Browser-based callers may
+    use this to force gaps in the source buffer timeline by adjusting the
+    timestamp offset if desired.
+*   `X-Leading-Duration`: if present, the total duration (in 90 kHz units) of
+    additional leading video included before the caller's first requested
+    timestamp. This happens when the caller's requested timestamp does not
+    fall exactly on a key frame. Media segments can't include edit lists, so
+    unlike with the `/api/.../view.mp4` endpoint the caller is responsible for
+    trimming this portion. Browser-based callers may use
+    `SourceBuffer.appendWindowStart`.
 
 Expected query parameters:
 
-*   `s` (one or more): as with the `.mp4` URL, except that media segments
-    can't contain edit lists so none will be generated. TODO: maybe add a
-    `Leading-Time:` header to indicate how many leading 90,000ths of a second
-    are present, so that the caller can trim it in some other way.
+*   `s` (one or more): as with the `.mp4` URL.
 
 It's recommended that each `.m4s` retrieval be for at most one Moonfire NVR
-recording segment for several reasons:
+recording segment. The fundamental reason is that the Media Source Extension
+API appears structured for adding a complete segment at a time. Large media
+segments thus impose significant latency on seeking. Additionally, because of
+this fundamental reason Moonfire NVR makes no effort to make multiple-segment
+`.m4s` requests practical:
 
-*   The Media Source Extension API appears structured for adding a complete
-    segment at a time. Large media segments thus impose significant latency on
-    seeking.
 *   There is currently a hard limit of 4 GiB of data because the `.m4s` uses a
     single `moof` followed by a single `mdat`; the former references the
     latter with 32-bit offsets.
 *   There's currently no way to generate an initialization segment for more
     than one video sample entry, so a `.m4s` that uses more than one video
     sample entry can't be used.
+*   The `X-Prev-Duration` and `X-Leading-Duration` headers only describe the
+    first segment.
 
 ### `GET /api/cameras/<uuid>/<stream>/view.m4s.txt`
 
@@ -445,6 +465,8 @@ be included:
     of a second) of the start of the recording. Note that if the recording
     is "unanchored" (as described in `GET /api/.../recordings`), the
     recording's start time may change before it is completed.
+*   `X-Prev-Duration`: as in `/.../view.m4s`.
+*   `X-Runs`: as in `/.../view.m4s`.
 *   `X-Time-Range`: the relative start and end times of these frames within
     the recording, in the same format as `REL_START_TIME` and `REL_END_TIME`
     above.

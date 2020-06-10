@@ -156,7 +156,7 @@ pub struct VideoSampleEntryToInsert {
 }
 
 /// A row used in `list_recordings_by_time` and `list_recordings_by_id`.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct ListRecordingsRow {
     pub start: recording::Time,
     pub video_sample_entry_id: i32,
@@ -171,6 +171,11 @@ pub struct ListRecordingsRow {
     pub run_offset: i32,
     pub open_id: u32,
     pub flags: i32,
+
+    /// This is populated by `list_recordings_by_id` but not `list_recordings_by_time`.
+    /// (It's not included in the `recording_cover` index, so adding it to
+    /// `list_recordings_by_time` would be inefficient.)
+    pub prev_duration_and_runs: Option<(recording::Duration, i32)>,
 }
 
 /// A row used in `list_aggregated_recordings`.
@@ -261,6 +266,7 @@ impl RecordingToInsert {
             run_offset: self.run_offset,
             open_id,
             flags: self.flags | RecordingFlags::Uncommitted as i32,
+            prev_duration_and_runs: Some((self.prev_duration, self.prev_runs)),
         }
     }
 }
@@ -1078,7 +1084,6 @@ impl LockedDatabase {
                 s.cum_duration += dur;
                 s.cum_runs += if l.run_offset == 0 { 1 } else { 0 };
                 let end = l.start + dur;
-                info!("range={:?}", l.start .. end);
                 s.add_recording(l.start .. end, l.sample_file_bytes);
             }
             s.synced_recordings = 0;

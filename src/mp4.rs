@@ -550,6 +550,7 @@ pub struct FileBuilder {
     subtitle_co64_pos: Option<usize>,
     body: BodyState,
     type_: Type,
+    prev_duration_and_cur_runs: Option<(recording::Duration, i32)>,
     include_timestamp_subtitle_track: bool,
     content_disposition: Option<HeaderValue>,
 }
@@ -736,6 +737,7 @@ impl FileBuilder {
             type_: type_,
             include_timestamp_subtitle_track: false,
             content_disposition: None,
+            prev_duration_and_cur_runs: None,
         }
     }
 
@@ -763,6 +765,11 @@ impl FileBuilder {
                         "unable to append recording {} after recording {} with trailing zero",
                         row.id, prev.s.id);
             }
+        } else {
+            // Include the current run in this count here, as we're not propagating the
+            // run_offset_id further.
+            self.prev_duration_and_cur_runs = row.prev_duration_and_runs
+                .map(|(d, r)| (d, r + if row.open_id == 0 { 1 } else { 0 }));
         }
         let s = Segment::new(db, &row, rel_range_90k, self.next_frame_num)?;
 
@@ -899,6 +906,8 @@ impl FileBuilder {
             etag: HeaderValue::try_from(format!("\"{}\"", etag.to_hex().as_str()))
                   .expect("hex string should be valid UTF-8"),
             content_disposition: self.content_disposition,
+            prev_duration_and_cur_runs: self.prev_duration_and_cur_runs,
+            type_: self.type_,
         })))
     }
 
@@ -1447,6 +1456,8 @@ struct FileInner {
     last_modified: SystemTime,
     etag: HeaderValue,
     content_disposition: Option<HeaderValue>,
+    prev_duration_and_cur_runs: Option<(recording::Duration, i32)>,
+    type_: Type,
 }
 
 impl FileInner {
@@ -1552,6 +1563,24 @@ impl http_serve::Entity for File {
 
         if let Some(cd) = self.0.content_disposition.as_ref() {
             hdrs.insert(http::header::CONTENT_DISPOSITION, cd.clone());
+        }
+        if self.0.type_ == Type::MediaSegment {
+            if let Some((d, r)) = self.0.prev_duration_and_cur_runs {
+                hdrs.insert(
+                    "X-Prev-Duration",
+                    HeaderValue::try_from(d.0.to_string()).expect("ints are valid headers"));
+                hdrs.insert(
+                    "X-Runs",
+                    HeaderValue::try_from(r.to_string()).expect("ints are valid headers"));
+            }
+            if let Some(s) = self.0.segments.first() {
+                let skip = s.s.desired_range_90k.start - s.s.actual_start_90k();
+                if skip > 0 {
+                    hdrs.insert(
+                        "X-Leading-Duration",
+                        HeaderValue::try_from(skip.to_string()).expect("ints are valid headers"));
+                }
+            }
         }
     }
     fn last_modified(&self) -> Option<SystemTime> { Some(self.0.last_modified) }
