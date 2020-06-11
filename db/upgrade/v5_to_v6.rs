@@ -31,7 +31,7 @@
 /// Upgrades a version 4 schema to a version 5 schema.
 
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use failure::{Error, bail, format_err};
+use failure::{Error, ResultExt, bail, format_err};
 use h264_reader::avcc::AvcDecoderConfigurationRecord;
 use rusqlite::{named_params, params};
 use std::convert::{TryFrom, TryInto};
@@ -93,6 +93,10 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
                                 values (:id, :width, :height, :rfc6381_codec, :data,
                                         :pasp_h_spacing, :pasp_v_spacing)
     "#)?;
+
+    // Only insert still-referenced video sample entries. I've had problems with
+    // no-longer-referenced ones (perhaps from some ancient, buggy version of Moonfire NVR) for
+    // which avcc.create_context(()) fails.
     let mut stmt = tx.prepare(r#"
         select
           id,
@@ -101,7 +105,15 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           rfc6381_codec,
           data
         from
-          old_video_sample_entry
+          old_video_sample_entry v
+        where
+          exists (
+            select
+              'x'
+            from
+              recording r
+            where
+              r.video_sample_entry_id = v.id)
     "#)?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
@@ -115,9 +127,10 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             bail!("Multiple SPSs!");
         }
         let ctx = avcc.create_context(())
-            .map_err(|e| format_err!("Can't load SPS+PPS: {:?}", e))?;
+            .map_err(|e| format_err!("Can't load SPS+PPS for video_sample_entry_id {}: {:?}",
+                                     id, e))?;
         let sps = ctx.sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())
-            .ok_or_else(|| format_err!("No SPS 0"))?;
+            .ok_or_else(|| format_err!("No SPS 0 for video_sample_entry_id {}", id))?;
         let pasp = sps.vui_parameters.as_ref()
                                      .and_then(|v| v.aspect_ratio_info.as_ref())
                                      .and_then(|a| a.clone().get())
@@ -257,8 +270,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             ":video_samples": video_samples,
             ":video_sync_samples": video_sync_samples,
             ":video_sample_entry_id": video_sample_entry_id,
-        })?;
-        cum_duration_90k += duration_90k;
+        }).with_context(|_| format!("Unable to insert composite_id {}", composite_id))?;
+        cum_duration_90k += i64::from(duration_90k);
         cum_runs += if run_offset == 0 { 1 } else { 0 };
     }
     tx.execute_batch(r#"

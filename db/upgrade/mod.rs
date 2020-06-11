@@ -230,19 +230,31 @@ mod tests {
             insert into video_sample_entry (id, sha1, width, height, data)
                 values (3, X'0000000000000000000000000000000000000002', 704, 480, ?);
         "#, params![GOOD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY])?;
+        upgraded.execute(r#"
+            insert into video_sample_entry (id, sha1, width, height, data)
+                values (4, X'0000000000000000000000000000000000000003', 704, 480, ?);
+        "#, params![GOOD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY])?;
         upgraded.execute_batch(r#"
             insert into recording (id, camera_id, sample_file_bytes, start_time_90k, duration_90k,
                                    local_time_delta_90k, video_samples, video_sync_samples,
                                    video_sample_entry_id, sample_file_uuid, sample_file_sha1,
                                    video_index)
                            values (1, 1, 42, 140063580000000, 90000, 0, 1, 1, 1,
-                                   X'E69D45E8CBA64DC1BA2ECB1585983A10', zeroblob(20), X'00');
+                                   X'E69D45E8CBA64DC1BA2ECB1585983A10', zeroblob(20), X'00'),
+                                  (2, 1, 42, 140063580090000, 90000, 0, 1, 1, 2,
+                                   X'94DE8484FF874A5295D488C8038A0312', zeroblob(20), X'00'),
+                                  (3, 1, 42, 140063580180000, 90000, 0, 1, 1, 3,
+                                   X'C94D4D0B533746059CD40B29039E641E', zeroblob(20), X'00');
             insert into reserved_sample_files values (X'51EF700C933E4197AAE4EE8161E94221', 0),
                                                      (X'E69D45E8CBA64DC1BA2ECB1585983A10', 1);
         "#)?;
         let rec1 = tmpdir.path().join("e69d45e8-cba6-4dc1-ba2e-cb1585983a10");
+        let rec2 = tmpdir.path().join("94de8484-ff87-4a52-95d4-88c8038a0312");
+        let rec3 = tmpdir.path().join("c94d4d0b-5337-4605-9cd4-0b29039e641e");
         let garbage = tmpdir.path().join("51ef700c-933e-4197-aae4-ee8161e94221");
         std::fs::File::create(&rec1)?;
+        std::fs::File::create(&rec2)?;
+        std::fs::File::create(&rec3)?;
         std::fs::File::create(&garbage)?;
 
         for (ver, fresh_sql) in &[(1, Some(include_str!("v1.sql"))),
@@ -287,6 +299,9 @@ mod tests {
                 assert_eq!(pasp_by_id.get(&1), Some(&(1, 1)));
                 assert_eq!(pasp_by_id.get(&2), Some(&(4, 3)));
                 assert_eq!(pasp_by_id.get(&3), Some(&(40, 33)));
+
+                // No recording references this video_sample_entry, so it gets dropped on upgrade.
+                assert_eq!(pasp_by_id.get(&4), None);
             }
         }
 
