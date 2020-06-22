@@ -110,6 +110,15 @@ pub struct Stream<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
     pub days: Option<&'a BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<StreamConfig<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct StreamConfig<'a> {
+    pub rtsp_url: &'a str,
 }
 
 #[derive(Serialize)]
@@ -203,8 +212,8 @@ impl<'a> Camera<'a> {
                 }),
             },
             streams: [
-                Stream::wrap(db, c.streams[0], include_days)?,
-                Stream::wrap(db, c.streams[1], include_days)?,
+                Stream::wrap(db, c.streams[0], include_days, include_config)?,
+                Stream::wrap(db, c.streams[1], include_days, include_config)?,
             ],
         })
     }
@@ -223,7 +232,8 @@ impl<'a> Camera<'a> {
 }
 
 impl<'a> Stream<'a> {
-    fn wrap(db: &'a db::LockedDatabase, id: Option<i32>, include_days: bool) -> Result<Option<Self>, Error> {
+    fn wrap(db: &'a db::LockedDatabase, id: Option<i32>, include_days: bool, include_config: bool)
+            -> Result<Option<Self>, Error> {
         let id = match id {
             Some(id) => id,
             None => return Ok(None),
@@ -236,6 +246,12 @@ impl<'a> Stream<'a> {
             total_duration_90k: s.duration.0,
             total_sample_file_bytes: s.sample_file_bytes,
             days: if include_days { Some(&s.days) } else { None },
+            config: match include_config {
+                false => None,
+                true => Some(StreamConfig {
+                    rtsp_url: &s.rtsp_url,
+                }),
+            },
         }))
     }
 

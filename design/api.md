@@ -53,9 +53,10 @@ request parameters:
 
 *   `days`: a boolean indicating if the days parameter described below
     should be included.
-*   `cameraConfigs`: a boolean indicating if the `camera.config` parameter
-    described below should be included. This requires the
-    `read_camera_configs` permission as described in `schema.proto`.
+*   `cameraConfigs`: a boolean indicating if the `camera.config` and
+    `camera.stream[].config` parameters described below should be included.
+    This requires the `read_camera_configs` permission as described in
+    `schema.proto`.
 
 Example request URI (with added whitespace between parameters):
 
@@ -104,6 +105,9 @@ The `application/json` response will have a dict as follows:
                 time zone.  It is usually 24 hours after the start time. It
                 might be 23 hours or 25 hours during spring forward or fall
                 back, respectively.
+        *   `config`: (only included if request parameter `cameraConfigs` is
+            true) a dictionary describing the configuration of the stream:
+            *   `rtsp_url`
 *   `signals`: a list of all signals known to the server. Each is a dictionary
     with the following properties:
        * `id`: an integer identifier.
