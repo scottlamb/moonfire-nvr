@@ -326,8 +326,8 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                 let u = if s.retain_bytes == 0 {
                     "0 / 0 (0.0%)".to_owned()
                 } else {
-                    format!("{} / {} ({:.1}%)", s.sample_file_bytes, s.retain_bytes,
-                                100. * s.sample_file_bytes as f32 / s.retain_bytes as f32)
+                    format!("{} / {} ({:.1}%)", s.fs_bytes, s.retain_bytes,
+                                100. * s.fs_bytes as f32 / s.retain_bytes as f32)
                 };
                 dialog.call_on_name(&format!("{}_rtsp_url", t.as_str()),
                                   |v: &mut views::EditView| v.set_content(s.rtsp_url.to_owned()));

@@ -104,6 +104,20 @@ const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &'static str = r#"
 const UPDATE_NEXT_RECORDING_ID_SQL: &'static str =
     "update stream set next_recording_id = :next_recording_id where id = :stream_id";
 
+/// The size of a filesystem block, to use in disk space accounting.
+/// This should really be obtained by a stat call on the sample file directory in question,
+/// but that requires some refactoring. See
+/// [#89](https://github.com/scottlamb/moonfire-nvr/issues/89). We might be able to get away with
+/// this hardcoded value for a while.
+const ASSUMED_BLOCK_SIZE_BYTES: i64 = 4096;
+
+/// Rounds a file size up to the next multiple of the block size.
+/// This is useful in representing the actual amount of filesystem space used.
+pub(crate) fn round_up(bytes: i64) -> i64 {
+    let blk = ASSUMED_BLOCK_SIZE_BYTES;
+    (bytes + blk - 1) / blk * blk
+}
+
 pub struct FromSqlUuid(pub Uuid);
 
 impl rusqlite::types::FromSql for FromSqlUuid {
@@ -168,8 +182,7 @@ pub struct ListAggregatedRecordingsRow {
     pub growing: bool,
 }
 
-impl ListAggregatedRecordingsRow {
-    fn from(row: ListRecordingsRow) -> Self {
+impl ListAggregatedRecordingsRow { fn from(row: ListRecordingsRow) -> Self {
         let recording_id = row.id.recording();
         let uncommitted = (row.flags & RecordingFlags::Uncommitted as i32) != 0;
         let growing = (row.flags & RecordingFlags::Growing as i32) != 0;
@@ -406,7 +419,14 @@ pub struct Stream {
     /// The time range of recorded data associated with this stream (minimum start time and maximum
     /// end time). `None` iff there are no recordings for this camera.
     pub range: Option<Range<recording::Time>>,
+
+    /// The total bytes of flushed sample files. This doesn't include disk space wasted in the
+    /// last filesystem block allocated to each file ("internal fragmentation").
     pub sample_file_bytes: i64,
+
+    /// The total bytes on the filesystem used by this stream. This slightly more than
+    /// `sample_file_bytes` because it includes the wasted space in the last filesystem block.
+    pub fs_bytes: i64,
 
     /// On flush, delete the following recordings (move them to the `garbage` table, to be
     /// collected later). Note they must be the oldest recordings. The later collection involves
@@ -416,10 +436,12 @@ pub struct Stream {
 
     /// The total bytes to delete with the next flush.
     pub bytes_to_delete: i64,
+    pub fs_bytes_to_delete: i64,
 
     /// The total bytes to add with the next flush. (`mark_synced` has already been called on these
     /// recordings.)
     pub bytes_to_add: i64,
+    pub fs_bytes_to_add: i64,
 
     /// The total duration of recorded data. This may not be `range.end - range.start` due to
     /// gaps and overlap.
@@ -565,6 +587,7 @@ impl Stream {
         });
         self.duration += r.end - r.start;
         self.sample_file_bytes += sample_file_bytes as i64;
+        self.fs_bytes += round_up(i64::from(sample_file_bytes));
         adjust_days(r, 1, &mut self.days);
     }
 }
@@ -759,9 +782,12 @@ impl StreamStateChanger {
                         flush_if_sec: sc.flush_if_sec,
                         range: None,
                         sample_file_bytes: 0,
+                        fs_bytes: 0,
                         to_delete: Vec::new(),
                         bytes_to_delete: 0,
+                        fs_bytes_to_delete: 0,
                         bytes_to_add: 0,
+                        fs_bytes_to_add: 0,
                         duration: recording::Duration(0),
                         days: BTreeMap::new(),
                         record: sc.record,
@@ -837,7 +863,9 @@ impl LockedDatabase {
             bail!("can't sync un-added recording {}", id);
         }
         let l = stream.uncommitted[stream.synced_recordings].lock();
-        stream.bytes_to_add += l.sample_file_bytes as i64;
+        let bytes = i64::from(l.sample_file_bytes);
+        stream.bytes_to_add += bytes;
+        stream.fs_bytes_to_add += round_up(bytes);
         stream.synced_recordings += 1;
         Ok(())
     }
@@ -988,17 +1016,19 @@ impl LockedDatabase {
         for (stream_id, new_range) in new_ranges.drain() {
             let s = self.streams_by_id.get_mut(&stream_id).unwrap();
             let dir_id = s.sample_file_dir_id.unwrap();
-            let d = self.sample_file_dirs_by_id.get_mut(&dir_id).unwrap();
+            let dir = self.sample_file_dirs_by_id.get_mut(&dir_id).unwrap();
             let log = dir_logs.entry(dir_id).or_default();
 
             // Process delete_oldest_recordings.
             s.sample_file_bytes -= s.bytes_to_delete;
+            s.fs_bytes -= s.fs_bytes_to_delete;
             log.deleted_bytes += s.bytes_to_delete;
             s.bytes_to_delete = 0;
+            s.fs_bytes_to_delete = 0;
             log.deleted.reserve(s.to_delete.len());
             for row in s.to_delete.drain(..) {
                 log.deleted.push(row.id);
-                d.garbage_needs_unlink.insert(row.id);
+                dir.garbage_needs_unlink.insert(row.id);
                 let d = recording::Duration(row.duration as i64);
                 s.duration -= d;
                 adjust_days(row.start .. row.start + d, -1, &mut s.days);
@@ -1007,6 +1037,7 @@ impl LockedDatabase {
             // Process add_recordings.
             log.added_bytes += s.bytes_to_add;
             s.bytes_to_add = 0;
+            s.fs_bytes_to_add = 0;
             log.added.reserve(s.synced_recordings);
             for _ in 0..s.synced_recordings {
                 let u = s.uncommitted.pop_front().unwrap();
@@ -1312,7 +1343,7 @@ impl LockedDatabase {
         Err(format_err!("no such recording {}", id))
     }
 
-    /// Deletes the oldest recordings that aren't already queued for deletion.
+    /// Queues for deletion the oldest recordings that aren't already queued.
     /// `f` should return true for each row that should be deleted.
     pub(crate) fn delete_oldest_recordings(
         &mut self, stream_id: i32, f: &mut dyn FnMut(&ListOldestRecordingsRow) -> bool)
@@ -1328,7 +1359,9 @@ impl LockedDatabase {
         raw::list_oldest_recordings(&self.conn, CompositeId::new(stream_id, end), &mut |r| {
             if f(&r) {
                 s.to_delete.push(r);
-                s.bytes_to_delete += r.sample_file_bytes as i64;
+                let bytes = i64::from(r.sample_file_bytes);
+                s.bytes_to_delete += bytes;
+                s.fs_bytes_to_delete += round_up(bytes);
                 return true;
             }
             false
@@ -1490,9 +1523,12 @@ impl LockedDatabase {
                 flush_if_sec,
                 range: None,
                 sample_file_bytes: 0,
+                fs_bytes: 0,
                 to_delete: Vec::new(),
                 bytes_to_delete: 0,
+                fs_bytes_to_delete: 0,
                 bytes_to_add: 0,
+                fs_bytes_to_add: 0,
                 duration: recording::Duration(0),
                 days: BTreeMap::new(),
                 next_recording_id: row.get(7)?,
@@ -2397,5 +2433,13 @@ mod tests {
                           .map(|&id| id)
                           .collect();
         assert_eq!(&g, &[]);
+    }
+
+    #[test]
+    fn round_up() {
+        assert_eq!(super::round_up(0), 0);
+        assert_eq!(super::round_up(8_191),  8_192);
+        assert_eq!(super::round_up(8_192),  8_192);
+        assert_eq!(super::round_up(8_193), 12_288);
     }
 }

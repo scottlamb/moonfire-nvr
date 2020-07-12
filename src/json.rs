@@ -106,6 +106,7 @@ pub struct Stream<'a> {
     pub max_end_time_90k: Option<i64>,
     pub total_duration_90k: i64,
     pub total_sample_file_bytes: i64,
+    pub fs_bytes: i64,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
@@ -235,6 +236,7 @@ impl<'a> Stream<'a> {
             max_end_time_90k: s.range.as_ref().map(|r| r.end.0),
             total_duration_90k: s.duration.0,
             total_sample_file_bytes: s.sample_file_bytes,
+            fs_bytes: s.fs_bytes,
             days: if include_days { Some(&s.days) } else { None },
         }))
     }
