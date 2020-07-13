@@ -105,16 +105,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
 }
 
 pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
-    // Enforce foreign keys. This is on by default with --features=bundled (as rusqlite
-    // compiles the SQLite3 amalgamation with -DSQLITE_DEFAULT_FOREIGN_KEYS=1). Ensure it's
-    // always on. Note that our foreign keys are immediate rather than deferred, so we have to
-    // be careful about the order of operations during the upgrade.
-    conn.execute("pragma foreign_keys = on", params![])?;
-
-    // Make the database actually durable.
-    conn.execute("pragma fullfsync = on", params![])?;
-    conn.execute("pragma synchronous = 2", params![])?;
-
+    db::set_integrity_pragmas(conn)?;
     upgrade(args, db::EXPECTED_VERSION, conn)?;
 
     // WAL is the preferred journal mode for normal operation; it reduces the number of syncs

@@ -193,15 +193,15 @@ pub fn lower_retention(db: Arc<db::Database>, dir_id: i32, limits: &[NewLimit])
     let (mut syncer, _) = Syncer::new(&db.lock(), db2, dir_id)?;
     syncer.do_rotation(|db| {
         for l in limits {
-            let (bytes_before, extra);
+            let (fs_bytes_before, extra);
             {
                 let stream = db.streams_by_id().get(&l.stream_id)
                                .ok_or_else(|| format_err!("no such stream {}", l.stream_id))?;
-                bytes_before = stream.sample_file_bytes + stream.bytes_to_add -
-                               stream.bytes_to_delete;
+                fs_bytes_before = stream.fs_bytes + stream.fs_bytes_to_add -
+                                  stream.fs_bytes_to_delete;
                 extra = stream.retain_bytes - l.limit;
             }
-            if l.limit >= bytes_before { continue }
+            if l.limit >= fs_bytes_before { continue }
             delete_recordings(db, l.stream_id, extra)?;
         }
         Ok(())
@@ -211,23 +211,24 @@ pub fn lower_retention(db: Arc<db::Database>, dir_id: i32, limits: &[NewLimit])
 /// Deletes recordings to bring a stream's disk usage within bounds.
 fn delete_recordings(db: &mut db::LockedDatabase, stream_id: i32,
                      extra_bytes_needed: i64) -> Result<(), Error> {
-    let bytes_needed = {
+    let fs_bytes_needed = {
         let stream = match db.streams_by_id().get(&stream_id) {
             None => bail!("no stream {}", stream_id),
             Some(s) => s,
         };
-        stream.sample_file_bytes + stream.bytes_to_add - stream.bytes_to_delete + extra_bytes_needed
+        stream.fs_bytes + stream.fs_bytes_to_add - stream.fs_bytes_to_delete + extra_bytes_needed
             - stream.retain_bytes
     };
-    let mut bytes_to_delete = 0;
-    if bytes_needed <= 0 {
-        debug!("{}: have remaining quota of {}", stream_id, -bytes_needed);
+    let mut fs_bytes_to_delete = 0;
+    if fs_bytes_needed <= 0 {
+        debug!("{}: have remaining quota of {}", stream_id,
+               base::strutil::encode_size(-fs_bytes_needed));
         return Ok(());
     }
     let mut n = 0;
     db.delete_oldest_recordings(stream_id, &mut |row| {
-        if bytes_needed >= bytes_to_delete {
-            bytes_to_delete += i64::from(row.sample_file_bytes);
+        if fs_bytes_needed >= fs_bytes_to_delete {
+            fs_bytes_to_delete += db::round_up(i64::from(row.sample_file_bytes));
             n += 1;
             return true;
         }
@@ -993,7 +994,7 @@ mod tests {
         h.db.lock().update_retention(&[db::RetentionChange {
             stream_id: testutil::TEST_STREAM_ID,
             new_record: true,
-            new_limit: 3,
+            new_limit: 0,
         }]).unwrap();
 
         // Setup: add a 3-byte recording.
@@ -1152,7 +1153,7 @@ mod tests {
         h.db.lock().update_retention(&[db::RetentionChange {
             stream_id: testutil::TEST_STREAM_ID,
             new_record: true,
-            new_limit: 3,
+            new_limit: 0,
         }]).unwrap();
 
         // Setup: add a 3-byte recording.

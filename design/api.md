@@ -91,6 +91,10 @@ The `application/json` response will have a dict as follows:
             be lesser if there are gaps in the recorded data.
         *   `totalSampleFileBytes`: the total number of bytes of sample data
             (the `mdat` portion of a `.mp4` file).
+        *   `fsBytes`: the total number of bytes on the filesystem used by
+            this stream. This is slightly more than `totalSampleFileBytes`
+            because it also includes the wasted portion of the final
+            filesystem block allocated to each file.
         *   `days`: (only included if request pararameter `days` is true)
             dictionary representing calendar days (in the server's time zone)
             with non-zero total duration of recordings for that day. The keys

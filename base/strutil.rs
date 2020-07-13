@@ -44,7 +44,7 @@ static MULTIPLIERS: [(char, u64); 4] = [
     ('K', 10),
 ];
 
-/// Encodes a size into human-readable form.
+/// Encodes a non-negative size into human-readable form.
 pub fn encode_size(mut raw: i64) -> String {
     let mut encoded = String::new();
     for &(c, n) in &MULTIPLIERS {
