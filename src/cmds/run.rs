@@ -54,7 +54,7 @@ pub struct Args {
     db_dir: PathBuf,
 
     /// Directory holding user interface files (.html, .js, etc).
-    #[structopt(default_value = "/usr/local/lib/moonfire-nvr/ui", value_name="path",
+    #[structopt(long, default_value = "/usr/local/lib/moonfire-nvr/ui", value_name="path",
                 parse(from_os_str))]
     ui_dir: std::path::PathBuf,
 
