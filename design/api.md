@@ -96,8 +96,11 @@ The `application/json` response will have a dict as follows:
             filesystem block allocated to each file.
         *   `days`: (only included if request pararameter `days` is true)
             dictionary representing calendar days (in the server's time zone)
-            with non-zero total duration of recordings for that day. The keys
-            are of the form `YYYY-mm-dd`; the values are objects with the
+            with non-zero total duration of recordings for that day. Currently
+            this includes uncommitted and growing recordings. This is likely
+            to change in a future release for
+            [#40](https://github.com/scottlamb/moonfire-nvr/issues/40). The
+            keys are of the form `YYYY-mm-dd`; the values are objects with the
             following attributes:
             *   `totalDuration90k` is the total duration recorded during that
                 day.  If a recording spans a day boundary, some portion of it

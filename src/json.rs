@@ -87,7 +87,7 @@ pub struct Camera<'a> {
     pub config: Option<CameraConfig<'a>>,
 
     #[serde(serialize_with = "Camera::serialize_streams")]
-    pub streams: [Option<Stream<'a>>; 2],
+    pub streams: [Option<Stream>; 2],
 }
 
 #[derive(Debug, Serialize)]
@@ -100,7 +100,7 @@ pub struct CameraConfig<'a> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct Stream<'a> {
+pub struct Stream {
     pub retain_bytes: i64,
     pub min_start_time_90k: Option<i64>,
     pub max_end_time_90k: Option<i64>,
@@ -110,7 +110,7 @@ pub struct Stream<'a> {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
-    pub days: Option<&'a BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+    pub days: Option<BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
 }
 
 #[derive(Serialize)]
@@ -210,7 +210,7 @@ impl<'a> Camera<'a> {
         })
     }
 
-    fn serialize_streams<S>(streams: &[Option<Stream<'a>>; 2], serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize_streams<S>(streams: &[Option<Stream>; 2], serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
         let mut map = serializer.serialize_map(Some(streams.len()))?;
         for (i, s) in streams.iter().enumerate() {
@@ -223,8 +223,9 @@ impl<'a> Camera<'a> {
     }
 }
 
-impl<'a> Stream<'a> {
-    fn wrap(db: &'a db::LockedDatabase, id: Option<i32>, include_days: bool) -> Result<Option<Self>, Error> {
+impl Stream {
+    fn wrap(db: &db::LockedDatabase, id: Option<i32>, include_days: bool)
+            -> Result<Option<Self>, Error> {
         let id = match id {
             Some(id) => id,
             None => return Ok(None),
@@ -237,14 +238,14 @@ impl<'a> Stream<'a> {
             total_duration_90k: s.duration.0,
             total_sample_file_bytes: s.sample_file_bytes,
             fs_bytes: s.fs_bytes,
-            days: if include_days { Some(&s.days) } else { None },
+            days: if include_days { Some(s.days()) } else { None },
         }))
     }
 
-    fn serialize_days<S>(days: &Option<&BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+    fn serialize_days<S>(days: &Option<BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
                          serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
-        let days = match *days {
+        let days = match days.as_ref() {
             Some(d) => d,
             None => return serializer.serialize_none(),
         };

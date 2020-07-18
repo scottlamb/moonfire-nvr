@@ -447,8 +447,9 @@ pub struct Stream {
     /// gaps and overlap.
     pub duration: recording::Duration,
 
-    /// Mapping of calendar day (in the server's time zone) to a summary of recordings on that day.
-    pub days: BTreeMap<StreamDayKey, StreamDayValue>,
+    /// Mapping of calendar day (in the server's time zone) to a summary of committed recordings on
+    /// that day.
+    pub committed_days: BTreeMap<StreamDayKey, StreamDayValue>,
     pub record: bool,
 
     /// The `next_recording_id` currently committed to the database.
@@ -588,7 +589,18 @@ impl Stream {
         self.duration += r.end - r.start;
         self.sample_file_bytes += sample_file_bytes as i64;
         self.fs_bytes += round_up(i64::from(sample_file_bytes));
-        adjust_days(r, 1, &mut self.days);
+        adjust_days(r, 1, &mut self.committed_days);
+    }
+
+    /// Returns a days map including unflushed recordings.
+    pub fn days(&self) -> BTreeMap<StreamDayKey, StreamDayValue> {
+        let mut days = self.committed_days.clone();
+        for u in &self.uncommitted {
+            let l = u.lock();
+            adjust_days(l.start .. l.start + recording::Duration(i64::from(l.duration_90k)),
+                        1, &mut days);
+        }
+        days
     }
 }
 
@@ -789,7 +801,7 @@ impl StreamStateChanger {
                         bytes_to_add: 0,
                         fs_bytes_to_add: 0,
                         duration: recording::Duration(0),
-                        days: BTreeMap::new(),
+                        committed_days: BTreeMap::new(),
                         record: sc.record,
                         next_recording_id: 1,
                         uncommitted: VecDeque::new(),
@@ -1031,7 +1043,7 @@ impl LockedDatabase {
                 dir.garbage_needs_unlink.insert(row.id);
                 let d = recording::Duration(row.duration as i64);
                 s.duration -= d;
-                adjust_days(row.start .. row.start + d, -1, &mut s.days);
+                adjust_days(row.start .. row.start + d, -1, &mut s.committed_days);
             }
 
             // Process add_recordings.
@@ -1530,7 +1542,7 @@ impl LockedDatabase {
                 bytes_to_add: 0,
                 fs_bytes_to_add: 0,
                 duration: recording::Duration(0),
-                days: BTreeMap::new(),
+                committed_days: BTreeMap::new(),
                 next_recording_id: row.get(7)?,
                 record: row.get(8)?,
                 uncommitted: VecDeque::new(),
