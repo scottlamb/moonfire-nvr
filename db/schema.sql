@@ -149,8 +149,8 @@ create table stream (
   -- deleted ones. This is used for assigning the next recording id.
   cum_recordings integer not null check (cum_recordings >= 0),
 
-  -- The total duration of all recordings ever created on this stream.
-  cum_duration_90k integer not null check (cum_duration_90k >= 0),
+  -- The total media duration of all recordings ever created on this stream.
+  cum_media_duration_90k integer not null check (cum_media_duration_90k >= 0),
 
   -- The total number of runs (recordings with run_offset = 0) ever created
   -- on this stream.
@@ -207,14 +207,19 @@ create table recording (
   -- The total duration of all previous recordings on this stream. This is
   -- returned in API requests and may be helpful for timestamps in a HTML
   -- MediaSourceExtensions SourceBuffer.
-  prev_duration_90k integer not null check (prev_duration_90k >= 0),
+  prev_media_duration_90k integer not null
+      check (prev_media_duration_90k >= 0),
 
   -- The total number of previous runs (rows in which run_offset = 0).
   prev_runs integer not null check (prev_runs >= 0),
 
-  -- The duration of the recording, in 90 kHz units.
-  duration_90k integer not null
-      check (duration_90k >= 0 and duration_90k < 5*60*90000),
+  -- The wall-time duration of the recording, in 90 kHz units. This is the
+  -- "corrected" duration.
+  wall_duration_90k integer not null
+      check (wall_duration_90k >= 0 and wall_duration_90k < 5*60*90000),
+
+  -- TODO: comment.
+  media_duration_delta_90k integer not null,
 
   video_samples integer not null check (video_samples > 0),
   video_sync_samples integer not null check (video_sync_samples > 0),
@@ -232,7 +237,8 @@ create index recording_cover on recording (
   -- that only database verification and actual viewing of recordings need
   -- to consult the underlying row.
   open_id,
-  duration_90k,
+  wall_duration_90k,
+  media_duration_delta_90k,
   video_samples,
   video_sync_samples,
   video_sample_entry_id,

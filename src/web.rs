@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -52,6 +52,7 @@ use nom::IResult;
 use nom::bytes::complete::{take_while1, tag};
 use nom::combinator::{all_consuming, map, map_res, opt};
 use nom::sequence::{preceded, tuple};
+use std::convert::TryFrom;
 use std::cmp;
 use std::net::IpAddr;
 use std::ops::Range;
@@ -460,13 +461,13 @@ impl Service {
         let mut hdrs = header::HeaderMap::new();
         mp4.add_headers(&mut hdrs);
         let mime_type = hdrs.get(header::CONTENT_TYPE).unwrap();
-        let (prev_duration, prev_runs) = row.prev_duration_and_runs.unwrap();
+        let (prev_media_duration, prev_runs) = row.prev_media_duration_and_runs.unwrap();
         let hdr = format!(
             "Content-Type: {}\r\n\
             X-Recording-Start: {}\r\n\
             X-Recording-Id: {}.{}\r\n\
             X-Time-Range: {}-{}\r\n\
-            X-Prev-Duration: {}\r\n\
+            X-Prev-Media-Duration: {}\r\n\
             X-Runs: {}\r\n\
             X-Video-Sample-Entry-Id: {}\r\n\r\n",
             mime_type.to_str().unwrap(),
@@ -475,7 +476,7 @@ impl Service {
             live.recording,
             live.off_90k.start,
             live.off_90k.end,
-            prev_duration.0,
+            prev_media_duration.0,
             prev_runs + if row.run_offset == 0 { 1 } else { 0 },
             &row.video_sample_entry_id);
         let mut v = hdr.into_bytes();
@@ -696,7 +697,7 @@ impl Service {
                             |()| plain_response(StatusCode::BAD_REQUEST,
                                                 format!("invalid s parameter: {}", value)))?;
                         debug!("stream_view_mp4: appending s={:?}", s);
-                        let mut est_segments = (s.ids.end - s.ids.start) as usize;
+                        let mut est_segments = usize::try_from(s.ids.end - s.ids.start).unwrap();
                         if let Some(end) = s.end_time {
                             // There should be roughly ceil((end - start) /
                             // desired_recording_duration) recordings in the desired timespan if
@@ -704,13 +705,13 @@ impl Service {
                             // the requested timespan with the rotate offset and another because
                             // rotation only happens at key frames.
                             let ceil_durations = (end - s.start_time +
-                                                  recording::DESIRED_RECORDING_DURATION - 1) /
-                                                 recording::DESIRED_RECORDING_DURATION;
+                                                  recording::DESIRED_RECORDING_WALL_DURATION - 1) /
+                                                 recording::DESIRED_RECORDING_WALL_DURATION;
                             est_segments = cmp::min(est_segments, (ceil_durations + 2) as usize);
                         }
                         builder.reserve(est_segments);
                         let db = self.db.lock();
-                        let mut prev = None;
+                        let mut prev = None; // previous recording id
                         let mut cur_off = 0;
                         db.list_recordings_by_id(stream_id, s.ids.clone(), &mut |r| {
                             let recording_id = r.id.recording();
@@ -734,19 +735,21 @@ impl Service {
                             prev = Some(recording_id);
 
                             // Add a segment for the relevant part of the recording, if any.
+                            // Note all calculations here are in wall times / wall durations.
                             let end_time = s.end_time.unwrap_or(i64::max_value());
-                            let d = r.duration_90k as i64;
+                            let d = i64::from(r.wall_duration_90k);
                             if s.start_time <= cur_off + d && cur_off < end_time {
                                 let start = cmp::max(0, s.start_time - cur_off);
                                 let end = cmp::min(d, end_time - cur_off);
-                                let times = start as i32 .. end as i32;
+                                let times = i32::try_from(start).unwrap() ..
+                                            i32::try_from(end).unwrap();
                                 debug!("...appending recording {} with times {:?} \
                                        (out of dur {})", r.id, times, d);
                                 if start_time_for_filename.is_none() {
                                     start_time_for_filename =
                                         Some(r.start + recording::Duration(start));
                                 }
-                                builder.append(&db, r, start as i32 .. end as i32)?;
+                                builder.append(&db, r, times)?;
                             } else {
                                 debug!("...skipping recording {} dur {}", r.id, d);
                             }
@@ -775,7 +778,8 @@ impl Service {
                             }
                         }
                     },
-                    "ts" => builder.include_timestamp_subtitle_track(value == "true"),
+                    "ts" => builder.include_timestamp_subtitle_track(value == "true")
+                                   .map_err(from_base_error)?,
                     _ => return Err(bad_req(format!("parameter {} not understood", key))),
                 }
             };

@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors
+// Copyright (C) 2018-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -45,7 +45,8 @@ const LIST_RECORDINGS_BY_TIME_SQL: &'static str = r#"
         recording.run_offset,
         recording.flags,
         recording.start_time_90k,
-        recording.duration_90k,
+        recording.wall_duration_90k,
+        recording.media_duration_delta_90k,
         recording.sample_file_bytes,
         recording.video_samples,
         recording.video_sync_samples,
@@ -57,7 +58,7 @@ const LIST_RECORDINGS_BY_TIME_SQL: &'static str = r#"
         stream_id = :stream_id and
         recording.start_time_90k > :start_time_90k - 27000000 and
         recording.start_time_90k < :end_time_90k and
-        recording.start_time_90k + recording.duration_90k > :start_time_90k
+        recording.start_time_90k + recording.wall_duration_90k > :start_time_90k
     order by
         recording.start_time_90k
 "#;
@@ -68,13 +69,14 @@ const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
         recording.run_offset,
         recording.flags,
         recording.start_time_90k,
-        recording.duration_90k,
+        recording.wall_duration_90k,
+        recording.media_duration_delta_90k,
         recording.sample_file_bytes,
         recording.video_samples,
         recording.video_sync_samples,
         recording.video_sample_entry_id,
         recording.open_id,
-        recording.prev_duration_90k,
+        recording.prev_media_duration_90k,
         recording.prev_runs
     from
         recording
@@ -98,7 +100,7 @@ const STREAM_MIN_START_SQL: &'static str = r#"
 const STREAM_MAX_START_SQL: &'static str = r#"
     select
       start_time_90k,
-      duration_90k
+      wall_duration_90k
     from
       recording
     where
@@ -110,7 +112,7 @@ const LIST_OLDEST_RECORDINGS_SQL: &'static str = r#"
     select
       composite_id,
       start_time_90k,
-      duration_90k,
+      wall_duration_90k,
       sample_file_bytes
     from
       recording
@@ -151,20 +153,23 @@ fn list_recordings_inner(mut rows: rusqlite::Rows, include_prev: bool,
                          f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>)
                          -> Result<(), Error> {
     while let Some(row) = rows.next()? {
+        let wall_duration_90k = row.get(4)?;
+        let media_duration_delta_90k: i32 = row.get(5)?;
         f(db::ListRecordingsRow {
             id: CompositeId(row.get(0)?),
             run_offset: row.get(1)?,
             flags: row.get(2)?,
             start: recording::Time(row.get(3)?),
-            duration_90k: row.get(4)?,
-            sample_file_bytes: row.get(5)?,
-            video_samples: row.get(6)?,
-            video_sync_samples: row.get(7)?,
-            video_sample_entry_id: row.get(8)?,
-            open_id: row.get(9)?,
-            prev_duration_and_runs: match include_prev {
+            wall_duration_90k,
+            media_duration_90k: wall_duration_90k + media_duration_delta_90k,
+            sample_file_bytes: row.get(6)?,
+            video_samples: row.get(7)?,
+            video_sync_samples: row.get(8)?,
+            video_sample_entry_id: row.get(9)?,
+            open_id: row.get(10)?,
+            prev_media_duration_and_runs: match include_prev {
                 false => None,
-                true => Some((recording::Duration(row.get(10)?), row.get(11)?)),
+                true => Some((recording::Duration(row.get(11)?), row.get(12)?)),
             },
         })?;
     }
@@ -183,13 +188,13 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
                                r: &db::RecordingToInsert) -> Result<(), Error> {
     let mut stmt = tx.prepare_cached(r#"
         insert into recording (composite_id, stream_id, open_id, run_offset, flags,
-                               sample_file_bytes, start_time_90k, prev_duration_90k,
-                               prev_runs, duration_90k, video_samples, video_sync_samples,
-                               video_sample_entry_id)
+                               sample_file_bytes, start_time_90k, prev_media_duration_90k,
+                               prev_runs, wall_duration_90k, media_duration_delta_90k,
+                               video_samples, video_sync_samples, video_sample_entry_id)
                        values (:composite_id, :stream_id, :open_id, :run_offset, :flags,
-                               :sample_file_bytes, :start_time_90k, :prev_duration_90k,
-                               :prev_runs, :duration_90k, :video_samples, :video_sync_samples,
-                               :video_sample_entry_id)
+                               :sample_file_bytes, :start_time_90k, :prev_media_duration_90k,
+                               :prev_runs, :wall_duration_90k, :media_duration_delta_90k,
+                               :video_samples, :video_sync_samples, :video_sample_entry_id)
     "#).with_context(|e| format!("can't prepare recording insert: {}", e))?;
     stmt.execute_named(named_params!{
         ":composite_id": id.0,
@@ -199,8 +204,9 @@ pub(crate) fn insert_recording(tx: &rusqlite::Transaction, o: &db::Open, id: Com
         ":flags": r.flags,
         ":sample_file_bytes": r.sample_file_bytes,
         ":start_time_90k": r.start.0,
-        ":duration_90k": r.duration_90k,
-        ":prev_duration_90k": r.prev_duration.0,
+        ":wall_duration_90k": r.wall_duration_90k,
+        ":media_duration_delta_90k": r.media_duration_90k - r.wall_duration_90k,
+        ":prev_media_duration_90k": r.prev_media_duration.0,
         ":prev_runs": r.prev_runs,
         ":video_samples": r.video_samples,
         ":video_sync_samples": r.video_sync_samples,
@@ -351,7 +357,7 @@ pub(crate) fn get_range(conn: &rusqlite::Connection, stream_id: i32)
             None => row_start .. row_end,
             Some(Range{start: s, end: e}) => s .. ::std::cmp::max(e, row_end),
         };
-        if row_start.0 <= maxes.start.0 - recording::MAX_RECORDING_DURATION {
+        if row_start.0 <= maxes.start.0 - recording::MAX_RECORDING_WALL_DURATION {
             break;
         }
         maxes_opt = Some(maxes);
@@ -390,7 +396,7 @@ pub(crate) fn list_oldest_recordings(conn: &rusqlite::Connection, start: Composi
         let should_continue = f(db::ListOldestRecordingsRow {
             id: CompositeId(row.get(0)?),
             start: recording::Time(row.get(1)?),
-            duration: row.get(2)?,
+            wall_duration_90k: row.get(2)?,
             sample_file_bytes: row.get(3)?,
         });
         if !should_continue {

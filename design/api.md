@@ -13,13 +13,9 @@ In the future, this is likely to be expanded:
     (at least for bootstrapping web authentication)
 *   mobile interface
 
-## Terminology
-
-*signal:* a timeseries with an enum value. Signals might represent a camera's
-motion detection or day/night status. They could also represent an external
-input such as a burglar alarm system's zone status.
-
 ## Detailed design
+
+*Note:* italicized terms in this document are defined in the [glossary](glossary.md).
 
 All requests for JSON data should be sent with the header
 `Accept: application/json` (exactly).
@@ -112,7 +108,7 @@ The `application/json` response will have a dict as follows:
         *   `config`: (only included if request parameter `cameraConfigs` is
             true) a dictionary describing the configuration of the stream:
             *   `rtsp_url`
-*   `signals`: a list of all signals known to the server. Each is a dictionary
+*   `signals`: a list of all *signals* known to the server. Each is a dictionary
     with the following properties:
        * `id`: an integer identifier.
        * `shortName`: a unique, human-readable description of the signal
@@ -254,13 +250,12 @@ Example response:
 
 ### `GET /api/cameras/<uuid>/<stream>/recordings`
 
-Returns information about recordings.
-
-Valid request parameters:
+Returns information about *recordings*. Valid request parameters:
 
 *   `startTime90k` and and `endTime90k` limit the data returned to only
-    recordings which overlap with the given half-open interval. Either or both
-    may be absent; they default to the beginning and end of time, respectively.
+    recordings with wall times overlapping with the given half-open interval.
+    Either or both may be absent; they default to the beginning and end of time,
+    respectively.
 *   `split90k` causes long runs of recordings to be split at the next
     convenient boundary after the given duration.
 *   TODO(slamb): `continue` to support paging. (If data is too large, the
@@ -291,12 +286,12 @@ arbitrary order. Each recording object has the following properties:
     an increasing "open id". This field is the open id as of when these
     recordings were written. This can be used to disambiguate ids referring to
     uncommitted recordings.
-*   `startTime90k`: the start time of the given recording. Note this may be
-    less than the requested `startTime90k` if this recording was ongoing
-    at the requested time.
-*   `endTime90k`: the end time of the given recording. Note this may be
-    greater than the requested `endTime90k` if this recording was ongoing at
-    the requested time.
+*   `startTime90k`: the start time of the given recording, in the wall time
+    scale. Note this may be less than the requested `startTime90k` if this
+    recording was ongoing at the requested time.
+*   `endTime90k`: the end time of the given recording, in the wall time scale.
+    Note this may be greater than the requested `endTime90k` if this recording
+    was ongoing at the requested time.
 *   `videoSampleEntryId`: a reference to an entry in the `videoSampleEntries`
     map.mp4` URL.
 *   `videoSamples`: the number of samples (aka frames) of video in this
@@ -362,18 +357,19 @@ Expected query parameters:
 
 *   `s` (one or more): a string of the form
     `START_ID[-END_ID][@OPEN_ID][.[REL_START_TIME]-[REL_END_TIME]]`. This
-    specifies recording segments to include. The produced `.mp4` file will be a
-    concatenation of the segments indicated by all `s` parameters.  The ids to
-    retrieve are as returned by the `/recordings` URL. The open id is optional
-    and will be enforced if present; it's recommended for disambiguation when
-    the requested range includes uncommitted recordings. The optional start and
-    end times are in 90k units and relative to the start of the first specified
-    id. These can be used to clip the returned segments. Note they can be used
-    to skip over some ids entirely; this is allowed so that the caller doesn't
-    need to know the start time of each interior id. If there is no key frame
-    at the desired relative start time, frames back to the last key frame will
-    be included in the returned data, and an edit list will instruct the
-    viewer to skip to the desired start time.
+    specifies *segments* to include. The produced `.mp4` file will be a
+    concatenation of the segments indicated by all `s` parameters. The ids to
+    retrieve are as returned by the `/recordings` URL.  The *open id* (see
+    [glossary](glossary.md)) is optional and will be enforced if present; it's
+    recommended for disambiguation when the requested range includes uncommitted
+    recordings. The optional start and end times are in 90k units of wall time
+    and relative to the start of the first specified id. These can be used to
+    clip the returned segments. Note they can be used to skip over some ids
+    entirely; this is allowed so that the caller doesn't need to know the start
+    time of each interior id. If there is no key frame at the desired relative
+    start time, frames back to the last key frame will be included in the
+    returned data, and an edit list will instruct the viewer to skip to the
+    desired start time.
 *   `ts` (optional): should be set to `true` to request a subtitle track be
     added with human-readable recording timestamps.
 
@@ -397,6 +393,11 @@ Example request URI to retrieve recording id 1, skipping its first 26
     /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1.26
 ```
 
+Note carefully the distinction between *wall duration* and *media duration*.
+It's normal for `/view.mp4` to return a media presentation with a length
+slightly different from the *wall duration* of the backing recording or
+portion that was requested.
+
 TODO: error behavior on missing segment. It should be a 404, likely with an
 `application/json` body describing what portion if any (still) exists.
 
@@ -415,20 +416,20 @@ trim undesired leading portions.
 
 This response will include the following additional headers:
 
-*   `X-Prev-Duration`: the total duration (in 90 kHz units) of all recordings
-    before the first requested recording in the `s` parameter. Browser-based
-    callers may use this to place this at the correct position in the source
-    buffer via `SourceBuffer.timestampOffset`.
+*   `X-Prev-Media-Duration`: the total *media duration* (in 90 kHz units) of all
+    *recordings* before the first requested recording in the `s` parameter.
+    Browser-based callers may use this to place this at the correct position in
+    the source buffer via `SourceBuffer.timestampOffset`.
 *   `X-Runs`: the cumulative number of "runs" of recordings. If this recording
     starts a new run, it is included in the count. Browser-based callers may
     use this to force gaps in the source buffer timeline by adjusting the
     timestamp offset if desired.
-*   `X-Leading-Duration`: if present, the total duration (in 90 kHz units) of
-    additional leading video included before the caller's first requested
-    timestamp. This happens when the caller's requested timestamp does not
-    fall exactly on a key frame. Media segments can't include edit lists, so
-    unlike with the `/api/.../view.mp4` endpoint the caller is responsible for
-    trimming this portion. Browser-based callers may use
+*   `X-Leading-Media-Duration`: if present, the total duration (in 90 kHz
+    units) of additional leading video included before the caller's first
+    requested timestamp. This happens when the caller's requested timestamp
+    does not fall exactly on a key frame. Media segments can't include edit
+    lists, so unlike with the `/api/.../view.mp4` endpoint the caller is
+    responsible for trimming this portion. Browser-based callers may use
     `SourceBuffer.appendWindowStart`.
 
 Expected query parameters:
@@ -448,8 +449,12 @@ this fundamental reason Moonfire NVR makes no effort to make multiple-segment
 *   There's currently no way to generate an initialization segment for more
     than one video sample entry, so a `.m4s` that uses more than one video
     sample entry can't be used.
-*   The `X-Prev-Duration` and `X-Leading-Duration` headers only describe the
-    first segment.
+*   The `X-Prev-Media-Duration` and `X-Leading-Duration` headers only describe
+    the first segment.
+
+Timestamp tracks (see the `ts` parameter to `.mp4` URIs) aren't supported
+today. Most likely browser clients will implement timestamp subtitles via
+WebVTT API calls anyway.
 
 ### `GET /api/cameras/<uuid>/<stream>/view.m4s.txt`
 

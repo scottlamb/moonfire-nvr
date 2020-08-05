@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2016 The Moonfire NVR Authors
+// Copyright (C) 2016-2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -32,15 +32,38 @@ use crate::coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
 use crate::db;
 use failure::{Error, bail};
 use log::trace;
+use std::convert::TryFrom;
 use std::ops::Range;
 
 pub use base::time::TIME_UNITS_PER_SEC;
 
-pub const DESIRED_RECORDING_DURATION: i64 = 60 * TIME_UNITS_PER_SEC;
-pub const MAX_RECORDING_DURATION: i64 = 5 * 60 * TIME_UNITS_PER_SEC;
+pub const DESIRED_RECORDING_WALL_DURATION: i64 = 60 * TIME_UNITS_PER_SEC;
+pub const MAX_RECORDING_WALL_DURATION: i64 = 5 * 60 * TIME_UNITS_PER_SEC;
 
 pub use base::time::Time;
 pub use base::time::Duration;
+
+/// Converts from a wall time offset into a recording to a media time offset.
+pub fn wall_to_media(wall_off_90k: i32, wall_duration_90k: i32, media_duration_90k: i32) -> i32 {
+    debug_assert!(wall_off_90k <= wall_duration_90k,
+                  "wall_off_90k={} wall_duration_90k={} media_duration_90k={}",
+                  wall_off_90k, wall_duration_90k, media_duration_90k);
+    if wall_duration_90k == 0 {
+        return 0;
+    }
+
+    // The intermediate values here may overflow i32, so use an i64 instead. The max wall
+    // time is recording::MAX_RECORDING_WALL_DURATION; the max media duration should be
+    // roughly the same (design limit of 500 ppm correction). The final result should fit
+    // within i32.
+    i32::try_from(i64::from(wall_off_90k) *
+                  i64::from(media_duration_90k) /
+                  i64::from(wall_duration_90k))
+        .map_err(|_| format!("wall_to_media overflow: {} * {} / {} > i32::max_value()",
+                             wall_off_90k, media_duration_90k,
+                             wall_duration_90k))
+        .unwrap()
+}
 
 /// An iterator through a sample index.
 /// Initially invalid; call `next()` before each read.
@@ -145,11 +168,12 @@ impl SampleIndexEncoder {
                       r: &mut db::RecordingToInsert) -> Result<(), Error> {
         let duration_delta = duration_90k - self.prev_duration_90k;
         self.prev_duration_90k = duration_90k;
-        let new_duration_90k = r.duration_90k + duration_90k;
-        if new_duration_90k as i64 > MAX_RECORDING_DURATION {
-            bail!("Duration {} exceeds maximum {}", new_duration_90k, MAX_RECORDING_DURATION);
+        let new_duration_90k = r.wall_duration_90k + duration_90k;
+        if i64::from(new_duration_90k) > MAX_RECORDING_WALL_DURATION {
+            bail!("Duration {} exceeds maximum {}", new_duration_90k, MAX_RECORDING_WALL_DURATION);
         }
-        r.duration_90k += duration_90k;
+        r.wall_duration_90k += duration_90k;
+        r.media_duration_90k += duration_90k;
         r.sample_file_bytes += bytes;
         r.video_samples += 1;
         let bytes_delta = bytes - if is_key {
@@ -169,19 +193,19 @@ impl SampleIndexEncoder {
 }
 
 /// A segment represents a view of some or all of a single recording, starting from a key frame.
-/// Used by the `Mp4FileBuilder` class to splice together recordings into a single virtual .mp4.
+/// This struct is not specific to a container format; for `.mp4`s, it's wrapped in a
+/// `mp4::Segment`. Other container/transport formats could be supported in a similar manner.
 #[derive(Debug)]
 pub struct Segment {
     pub id: db::CompositeId,
     pub open_id: u32,
-    pub start: Time,
 
     /// An iterator positioned at the beginning of the segment, or `None`. Most segments are
     /// positioned at the beginning of the recording, so this is an optional box to shrink a long
     /// of segments. `None` is equivalent to `SampleIndexIterator::new()`.
     begin: Option<Box<SampleIndexIterator>>,
     pub file_end: i32,
-    pub desired_range_90k: Range<i32>,
+
     pub frames: u16,
     pub key_frames: u16,
     video_sample_entry_id_and_trailing_zero: i32,
@@ -190,22 +214,20 @@ pub struct Segment {
 impl Segment {
     /// Creates a segment.
     ///
-    /// `desired_range_90k` represents the desired range of the segment relative to the start of
-    /// the recording. The actual range will start at the first key frame at or before the
-    /// desired start time. (The caller is responsible for creating an edit list to skip the
-    /// undesired portion.) It will end at the first frame after the desired range (unless the
-    /// desired range extends beyond the recording). (Likewise, the caller is responsible for
-    /// trimming the final frame's duration if desired.)
+    /// `desired_media_range_90k` represents the desired range of the segment relative to the start
+    /// of the recording, in media time units. The actual range will start at the first key frame
+    /// at or before the desired start time. (The caller is responsible for creating an edit list
+    /// to skip the undesired portion.) It will end at the first frame after the desired range
+    /// (unless the desired range extends beyond the recording). (Likewise, the caller is
+    /// responsible for trimming the final frame's duration if desired.)
     pub fn new(db: &db::LockedDatabase,
                recording: &db::ListRecordingsRow,
-               desired_range_90k: Range<i32>) -> Result<Segment, Error> {
+               desired_media_range_90k: Range<i32>) -> Result<Segment, Error> {
         let mut self_ = Segment {
             id: recording.id,
             open_id: recording.open_id,
-            start: recording.start,
             begin: None,
             file_end: recording.sample_file_bytes,
-            desired_range_90k: desired_range_90k,
             frames: recording.video_samples as u16,
             key_frames: recording.video_sync_samples as u16,
             video_sample_entry_id_and_trailing_zero:
@@ -213,23 +235,23 @@ impl Segment {
                 ((((recording.flags & db::RecordingFlags::TrailingZero as i32) != 0) as i32) << 31),
         };
 
-        if self_.desired_range_90k.start > self_.desired_range_90k.end ||
-           self_.desired_range_90k.end > recording.duration_90k {
-            bail!("desired range [{}, {}) invalid for recording of length {}",
-                  self_.desired_range_90k.start, self_.desired_range_90k.end,
-                  recording.duration_90k);
+        if desired_media_range_90k.start > desired_media_range_90k.end ||
+           desired_media_range_90k.end > recording.media_duration_90k {
+            bail!("desired media range [{}, {}) invalid for recording of length {}",
+                  desired_media_range_90k.start, desired_media_range_90k.end,
+                  recording.media_duration_90k);
         }
 
-        if self_.desired_range_90k.start == 0 &&
-           self_.desired_range_90k.end == recording.duration_90k {
+        if desired_media_range_90k.start == 0 &&
+           desired_media_range_90k.end == recording.media_duration_90k {
             // Fast path. Existing entry is fine.
             trace!("recording::Segment::new fast path, recording={:#?}", recording);
             return Ok(self_)
         }
 
         // Slow path. Need to iterate through the index.
-        trace!("recording::Segment::new slow path, desired_range_90k={:?}, recording={:#?}",
-               self_.desired_range_90k, recording);
+        trace!("recording::Segment::new slow path, desired_media_range_90k={:?}, recording={:#?}",
+               desired_media_range_90k, recording);
         db.with_recording_playback(self_.id, &mut |playback| {
             let mut begin = Box::new(SampleIndexIterator::new());
             let data = &(&playback).video_index;
@@ -245,15 +267,15 @@ impl Segment {
             // Going until the end of the recording is special-cased because there can be a trailing
             // frame of zero duration. It's unclear exactly how this should be handled, but let's
             // include it for consistency with the fast path. It'd be bizarre to have it included or
-            // not based on desired_range_90k.start.
-            let end_90k = if self_.desired_range_90k.end == recording.duration_90k {
+            // not based on desired_media_range_90k.start.
+            let end_90k = if desired_media_range_90k.end == recording.media_duration_90k {
                 i32::max_value()
             } else {
-                self_.desired_range_90k.end
+                desired_media_range_90k.end
             };
 
             loop {
-                if it.start_90k <= self_.desired_range_90k.start && it.is_key() {
+                if it.start_90k <= desired_media_range_90k.start && it.is_key() {
                     // new start candidate.
                     *begin = it;
                     self_.frames = 0;
@@ -289,7 +311,8 @@ impl Segment {
         self.begin.as_ref().map(|b| b.pos as u64).unwrap_or(0) .. self.file_end as u64
     }
 
-    /// Returns the actual start time as described in `new`.
+    /// Returns the actual media start time. As described in `new`, this can be less than the
+    /// desired media start time if there is no key frame at the right position.
     pub fn actual_start_90k(&self) -> i32 { self.begin.as_ref().map(|b| b.start_90k).unwrap_or(0) }
 
     /// Iterates through each frame in the segment.
@@ -363,7 +386,7 @@ mod tests {
         e.add_sample(10, 12, false, &mut r).unwrap();
         e.add_sample(10, 1050, true, &mut r).unwrap();
         assert_eq!(r.video_index, b"\x29\xd0\x0f\x02\x14\x08\x0a\x02\x05\x01\x64");
-        assert_eq!(10 + 9 + 11 + 10 + 10, r.duration_90k);
+        assert_eq!(10 + 9 + 11 + 10 + 10, r.media_duration_90k);
         assert_eq!(5, r.video_samples);
         assert_eq!(2, r.video_sync_samples);
     }

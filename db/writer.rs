@@ -781,12 +781,12 @@ impl<F: FileWriter> InnerWriter<F> {
                   pkt_local_time: recording::Time) -> Result<i32, Error> {
         let mut l = self.r.lock();
         self.e.add_sample(duration_90k, bytes, is_key, &mut l)?;
-        let new = pkt_local_time - recording::Duration(i64::from(l.duration_90k));
+        let new = pkt_local_time - recording::Duration(i64::from(l.media_duration_90k));
         self.local_start = cmp::min(self.local_start, new);
         if l.run_offset == 0 {  // start time isn't anchored to previous recording's end; adjust.
             l.start = self.local_start;
         }
-        Ok(l.duration_90k)
+        Ok(l.media_duration_90k)
     }
 
     fn close<C: Clocks + Clone>(mut self, channel: &SyncerChannel<F>, next_pts: Option<i64>,
@@ -813,7 +813,7 @@ impl<F: FileWriter> InnerWriter<F> {
             local_time_delta = self.local_start - l.start;
             l.local_time_delta = local_time_delta;
             l.sample_file_blake3 = Some(blake3.as_bytes().clone());
-            total_duration = recording::Duration(i64::from(l.duration_90k));
+            total_duration = recording::Duration(i64::from(l.wall_duration_90k));
             run_offset = l.run_offset;
             end = l.start + total_duration;
         }

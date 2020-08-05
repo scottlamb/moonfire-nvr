@@ -258,5 +258,8 @@ Version 6 adds over version 5:
     before it on that stream. This is useful for MediaSourceExtension-based
     web browser UIs when setting timestamps of video segments in the
     SourceBuffer.
+*   decoupled "wall time" and "media time" of recoridngs, as a step toward
+    implementing audio support without giving up clock frequency adjustment. See
+    [this comment](https://github.com/scottlamb/moonfire-nvr/issues/34#issuecomment-651548468).
 
 On upgrading to this version, sessions will be revoked.

@@ -165,7 +165,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           retain_bytes integer not null check (retain_bytes >= 0),
           flush_if_sec integer not null,
           cum_recordings integer not null check (cum_recordings >= 0),
-          cum_duration_90k integer not null check (cum_duration_90k >= 0),
+          cum_media_duration_90k integer not null check (cum_media_duration_90k >= 0),
           cum_runs integer not null check (cum_runs >= 0),
           unique (camera_id, type)
         );
@@ -195,10 +195,11 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           flags integer not null,
           sample_file_bytes integer not null check (sample_file_bytes > 0),
           start_time_90k integer not null check (start_time_90k > 0),
-          prev_duration_90k integer not null check (prev_duration_90k >= 0),
+          prev_media_duration_90k integer not null check (prev_media_duration_90k >= 0),
           prev_runs integer not null check (prev_runs >= 0),
-          duration_90k integer not null
-              check (duration_90k >= 0 and duration_90k < 5*60*90000),
+          wall_duration_90k integer not null
+              check (wall_duration_90k >= 0 and wall_duration_90k < 5*60*90000),
+          media_duration_delta_90k integer not null,
           video_samples integer not null check (video_samples > 0),
           video_sync_samples integer not null check (video_sync_samples > 0),
           video_sample_entry_id integer references video_sample_entry (id),
@@ -230,13 +231,13 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     "#)?;
     let mut insert = tx.prepare(r#"
         insert into recording (composite_id, open_id, stream_id, run_offset, flags,
-                               sample_file_bytes, start_time_90k, prev_duration_90k, prev_runs,
-                               duration_90k, video_samples, video_sync_samples,
-                               video_sample_entry_id)
+                               sample_file_bytes, start_time_90k, prev_media_duration_90k,
+                               prev_runs, wall_duration_90k, media_duration_delta_90k,
+                               video_samples, video_sync_samples, video_sample_entry_id)
                        values (:composite_id, :open_id, :stream_id, :run_offset, :flags,
-                               :sample_file_bytes, :start_time_90k, :prev_duration_90k, :prev_runs,
-                               :duration_90k, :video_samples, :video_sync_samples,
-                               :video_sample_entry_id)
+                               :sample_file_bytes, :start_time_90k, :prev_media_duration_90k,
+                               :prev_runs, :wall_duration_90k, 0, :video_samples,
+                               :video_sync_samples, :video_sample_entry_id)
     "#)?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
@@ -247,7 +248,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         let flags: i32 = row.get(4)?;
         let sample_file_bytes: i32 = row.get(5)?;
         let start_time_90k: i64 = row.get(6)?;
-        let duration_90k: i32 = row.get(7)?;
+        let wall_duration_90k: i32 = row.get(7)?;
         let video_samples: i32 = row.get(8)?;
         let video_sync_samples: i32 = row.get(9)?;
         let video_sample_entry_id: i32 = row.get(10)?;
@@ -264,14 +265,14 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             ":flags": flags,
             ":sample_file_bytes": sample_file_bytes,
             ":start_time_90k": start_time_90k,
-            ":prev_duration_90k": cum_duration_90k,
+            ":prev_media_duration_90k": cum_duration_90k,
             ":prev_runs": cum_runs,
-            ":duration_90k": duration_90k,
+            ":wall_duration_90k": wall_duration_90k,
             ":video_samples": video_samples,
             ":video_sync_samples": video_sync_samples,
             ":video_sample_entry_id": video_sample_entry_id,
         }).with_context(|_| format!("Unable to insert composite_id {}", composite_id))?;
-        cum_duration_90k += i64::from(duration_90k);
+        cum_duration_90k += i64::from(wall_duration_90k);
         cum_runs += if run_offset == 0 { 1 } else { 0 };
     }
     tx.execute_batch(r#"
@@ -280,7 +281,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           stream_id,
           start_time_90k,
           open_id,
-          duration_90k,
+          wall_duration_90k,
+          media_duration_delta_90k,
           video_samples,
           video_sync_samples,
           video_sample_entry_id,
