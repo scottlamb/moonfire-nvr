@@ -157,6 +157,7 @@ impl<C: Clocks + Clone> TestDb<C> {
         let (id, _) = db.add_recording(TEST_STREAM_ID, db::RecordingToInsert {
             start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
             video_sample_entry_id,
+            wall_duration_90k: r.media_duration_90k,
             ..r
         }).unwrap();
         db.mark_synced(id).unwrap();

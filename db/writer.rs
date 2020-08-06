@@ -35,7 +35,7 @@
 use base::clock::{self, Clocks};
 use crate::db::{self, CompositeId};
 use crate::dir;
-use crate::recording;
+use crate::recording::{self, MAX_RECORDING_WALL_DURATION};
 use failure::{Error, bail, format_err};
 use fnv::FnvHashMap;
 use parking_lot::Mutex;
@@ -240,8 +240,8 @@ fn delete_recordings(db: &mut db::LockedDatabase, stream_id: i32,
 impl<F: FileWriter> SyncerChannel<F> {
     /// Asynchronously syncs the given writer, closes it, records it into the database, and
     /// starts rotation.
-    fn async_save_recording(&self, id: CompositeId, duration: recording::Duration, f: F) {
-        self.0.send(SyncerCommand::AsyncSaveRecording(id, duration, f)).unwrap();
+    fn async_save_recording(&self, id: CompositeId, wall_duration: recording::Duration, f: F) {
+        self.0.send(SyncerCommand::AsyncSaveRecording(id, wall_duration, f)).unwrap();
     }
 
     /// For testing: flushes the syncer, waiting for all currently-queued commands to complete,
@@ -400,7 +400,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
 
         // Have a command; handle it.
         match cmd {
-            SyncerCommand::AsyncSaveRecording(id, dur, f) => self.save(id, dur, f),
+            SyncerCommand::AsyncSaveRecording(id, wall_dur, f) => self.save(id, wall_dur, f),
             SyncerCommand::DatabaseFlushed => self.collect_garbage(),
             SyncerCommand::Flush(flush) => {
                 // The sender is waiting for the supplied writer to be dropped. If there's no
@@ -448,7 +448,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
     /// so that there can be only one dir sync and database transaction per save.
     /// Internal helper for `save`. This is separated out so that the question-mark operator
     /// can be used in the many error paths.
-    fn save(&mut self, id: CompositeId, duration: recording::Duration, f: D::File) {
+    fn save(&mut self, id: CompositeId, wall_duration: recording::Duration, f: D::File) {
         trace!("Processing save for {}", id);
         let stream_id = id.stream();
 
@@ -462,11 +462,11 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         let c = db.cameras_by_id().get(&s.camera_id).unwrap();
 
         // Schedule a flush.
-        let how_soon = Duration::seconds(s.flush_if_sec) - duration.to_tm_duration();
+        let how_soon = Duration::seconds(s.flush_if_sec) - wall_duration.to_tm_duration();
         let now = self.db.clocks().monotonic();
         let when = now + how_soon;
         let reason = format!("{} sec after start of {} {}-{} recording {}",
-                             s.flush_if_sec, duration, c.short_name, s.type_.as_str(), id);
+                             s.flush_if_sec, wall_duration, c.short_name, s.type_.as_str(), id);
         trace!("scheduling flush in {} because {}", how_soon, &reason);
         self.planned_flushes.push(PlannedFlush {
             when,
@@ -571,8 +571,6 @@ struct InnerWriter<F: FileWriter> {
     /// are discovered. See design/time.md for details.
     local_start: recording::Time,
 
-    adjuster: ClockAdjuster,
-
     /// A sample which has been written to disk but not added to `index`. Index writes are one
     /// sample behind disk writes because the duration of a sample is the difference between its
     /// pts and the next sample's pts. A sample is flushed when the next sample is written, when
@@ -581,55 +579,6 @@ struct InnerWriter<F: FileWriter> {
     ///
     /// Invariant: this should always be `Some` (briefly violated during `write` call only).
     unindexed_sample: Option<UnindexedSample>,
-}
-
-/// Adjusts durations given by the camera to correct its clock frequency error.
-#[derive(Copy, Clone, Debug)]
-struct ClockAdjuster {
-    /// Every `every_minus_1 + 1` units, add `-ndir`.
-    /// Note i32::max_value() disables adjustment.
-    every_minus_1: i32,
-
-    /// Should be 1 or -1 (unless disabled).
-    ndir: i32,
-
-    /// Keeps accumulated difference from previous values.
-    cur: i32,
-}
-
-impl ClockAdjuster {
-    fn new(local_time_delta: Option<i64>) -> Self {
-        // Pick an adjustment rate to correct local_time_delta over the next minute (the
-        // desired duration of a single recording). Cap the rate at 500 ppm (which corrects
-        // 2,700/90,000ths of a second over a minute) to prevent noticeably speeding up or slowing
-        // down playback.
-        let (every_minus_1, ndir) = match local_time_delta {
-            Some(d) if d <= -2700 => (1999,  1),
-            Some(d) if d >=  2700 => (1999, -1),
-            Some(d) if d < -60 => ((60 * 90000) / -i32::try_from(d).unwrap() - 1,  1),
-            Some(d) if d > 60  => ((60 * 90000) /  i32::try_from(d).unwrap() - 1, -1),
-            _ => (i32::max_value(), 0),
-        };
-        ClockAdjuster{
-            every_minus_1,
-            ndir,
-            cur: 0,
-        }
-    }
-
-    fn adjust(&mut self, mut val: i32) -> i32 {
-        self.cur += val;
-
-        // The "val > self.ndir" here is so that if decreasing durations (ndir == 1), we don't
-        // cause a duration of 1 to become a duration of 0. It has no effect when increasing
-        // durations. (There's no danger of a duration of 0 becoming a duration of 1; cur wouldn't
-        // be newly > self.every_minus_1.)
-        while self.cur > self.every_minus_1 && val > self.ndir {
-            val -= self.ndir;
-            self.cur -= self.every_minus_1 + 1;
-        }
-        val
-    }
 }
 
 #[derive(Copy, Clone)]
@@ -644,7 +593,6 @@ struct UnindexedSample {
 #[derive(Copy, Clone)]
 struct PreviousWriter {
     end: recording::Time,
-    local_time_delta: recording::Duration,
     run_offset: i32,
 }
 
@@ -689,7 +637,6 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             completed_live_segment_off_90k: 0,
             hasher: blake3::Hasher::new(),
             local_start: recording::Time(i64::max_value()),
-            adjuster: ClockAdjuster::new(prev.map(|p| p.local_time_delta.0)),
             unindexed_sample: None,
          });
         Ok(())
@@ -724,7 +671,6 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
                 bail!("pts not monotonically increasing; got {} then {}",
                       unindexed.pts_90k, pts_90k);
             }
-            let duration = w.adjuster.adjust(duration);
             let d = match w.add_sample(duration, unindexed.len, unindexed.is_key,
                                        unindexed.local_time) {
                 Ok(d) => d,
@@ -775,29 +721,51 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
     }
 }
 
+fn clamp(v: i64, min: i64, max: i64) -> i64 {
+    std::cmp::min(std::cmp::max(v, min), max)
+}
+
 impl<F: FileWriter> InnerWriter<F> {
     /// Returns the total duration of the `RecordingToInsert` (needed for live view path).
     fn add_sample(&mut self, duration_90k: i32, bytes: i32, is_key: bool,
                   pkt_local_time: recording::Time) -> Result<i32, Error> {
         let mut l = self.r.lock();
-        self.e.add_sample(duration_90k, bytes, is_key, &mut l)?;
-        let new = pkt_local_time - recording::Duration(i64::from(l.media_duration_90k));
-        self.local_start = cmp::min(self.local_start, new);
-        if l.run_offset == 0 {  // start time isn't anchored to previous recording's end; adjust.
-            l.start = self.local_start;
+
+        // design/time.md explains these time manipulations in detail.
+        let media_duration_90k = l.media_duration_90k + duration_90k;
+        let local_start =
+            cmp::min(self.local_start,
+                     pkt_local_time - recording::Duration(i64::from(media_duration_90k)));
+        let limit = i64::from(media_duration_90k / 2000); // 1/2000th, aka 500 ppm.
+        let start = if l.run_offset == 0 {
+            // Start time isn't anchored to previous recording's end; adjust.
+            local_start
+        } else {
+            l.start
+        };
+        let wall_duration_90k =
+            media_duration_90k +
+            i32::try_from(clamp(local_start.0 - start.0, -limit, limit)).unwrap();
+        if wall_duration_90k > i32::try_from(MAX_RECORDING_WALL_DURATION).unwrap() {
+            bail!("Duration {} exceeds maximum {}", wall_duration_90k,
+                  MAX_RECORDING_WALL_DURATION);
         }
-        Ok(l.media_duration_90k)
+        l.wall_duration_90k = wall_duration_90k;
+        l.start = start;
+        self.local_start = local_start;
+        self.e.add_sample(duration_90k, bytes, is_key, &mut l);
+        Ok(media_duration_90k)
     }
 
     fn close<C: Clocks + Clone>(mut self, channel: &SyncerChannel<F>, next_pts: Option<i64>,
              db: &db::Database<C>, stream_id: i32) -> Result<PreviousWriter, Error> {
         let unindexed = self.unindexed_sample.take().expect("should always be an unindexed sample");
         let (last_sample_duration, flags) = match next_pts {
-            None => (self.adjuster.adjust(0), db::RecordingFlags::TrailingZero as i32),
-            Some(p) => (self.adjuster.adjust(i32::try_from(p - unindexed.pts_90k)?), 0),
+            None => (0, db::RecordingFlags::TrailingZero as i32),
+            Some(p) => (i32::try_from(p - unindexed.pts_90k)?, 0),
         };
         let blake3 = self.hasher.finalize();
-        let (local_time_delta, run_offset, end);
+        let (run_offset, end);
         let d = self.add_sample(last_sample_duration, unindexed.len, unindexed.is_key,
                                 unindexed.local_time)?;
 
@@ -806,22 +774,20 @@ impl<F: FileWriter> InnerWriter<F> {
             recording: self.id.recording(),
             off_90k: self.completed_live_segment_off_90k .. d,
         }).unwrap();
-        let total_duration;
+        let wall_duration;
         {
             let mut l = self.r.lock();
             l.flags = flags;
-            local_time_delta = self.local_start - l.start;
-            l.local_time_delta = local_time_delta;
+            l.local_time_delta = self.local_start - l.start;
             l.sample_file_blake3 = Some(blake3.as_bytes().clone());
-            total_duration = recording::Duration(i64::from(l.wall_duration_90k));
+            wall_duration = recording::Duration(i64::from(l.wall_duration_90k));
             run_offset = l.run_offset;
-            end = l.start + total_duration;
+            end = l.start + wall_duration;
         }
         drop(self.r);
-        channel.async_save_recording(self.id, total_duration, self.f);
+        channel.async_save_recording(self.id, wall_duration, self.f);
         Ok(PreviousWriter {
             end,
-            local_time_delta,
             run_offset,
         })
     }
@@ -853,7 +819,7 @@ mod tests {
     use std::io;
     use std::sync::Arc;
     use std::sync::mpsc;
-    use super::{ClockAdjuster, Writer};
+    use super::Writer;
     use crate::testutil;
 
     #[derive(Clone)]
@@ -1321,64 +1287,5 @@ mod tests {
         assert_eq!(h.syncer_rcv.try_recv().err(),
                    Some(std::sync::mpsc::TryRecvError::Disconnected));
         assert!(h.syncer.planned_flushes.is_empty());
-    }
-
-    #[test]
-    fn adjust() {
-        testutil::init();
-
-        // no-ops.
-        for v in &[None, Some(0), Some(-10), Some(10)] {
-            let mut a = ClockAdjuster::new(*v);
-            for _ in 0..1800 {
-                assert_eq!(3000, a.adjust(3000), "v={:?}", *v);
-            }
-        }
-
-        // typical, 100 ppm adjustment.
-        let mut a = ClockAdjuster::new(Some(-540));
-        let mut total = 0;
-        for _ in 0..1800 {
-            let new = a.adjust(3000);
-            assert!(new == 2999 || new == 3000);
-            total += new;
-        }
-        let expected = 1800*3000 - 540;
-        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
-                total, expected);
-
-        a = ClockAdjuster::new(Some(540));
-        let mut total = 0;
-        for _ in 0..1800 {
-            let new = a.adjust(3000);
-            assert!(new == 3000 || new == 3001);
-            total += new;
-        }
-        let expected = 1800*3000 + 540;
-        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
-                total, expected);
-
-        // capped at 500 ppm (change of 2,700/90,000ths over 1 minute).
-        a = ClockAdjuster::new(Some(-1_000_000));
-        total = 0;
-        for _ in 0..1800 {
-            let new = a.adjust(3000);
-            assert!(new == 2998 || new == 2999, "new={}", new);
-            total += new;
-        }
-        let expected = 1800*3000 - 2700;
-        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
-                total, expected);
-
-        a = ClockAdjuster::new(Some(1_000_000));
-        total = 0;
-        for _ in 0..1800 {
-            let new = a.adjust(3000);
-            assert!(new == 3001 || new == 3002, "new={}", new);
-            total += new;
-        }
-        let expected = 1800*3000 + 2700;
-        assert!(total == expected || total == expected + 1, "total={} vs expected={}",
-                total, expected);
     }
 }

@@ -1,6 +1,6 @@
 # Moonfire NVR Time Handling
 
-Status: **in flux**. The approach below works well for video, but audio frames'
+Status: **current**. The approach below works well for video, but audio frames'
 durations can't be adjusted as easily. As part of implementing audio support,
 the implementation is changing to instead decouple "wall time" and "media time",
 as described in 
@@ -33,9 +33,9 @@ from other sources:
      purpose of determining chronology, to the extent those persons use
      accurate clocks.
 
-Two segments of video recorded from the same stream of the same camera should
-not overlap. This would make it impossible for a user interface to present a
-simple timeline for accessing all recorded video.
+Two recordings from the same stream should not overlap. This would make it
+impossible for a user interface to present a simple timeline for accessing all
+recorded video.
 
 Durations should be useful over short timescales:
 
@@ -103,20 +103,22 @@ information:
      interface to determine if the clock is currently synchronized. This
      document's author owns several cameras with clocks that run roughly 20
      ppm fast (2 seconds per day) and are adjusted via steps.
-   * the RTP timestamps from each of a camera's streams. As described in [RFC
-     3550 section 5.1](https://tools.ietf.org/html/rfc3550#section-5.1), these
-     are monotonically increasing with an unspecified reference point. They
-     can't be directly compared to other cameras or other streams from the
-     same camera. Emperically, budget cameras don't appear to do any frequency
-     correction on these timestamps.
-   * in some cases, RTCP sender reports, as described in [RFC 3550 section
-     6.4](https://tools.ietf.org/html/rfc3550#section-6.4). These correlate
-     RTP timestamps with the camera's real time clock. However, these are only
-     sent periodically, not necessarily at the beginning of the session.
-     Some cameras omit them entirely depending on firmware version, as noted
-     in [this forum post](http://www.cctvforum.com/viewtopic.php). Additionally,
-     Moonfire NVR currently uses ffmpeg's libavformat for RTSP protocol
-     handling; this library exposes these reports in a limited fashion.
+   * the RTP timestamps from each of a camera's streams. As described in
+     [RFC 3550 section 5.1](https://tools.ietf.org/html/rfc3550#section-5.1),
+     these are monotonically increasing with an unspecified reference point.
+     They can't be directly compared to other cameras or other streams from
+     the same camera. Emperically, budget cameras don't appear to do any
+     frequency correction on these timestamps.
+   * in some cases, RTCP sender reports, as described in
+     [RFC 3550 section 6.4](https://tools.ietf.org/html/rfc3550#section-6.4).
+     These correlate RTP timestamps with the camera's real time clock.
+     However, these are only sent periodically, not necessarily at the
+     beginning of the session.  Some cameras omit them entirely depending on
+     firmware version, as noted in
+     [this forum post](https://www.cctvforum.com/topic/40914-video-sync-with-hikvision-ipcams-tech-query-about-rtcp/).
+     Additionally, Moonfire NVR currently uses ffmpeg's libavformat for RTSP
+     protocol handling; this library exposes these reports in a limited
+     fashion.
 
 The camera records video frames as in the diagram below:
 
@@ -134,17 +136,22 @@ from the timestamp of the following frame. This means that if a stream is
 terminated, the final frame has unknown duration.
 
 As described in [schema.md](schema.md), Moonfire NVR saves RTSP video streams
-into roughly one-minute "recordings", with a fixed rotation offset after the
+into roughly one-minute *recordings,* with a fixed rotation offset after the
 minute in the NVR's wall time.
+
+See the [glossary](glossary.md) for additional terminology. Glossary terms
+are italicized on first use.
 
 ## Overview
 
-Moonfire NVR will use the RTP timestamps to calculate video frames' durations.
-For the first segment of video, it will trust these completely. It will use
-them and the NVR's wall clock time to establish the start time of the
-recording. For following segments, it will slightly adjust durations to
-compensate for difference between the frequencies of the camera and NVR
-clock, trusting the latter to be accurate.
+Moonfire NVR will use the RTP timestamps to calculate video frames' durations,
+relying on the camera's clock for the *media duration* of frames and
+recordings. In the first recording in a *run*, it will use these durations
+and the NVR's wall clock time to establish the start time of the run. In
+subsequent recordings of the run, it will calculate a *wall duration* which
+is up to 500 ppm different from the media duration to gently correct the
+camera's clock toward the NVR's clock, trusting the latter to be more
+accurate.
 
 ## Detailed design
 
@@ -156,49 +163,55 @@ _local frame time_. Assuming the local clock is accurate, this time is an
 upper bound on when the frame was generated. The difference is the sum of the
 following items:
 
-   * H.264 encoding
-   * buffering on the camera (particularly when starting the stream—some
-     cameras apparently send frames that were captured before the RTSP session
-     was established)
-   * network transmission time
+*   H.264 encoding
+*   buffering on the camera (particularly when starting the stream—some
+    cameras apparently send frames that were captured before the RTSP session
+    was established)
+*   network transmission time
 
-These values may produce some jitter, so the local frame time is not directly
-used to calculate frame durations. Instead, they are primarily taken from
-differences in RTP timestamps from one frame to the next. During the first
-segment of video, these RTP timestamp differences are used directly, without
-correcting for incorrect camera frequency. At the design limit of 500 ppm
-camera frequency error, and an upper bound of two minutes of recording for the
-initial segment (explained below), this causes a maximum of 60 milliseconds of
-error.
+The _local start time_ of a recording is calculated when ending it. It's
+defined as the minimum for all frames of the local frame time minus the
+duration of all previous frames. If there are many frames, this means neither
+initial buffering nor spikes of delay in H.264 encoding or network
+transmission cause the local start time to become inaccurate. The least
+delayed frame wins.
 
-The _local start time_ of a segment is calculated when ending it. It's defined
-as the minimum for all frames of the local frame time minus the duration of
-all previous frames. If there are many frames, this means neither initial
-buffering nor spikes of delay in H.264 encoding or network transmission cause
-the local start time to become inaccurate. The least delayed frame wins.
+The start time of a recording is calculated as follows:
 
-The first segment either ends with the RTSP session (due to error/shutdown) or
-on rotation. In the former case, there may not be many samples to use in
-calculating the local start time; accuracy may suffer but the system degrades
-gracefully. Rotation doesn't happen until the second time the rotation offset
-is passed, so rotation happens after 1–2 minutes rather than 0–1 minutes to
-maximize accuracy.
+*   For the first recording in a *run*: the start time is the local start
+    time.
+*   For subsequent recordings: the start time is the end time of the previous
+    recording.
 
-The _start time_ of the first segment is its local start time. The start time
-of following segments is the end time of the previous segment.
+The *media duration* of video and audio samples is simply taken from the RTSP
+timestamps. For video, this is superior to the local frame time because the
+latter is vulnerable to jitter. For audio, this is the only realistic option;
+it's infeasible to adjust the duration of audio samples.
 
-The duration of following segments is adjusted to compensate for camera
-frequency error, assuming the NVR clock's frequency is more trustworthy. This
-is done as follows. The _local duration_ of segment _i_ is calculated as the
-local start time of segment _i+1_ minus the local start time of segment _i_.
-The _cumulative error_ as of segment _i_ is defined as the local duration of
-all previous segments minus the duration of all previous segments. The
-duration of segment _i_ should be adjusted by up to 500 ppm to eliminate
-cumulative error. (For a one-minute segment, this is 0.3 ms, or 27 90kHz units.)
-This correction should be spread out across the segment to minimize jitter.
+The media duration of recordings and runs are simply taken from the media
+durations of the samples they contain.
 
-Each segment's local start time is also stored in the database as a delta to
-the segment's start time. These stored values aren't  for normal system
+Over a long run, the start time plus the media duration may drift
+significantly from the actual time samples were recorded because of
+inaccuracies in the camera's clock. Therefore, Moonfire NVR also calculates
+a *wall duration* of recordings which more closely matches the NVR's clock.
+It is calculated as follows:
+
+*   For the first recording in a run: the wall duration is the media duration.
+    At the design limit of 500 ppm camera frequency error and an upper
+    bound of two minutes duration for the initial recording, this causes
+    a maximum of 60 milliseconds of error.
+*   For subsequent recordings, the wall duration is the media duration
+    adjusted by up to 500 ppm to reduce differences between the "local start
+    time" and the start time, as follows:
+    ```
+    limit = media_duration / 2000
+    wall_duration = media_duration + clamp(local_start - start, -limit, +limit)
+    ```
+    Note that for a 1-minute recording, 500 ppm is 0.3 ms, or 27 90kHz units.
+
+Each recording's local start time is also stored in the database as a delta to
+the recording's start time. These stored values aren't used for normal system
 operation but may be handy in understanding and correcting errors.
 
 ## Caveats
@@ -212,8 +225,8 @@ could be used in some circumstances: the _camera start time_. The first RTCP
 sender report could be used to correlate a RTP timestamp with the camera's
 wall clock, and thus calculate the camera's time as of the first frame.
 
-The _start time_ of the first segment could be either its local start time or
-its camera start time, determined via the following rules:
+The _start time_ of the first recording could be either its local start time
+or its camera start time, determined via the following rules:
 
    1. if there is no camera start time (due to the lack of a RTCP sender
       report), the local start time wins by default.
@@ -329,3 +342,11 @@ attempt to correct the time into TAI with a leap second table. This behavior
 would work well on a system with the expected configuration and produce
 surprising results on other systems. It's unfortunate that there's no standard
 way to determine if a system is using a leap smear and with what policy.
+
+## Alternatives considered
+
+Schema versions prior to 6 used a simpler database schema which didn't
+distinguish between "wall" and "media" time. Instead, the durations of video
+samples were adjusted for clock correction. This approach worked well for
+video. It couldn't be extended to audio without decoding and re-encoding to
+adjust same lengths and pitch.

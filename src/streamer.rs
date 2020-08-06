@@ -217,6 +217,7 @@ mod tests {
     use log::trace;
     use parking_lot::Mutex;
     use std::cmp;
+    use std::convert::TryFrom;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use time;
@@ -256,7 +257,8 @@ mod tests {
 
             let mut pkt = self.inner.get_next()?;
 
-            // Advance clock to the end of this frame.
+            // Emulate the behavior of real cameras that send some pre-buffered frames immediately
+            // on connect. After that, advance clock to the end of this frame.
             // Avoid accumulating conversion error by tracking the total amount to sleep and how
             // much we've already slept, rather than considering each frame in isolation.
             {
@@ -278,8 +280,9 @@ mod tests {
                 pkt.set_dts(old_dts + self.ts_offset);
 
                 // In a real rtsp stream, the duration of a packet is not known until the
-                // next packet. ffmpeg's duration is an unreliable estimate.
-                pkt.set_duration(recording::TIME_UNITS_PER_SEC as i32);
+                // next packet. ffmpeg's duration is an unreliable estimate. Set it to something
+                // ridiculous.
+                pkt.set_duration(i32::try_from(3600 * recording::TIME_UNITS_PER_SEC).unwrap());
             }
 
             Ok(pkt)
@@ -350,7 +353,7 @@ mod tests {
 
         let stream = stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
         let mut stream = ProxyingStream::new(&clocks, time::Duration::seconds(2), stream);
-        stream.ts_offset = 180000;  // starting pts of the input should be irrelevant
+        stream.ts_offset = 123456;  // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::max_value();
         stream.pkts_left = u32::max_value();
         let opener = MockOpener{
