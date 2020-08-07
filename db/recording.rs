@@ -143,7 +143,7 @@ impl SampleIndexIterator {
         Ok(true)
     }
 
-    pub fn uninitialized(&self) -> bool { self.i_and_is_key == 0 }
+    #[inline]
     pub fn is_key(&self) -> bool { (self.i_and_is_key & 0x8000_0000) != 0 }
 }
 
@@ -208,14 +208,20 @@ impl Segment {
     /// Creates a segment.
     ///
     /// `desired_media_range_90k` represents the desired range of the segment relative to the start
-    /// of the recording, in media time units. The actual range will start at the first key frame
-    /// at or before the desired start time. (The caller is responsible for creating an edit list
-    /// to skip the undesired portion.) It will end at the first frame after the desired range
-    /// (unless the desired range extends beyond the recording). (Likewise, the caller is
-    /// responsible for trimming the final frame's duration if desired.)
+    /// of the recording, in media time units.
+    ///
+    /// The actual range will start at the most recent acceptable frame's start at or before the
+    /// desired start time. If `start_at_key` is true, only key frames are acceptable; otherwise
+    /// any frame is. The caller is responsible for skipping over the undesired prefix, perhaps
+    /// with an edit list in the case of a `.mp4`.
+    ///
+    /// The actual range will end at the first frame after the desired range (unless the desired
+    /// range extends beyond the recording). Likewise, the caller is responsible for trimming the
+    /// final frame's duration if desired.
     pub fn new(db: &db::LockedDatabase,
                recording: &db::ListRecordingsRow,
-               desired_media_range_90k: Range<i32>) -> Result<Segment, Error> {
+               desired_media_range_90k: Range<i32>,
+               start_at_key: bool) -> Result<Segment, Error> {
         let mut self_ = Segment {
             id: recording.id,
             open_id: recording.open_id,
@@ -268,7 +274,8 @@ impl Segment {
             };
 
             loop {
-                if it.start_90k <= desired_media_range_90k.start && it.is_key() {
+                if it.start_90k <= desired_media_range_90k.start &&
+                    (!start_at_key || it.is_key()) {
                     // new start candidate.
                     *begin = it;
                     self_.frames = 0;
@@ -317,16 +324,17 @@ impl Segment {
         let data = &(&playback).video_index;
         let mut it = match self.begin {
             Some(ref b) => **b,
-            None => SampleIndexIterator::new(),
+            None => {
+                let mut it = SampleIndexIterator::new();
+                if !it.next(data)? {
+                    bail!("recording {} has no frames", self.id);
+                }
+                if !it.is_key() {
+                    bail!("recording {} doesn't start with key frame", self.id);
+                }
+                it
+            }
         };
-        if it.uninitialized() {
-            if !it.next(data)? {
-                bail!("recording {}: no frames", self.id);
-            }
-            if !it.is_key() {
-                bail!("recording {}: doesn't start with key frame", self.id);
-            }
-        }
         let mut have_frame = true;
         let mut key_frame = 0;
 
@@ -358,6 +366,17 @@ impl Segment {
                   self.id, self.key_frames, key_frame);
         }
         Ok(())
+    }
+
+    /// Returns true if this starts with a non-key frame.
+    pub fn starts_with_nonkey(&self) -> bool {
+        match self.begin {
+            Some(ref b) => !b.is_key(),
+
+            // Fast-path case, in which this holds an entire recording. They always start with a
+            // key frame.
+            None => false,
+        }
     }
 }
 
@@ -467,7 +486,7 @@ mod tests {
         let row = db.insert_recording_from_encoder(r);
         // Time range [2, 2 + 4 + 6 + 8) means the 2nd, 3rd, 4th samples should be
         // included.
-        let segment = Segment::new(&db.db.lock(), &row, 2 .. 2+4+6+8).unwrap();
+        let segment = Segment::new(&db.db.lock(), &row, 2 .. 2+4+6+8, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[4, 6, 8]);
     }
 
@@ -486,7 +505,7 @@ mod tests {
         let row = db.insert_recording_from_encoder(r);
         // Time range [2 + 4 + 6, 2 + 4 + 6 + 8) means the 4th sample should be included.
         // The 3rd also gets pulled in because it is a sync frame and the 4th is not.
-        let segment = Segment::new(&db.db.lock(), &row, 2+4+6 .. 2+4+6+8).unwrap();
+        let segment = Segment::new(&db.db.lock(), &row, 2+4+6 .. 2+4+6+8, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[6, 8]);
     }
 
@@ -500,7 +519,7 @@ mod tests {
         encoder.add_sample(0, 3, true, &mut r);
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
-        let segment = Segment::new(&db.db.lock(), &row, 1 .. 2).unwrap();
+        let segment = Segment::new(&db.db.lock(), &row, 1 .. 2, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[2, 3]);
     }
 
@@ -513,7 +532,7 @@ mod tests {
         encoder.add_sample(1, 1, true, &mut r);
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
-        let segment = Segment::new(&db.db.lock(), &row, 0 .. 0).unwrap();
+        let segment = Segment::new(&db.db.lock(), &row, 0 .. 0, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1]);
     }
 
@@ -531,7 +550,7 @@ mod tests {
         }
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
-        let segment = Segment::new(&db.db.lock(), &row, 0 .. 2+4+6+8+10).unwrap();
+        let segment = Segment::new(&db.db.lock(), &row, 0 .. 2+4+6+8+10, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[2, 4, 6, 8, 10]);
     }
 
@@ -545,7 +564,7 @@ mod tests {
         encoder.add_sample(0, 3, true, &mut r);
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
-        let segment = Segment::new(&db.db.lock(), &row, 0 .. 2).unwrap();
+        let segment = Segment::new(&db.db.lock(), &row, 0 .. 2, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1, 2, 3]);
     }
 

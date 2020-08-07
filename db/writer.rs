@@ -558,10 +558,6 @@ struct InnerWriter<F: FileWriter> {
     e: recording::SampleIndexEncoder,
     id: CompositeId,
 
-    /// The pts, relative to the start of this segment and in 90kHz units, up until which live
-    /// segments have been sent out. Initially 0.
-    completed_live_segment_media_off_90k: i32,
-
     hasher: blake3::Hasher,
 
     /// The start time of this segment, based solely on examining the local clock after frames in
@@ -634,7 +630,6 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             r,
             e: recording::SampleIndexEncoder::new(),
             id,
-            completed_live_segment_media_off_90k: 0,
             hasher: blake3::Hasher::new(),
             local_start: recording::Time(i64::max_value()),
             unindexed_sample: None,
@@ -666,29 +661,14 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
         if let Some(unindexed) = w.unindexed_sample.take() {
             let duration = i32::try_from(pts_90k - i64::from(unindexed.pts_90k))?;
             if duration <= 0 {
-                // Restore invariant.
-                w.unindexed_sample = Some(unindexed);
+                w.unindexed_sample = Some(unindexed); // restore invariant.
                 bail!("pts not monotonically increasing; got {} then {}",
                       unindexed.pts_90k, pts_90k);
             }
-            let d = match w.add_sample(duration, unindexed.len, unindexed.is_key,
-                                       unindexed.local_time) {
-                Ok(d) => d,
-                Err(e) => {
-                    // Restore invariant.
-                    w.unindexed_sample = Some(unindexed);
-                    return Err(e);
-                },
-            };
-
-            // If the sample `write` was called on is a key frame, then the prior frames (including
-            // the one we just flushed) represent a live segment. Send it out.
-            if is_key {
-                self.db.lock().send_live_segment(self.stream_id, db::LiveSegment {
-                    recording: w.id.recording(),
-                    media_off_90k: w.completed_live_segment_media_off_90k .. d,
-                }).unwrap();
-                w.completed_live_segment_media_off_90k = d;
+            if let Err(e) = w.add_sample(duration, unindexed.len, unindexed.is_key,
+                                         unindexed.local_time, self.db, self.stream_id) {
+                w.unindexed_sample = Some(unindexed); // restore invariant.
+                return Err(e);
             }
         }
         let mut remaining = pkt;
@@ -726,12 +706,14 @@ fn clamp(v: i64, min: i64, max: i64) -> i64 {
 }
 
 impl<F: FileWriter> InnerWriter<F> {
-    /// Returns the total media duration of the `RecordingToInsert` (needed for live view path).
-    fn add_sample(&mut self, duration_90k: i32, bytes: i32, is_key: bool,
-                  pkt_local_time: recording::Time) -> Result<i32, Error> {
+    fn add_sample<C: Clocks + Clone>(&mut self, duration_90k: i32, bytes: i32, is_key: bool,
+                                     pkt_local_time: recording::Time, db: &db::Database<C>,
+                                     stream_id: i32)
+                                     -> Result<(), Error> {
         let mut l = self.r.lock();
 
         // design/time.md explains these time manipulations in detail.
+        let prev_media_duration_90k = l.media_duration_90k;
         let media_duration_90k = l.media_duration_90k + duration_90k;
         let local_start =
             cmp::min(self.local_start,
@@ -754,7 +736,13 @@ impl<F: FileWriter> InnerWriter<F> {
         l.start = start;
         self.local_start = local_start;
         self.e.add_sample(duration_90k, bytes, is_key, &mut l);
-        Ok(media_duration_90k)
+        drop(l);
+        db.lock().send_live_segment(stream_id, db::LiveSegment {
+            recording: self.id.recording(),
+            is_key,
+            media_off_90k: prev_media_duration_90k .. media_duration_90k,
+        }).unwrap();
+        Ok(())
     }
 
     fn close<C: Clocks + Clone>(mut self, channel: &SyncerChannel<F>, next_pts: Option<i64>,
@@ -766,14 +754,10 @@ impl<F: FileWriter> InnerWriter<F> {
         };
         let blake3 = self.hasher.finalize();
         let (run_offset, end);
-        let d = self.add_sample(last_sample_duration, unindexed.len, unindexed.is_key,
-                                unindexed.local_time)?;
+        self.add_sample(last_sample_duration, unindexed.len, unindexed.is_key,
+                        unindexed.local_time, db, stream_id)?;
 
         // This always ends a live segment.
-        db.lock().send_live_segment(stream_id, db::LiveSegment {
-            recording: self.id.recording(),
-            media_off_90k: self.completed_live_segment_media_off_90k .. d,
-        }).unwrap();
         let wall_duration;
         {
             let mut l = self.r.lock();

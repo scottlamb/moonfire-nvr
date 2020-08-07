@@ -424,22 +424,29 @@ impl Service {
             tungstenite::protocol::Role::Server,
             None,
         ).await;
+
+        // Start the first segment at a key frame to reduce startup latency.
+        let mut start_at_key = true;
         loop {
             let live = match sub_rx.next().await {
                 Some(l) => l,
                 None => return,
             };
-            if let Err(e) = self.stream_live_m4s_chunk(open_id, stream_id, &mut ws, live).await {
+
+            info!("chunk: is_key={:?}", live.is_key);
+            if let Err(e) = self.stream_live_m4s_chunk(open_id, stream_id, &mut ws, live,
+                                                       start_at_key).await {
                 info!("Dropping WebSocket after error: {}", e);
                 return;
             }
+            start_at_key = false;
         }
     }
 
     async fn stream_live_m4s_chunk(
         &self, open_id: u32, stream_id: i32,
         ws: &mut tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>,
-        live: db::LiveSegment) -> Result<(), Error> {
+        live: db::LiveSegment, start_at_key: bool) -> Result<(), Error> {
         let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
         let mut row = None;
         {
@@ -448,7 +455,7 @@ impl Service {
             db.list_recordings_by_id(stream_id, live.recording .. live.recording+1, &mut |r| {
                 rows += 1;
                 row = Some(r);
-                builder.append(&db, r, live.media_off_90k.clone())?;
+                builder.append(&db, r, live.media_off_90k.clone(), start_at_key)?;
                 Ok(())
             })?;
             if rows != 1 {
@@ -753,7 +760,7 @@ impl Service {
                                 let mr =
                                     rescale(wr.start, r.wall_duration_90k, r.media_duration_90k) ..
                                     rescale(wr.end,   r.wall_duration_90k, r.media_duration_90k);
-                                builder.append(&db, r, mr)?;
+                                builder.append(&db, r, mr, true)?;
                             } else {
                                 debug!("...skipping recording {} wall dur {}", r.id, wd);
                             }
@@ -1441,7 +1448,7 @@ mod bench {
     }
 
     lazy_static! {
-        static ref SERVER: Server = { Server::new() };
+        static ref SERVER: Server = Server::new();
     }
 
     #[bench]

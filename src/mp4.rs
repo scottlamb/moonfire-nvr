@@ -382,9 +382,9 @@ unsafe impl Sync for Segment {}
 
 impl Segment {
     fn new(db: &db::LockedDatabase, row: &db::ListRecordingsRow, rel_media_range_90k: Range<i32>,
-           first_frame_num: u32) -> Result<Self, Error> {
+           first_frame_num: u32, start_at_key: bool) -> Result<Self, Error> {
         Ok(Segment {
-            s: recording::Segment::new(db, row, rel_media_range_90k.clone())
+            s: recording::Segment::new(db, row, rel_media_range_90k.clone(), start_at_key)
                 .err_kind(ErrorKind::Unknown)?,
             recording_start: row.start,
             recording_wall_duration_90k: row.wall_duration_90k,
@@ -475,8 +475,9 @@ impl Segment {
     }
 
     fn truns_len(&self) -> usize {
-        (self.s.key_frames as usize) * (mem::size_of::<u32>() * 6) +
-        (    self.s.frames as usize) * (mem::size_of::<u32>() * 2)
+        self.s.key_frames as usize * (mem::size_of::<u32>() * 6) +
+            self.s.frames as usize * (mem::size_of::<u32>() * 2) +
+        if self.s.starts_with_nonkey() { mem::size_of::<u32>() * 5 } else { 0 }
     }
 
     // TrackRunBox / trun (8.8.8).
@@ -494,7 +495,8 @@ impl Segment {
         let mut run_info: Option<RunInfo> = None;
         let mut data_pos = initial_pos;
         self.s.foreach(playback, |it| {
-            if it.is_key() {
+            let is_key = it.is_key();
+            if is_key {
                 if let Some(r) = run_info.take() {
                     // Finish a non-terminal run.
                     let p = v.len();
@@ -503,48 +505,56 @@ impl Segment {
                     BigEndian::write_u32(&mut v[r.sample_count_pos .. r.sample_count_pos + 4],
                                          r.count);
                 }
-                let box_len_pos = v.len();
-                v.extend_from_slice(&[
-                    0x00, 0x00, 0x00, 0x00,  // placeholder for size
-                    b't', b'r', b'u', b'n',
-
-                    // version 0, tr_flags:
-                    // 0x000001 data-offset-present
-                    // 0x000004 first-sample-flags-present
-                    // 0x000100 sample-duration-present
-                    // 0x000200 sample-size-present
-                    0x00, 0x00, 0x03, 0x05,
-                    ]);
-                run_info = Some(RunInfo {
-                    box_len_pos,
-                    sample_count_pos: v.len(),
-                    count: 1,
-                    last_start: it.start_90k,
-                    last_dur: it.duration_90k,
-                });
-                v.write_u32::<BigEndian>(0)?;  // placeholder for sample count
-                v.write_u32::<BigEndian>(data_pos as u32)?;
-
-                // first_sample_flags. See trex (8.8.3.1).
-                v.write_u32::<BigEndian>(
-                    // As defined by the Independent and Disposable Samples Box (sdp, 8.6.4).
-                    (2 << 26) |  // is_leading: this sample is not a leading sample
-                    (2 << 24) |  // sample_depends_on: this sample does not depend on others
-                    (1 << 22) |  // sample_is_depend_on: others may depend on this one
-                    (2 << 20) |  // sample_has_redundancy: no redundant coding
-                    // As defined by the sample padding bits (padb, 8.7.6).
-                    (0 << 17) |  // no padding
-                    (0 << 16) |  // sample_is_non_sync_sample=0
-                    0)?;         // TODO: sample_degradation_priority
-            } else {
-                let r = run_info.as_mut().expect("non-key sample must be preceded by key sample");
-                r.count += 1;
-                r.last_start = it.start_90k;
-                r.last_dur = it.duration_90k;
             }
+            let mut r = match run_info.take() {
+                None => {
+                    let box_len_pos = v.len();
+                    v.extend_from_slice(&[
+                        0x00, 0x00, 0x00, 0x00,  // placeholder for size
+                        b't', b'r', b'u', b'n',
+
+                        // version 0, tr_flags:
+                        // 0x000001 data-offset-present
+                        // 0x000004 first-sample-flags-present
+                        // 0x000100 sample-duration-present
+                        // 0x000200 sample-size-present
+                        0x00, 0x00, 0x03, 0x01 | if is_key { 0x04 } else { 0 },
+                        ]);
+                    let sample_count_pos = v.len();
+                    v.write_u32::<BigEndian>(0)?;  // placeholder for sample count
+                    v.write_u32::<BigEndian>(data_pos as u32)?;
+
+                    if is_key {
+                        // first_sample_flags. See trex (8.8.3.1).
+                        v.write_u32::<BigEndian>(
+                            // As defined by the Independent and Disposable Samples Box
+                            // (sdp, 8.6.4).
+                            (2 << 26) | // is_leading: this sample is not a leading sample
+                            (2 << 24) | // sample_depends_on: this sample does not depend on others
+                            (1 << 22) | // sample_is_depend_on: others may depend on this one
+                            (2 << 20) | // sample_has_redundancy: no redundant coding
+                            // As defined by the sample padding bits (padb, 8.7.6).
+                            (0 << 17) | // no padding
+                            (0 << 16) | // sample_is_non_sync_sample=0
+                            0)?;        // TODO: sample_degradation_priority
+                    }
+                    RunInfo {
+                        box_len_pos,
+                        sample_count_pos,
+                        count: 0,
+                        last_start: 0,
+                        last_dur: 0,
+                    }
+                },
+                Some(r) => r,
+            };
+            r.count += 1;
+            r.last_start = it.start_90k;
+            r.last_dur = it.duration_90k;
             v.write_u32::<BigEndian>(it.duration_90k as u32)?;
             v.write_u32::<BigEndian>(it.bytes as u32)?;
             data_pos += it.bytes as u64;
+            run_info = Some(r);
             Ok(())
         }).err_kind(ErrorKind::Internal)?;
         if let Some(r) = run_info.take() {
@@ -562,6 +572,9 @@ impl Segment {
                 u32::try_from(cmp::min(self.rel_media_range_90k.end - r.last_start, r.last_dur))
                     .unwrap());
 
+        }
+        if len != v.len() {
+            bail_t!(Internal, "truns on {:?} expected len {} got len {}", self, len, v.len());
         }
         Ok(v)
     }
@@ -643,12 +656,18 @@ impl Slice {
     }
     fn p(&self) -> usize { (self.0 >> 44) as usize }
 
-    fn wrap_index<F>(&self, mp4: &File, r: Range<u64>, f: &F) -> Result<Chunk, Error>
+    fn wrap_index<F>(&self, mp4: &File, r: Range<u64>, len: u64, f: &F) -> Result<Chunk, Error>
     where F: Fn(&[u8], SegmentLengths) -> &[u8] {
         let mp4 = ARefss::new(mp4.0.clone());
         let r = r.start as usize .. r.end as usize;
         let p = self.p();
-        Ok(mp4.try_map(|mp4| Ok::<_, Error>(&mp4.segments[p].get_index(&mp4.db, f)?[r]))?.into())
+        Ok(mp4.try_map(|mp4| {
+            let i = mp4.segments[p].get_index(&mp4.db, f)?;
+            if u64::try_from(i.len()).unwrap() != len {
+                bail_t!(Internal, "expected len {} got {}", len, i.len());
+            }
+            Ok::<_, Error>(&i[r])
+        })?.into())
     }
 
     fn wrap_truns(&self, mp4: &File, r: Range<u64>, len: usize) -> Result<Chunk, Error> {
@@ -665,6 +684,17 @@ impl Slice {
         let truns = ARefss::new(truns);
         Ok(truns.map(|t| &t[r.start as usize .. r.end as usize]).into())
     }
+
+    fn wrap_video_sample_entry(&self, f: &File, r: Range<u64>, len: u64) -> Result<Chunk, Error> {
+        let mp4 = ARefss::new(f.0.clone());
+        Ok(mp4.try_map(|mp4| {
+            let data = &mp4.video_sample_entries[self.p()].data;
+            if u64::try_from(data.len()).unwrap() != len {
+                bail_t!(Internal, "expected len {} got len {}", len, data.len());
+            }
+            Ok::<_, Error>(&data[r.start as usize .. r.end as usize])
+        })?.into())
+    }
 }
 
 impl slices::Slice for Slice {
@@ -679,21 +709,21 @@ impl slices::Slice for Slice {
         let res = match self.t() {
             SliceType::Static => {
                 let s = STATIC_BYTESTRINGS[p];
-                let part = &s[range.start as usize .. range.end as usize];
-                Ok(part.into())
+                if u64::try_from(s.len()).unwrap() != len {
+                    Err(format_err_t!(Internal, "expected len {} got len {}", len, s.len()))
+                } else {
+                    let part = &s[range.start as usize .. range.end as usize];
+                    Ok(part.into())
+                }
             },
             SliceType::Buf => {
                 let r = ARefss::new(f.0.clone());
                 Ok(r.map(|f| &f.buf[p+range.start as usize .. p+range.end as usize]).into())
             },
-            SliceType::VideoSampleEntry => {
-                let r = ARefss::new(f.0.clone());
-                Ok(r.map(|f| &f.video_sample_entries[p]
-                               .data[range.start as usize .. range.end as usize]).into())
-            },
-            SliceType::Stts => self.wrap_index(f, range.clone(), &Segment::stts),
-            SliceType::Stsz => self.wrap_index(f, range.clone(), &Segment::stsz),
-            SliceType::Stss => self.wrap_index(f, range.clone(), &Segment::stss),
+            SliceType::VideoSampleEntry => self.wrap_video_sample_entry(f, range.clone(), len),
+            SliceType::Stts => self.wrap_index(f, range.clone(), len, &Segment::stts),
+            SliceType::Stsz => self.wrap_index(f, range.clone(), len, &Segment::stsz),
+            SliceType::Stss => self.wrap_index(f, range.clone(), len, &Segment::stss),
             SliceType::Co64 => f.0.get_co64(range.clone(), len),
             SliceType::VideoSampleData => f.0.get_video_sample_data(p, range.clone()),
             SliceType::SubtitleSampleData => f.0.get_subtitle_sample_data(p, range.clone(), len),
@@ -797,7 +827,7 @@ impl FileBuilder {
     /// `rel_media_range_90k` is the media time range within the recording.
     /// Eg `0 .. row.media_duration_90k` means the full recording.
     pub fn append(&mut self, db: &db::LockedDatabase, row: db::ListRecordingsRow,
-                  rel_media_range_90k: Range<i32>) -> Result<(), Error> {
+                  rel_media_range_90k: Range<i32>, start_at_key: bool) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero() {
                 bail_t!(InvalidArgument,
@@ -810,7 +840,7 @@ impl FileBuilder {
             self.prev_media_duration_and_cur_runs = row.prev_media_duration_and_runs
                 .map(|(d, r)| (d, r + if row.open_id == 0 { 1 } else { 0 }));
         }
-        let s = Segment::new(db, &row, rel_media_range_90k, self.next_frame_num)?;
+        let s = Segment::new(db, &row, rel_media_range_90k, self.next_frame_num, start_at_key)?;
 
         self.next_frame_num += s.s.frames as u32;
         self.segments.push(s);
@@ -1006,7 +1036,8 @@ impl FileBuilder {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mvex");
 
-            // Appends a `TrackExtendsBox` (ISO/IEC 14496-12 section 8.8.3) for the video track.
+            // Appends a `TrackExtendsBox`, `trex` (ISO/IEC 14496-12 section 8.8.3) for the video
+            // track.
             write_length!(self, {
                 self.body.buf.extend_from_slice(&[
                     b't', b'r', b'e', b'x',
@@ -1043,7 +1074,7 @@ impl FileBuilder {
             write_length!(self, {
                 self.body.buf.extend_from_slice(b"traf");
 
-                // TrackFragmentHeaderBox (ISO/IEC 14496-12 section 8.8.7).
+                // TrackFragmentHeaderBox, tfhd (ISO/IEC 14496-12 section 8.8.7).
                 write_length!(self, {
                     self.body.buf.extend_from_slice(&[
                         b't', b'f', b'h', b'd',
@@ -1793,6 +1824,8 @@ mod tests {
             str::from_utf8(&self.stack.last().expect("at root").boxtype[..]).unwrap()
         }
 
+        pub fn depth(&self) -> usize { self.stack.len() }
+
         /// Gets the specified byte range within the current box (excluding length and type).
         /// Must not be at EOF.
         pub async fn get(&self, start: u64, buf: &mut [u8]) {
@@ -1912,6 +1945,15 @@ mod tests {
         }
     }
 
+    /// Traverses the box structure in `mp4` depth-first, validating the box positions.
+    async fn traverse(mp4: File) {
+        let mut cursor = BoxCursor::new(mp4);
+        cursor.down().await;
+        while cursor.depth() > 0 {
+            cursor.next().await;
+        }
+    }
+
     fn copy_mp4_to_db(db: &TestDb<RealClocks>) {
         let mut input =
             stream::FFMPEG.open(stream::Source::File("src/testdata/clip.mp4")).unwrap();
@@ -1950,8 +1992,8 @@ mod tests {
         db.syncer_channel.flush();
     }
 
-    pub fn create_mp4_from_db(tdb: &TestDb<RealClocks>,
-                              skip_90k: i32, shorten_90k: i32, include_subtitles: bool) -> File {
+    pub fn create_mp4_from_db(tdb: &TestDb<RealClocks>, skip_90k: i32, shorten_90k: i32,
+                                    include_subtitles: bool) -> File {
         let mut builder = FileBuilder::new(Type::Normal);
         builder.include_timestamp_subtitle_track(include_subtitles).unwrap();
         let all_time = recording::Time(i64::min_value()) .. recording::Time(i64::max_value());
@@ -1961,7 +2003,7 @@ mod tests {
                 let d = r.media_duration_90k;
                 assert!(skip_90k + shorten_90k < d, "skip_90k={} shorten_90k={} r={:?}",
                         skip_90k, shorten_90k, r);
-                builder.append(&*db, r, skip_90k .. d - shorten_90k).unwrap();
+                builder.append(&*db, r, skip_90k .. d - shorten_90k, true).unwrap();
                 Ok(())
             }).unwrap();
         }
@@ -2027,7 +2069,8 @@ mod tests {
     /// sample tables that match the supplied encoder.
     fn make_mp4_from_encoders(type_: Type, db: &TestDb<RealClocks>,
                               mut recordings: Vec<db::RecordingToInsert>,
-                              desired_range_90k: Range<i32>) -> Result<File, Error> {
+                              desired_range_90k: Range<i32>,
+                              start_at_key: bool) -> Result<File, Error> {
         let mut builder = FileBuilder::new(type_);
         let mut duration_so_far = 0;
         for r in recordings.drain(..) {
@@ -2040,7 +2083,7 @@ mod tests {
                 desired_range_90k.end - duration_so_far
             };
             duration_so_far += row.media_duration_90k;
-            builder.append(&db.db.lock(), row, d_start .. d_end).unwrap();
+            builder.append(&db.db.lock(), row, d_start .. d_end, start_at_key).unwrap();
         }
         builder.build(db.db.clone(), db.dirs_by_stream_id.clone())
     }
@@ -2059,7 +2102,8 @@ mod tests {
         }
 
         // Time range [2, 2+4+6+8) means the 2nd, 3rd, and 4th samples should be included.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2 .. 2+4+6+8).unwrap();
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2 .. 2+4+6+8, true).unwrap();
+        traverse(mp4.clone()).await;
         let track = find_track(mp4, 1).await;
         assert!(track.edts_cursor.is_none());
         let mut cursor = track.stbl_cursor;
@@ -2114,7 +2158,9 @@ mod tests {
 
         // Time range [2+4+6, 2+4+6+8) means the 4th sample should be included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2+4+6 .. 2+4+6+8).unwrap();
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, vec![r], 2+4+6 .. 2+4+6+8, true)
+            .unwrap();
+        traverse(mp4.clone()).await;
         let track = find_track(mp4, 1).await;
 
         // Examine edts. It should skip the 3rd frame.
@@ -2167,7 +2213,7 @@ mod tests {
     async fn test_no_segments() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
-        let e = make_mp4_from_encoders(Type::Normal, &db, vec![], 0 .. 0).err().unwrap();
+        let e = make_mp4_from_encoders(Type::Normal, &db, vec![], 0 .. 0, true).err().unwrap();
         assert_eq!(e.to_string(), "Invalid argument: no video_sample_entries");
     }
 
@@ -2189,7 +2235,9 @@ mod tests {
         encoders.push(r);
 
         // This should include samples 3 and 4 only, both sync frames.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1+2 .. 1+2+3+4).unwrap();
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1+2 .. 1+2+3+4, true)
+            .unwrap();
+        traverse(mp4.clone()).await;
         let mut cursor = BoxCursor::new(mp4);
         cursor.down().await;
         assert!(cursor.find(b"moov").await);
@@ -2224,7 +2272,8 @@ mod tests {
         encoders.push(r);
 
         // Multi-segment recording with an edit list, encoding with a zero-duration recording.
-        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1 .. 2+3).unwrap();
+        let mp4 = make_mp4_from_encoders(Type::Normal, &db, encoders, 1 .. 2+3, true).unwrap();
+        traverse(mp4.clone()).await;
         let track = find_track(mp4, 1).await;
         let mut cursor = track.edts_cursor.unwrap();
         cursor.down().await;
@@ -2249,7 +2298,8 @@ mod tests {
         // Time range [2+4+6, 2+4+6+8+1) means the 4th sample and part of the 5th are included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
         let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![r],
-                                         2+4+6 .. 2+4+6+8+1).unwrap();
+                                         2+4+6 .. 2+4+6+8+1, true).unwrap();
+        traverse(mp4.clone()).await;
         let mut cursor = BoxCursor::new(mp4);
         cursor.down().await;
 
@@ -2277,12 +2327,43 @@ mod tests {
         assert_eq!(cursor.get_u32(20).await, 15);   // sample size
     }
 
+    /// Tests `.mp4` files which represent a single frame, as in the live view WebSocket stream.
+    #[tokio::test]
+    async fn test_single_frame_media_segment() {
+        testutil::init();
+        let db = TestDb::new(RealClocks {});
+        let mut r = db::RecordingToInsert::default();
+        let mut encoder = recording::SampleIndexEncoder::new();
+        for i in 1..6 {
+            let duration_90k = 2 * i;
+            let bytes = 3 * i;
+            encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
+        }
+
+        let mut pos = 0;
+        for i in 1..6 {
+            let duration_90k = 2 * i;
+            let mp4 = make_mp4_from_encoders(Type::MediaSegment, &db, vec![r.clone()],
+                                             pos .. pos+duration_90k, false).unwrap();
+            traverse(mp4.clone()).await;
+            let mut cursor = BoxCursor::new(mp4);
+            cursor.down().await;
+            assert!(cursor.find(b"moof").await);
+            cursor.down().await;
+            assert!(cursor.find(b"traf").await);
+            cursor.down().await;
+            assert!(cursor.find(b"trun").await);
+            pos += duration_90k;
+        }
+    }
+
     #[tokio::test]
     async fn test_round_trip() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 0, false);
+        traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
         compare_mp4s(&new_filename, 0, 0);
 
@@ -2306,6 +2387,7 @@ mod tests {
         let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 0, true);
+        traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
         compare_mp4s(&new_filename, 0, 0);
 
@@ -2329,6 +2411,7 @@ mod tests {
         let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 1, 0, false);
+        traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
         compare_mp4s(&new_filename, 1, 0);
 
@@ -2352,6 +2435,7 @@ mod tests {
         let db = TestDb::new(RealClocks {});
         copy_mp4_to_db(&db);
         let mp4 = create_mp4_from_db(&db, 0, 1, false);
+        traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
         compare_mp4s(&new_filename, 0, 1);
 
@@ -2428,7 +2512,7 @@ mod bench {
     }
 
     lazy_static! {
-        static ref SERVER: BenchServer = { BenchServer::new() };
+        static ref SERVER: BenchServer = BenchServer::new();
     }
 
     #[bench]
@@ -2446,8 +2530,8 @@ mod bench {
                 Ok(())
             }).unwrap();
             let row = row.unwrap();
-            let rel_range_90k = 0 .. row.duration_90k;
-            super::Segment::new(&db, &row, rel_range_90k, 1).unwrap()
+            let rel_range_90k = 0 .. row.media_duration_90k;
+            super::Segment::new(&db, &row, rel_range_90k, 1, true).unwrap()
         };
         db.with_recording_playback(segment.s.id, &mut |playback| {
             let v = segment.build_index(playback).unwrap();  // warm.

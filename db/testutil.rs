@@ -187,7 +187,8 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
     let mut recording = db::RecordingToInsert {
         sample_file_bytes: 30104460,
         start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
-        duration_90k: 5399985,
+        media_duration_90k: 5399985,
+        wall_duration_90k: 5399985,
         video_samples: 1800,
         video_sync_samples: 60,
         video_sample_entry_id: video_sample_entry_id,
@@ -197,7 +198,7 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
     };
     for _ in 0..num {
         let (id, _) = db.add_recording(TEST_STREAM_ID, recording.clone()).unwrap();
-        recording.start += recording::Duration(recording.duration_90k as i64);
+        recording.start += recording::Duration(recording.wall_duration_90k as i64);
         recording.run_offset += 1;
         db.mark_synced(id).unwrap();
     }

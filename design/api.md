@@ -468,9 +468,9 @@ WebSocket headers as described in [RFC 6455][rfc-6455] and (if authentication
 is required) the `s` cookie.
 
 The server will send a sequence of binary messages. Each message corresponds
-to one GOP of video: a key (IDR) frame and all other frames which depend on it.
-These are encoded as a `.mp4` media segment. The following headers will be
-included:
+to one or more frames of video. The first message is guaranteed to start with a
+"key" (IDR) frame; others may not. The message will contain HTTP headers
+followed by by a `.mp4` media segment. The following headers will be included:
 
 *   `X-Recording-Id`: the open id, a period, and the recording id of the
     recording these frames belong to.
@@ -483,10 +483,8 @@ included:
 *   `X-Media-Time-Range`: the relative media start and end times of these
     frames within the recording, as a half-open interval.
 
-Cameras are typically configured to have about one key frame per second, so
-there will be one part per second when the stream is working. If the stream is
-not connected, the HTTP GET request will wait until the stream is established,
-possibly forever.
+The WebSocket will always open immediately but will receive messages only while the
+backing RTSP stream is connected.
 
 Example request URI:
 
@@ -529,13 +527,20 @@ X-Video-Sample-Entry-Id: 4
 binary mp4 data
 ```
 
-If the wall duration and media duration for these recordings are equal, these
-segments are exactly the same as the ones that can be retrieved at the
-following URLs, respectively:
+These roughly correspond to the `.m4s` files available at the following URLs:
 
 *   `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5680@42.5220058-5400061`
 *   `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5681@42.0-180002`
 *   `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5681@42.180002-360004`
+
+However, there are two important differences:
+
+*   The `/view.m4s` endpoint accepts offsets within a recording as wall durations;
+    the `/live.m4s` endpoint's `X-Media-Time-Range` header returns them as
+    media durations. Thus the URLs above are only exactly correct if the wall
+    and media durations of the recording are identical.
+*   The `/view.m4s` endpoint always returns a time range that starts with a key frame;
+    `/live.m4s` messages may not include a key frame.
 
 Note: an earlier version of this API used a `multipart/mixed` segment instead,
 compatible with the [multipart-stream-js][multipart-stream-js] library. The

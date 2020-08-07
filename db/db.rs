@@ -512,12 +512,15 @@ pub struct Stream {
     on_live_segment: Vec<Box<dyn FnMut(LiveSegment) -> bool + Send>>,
 }
 
-/// Bounds of a single keyframe and the frames dependent on it.
+/// Bounds of a live view segment. Currently this is a single frame of video.
 /// This is used for live stream recordings. The stream id should already be known to the
 /// subscriber.
 #[derive(Clone, Debug)]
 pub struct LiveSegment {
     pub recording: i32,
+
+    /// If the segment's one frame is a key frame.
+    pub is_key: bool,
 
     /// The pts, relative to the start of the recording, of the start and end of this live segment,
     /// in 90kHz units.
