@@ -521,7 +521,7 @@ pub struct LiveSegment {
 
     /// The pts, relative to the start of the recording, of the start and end of this live segment,
     /// in 90kHz units.
-    pub off_90k: Range<i32>,
+    pub media_off_90k: Range<i32>,
 }
 
 #[derive(Clone, Debug, Default)]

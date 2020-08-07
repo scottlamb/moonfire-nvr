@@ -448,7 +448,7 @@ impl Service {
             db.list_recordings_by_id(stream_id, live.recording .. live.recording+1, &mut |r| {
                 rows += 1;
                 row = Some(r);
-                builder.append(&db, r, live.off_90k.clone())?;
+                builder.append(&db, r, live.media_off_90k.clone())?;
                 Ok(())
             })?;
             if rows != 1 {
@@ -466,7 +466,7 @@ impl Service {
             "Content-Type: {}\r\n\
             X-Recording-Start: {}\r\n\
             X-Recording-Id: {}.{}\r\n\
-            X-Time-Range: {}-{}\r\n\
+            X-Media-Time-Range: {}-{}\r\n\
             X-Prev-Media-Duration: {}\r\n\
             X-Runs: {}\r\n\
             X-Video-Sample-Entry-Id: {}\r\n\r\n",
@@ -474,8 +474,8 @@ impl Service {
             row.start.0,
             open_id,
             live.recording,
-            live.off_90k.start,
-            live.off_90k.end,
+            live.media_off_90k.start,
+            live.media_off_90k.end,
             prev_media_duration.0,
             prev_runs + if row.run_offset == 0 { 1 } else { 0 },
             &row.video_sample_entry_id);
@@ -737,23 +737,27 @@ impl Service {
                             // Add a segment for the relevant part of the recording, if any.
                             // Note all calculations here are in wall times / wall durations.
                             let end_time = s.end_time.unwrap_or(i64::max_value());
-                            let d = i64::from(r.wall_duration_90k);
-                            if s.start_time <= cur_off + d && cur_off < end_time {
+                            let wd = i64::from(r.wall_duration_90k);
+                            if s.start_time <= cur_off + wd && cur_off < end_time {
                                 let start = cmp::max(0, s.start_time - cur_off);
-                                let end = cmp::min(d, end_time - cur_off);
-                                let times = i32::try_from(start).unwrap() ..
-                                            i32::try_from(end).unwrap();
-                                debug!("...appending recording {} with times {:?} \
-                                       (out of dur {})", r.id, times, d);
+                                let end = cmp::min(wd, end_time - cur_off);
+                                let wr = i32::try_from(start).unwrap() ..
+                                         i32::try_from(end).unwrap();
+                                debug!("...appending recording {} with wall duration {:?} \
+                                       (out of total {})", r.id, wr, wd);
                                 if start_time_for_filename.is_none() {
                                     start_time_for_filename =
                                         Some(r.start + recording::Duration(start));
                                 }
-                                builder.append(&db, r, times)?;
+                                use recording::rescale;
+                                let mr =
+                                    rescale(wr.start, r.wall_duration_90k, r.media_duration_90k) ..
+                                    rescale(wr.end,   r.wall_duration_90k, r.media_duration_90k);
+                                builder.append(&db, r, mr)?;
                             } else {
-                                debug!("...skipping recording {} dur {}", r.id, d);
+                                debug!("...skipping recording {} wall dur {}", r.id, wd);
                             }
-                            cur_off += d;
+                            cur_off += wd;
                             Ok(())
                         }).map_err(internal_server_err)?;
 

@@ -359,17 +359,17 @@ Expected query parameters:
     `START_ID[-END_ID][@OPEN_ID][.[REL_START_TIME]-[REL_END_TIME]]`. This
     specifies *segments* to include. The produced `.mp4` file will be a
     concatenation of the segments indicated by all `s` parameters. The ids to
-    retrieve are as returned by the `/recordings` URL.  The *open id* (see
-    [glossary](glossary.md)) is optional and will be enforced if present; it's
-    recommended for disambiguation when the requested range includes uncommitted
-    recordings. The optional start and end times are in 90k units of wall time
-    and relative to the start of the first specified id. These can be used to
-    clip the returned segments. Note they can be used to skip over some ids
-    entirely; this is allowed so that the caller doesn't need to know the start
-    time of each interior id. If there is no key frame at the desired relative
-    start time, frames back to the last key frame will be included in the
-    returned data, and an edit list will instruct the viewer to skip to the
-    desired start time.
+    retrieve are as returned by the `/recordings` URL.  The *open id* is
+    optional and will be enforced if present; it's recommended for
+    disambiguation when the requested range includes uncommitted recordings.
+    The optional start and end times are in 90k units of wall time and relative
+    to the start of the first specified id. These can be used to clip the
+    returned segments. Note they can be used to skip over some ids entirely;
+    this is allowed so that the caller doesn't need to know the start time of
+    each interior id. If there is no key frame at the desired relative start
+    time, frames back to the last key frame will be included in the returned
+    data, and an edit list will instruct the viewer to skip to the desired
+    start time.
 *   `ts` (optional): should be set to `true` to request a subtitle track be
     added with human-readable recording timestamps.
 
@@ -449,8 +449,8 @@ this fundamental reason Moonfire NVR makes no effort to make multiple-segment
 *   There's currently no way to generate an initialization segment for more
     than one video sample entry, so a `.m4s` that uses more than one video
     sample entry can't be used.
-*   The `X-Prev-Media-Duration` and `X-Leading-Duration` headers only describe
-    the first segment.
+*   The `X-Prev-Media-Duration` and `X-Leading-Media-Duration` headers only
+    describe the first segment.
 
 Timestamp tracks (see the `ts` parameter to `.mp4` URIs) aren't supported
 today. Most likely browser clients will implement timestamp subtitles via
@@ -468,9 +468,9 @@ WebSocket headers as described in [RFC 6455][rfc-6455] and (if authentication
 is required) the `s` cookie.
 
 The server will send a sequence of binary messages. Each message corresponds
-to one run (GOP) of video: a key (IDR) frame and all other frames which depend
-on it. These are encoded as a `.mp4` media segment. The following headers will
-be included:
+to one GOP of video: a key (IDR) frame and all other frames which depend on it.
+These are encoded as a `.mp4` media segment. The following headers will be
+included:
 
 *   `X-Recording-Id`: the open id, a period, and the recording id of the
     recording these frames belong to.
@@ -478,11 +478,10 @@ be included:
     of a second) of the start of the recording. Note that if the recording
     is "unanchored" (as described in `GET /api/.../recordings`), the
     recording's start time may change before it is completed.
-*   `X-Prev-Duration`: as in `/.../view.m4s`.
+*   `X-Prev-Media-Duration`: as in `/.../view.m4s`.
 *   `X-Runs`: as in `/.../view.m4s`.
-*   `X-Time-Range`: the relative start and end times of these frames within
-    the recording, in the same format as `REL_START_TIME` and `REL_END_TIME`
-    above.
+*   `X-Media-Time-Range`: the relative media start and end times of these
+    frames within the recording, as a half-open interval.
 
 Cameras are typically configured to have about one key frame per second, so
 there will be one part per second when the stream is working. If the stream is
@@ -501,7 +500,8 @@ Example binary message sequence:
 Content-Type: video/mp4; codecs="avc1.640028"
 X-Recording-Id: 42.5680
 X-Recording-Start: 130985461191810
-X-Time-Range: 5220058-5400061
+X-Prev-Media-Duration: 10000000
+X-Media-Time-Range: 5220058-5400061
 X-Video-Sample-Entry-Id: 4
 
 binary mp4 data
@@ -511,7 +511,8 @@ binary mp4 data
 Content-Type: video/mp4; codecs="avc1.640028"
 X-Recording-Id: 42.5681
 X-Recording-Start: 130985461191822
-X-Time-Range: 0-180002
+X-Prev-Media-Duration: 10180003
+X-Media-Time-Range: 0-180002
 X-Video-Sample-Entry-Id: 4
 
 binary mp4 data
@@ -521,18 +522,20 @@ binary mp4 data
 Content-Type: video/mp4; codecs="avc1.640028"
 X-Recording-Id: 42.5681
 X-Recording-Start: 130985461191822
-X-Time-Range: 180002-360004
+X-Prev-Media-Duration: 10360005
+X-Media-Time-Range: 180002-360004
 X-Video-Sample-Entry-Id: 4
 
 binary mp4 data
 ```
 
-These segments are exactly the same as ones that can be retrieved at the
+If the wall duration and media duration for these recordings are equal, these
+segments are exactly the same as the ones that can be retrieved at the
 following URLs, respectively:
 
-   * `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5680@42.5220058-5400061`
-   * `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5681@42.0-180002`
-   * `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5681@42.180002-360004`
+*   `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5680@42.5220058-5400061`
+*   `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5681@42.0-180002`
+*   `/api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.m4s?s=5681@42.180002-360004`
 
 Note: an earlier version of this API used a `multipart/mixed` segment instead,
 compatible with the [multipart-stream-js][multipart-stream-js] library. The

@@ -560,7 +560,7 @@ struct InnerWriter<F: FileWriter> {
 
     /// The pts, relative to the start of this segment and in 90kHz units, up until which live
     /// segments have been sent out. Initially 0.
-    completed_live_segment_off_90k: i32,
+    completed_live_segment_media_off_90k: i32,
 
     hasher: blake3::Hasher,
 
@@ -634,7 +634,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             r,
             e: recording::SampleIndexEncoder::new(),
             id,
-            completed_live_segment_off_90k: 0,
+            completed_live_segment_media_off_90k: 0,
             hasher: blake3::Hasher::new(),
             local_start: recording::Time(i64::max_value()),
             unindexed_sample: None,
@@ -686,9 +686,9 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             if is_key {
                 self.db.lock().send_live_segment(self.stream_id, db::LiveSegment {
                     recording: w.id.recording(),
-                    off_90k: w.completed_live_segment_off_90k .. d,
+                    media_off_90k: w.completed_live_segment_media_off_90k .. d,
                 }).unwrap();
-                w.completed_live_segment_off_90k = d;
+                w.completed_live_segment_media_off_90k = d;
             }
         }
         let mut remaining = pkt;
@@ -726,7 +726,7 @@ fn clamp(v: i64, min: i64, max: i64) -> i64 {
 }
 
 impl<F: FileWriter> InnerWriter<F> {
-    /// Returns the total duration of the `RecordingToInsert` (needed for live view path).
+    /// Returns the total media duration of the `RecordingToInsert` (needed for live view path).
     fn add_sample(&mut self, duration_90k: i32, bytes: i32, is_key: bool,
                   pkt_local_time: recording::Time) -> Result<i32, Error> {
         let mut l = self.r.lock();
@@ -772,7 +772,7 @@ impl<F: FileWriter> InnerWriter<F> {
         // This always ends a live segment.
         db.lock().send_live_segment(stream_id, db::LiveSegment {
             recording: self.id.recording(),
-            off_90k: self.completed_live_segment_off_90k .. d,
+            media_off_90k: self.completed_live_segment_media_off_90k .. d,
         }).unwrap();
         let wall_duration;
         {

@@ -81,7 +81,7 @@ use bytes::{Buf, BytesMut};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use crate::body::{Chunk, BoxedError, wrap_error};
 use db::dir;
-use db::recording::{self, TIME_UNITS_PER_SEC, wall_to_media};
+use db::recording::{self, TIME_UNITS_PER_SEC, rescale};
 use futures::Stream;
 use futures::stream;
 use http;
@@ -347,13 +347,12 @@ struct Segment {
     recording_wall_duration_90k: i32,
     recording_media_duration_90k: i32,
 
-    /// The _desired_, _relative_, _wall_ time range covered by this recording.
+    /// The _desired_, _relative_, _media_ time range covered by this recording.
     /// *   _desired_: as noted in `recording::Segment`, the _actual_ time range may be somewhat
     ///     more if there's no key frame at the desired start.
     /// *   _relative_: relative to `recording_start` rather than absolute timestamps.
-    /// *   _wall_ time: the media time units are in terms of the cameras' clocks. Wall time units
-    ///     differ slightly.
-    rel_wall_range_90k: Range<i32>,
+    /// *   _media_ time: as described in design/glossary.md and design/time.md.
+    rel_media_range_90k: Range<i32>,
 
     /// If generated, the `.mp4`-format sample indexes, accessed only through `get_index`:
     ///    1. stts: `slice[.. stsz_start]`
@@ -382,18 +381,15 @@ impl fmt::Debug for Segment {
 unsafe impl Sync for Segment {}
 
 impl Segment {
-    fn new(db: &db::LockedDatabase, row: &db::ListRecordingsRow, rel_wall_range_90k: Range<i32>,
+    fn new(db: &db::LockedDatabase, row: &db::ListRecordingsRow, rel_media_range_90k: Range<i32>,
            first_frame_num: u32) -> Result<Self, Error> {
-        let rel_media_range_90k =
-            wall_to_media(rel_wall_range_90k.start, row.wall_duration_90k, row.media_duration_90k)
-            ..
-            wall_to_media(rel_wall_range_90k.end, row.wall_duration_90k, row.media_duration_90k);
         Ok(Segment {
-            s: recording::Segment::new(db, row, rel_media_range_90k).err_kind(ErrorKind::Unknown)?,
+            s: recording::Segment::new(db, row, rel_media_range_90k.clone())
+                .err_kind(ErrorKind::Unknown)?,
             recording_start: row.start,
             recording_wall_duration_90k: row.wall_duration_90k,
             recording_media_duration_90k: row.media_duration_90k,
-            rel_wall_range_90k,
+            rel_media_range_90k,
             index: UnsafeCell::new(Err(())),
             index_once: Once::new(),
             first_frame_num,
@@ -401,9 +397,12 @@ impl Segment {
         })
     }
 
+    fn wall(&self, rel_media_90k: i32) -> i32 {
+        rescale(rel_media_90k, self.recording_media_duration_90k, self.recording_wall_duration_90k)
+    }
+
     fn media(&self, rel_wall_90k: i32) -> i32 {
-        db::recording::wall_to_media(rel_wall_90k, self.recording_wall_duration_90k,
-                                     self.recording_media_duration_90k)
+        rescale(rel_wall_90k, self.recording_wall_duration_90k, self.recording_media_duration_90k)
     }
 
     fn get_index<'a, F>(&'a self, db: &db::Database, f: F) -> Result<&'a [u8], Error>
@@ -467,7 +466,7 @@ impl Segment {
             // Doing this after the fact is more efficient than having a condition on every
             // iteration.
             if let Some((last_start, dur)) = last_start_and_dur {
-                let min = cmp::min(self.media(self.rel_wall_range_90k.end) - last_start, dur);
+                let min = cmp::min(self.rel_media_range_90k.end - last_start, dur);
                 BigEndian::write_u32(&mut stts[8*frame-4 ..], u32::try_from(min).unwrap());
             }
         }
@@ -558,9 +557,10 @@ impl Segment {
             // One more thing to do in the terminal case: fix up the final frame's duration.
             // Doing this after the fact is more efficient than having a condition on every
             // iteration.
-            BigEndian::write_u32(&mut v[p-8 .. p-4],
-                                 cmp::min(self.media(self.rel_wall_range_90k.end) - r.last_start,
-                                          r.last_dur) as u32);
+            BigEndian::write_u32(
+                &mut v[p-8 .. p-4],
+                u32::try_from(cmp::min(self.rel_media_range_90k.end - r.last_start, r.last_dur))
+                    .unwrap());
 
         }
         Ok(v)
@@ -794,10 +794,10 @@ impl FileBuilder {
     }
 
     /// Appends a segment for (a subset of) the given recording.
-    /// `rel_wall_range_90k` is the wall time range within the recording.
-    /// Eg `0 .. row.wall_duration_90k` means the full recording.
+    /// `rel_media_range_90k` is the media time range within the recording.
+    /// Eg `0 .. row.media_duration_90k` means the full recording.
     pub fn append(&mut self, db: &db::LockedDatabase, row: db::ListRecordingsRow,
-                  rel_wall_range_90k: Range<i32>) -> Result<(), Error> {
+                  rel_media_range_90k: Range<i32>) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero() {
                 bail_t!(InvalidArgument,
@@ -810,7 +810,7 @@ impl FileBuilder {
             self.prev_media_duration_and_cur_runs = row.prev_media_duration_and_runs
                 .map(|(d, r)| (d, r + if row.open_id == 0 { 1 } else { 0 }));
         }
-        let s = Segment::new(db, &row, rel_wall_range_90k, self.next_frame_num)?;
+        let s = Segment::new(db, &row, rel_media_range_90k, self.next_frame_num)?;
 
         self.next_frame_num += s.s.frames as u32;
         self.segments.push(s);
@@ -848,8 +848,7 @@ impl FileBuilder {
             Type::MediaSegment => { etag.update(b":media:"); },
         };
         for s in &mut self.segments {
-            let wd = &s.rel_wall_range_90k;
-            let md = s.media(wd.start) .. s.media(wd.end);
+            let md = &s.rel_media_range_90k;
 
             // Add the media time for this segment. If edit lists are supported (not media
             // segments), this shouldn't include the portion they skip.
@@ -859,8 +858,8 @@ impl FileBuilder {
             };
             self.media_duration_90k += u64::try_from(md.end - start).unwrap();
             let wall =
-                s.recording_start + recording::Duration(i64::from(s.rel_wall_range_90k.start)) ..
-                s.recording_start + recording::Duration(i64::from(s.rel_wall_range_90k.end));
+                s.recording_start + recording::Duration(i64::from(s.wall(md.start))) ..
+                s.recording_start + recording::Duration(i64::from(s.wall(md.end)));
             max_end = match max_end {
                 None => Some(wall.end),
                 Some(v) => Some(cmp::max(v, wall.end)),
@@ -881,8 +880,8 @@ impl FileBuilder {
             cursor.write_i64::<BigEndian>(s.s.id.0).err_kind(ErrorKind::Internal)?;
             cursor.write_i64::<BigEndian>(s.recording_start.0).err_kind(ErrorKind::Internal)?;
             cursor.write_u32::<BigEndian>(s.s.open_id).err_kind(ErrorKind::Internal)?;
-            cursor.write_i32::<BigEndian>(wd.start).err_kind(ErrorKind::Internal)?;
-            cursor.write_i32::<BigEndian>(wd.end).err_kind(ErrorKind::Internal)?;
+            cursor.write_i32::<BigEndian>(md.start).err_kind(ErrorKind::Internal)?;
+            cursor.write_i32::<BigEndian>(md.end).err_kind(ErrorKind::Internal)?;
             etag.update(cursor.into_inner());
         }
         let max_end = match max_end {
@@ -1162,7 +1161,7 @@ impl FileBuilder {
             // key frame. This relationship should hold true:
             // actual start <= desired start <= desired end
             let actual_start_90k = s.s.actual_start_90k();
-            let md = s.media(s.rel_wall_range_90k.start) .. s.media(s.rel_wall_range_90k.end);
+            let md = &s.rel_media_range_90k;
             let skip = md.start - actual_start_90k;
             let keep = md.end - md.start;
             if skip < 0 || keep < 0 {
@@ -1325,13 +1324,12 @@ impl FileBuilder {
             for s in &self.segments {
                 // Note desired media range = actual media range for the subtitle track.
                 // We still need to consider media time vs wall time.
-                let wr = &s.rel_wall_range_90k;
-                let start = s.recording_start + recording::Duration(i64::from(wr.start));
-                let end = s.recording_start + recording::Duration(i64::from(wr.end));
+                let mr = &s.rel_media_range_90k;
+                let start = s.recording_start + recording::Duration(i64::from(s.wall(mr.start)));
+                let end = s.recording_start + recording::Duration(i64::from(s.wall(mr.end)));
                 let start_next_sec = recording::Time(
                     start.0 + TIME_UNITS_PER_SEC - (start.0 % TIME_UNITS_PER_SEC));
 
-                let mr = s.media(wr.start) .. s.media(wr.end);
                 if end <= start_next_sec {
                     // Segment doesn't last past the next second. Just write one entry.
                     entry_count += 1;
@@ -1346,7 +1344,7 @@ impl FileBuilder {
                     self.body.append_u32(u32::try_from(media_pos - mr.start).unwrap());
 
                     // Then there are zero or more "interior" subtitles, one second each. That's
-                    // one second converted from wall to media duration. wall_to_media rounds down,
+                    // one second converted from wall to media duration. rescale rounds down,
                     // and these errors accumulate, so the final subtitle can be too early by as
                     // much as (MAX_RECORDING_WALL_DURATION/TIME_UNITS_PER_SEC) time units, or
                     // roughly 3 ms. We could avoid that by writing a separate entry for each
@@ -1563,11 +1561,12 @@ impl FileInner {
 
     fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, l: u64) -> Result<Chunk, Error> {
         let s = &self.segments[i];
-        let d = &s.rel_wall_range_90k;
+        let md = &s.rel_media_range_90k;
+        let wd = s.wall(md.start) .. s.wall(md.end);
         let start_sec =
-            (s.recording_start + recording::Duration(i64::from(d.start))).unix_seconds();
+            (s.recording_start + recording::Duration(i64::from(wd.start))).unix_seconds();
         let end_sec =
-            (s.recording_start + recording::Duration(i64::from(d.end) + TIME_UNITS_PER_SEC - 1))
+            (s.recording_start + recording::Duration(i64::from(wd.end) + TIME_UNITS_PER_SEC - 1))
             .unix_seconds();
         let l = usize::try_from(l).unwrap();
         let mut v = Vec::with_capacity(l);
@@ -1642,7 +1641,7 @@ impl http_serve::Entity for File {
                     HeaderValue::try_from(r.to_string()).expect("ints are valid headers"));
             }
             if let Some(s) = self.0.segments.first() {
-                let skip = s.media(s.rel_wall_range_90k.start) - s.s.actual_start_90k();
+                let skip = s.rel_media_range_90k.start - s.s.actual_start_90k();
                 if skip > 0 {
                     hdrs.insert(
                         "X-Leading-Media-Duration",
