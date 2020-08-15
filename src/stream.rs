@@ -33,7 +33,7 @@ use cstr::*;
 use failure::{Error, bail};
 use ffmpeg;
 use lazy_static::lazy_static;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use std::convert::TryFrom;
 use std::ffi::CString;
 use std::result::Result;
@@ -78,7 +78,7 @@ impl Ffmpeg {
 impl Opener<FfmpegStream> for Ffmpeg {
     fn open(&self, src: Source) -> Result<FfmpegStream, Error> {
         use ffmpeg::avformat::InputFormatContext;
-        let (mut input, discard_first) = match src {
+        let mut input = match src {
             #[cfg(test)]
             Source::File(filename) => {
                 let mut open_options = ffmpeg::avutil::Dictionary::new();
@@ -92,14 +92,19 @@ impl Opener<FfmpegStream> for Ffmpeg {
                     warn!("While opening URL {}, some options were not understood: {}",
                           url, open_options);
                 }
-                (i, false)
+                i
             }
             Source::Rtsp{url, redacted_url} => {
                 let mut open_options = ffmpeg::avutil::Dictionary::new();
                 open_options.set(cstr!("rtsp_transport"), cstr!("tcp")).unwrap();
                 open_options.set(cstr!("user-agent"), cstr!("moonfire-nvr")).unwrap();
+
                 // 10-second socket timeout, in microseconds.
                 open_options.set(cstr!("stimeout"), cstr!("10000000")).unwrap();
+
+                // Without this option, the first packet has an incorrect pts.
+                // https://trac.ffmpeg.org/ticket/5018
+                open_options.set(cstr!("fflags"), cstr!("nobuffer")).unwrap();
 
                 // Moonfire NVR currently only supports video, so receiving audio is wasteful.
                 // It also triggers <https://github.com/scottlamb/moonfire-nvr/issues/36>.
@@ -110,7 +115,7 @@ impl Opener<FfmpegStream> for Ffmpeg {
                     warn!("While opening URL {}, some options were not understood: {}",
                           redacted_url, open_options);
                 }
-                (i, true)
+                i
             },
         };
 
@@ -133,17 +138,10 @@ impl Opener<FfmpegStream> for Ffmpeg {
             None => bail!("no video stream"),
         };
 
-        let mut stream = FfmpegStream{
+        Ok(FfmpegStream {
             input,
             video_i,
-        };
-
-        if discard_first {
-            info!("Discarding the first packet to work around https://trac.ffmpeg.org/ticket/5018");
-            stream.get_next()?;
-        }
-
-        Ok(stream)
+        })
     }
 }
 
