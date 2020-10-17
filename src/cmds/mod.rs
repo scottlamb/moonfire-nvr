@@ -53,11 +53,17 @@ enum OpenMode {
 /// Locks the directory without opening the database.
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
 fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
-    let dir = dir::Fd::open(db_dir, mode == OpenMode::Create)?;
+    let dir = dir::Fd::open(db_dir, mode == OpenMode::Create)
+        .map_err(|e| e.context(if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
+                                   format!("db dir {} not found; try running moonfire-nvr init",
+                                           db_dir.display())
+                               } else {
+                                   format!("unable to open db dir {}: {}", db_dir.display(), &e)
+                               }))?;
     let ro = mode == OpenMode::ReadOnly;
     dir.lock(if ro { FlockArg::LockSharedNonblock } else { FlockArg::LockExclusiveNonblock })
-       .map_err(|e| e.context(format!("db dir {:?} already in use; can't get {} lock",
-                                      db_dir, if ro { "shared" } else { "exclusive" })))?;
+       .map_err(|e| e.context(format!("db dir {} already in use; can't get {} lock",
+                                      db_dir.display(), if ro { "shared" } else { "exclusive" })))?;
     Ok(dir)
 }
 
