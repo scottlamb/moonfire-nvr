@@ -110,7 +110,7 @@ pub struct Stream<'a> {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
-    pub days: Option<&'a BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+    pub days: Option<BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<StreamConfig<'a>>,
@@ -219,7 +219,7 @@ impl<'a> Camera<'a> {
         })
     }
 
-    fn serialize_streams<S>(streams: &[Option<Stream<'a>>; 2], serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize_streams<S>(streams: &[Option<Stream>; 2], serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
         let mut map = serializer.serialize_map(Some(streams.len()))?;
         for (i, s) in streams.iter().enumerate() {
@@ -247,7 +247,7 @@ impl<'a> Stream<'a> {
             total_duration_90k: s.duration.0,
             total_sample_file_bytes: s.sample_file_bytes,
             fs_bytes: s.fs_bytes,
-            days: if include_days { Some(&s.days) } else { None },
+            days: if include_days { Some(s.days()) } else { None },
             config: match include_config {
                 false => None,
                 true => Some(StreamConfig {
@@ -257,10 +257,10 @@ impl<'a> Stream<'a> {
         }))
     }
 
-    fn serialize_days<S>(days: &Option<&BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+    fn serialize_days<S>(days: &Option<BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
                          serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
-        let days = match *days {
+        let days = match days.as_ref() {
             Some(d) => d,
             None => return serializer.serialize_none(),
         };

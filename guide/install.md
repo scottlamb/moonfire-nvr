@@ -85,13 +85,13 @@ RequiresMountsFor=/media/nvr
 
 ## Completing configuration through the UI
 
-Once setup is complete, it is time to add sample file directory and camera
-configurations to the database.
-
-You can configure the system's database through a text-based user interface:
+Once your system is set up, it's time to initialize an empty database,
+and add the cameras and sample directories to moonfire. You can do this
+by using the `moonfire-nvr` binary's text-based configuration tool.
 
 ```
-$ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
+$ sudo -u moonfire-nvr moonfire-nvr init               # Initialize empty db
+$ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log # Configure cameras and storage
 ```
 
 In the user interface,
