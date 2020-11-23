@@ -62,9 +62,9 @@ use crate::schema;
 use crate::signal;
 use failure::{Error, bail, format_err};
 use fnv::{FnvHashMap, FnvHashSet};
+use hashlink::LinkedHashMap;
 use itertools::Itertools;
 use log::{error, info, trace};
-use lru_cache::LruCache;
 use openssl::hash;
 use parking_lot::{Mutex,MutexGuard};
 use protobuf::prelude::MessageField;
@@ -86,6 +86,11 @@ use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
 pub const EXPECTED_VERSION: i32 = 5;
+
+/// Length of the video index cache.
+/// The actual data structure is one bigger than this because we insert before we remove.
+/// Make it one less than a power of two so that the data structure's size is efficient.
+const VIDEO_INDEX_CACHE_LEN: usize = 1023;
 
 const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
     select
@@ -652,7 +657,7 @@ pub struct LockedDatabase {
     streams_by_id: BTreeMap<i32, Stream>,
     cameras_by_uuid: BTreeMap<Uuid, i32>,  // values are ids.
     video_sample_entries_by_id: BTreeMap<i32, Arc<VideoSampleEntry>>,
-    video_index_cache: RefCell<LruCache<i64, Box<[u8]>, fnv::FnvBuildHasher>>,
+    video_index_cache: RefCell<LinkedHashMap<i64, Box<[u8]>, fnv::FnvBuildHasher>>,
     on_flush: Vec<Box<dyn Fn() + Send>>,
 }
 
@@ -1339,20 +1344,30 @@ impl LockedDatabase {
 
         // Committed path.
         let mut cache = self.video_index_cache.borrow_mut();
-        if let Some(video_index) = cache.get_mut(&id.0) {
-            trace!("cache hit for recording {}", id);
-            return f(&RecordingPlayback { video_index });
+        use hashlink::linked_hash_map::RawEntryMut;
+        match cache.raw_entry_mut().from_key(&id.0) {
+            RawEntryMut::Occupied(mut occupied) => {
+                trace!("cache hit for recording {}", id);
+                occupied.to_back();
+                let video_index = occupied.get();
+                return f(&RecordingPlayback { video_index });
+            },
+            RawEntryMut::Vacant(vacant) => {
+                trace!("cache miss for recording {}", id);
+                let mut stmt = self.conn.prepare_cached(GET_RECORDING_PLAYBACK_SQL)?;
+                let mut rows = stmt.query_named(named_params!{":composite_id": id.0})?;
+                if let Some(row) = rows.next()? {
+                    let video_index: VideoIndex = row.get(0)?;
+                    let result = f(&RecordingPlayback { video_index: &video_index.0[..] });
+                    vacant.insert(id.0, video_index.0);
+                    if cache.len() > VIDEO_INDEX_CACHE_LEN {
+                        cache.pop_front();
+                    }
+                    return result;
+                }
+                Err(format_err!("no such recording {}", id))
+            },
         }
-        trace!("cache miss for recording {}", id);
-        let mut stmt = self.conn.prepare_cached(GET_RECORDING_PLAYBACK_SQL)?;
-        let mut rows = stmt.query_named(named_params!{":composite_id": id.0})?;
-        if let Some(row) = rows.next()? {
-            let video_index: VideoIndex = row.get(0)?;
-            let result = f(&RecordingPlayback { video_index: &video_index.0[..] });
-            cache.insert(id.0, video_index.0);
-            return result;
-        }
-        Err(format_err!("no such recording {}", id))
     }
 
     /// Queues for deletion the oldest recordings that aren't already queued.
@@ -2020,7 +2035,8 @@ impl<C: Clocks + Clone> Database<C> {
                 cameras_by_uuid: BTreeMap::new(),
                 streams_by_id: BTreeMap::new(),
                 video_sample_entries_by_id: BTreeMap::new(),
-                video_index_cache: RefCell::new(LruCache::with_hasher(1024, Default::default())),
+                video_index_cache: RefCell::new(LinkedHashMap::with_capacity_and_hasher(
+                    VIDEO_INDEX_CACHE_LEN + 1, Default::default())),
                 on_flush: Vec::new(),
             })),
             clocks,
