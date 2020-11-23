@@ -49,7 +49,7 @@ pub const TIME_UNITS_PER_SEC: i64 = 90_000;
 pub struct Time(pub i64);
 
 /// Returns a parser for a `len`-digit non-negative number which fits into an i32.
-fn fixed_len_num<'a>(len: usize) -> impl Fn(&'a str) -> IResult<&'a str, i32> {
+fn fixed_len_num<'a>(len: usize) -> impl FnMut(&'a str) -> IResult<&'a str, i32> {
     map_res(take_while_m_n(len, len, |c: char| c.is_ascii_digit()),
             |input: &str| i32::from_str_radix(input, 10))
 }

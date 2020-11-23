@@ -190,7 +190,7 @@ struct Segments {
     end_time: Option<i64>,
 }
 
-fn num<'a, T: FromStr>() -> impl Fn(&'a str) -> IResult<&'a str, T> {
+fn num<'a, T: FromStr>() -> impl FnMut(&'a str) -> IResult<&'a str, T> {
     map_res(take_while1(|c: char| c.is_ascii_digit()), FromStr::from_str)
 }
 

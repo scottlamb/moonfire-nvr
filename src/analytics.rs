@@ -49,7 +49,7 @@
 //! *   H.264/H.265 decoding on every frame but performing object detection at a minimum pts
 //!     interval to cut down on expense.
 
-use cstr::*;
+use cstr::cstr;
 use failure::{Error, format_err};
 use ffmpeg;
 use log::info;

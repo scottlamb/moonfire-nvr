@@ -35,12 +35,12 @@
 
 use crate::db::FromSqlUuid;
 use crate::{dir, schema};
-use cstr::*;
+use cstr::cstr;
 use failure::{Error, Fail, bail};
 use log::info;
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
-use protobuf::{Message, prelude::MessageField};
+use protobuf::Message;
 use rusqlite::params;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
@@ -137,7 +137,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         db_meta.dir_uuid.extend_from_slice(&dir_uuid.0.as_bytes()[..]);
         match (open_id, open_uuid) {
             (Some(id), Some(uuid)) => {
-                let mut o = db_meta.last_complete_open.mut_message();
+                let mut o = db_meta.last_complete_open.set_default();
                 o.id = id;
                 o.uuid.extend_from_slice(&uuid.0.as_bytes()[..]);
             },

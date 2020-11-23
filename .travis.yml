@@ -23,7 +23,7 @@ matrix:
       script:
         - ci/script-rust.sh
     - language: rust
-      rust: 1.42.0
+      rust: 1.45.0
       script:
         - ci/script-rust.sh
     - language: node_js

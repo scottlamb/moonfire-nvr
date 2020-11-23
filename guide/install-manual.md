@@ -48,7 +48,7 @@ $ sudo apt-get install \
                tzdata
 ```
 
-Next, you need Rust 1.42+ and Cargo. The easiest way to install them is by
+Next, you need Rust 1.45+ and Cargo. The easiest way to install them is by
 following the instructions at [rustup.rs](https://www.rustup.rs/).
 
 Finally, building the UI requires [yarn](https://yarnpkg.com/en/).

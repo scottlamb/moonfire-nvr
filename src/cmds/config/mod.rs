@@ -34,7 +34,7 @@
 //! configuration will likely be almost entirely done through a web-based UI.
 
 use base::clock;
-use cursive::Cursive;
+use cursive::{Cursive, CursiveExt};
 use cursive::views;
 use db;
 use failure::Error;

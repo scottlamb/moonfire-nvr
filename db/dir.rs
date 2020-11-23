@@ -35,7 +35,7 @@
 use crate::coding;
 use crate::db::CompositeId;
 use crate::schema;
-use cstr::*;
+use cstr::cstr;
 use failure::{Error, Fail, bail, format_err};
 use log::warn;
 use protobuf::Message;
@@ -322,7 +322,6 @@ pub(crate) fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
 
 #[cfg(test)]
 mod tests {
-    use protobuf::prelude::MessageField;
     use super::*;
 
     #[test]
@@ -343,10 +342,16 @@ mod tests {
         let fake_uuid = &[0u8; 16][..];
         meta.db_uuid.extend_from_slice(fake_uuid);
         meta.dir_uuid.extend_from_slice(fake_uuid);
-        meta.last_complete_open.mut_message().id = u32::max_value();
-        meta.last_complete_open.mut_message().id = u32::max_value();
-        meta.in_progress_open.mut_message().uuid.extend_from_slice(fake_uuid);
-        meta.in_progress_open.mut_message().uuid.extend_from_slice(fake_uuid);
+        {
+            let o = meta.last_complete_open.set_default();
+            o.id = u32::max_value();
+            o.uuid.extend_from_slice(fake_uuid);
+        }
+        {
+            let o = meta.in_progress_open.set_default();
+            o.id = u32::max_value();
+            o.uuid.extend_from_slice(fake_uuid);
+        }
         let data = meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
         assert!(data.len() <= FIXED_DIR_META_LEN, "{} vs {}", data.len(), FIXED_DIR_META_LEN);
     }

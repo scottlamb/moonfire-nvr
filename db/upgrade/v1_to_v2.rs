@@ -34,7 +34,6 @@ use crate::dir;
 use failure::{Error, bail, format_err};
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
-use protobuf::prelude::MessageField;
 use rusqlite::params;
 use crate::schema::DirMeta;
 use std::os::unix::io::AsRawFd;
@@ -116,7 +115,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
     {
         meta.db_uuid.extend_from_slice(db_uuid_bytes);
         meta.dir_uuid.extend_from_slice(dir_uuid_bytes);
-        let open = meta.last_complete_open.mut_message();
+        let open = meta.last_complete_open.set_default();
         open.id = open_id;
         open.uuid.extend_from_slice(&open_uuid_bytes);
     }

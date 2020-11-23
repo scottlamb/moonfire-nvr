@@ -29,7 +29,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::h264;
-use cstr::*;
+use cstr::cstr;
 use failure::{Error, bail};
 use ffmpeg;
 use lazy_static::lazy_static;
