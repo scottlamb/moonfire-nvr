@@ -23,7 +23,7 @@ h264-reader = { git = "https://github.com/dholroyd/h264-reader" }
 hashlink = "0.6.0"
 lazy_static = "1.0"
 libc = "0.2"
-libpasta = "0.1.0-rc2"
+libpasta = { git = "https://github.com/scottlamb/libpasta", branch = "pr-deps" }
 log = "0.4"
 mylog = { git = "https://github.com/scottlamb/mylog" }
 nix = "0.19.0"
@@ -31,7 +31,7 @@ odds = { version = "0.4.0", features = ["std-vec"] }
 parking_lot = { version = "0.10", features = [] }
 prettydiff = "0.3.1"
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
-ring = "0.14.6"
+ring = "0.16.2"
 rusqlite = "0.24.1"
 smallvec = "1.0"
 tempdir = "0.3"
