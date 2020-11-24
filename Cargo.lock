@@ -288,15 +288,6 @@ dependencies = [
 
 [[package]]
 name = "cloudabi"
-version = "0.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
-dependencies = [
- "bitflags",
-]
-
-[[package]]
-name = "cloudabi"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4344512281c643ae7638bbabc3af17a11307803ec8f0fcad9fae512a8bf36467"
@@ -1219,15 +1210,6 @@ checksum = "8dd5a6d5999d9907cda8ed67bbd137d3af8085216c2ac62de5be860bd41f304a"
 
 [[package]]
 name = "lock_api"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4da24a77a3d8a6d4862d95f72e6fdb9c09a643ecdb402d754004a557f2bec75"
-dependencies = [
- "scopeguard",
-]
-
-[[package]]
-name = "lock_api"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd96ffd135b2fd7b973ac026d28085defbe8983df057ced3eb4f2130b0831312"
@@ -1355,7 +1337,7 @@ dependencies = [
  "libc",
  "log",
  "nom",
- "parking_lot 0.10.2",
+ "parking_lot",
  "time 0.1.44",
 ]
 
@@ -1380,7 +1362,7 @@ dependencies = [
  "mylog",
  "nix",
  "odds",
- "parking_lot 0.10.2",
+ "parking_lot",
  "prettydiff",
  "protobuf",
  "protobuf-codegen-pure",
@@ -1395,12 +1377,12 @@ dependencies = [
 [[package]]
 name = "moonfire-ffmpeg"
 version = "0.0.1"
-source = "git+https://github.com/scottlamb/moonfire-ffmpeg#25ca2df9e7a725a5500794aa80b1f4f4c1c58487"
+source = "git+https://github.com/scottlamb/moonfire-ffmpeg#d008cebe93e12dcdeeb341cc39b60ca6daf07226"
 dependencies = [
  "cc",
  "libc",
  "log",
- "parking_lot 0.10.2",
+ "parking_lot",
  "pkg-config",
 ]
 
@@ -1433,7 +1415,7 @@ dependencies = [
  "mylog",
  "nix",
  "nom",
- "parking_lot 0.10.2",
+ "parking_lot",
  "protobuf",
  "reffers",
  "reqwest",
@@ -1454,7 +1436,7 @@ dependencies = [
 [[package]]
 name = "moonfire-tflite"
 version = "0.0.1"
-source = "git+https://github.com/scottlamb/moonfire-tflite#b86940ef5b3a5b2583e52c1d494477cae7dac7c8"
+source = "git+https://github.com/scottlamb/moonfire-tflite#b1d30c09045c02966249676fd716e917761a7de5"
 dependencies = [
  "cc",
  "libc",
@@ -1464,11 +1446,11 @@ dependencies = [
 [[package]]
 name = "mylog"
 version = "0.1.0"
-source = "git+https://github.com/scottlamb/mylog#bebeacb74efc127f9c16e57e38886c8e6ba8a95c"
+source = "git+https://github.com/scottlamb/mylog#f3dc450d2dc879b3915c83fb1dbafb709c4b7709"
 dependencies = [
  "chrono",
  "log",
- "parking_lot 0.10.2",
+ "parking_lot",
 ]
 
 [[package]]
@@ -1687,37 +1669,13 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3a704eb390aafdc107b0e392f56a82b668e3a71366993b5340f5833fd62505e"
-dependencies = [
- "lock_api 0.3.4",
- "parking_lot_core 0.7.2",
-]
-
-[[package]]
-name = "parking_lot"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d7744ac029df22dca6284efe4e898991d28e3085c706c972bcd7da4a27a15eb"
 dependencies = [
  "instant",
- "lock_api 0.4.2",
- "parking_lot_core 0.8.0",
-]
-
-[[package]]
-name = "parking_lot_core"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d58c7c768d4ba344e3e8d72518ac13e259d7c7ade24167003b8488e10b6740a3"
-dependencies = [
- "cfg-if 0.1.10",
- "cloudabi 0.0.3",
- "libc",
- "redox_syscall",
- "smallvec",
- "winapi 0.3.9",
+ "lock_api",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -1727,7 +1685,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c361aa727dd08437f2f1447be8b59a33b0edd15e0fcee698f935613d9efbca9b"
 dependencies = [
  "cfg-if 0.1.10",
- "cloudabi 0.1.0",
+ "cloudabi",
  "instant",
  "libc",
  "redox_syscall",
@@ -2710,7 +2668,7 @@ dependencies = [
  "mio",
  "mio-uds",
  "num_cpus",
- "parking_lot 0.11.1",
+ "parking_lot",
  "pin-project-lite 0.1.11",
  "signal-hook-registry",
  "slab",

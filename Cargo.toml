@@ -45,7 +45,7 @@ moonfire-tflite = { git = "https://github.com/scottlamb/moonfire-tflite", featur
 mylog = { git = "https://github.com/scottlamb/mylog" }
 nix = "0.19.0"
 nom = "6.0.0"
-parking_lot = { version = "0.10", features = [] }
+parking_lot = { version = "0.11.1", features = [] }
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
 reffers = "0.6.0"
 ring = "0.16.2"
