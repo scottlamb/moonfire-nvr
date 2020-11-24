@@ -64,6 +64,12 @@ uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 reqwest = { version = "0.10.1", features = ["json"] }
 tempdir = "0.3"
 
+[profile.dev.package.scrypt]
+# On an Intel i3-6100U @ 2.30 GHz, a single scrypt password hash takes 7.6
+# seconds at opt-level=0, or 0.096 seconds at opt-level=2. Always optimize this
+# crate to avoid seeming hung / being annoyingly slow when debugging.
+opt-level = 2
+
 [profile.release]
 debug = true
 
