@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors
+// Copyright (C) 2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -37,7 +37,7 @@ use crate::raw;
 use crate::recording;
 use failure::Error;
 use fnv::FnvHashMap;
-use log::error;
+use log::{info, error};
 use nix::fcntl::AtFlags;
 use rusqlite::params;
 use crate::schema;
@@ -54,7 +54,10 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
         db::init(&mut expected)?;
         if let Some(diffs) = compare::get_diffs("actual", conn, "expected", &expected)? {
             println!("{}", &diffs);
+        } else {
+            println!("Schema is as expected.");
         }
+        info!("Done comparing schemas.");
     }
 
     let db_uuid = raw::get_db_uuid(&conn)?;
@@ -135,7 +138,7 @@ struct RecordingSummary {
     bytes: u64,
     video_samples: i32,
     video_sync_samples: i32,
-    duration: i32,
+    media_duration: i32,
     flags: i32,
 }
 
@@ -163,13 +166,13 @@ type Dir = FnvHashMap<i32, Stream>;
 
 fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
     let mut it = recording::SampleIndexIterator::new();
-    let mut duration = 0;
+    let mut media_duration = 0;
     let mut video_samples = 0;
     let mut video_sync_samples = 0;
     let mut bytes = 0;
     while it.next(video_index)? {
         bytes += it.bytes as u64;
-        duration += it.duration_90k;
+        media_duration += it.duration_90k;
         video_samples += 1;
         video_sync_samples += it.is_key() as i32;
     }
@@ -177,7 +180,7 @@ fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
         bytes,
         video_samples,
         video_sync_samples,
-        duration,
+        media_duration,
         flags: if it.duration_90k == 0 { db::RecordingFlags::TrailingZero as i32 } else { 0 },
     })
 }
@@ -225,7 +228,7 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
               composite_id,
               flags,
               sample_file_bytes,
-              duration_90k,
+              wall_duration_90k + media_duration_delta_90k,
               video_samples,
               video_sync_samples
             from
@@ -239,7 +242,7 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
             let s = RecordingSummary {
                 flags: row.get(1)?,
                 bytes: row.get::<_, i64>(2)? as u64,
-                duration: row.get(3)?,
+                media_duration: row.get(3)?,
                 video_samples: row.get(4)?,
                 video_sync_samples: row.get(5)?,
             };

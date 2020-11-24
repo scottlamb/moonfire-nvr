@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2019 The Moonfire NVR Authors
+// Copyright (C) 2020 The Moonfire NVR Authors
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -79,7 +79,16 @@ impl std::fmt::Display for IndexColumn {
 
 /// Returns a sorted vec of table names in the given connection.
 fn get_tables(c: &rusqlite::Connection) -> Result<Vec<String>, rusqlite::Error> {
-    c.prepare("select name from sqlite_master where type = 'table' order by name")?
+    c.prepare(r#"
+        select
+            name
+        from
+            sqlite_master
+        where
+            type = 'table' and
+            name not like 'sqlite_%'
+        order by name
+    "#)?
      .query_map(params![], |r| r.get(0))?
      .collect()
 }
