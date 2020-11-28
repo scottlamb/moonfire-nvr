@@ -359,12 +359,11 @@ struct Segment {
     ///    2. stsz: `slice[stsz_start .. stss_start]`
     ///    3. stss: `slice[stss_start ..]`
     index: UnsafeCell<Result<Box<[u8]>, ()>>,
+    index_once: Once,
 
     /// The 1-indexed frame number in the `File` of the first frame in this segment.
     first_frame_num: u32,
     num_subtitle_samples: u16,
-
-    index_once: Once,
 }
 
 // Manually implement Debug because `index` and `index_once` are not Debug.
@@ -372,6 +371,10 @@ impl fmt::Debug for Segment {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("mp4::Segment")
            .field("s", &self.s)
+           .field("recording_start", &self.recording_start)
+           .field("recording_wall_duration_90k", &self.recording_wall_duration_90k)
+           .field("recording_media_duration_90k", &self.recording_media_duration_90k)
+           .field("rel_media_range_90k", &self.rel_media_range_90k)
            .field("first_frame_num", &self.first_frame_num)
            .field("num_subtitle_samples", &self.num_subtitle_samples)
            .finish()
@@ -1368,11 +1371,12 @@ impl FileBuilder {
                     self.body.append_u32(u32::try_from(mr.end - mr.start).unwrap());
                 } else {
                     // The first subtitle lasts until the next second.
-                    let mut media_pos =
+                    // media_off is relative to the start of the desired range.
+                    let mut media_off =
                         s.media(i32::try_from((start_next_sec - start).0).unwrap());
                     entry_count += 1;
                     self.body.append_u32(1);
-                    self.body.append_u32(u32::try_from(media_pos - mr.start).unwrap());
+                    self.body.append_u32(u32::try_from(media_off).unwrap());
 
                     // Then there are zero or more "interior" subtitles, one second each. That's
                     // one second converted from wall to media duration. rescale rounds down,
@@ -1388,13 +1392,13 @@ impl FileBuilder {
                         entry_count += 1;
                         self.body.append_u32(interior as u32);                       // count
                         self.body.append_u32(u32::try_from(onesec_media_dur).unwrap());
-                        media_pos += onesec_media_dur * i32::try_from(interior).unwrap();
+                        media_off += onesec_media_dur * i32::try_from(interior).unwrap();
                     }
 
                     // Then there's a final subtitle for the remaining fraction of a second.
                     entry_count += 1;
                     self.body.append_u32(1);
-                    self.body.append_u32(u32::try_from(mr.end - media_pos).unwrap());
+                    self.body.append_u32(u32::try_from(mr.end - mr.start - media_off).unwrap());
                 }
             }
             BigEndian::write_u32(&mut self.body.buf[entry_count_pos .. entry_count_pos + 4],
@@ -2423,6 +2427,31 @@ mod tests {
                    hash.to_hex().as_str());
         const EXPECTED_ETAG: &'static str =
             "\"196192eccd8be2c840dfc4073355efe5c917999641e3d0a2b87e0d2eab40267f\"";
+        assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
+        drop(db.syncer_channel);
+        db.db.lock().clear_on_flush();
+        db.syncer_join.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_round_trip_with_edit_list_and_subtitles() {
+        testutil::init();
+        let db = TestDb::new(RealClocks {});
+        copy_mp4_to_db(&db);
+        let off = 2*TIME_UNITS_PER_SEC;
+        let mp4 = create_mp4_from_db(&db, i32::try_from(off).unwrap(),  0, true);
+        traverse(mp4.clone()).await;
+        let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
+        compare_mp4s(&new_filename, off, 0);
+
+        // Test the metadata. This is brittle, which is the point. Any time the digest comparison
+        // here fails, it can be updated, but the etag must change as well! Otherwise clients may
+        // combine ranges from the new format with ranges from the old format.
+        let hash = digest(&mp4).await;
+        assert_eq!("7aef371e9ab5e871893fd9b1963cb71c1c9b093b5d4ff36cb1340b65155a8aa2",
+                   hash.to_hex().as_str());
+        const EXPECTED_ETAG: &'static str =
+            "\"84cafd9db7a5c0c32961d9848582d2dca436a58d25cbedfb02d7450bc6ce1229\"";
         assert_eq!(Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()), mp4.etag());
         drop(db.syncer_channel);
         db.db.lock().clear_on_flush();
