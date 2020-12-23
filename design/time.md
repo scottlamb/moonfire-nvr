@@ -1,10 +1,6 @@
 # Moonfire NVR Time Handling
 
-Status: **current**. The approach below works well for video, but audio frames'
-durations can't be adjusted as easily. As part of implementing audio support,
-the implementation is changing to instead decouple "wall time" and "media time",
-as described in 
-[this comment](https://github.com/scottlamb/moonfire-nvr/issues/34#issuecomment-651548468).
+Status: **current**.
 
 > A man with a watch knows what time it is. A man with two watches is never
 > sure.
