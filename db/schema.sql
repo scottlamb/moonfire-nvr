@@ -519,45 +519,5 @@ create table signal_change (
   changes blob not null
 );
 
-create table object_detection_model (
-  id integer primary key,
-  uuid blob unique not null check (length(uuid) = 16),
-  name text not null,
-
-  -- The actual model and label mappings, in a tbd protocol buffer message
-  -- format.
-  data blob
-);
-
--- An entry for every supported label in any model. (E.g., there is one row
--- for "person" even if there are many models that support detecting people.)
-create table object_detection_label (
-  id integer primary key,
-  uuid blob unique not null check (length(uuid) = 16),
-  name text unique not null,
-  color text
-);
-
-create table recording_object_detection (
-  composite_id integer not null references recording (composite_id),
-  model_id integer not null references object_detection_model (id),
-
-  -- repeated:
-  -- * frame delta unsigned varint
-  -- * label unsigned varint
-  -- * xmin, xmax, ymin, ymax as fixed 8-bit numbers
-  --   (any value from knowing xmin <= xmax, ymin <= ymax?
-  --   probably not a whole byte anyway.)
-  --   although 256/300 or 256/320 is not super clean. awkward.
-  -- * score/probability/whatever-it's-called as fixed 8-bit number
-  --   linear scale?
-  frame_data blob not null,
-
-  -- Operations are almost always done on a bounded set of recordings, so
-  -- and perhaps on all models. Use composite_id as the prefix of the primary
-  -- key to make these efficient.
-  primary key (composite_id, model_id)
-);
-
 insert into version (id, unix_time,                           notes)
              values (6,  cast(strftime('%s', 'now') as int), 'db creation');

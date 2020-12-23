@@ -271,12 +271,6 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
           :start <= composite_id and
           composite_id < :end
     "#)?;
-    let mut del_detection = tx.prepare_cached(r#"
-        delete from recording_object_detection
-        where
-          :start <= composite_id and
-          composite_id < :end
-    "#)?;
     let mut del_main = tx.prepare_cached(r#"
         delete from recording
         where
@@ -300,9 +294,6 @@ pub(crate) fn delete_recordings(tx: &rusqlite::Transaction, sample_file_dir_id: 
     if n_integrity > n {  // fewer is okay; recording_integrity is optional.
         bail!("inserted {} garbage rows but deleted {} recording_integrity rows!", n, n_integrity);
     }
-    // Any number of object detection rows is okay, as there can be zero or more models per
-    // recording.
-    del_detection.execute_named(p)?;
     let n_main = del_main.execute_named(p)?;
     if n_main != n {
         bail!("inserted {} garbage rows but deleted {} recording rows!", n, n_main);
