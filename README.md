@@ -1,3 +1,5 @@
+[![CI](https://github.com/scottlamb/moonfire-nvr/workflows/CI/badge.svg)](https://github.com/scottlamb/moonfire-nvr/actions?query=workflow%3ACI)
+
 # Introduction
 
 Moonfire NVR is an open-source security camera network video recorder, started

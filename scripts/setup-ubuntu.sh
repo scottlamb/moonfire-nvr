@@ -50,7 +50,6 @@ PKGS="build-essential \
       libncurses5-dev \
       libncursesw5-dev \
       libsqlite3-dev \
-      libssl-dev \
       pkgconf \
       sqlite3 \
       tzdata"
