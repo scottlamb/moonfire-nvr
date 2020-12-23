@@ -1,12 +1,8 @@
-cameras.sql
 .DS_Store
-.project
-.settings
 *.swp
 *.sublime-workspace
 node_modules
 prep.config
-settings-nvr-local.js
 db/schema.rs
 target
 ui-dist

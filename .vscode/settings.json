@@ -1,0 +1,11 @@
+{
+    "editor.rulers": [
+        
+        80,
+        {
+            "column": 100,
+            "color": "#cc8888"
+        }
+    ],
+    "rust-analyzer.inlayHints.enable": false
+}
