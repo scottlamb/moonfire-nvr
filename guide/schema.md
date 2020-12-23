@@ -241,7 +241,7 @@ Version 5 adds over version 3:
 *   the ability to recover from a completely full sample file directory (#65)
     without manual intervention.
 
-### Version 6 (under development on the `new-schema` branch)
+### Version 6
 
 This upgrade affects only the SQLite database.
 
