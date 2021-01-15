@@ -61,7 +61,7 @@ url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 
 [dev-dependencies]
-reqwest = { version = "0.10.1", features = ["json"] }
+reqwest = { version = "0.10.1", default-features = false, features = ["json"] }
 tempdir = "0.3"
 
 [profile.dev.package.scrypt]

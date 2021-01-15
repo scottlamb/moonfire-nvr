@@ -28,11 +28,14 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-fn main() {
-    protobuf_codegen_pure::Codegen::new()
-        .out_dir(".")
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Ok(protobuf_codegen_pure::Codegen::new()
+        .out_dir(std::env::var("OUT_DIR")?)
         .inputs(&["proto/schema.proto"])
         .include("proto")
-        .run()
-        .expect("protoc");
+        .customize(protobuf_codegen_pure::Customize {
+            gen_mod_rs: Some(true),
+            ..Default::default()
+        })
+        .run()?)
 }

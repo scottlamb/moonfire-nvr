@@ -47,8 +47,8 @@ PKGS="build-essential \
       libavcodec-dev \
       libavformat-dev \
       libavutil-dev \
-      libncurses5-dev \
-      libncursesw5-dev \
+      libncurses-dev \
+      libncursesw-dev \
       libsqlite3-dev \
       pkgconf \
       sqlite3 \

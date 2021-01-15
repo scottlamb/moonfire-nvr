@@ -37,9 +37,12 @@ mod compare;
 pub mod db;
 pub mod dir;
 mod fs;
+mod proto {
+    include!(concat!(env!("OUT_DIR"), "/mod.rs"));
+}
 mod raw;
 pub mod recording;
-mod schema;
+use proto::schema;
 pub mod signal;
 pub mod upgrade;
 pub mod writer;
