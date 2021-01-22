@@ -64,7 +64,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
         moonfire-nvr && \
     ln -s moonfire-nvr /usr/local/bin/nvr
 COPY --from=build-server /var/lib/moonfire-nvr/moonfire-nvr /usr/local/bin/moonfire-nvr
-COPY --from=build-webpack /var/lib/moonfire-nvr/ui-dist/* /usr/local/lib/moonfire-nvr/ui
+COPY --from=build-webpack /var/lib/moonfire-nvr/ui-dist /usr/local/lib/moonfire-nvr/ui
 
 USER moonfire-nvr:moonfire-nvr
 WORKDIR /var/lib/moonfire-nvr
