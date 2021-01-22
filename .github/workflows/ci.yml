@@ -27,7 +27,7 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          target
+          server/target
         key: ${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     - name: Install dependencies
       run: sudo apt-get update && sudo apt-get install libavcodec-dev libavformat-dev libavutil-dev libncurses-dev libsqlite3-dev pkgconf
@@ -38,7 +38,7 @@ jobs:
         toolchain: ${{ matrix.rust }}
         override: true
     - name: Test
-      run: cargo test ${{ matrix.extra_args }} --all
+      run: cd server && cargo test ${{ matrix.extra_args }} --all
   js:
     name: Build and lint Javascript frontend
     runs-on: ubuntu-20.04
@@ -57,6 +57,6 @@ jobs:
         key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
         restore-keys: |
           ${{ runner.os }}-yarn-
-    - run: yarn install
-    - run: yarn build
-    - run: yarn lint
+    - run: cd ui && yarn install
+    - run: cd ui && yarn build
+    - run: cd ui && yarn lint

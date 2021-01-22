@@ -10,7 +10,7 @@
   "scripts": {
     "start": "webpack-dev-server --mode development --config webpack/dev.config.js --progress",
     "build": "webpack --mode production --config webpack/prod.config.js",
-    "lint": "eslint ui-src"
+    "lint": "eslint src"
   },
   "dependencies": {
     "jquery": "^3.2.1",
@@ -45,3 +45,4 @@
     "webpack-merge": "^4.2.2"
   }
 }
+

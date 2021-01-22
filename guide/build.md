@@ -84,10 +84,6 @@ caveats:
     $ docker buildx build --load --platform=arm64/v8 ...
     ```
 
-Major caveat: something appears to be making `docker buildx build` frequently
-redo builds rather than reusing cached results. The author is very annoyed by
-this and would welcome help in understanding this problem...
-
 ## Non-Docker setup
 
 You may prefer building without Docker on the host. Moonfire NVR should run
@@ -148,13 +144,15 @@ Once prerequisites are installed, you can build the server and find it in
 `target/release/moonfire-nvr`:
 
 ```
+$ cd server
 $ cargo test
 $ cargo build --release
 ```
 
-You can build the UI via `yarn` and find it in the `ui-dist` directory:
+You can build the UI via `yarn` and find it in the `ui/dist` directory:
 
 ```
+$ cd ui
 $ yarn
 $ yarn build
 ```

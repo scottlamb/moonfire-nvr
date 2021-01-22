@@ -1,3 +1,4 @@
-node_modules
-target
-ui-dist
+/server/target
+/ui/dist
+/ui/node_modules
+/ui/yarn-error.log

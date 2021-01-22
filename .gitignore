@@ -1,9 +1,6 @@
 .DS_Store
 *.swp
-*.sublime-workspace
-node_modules
-prep.config
-db/schema.rs
-target
-ui-dist
-yarn-error.log
+/server/target
+/ui/dist
+/ui/node_modules
+/ui/yarn-error.log

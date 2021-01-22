@@ -20,6 +20,7 @@ this in the webpack documentation.
 
 Checkout the branch you want to work on and type
 
+    $ cd ui
     $ yarn start
 
 This will pack and prepare a development setup. By default the development

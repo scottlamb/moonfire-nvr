@@ -37,11 +37,11 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
   entry: {
-    nvr: './ui-src/index.js',
+    nvr: './src/index.js',
   },
   output: {
     filename: '[name].[chunkhash].js',
-    path: path.resolve('./ui-dist/'),
+    path: path.resolve('./dist/'),
     publicPath: '/',
   },
   module: {
@@ -60,7 +60,7 @@ module.exports = {
           ],
         },
         exclude: /(node_modules|bower_components)/,
-        include: [path.resolve('./ui-src')],
+        include: [path.resolve('./src')],
       },
       {
         test: /\.png$/,
@@ -83,7 +83,7 @@ module.exports = {
   plugins: [
     new webpack.IgnorePlugin(/\.\/locale$/),
     new HtmlWebpackPlugin({
-      template: './ui-src/index.html',
+      template: './src/index.html',
     }),
     new webpack.NormalModuleReplacementPlugin(
       /node_modules\/moment\/moment\.js$/,
@@ -94,7 +94,7 @@ module.exports = {
       './builds/moment-timezone-with-data-2012-2022.min.js'
     ),
     new FaviconsWebpackPlugin({
-      logo: './ui-src/favicon.svg',
+      logo: './src/favicon.svg',
       mode: 'webapp',
       devMode: 'light',
       prefix: 'favicons-[hash]/',

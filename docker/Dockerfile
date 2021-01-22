@@ -3,39 +3,51 @@
 # See documentation here:
 # https://github.com/moby/buildkit/blob/master/frontend/dockerfile/docs/syntax.md
 
-# Moonfire NVR development environment, using the build platform.
-FROM --platform=$BUILDPLATFORM ubuntu:20.04 AS dev
+# "dev-common" is the portion of "dev" (see below) which isn't specific to the
+# target arch. It's sufficient for building the non-arch-specific webpack.
+FROM --platform=$BUILDPLATFORM ubuntu:20.04 AS dev-common
 LABEL maintainer="slamb@slamb.org"
-ARG TARGETARCH
-ARG BUILDARCH
 ARG BUILD_UID=1000
 ARG BUILD_GID=1000
-LABEL maintainer="slamb@slamb.org"
 ENV LC_ALL=C.UTF-8
+COPY docker/dev-common.bash /
+RUN /dev-common.bash
+CMD	[ "/bin/bash", "--login" ]
+
+# "dev" is a full development environment, suitable for shelling into or
+# using with the VS Code container plugin.
+FROM --platform=$BUILDPLATFORM dev-common AS dev
+ARG BUILDARCH
+ARG TARGETARCH
+LABEL maintainer="slamb@slamb.org"
 COPY docker/dev.bash /
 RUN /dev.bash
 USER moonfire-nvr:moonfire-nvr
 WORKDIR /var/lib/moonfire-nvr
-CMD	[ "/bin/bash", "--login" ]
 
-# Build the webpack with node_modules and ui-dist outside the src dir.
-FROM dev AS build-webpack
+# Build the UI with node_modules and ui-dist outside the src dir.
+FROM --platform=$BUILDPLATFORM dev-common AS build-ui
 LABEL maintainer="slamb@slamb.org"
-RUN --mount=type=bind,target=/var/lib/moonfire-nvr/src,readonly \
-    ln -s src/package.json src/yarn.lock src/ui-src src/webpack . && \
-    yarn install && yarn build && rm -rf node_modules
+WORKDIR /var/lib/moonfire-nvr/src/ui
+COPY ui /var/lib/moonfire-nvr/src/ui
+RUN --mount=type=cache,target=/var/lib/moonfire-nvr/src/ui/node_modules,sharing=locked,mode=1777 \
+    yarn install && yarn build
 
 # Build the Rust components. Note that dev.sh set up an environment variable
 # in .buildrc that similarly changes the target dir path.
-FROM dev AS build-server
+FROM --platform=$BUILDPLATFORM dev AS build-server
 LABEL maintainer="slamb@slamb.org"
-RUN --mount=type=bind,target=/var/lib/moonfire-nvr/src,readonly \
-    bash -c 'set -o xtrace && source ~/.buildrc && cd src && cargo test && cargo build --release'
+RUN --mount=type=cache,id=target,target=/var/lib/moonfire-nvr/target,sharing=locked,mode=1777 \
+    --mount=type=bind,source=server,target=/var/lib/moonfire-nvr/src/server,readonly \
+    bash -c 'set -o xtrace && \
+             source ~/.buildrc && \
+             cd src/server && \
+             cargo test && \
+             cargo build --release && \
+             sudo install -m 755 ~/moonfire-nvr /usr/local/bin/moonfire-nvr'
 
 # Deployment environment, now in the target platform.
 FROM --platform=$TARGETPLATFORM ubuntu:20.04 AS deploy
-ARG DEPLOY_UID=10000
-ARG DEPLOY_GID=10000
 LABEL maintainer="slamb@slamb.org"
 ENV LC_ALL=C.UTF-8
 RUN export DEBIAN_FRONTEND=noninteractive && \
@@ -51,21 +63,12 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
         vim-nox && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    groupadd \
-        --gid="${DEPLOY_GID}" \
-        moonfire-nvr && \
-    useradd \
-        --no-log-init \
-        --home-dir=/var/lib/moonfire-nvr \
-        --uid="${DEPLOY_UID}" \
-        --gid=moonfire-nvr \
-        --shell=/bin/bash \
-        --create-home \
-        moonfire-nvr && \
     ln -s moonfire-nvr /usr/local/bin/nvr
-COPY --from=build-server /var/lib/moonfire-nvr/moonfire-nvr /usr/local/bin/moonfire-nvr
-COPY --from=build-webpack /var/lib/moonfire-nvr/ui-dist /usr/local/lib/moonfire-nvr/ui
+COPY --from=build-server /usr/local/bin/moonfire-nvr /usr/local/bin/moonfire-nvr
+COPY --from=build-ui /var/lib/moonfire-nvr/ui/dist /usr/local/lib/moonfire-nvr/ui
 
-USER moonfire-nvr:moonfire-nvr
+# The install instructions say to use --user in the docker run commandline.
+# Specify a non-root user just in case someone forgets.
+USER 10000:10000
 WORKDIR /var/lib/moonfire-nvr
 ENTRYPOINT [ "/usr/local/bin/moonfire-nvr" ]
