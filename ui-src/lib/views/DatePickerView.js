@@ -215,7 +215,10 @@ export default class DatePickerView {
    * @return {String} Date portion of ISO-8601 formatted selected date
    */
   get dateISO() {
-    return this.date.toISOString().substr(0, 10);
+    const year = this.date.getYear() + 1900;
+    const month = (this.date.getMonth() + 1).toString().padStart(2, '0');
+    const day = this.date.getDate().toString().padStart(2, '0');
+    return [year, month, day].join('-');
   }
 
   /**

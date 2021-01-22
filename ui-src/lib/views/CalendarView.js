@@ -161,7 +161,10 @@ export default class CalendarView {
     const fromPickerView = this.fromPickerView_;
     const toPickerView = this.toPickerView_;
     const beforeShowDay = function(date) {
-      const dateStr = date.toISOString().substr(0, 10);
+      const year = date.getYear() + 1900;
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const day = date.getDate().toString().padStart(2, '0');
+      const dateStr = [year, month, day].join('-');
       return [dateSet.has(dateStr), '', ''];
     };
 
@@ -170,6 +173,7 @@ export default class CalendarView {
         dateFormat: DatePickerView.datepicker.ISO_8601,
         minDate: minDateStr,
         maxDate: maxDateStr,
+        defaultDate: maxDateStr,
         onSelect: (dateStr /* , picker */) =>
           this.updateRangeDates_(dateStr, dateStr),
         beforeShowDay: beforeShowDay,
@@ -181,6 +185,8 @@ export default class CalendarView {
       fromPickerView.option({
         dateFormat: DatePickerView.datepicker.ISO_8601,
         minDate: minDateStr,
+        maxDate: maxDateStr,
+        defaultDate: maxDateStr,
         onSelect: (dateStr /* , picker */) => {
           toPickerView.minDate = this.fromDateISO;
           this.updateRangeDates_(dateStr, this.toDateISO);
@@ -192,6 +198,7 @@ export default class CalendarView {
         dateFormat: DatePickerView.datepicker.ISO_8601,
         minDate: fromPickerView.dateISO,
         maxDate: maxDateStr,
+        defaultDate: maxDateStr,
         onSelect: (dateStr /* , picker */) => {
           fromPickerView.maxDate = this.toDateISO;
           this.updateRangeDates_(this.fromDateISO, dateStr);
