@@ -4,9 +4,12 @@
 
 While Moonfire NVR is running, logs will be written to stderr.
 
-   * When running `moonfire-nvr config`, you typically should redirect stderr
+   * When running the configuration UI, you typically should redirect stderr
      to a text file to avoid poor interaction between the interactive stdout
-     output and the logging.
+     output and the logging. If you use the recommended
+     `nvr config 2>debug-log` command, output will be in the `debug-log` file.
+   * When running detached through Docker, Docker saves the logs for you.
+     Try `nvr logs` or `docker logs moonfire-nvr`.
    * When running through systemd, stderr will be redirected to the journal.
      Try `sudo journalctl --unit moonfire-nvr` to view the logs. You also
      likely want to set `MOONFIRE_FORMAT=google-systemd` to format logs as
@@ -25,6 +28,8 @@ Logging options are controlled by environmental variables:
      [glog](https://github.com/google/glog) package) and `google-systemd` (a
      variation for better systemd compatibility).
 
+If you use Docker, set these via Docker's `--env` argument.
+
 ## Problems
 
 ### `Error: pts not monotonically increasing; got 26615520 then 26539470`
@@ -39,11 +44,5 @@ to disable B frames in the meantime.
 ### `moonfire-nvr config` displays garbage
 
 This happens if your machine is configured to a non-UTF-8 locale, due to
-gyscos/Cursive#13. As a workaround, type `export LC_ALL=en_US.UTF-8` prior to
-running `moonfire-nvr config`.
-
-### Logging in is very very slow
-
-Ensure you're using a build compiled with the `--release` flag. See
-[libpasta/libpasta#9](https://github.com/libpasta/libpasta/issues/9) for more
-background.
+gyscos/Cursive#13. As a workaround, try setting the environment variable
+`LC_ALL=C.UTF-8`. This should automatically be set with the Docker container.

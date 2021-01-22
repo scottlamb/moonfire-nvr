@@ -149,16 +149,20 @@ your browser. See [How to secure Nginx with Let's Encrypt on Ubuntu
 
 ## 6. Reconfigure Moonfire NVR
 
-In your `/etc/systemd/system/moonfire-nvr.service` file, look for these lines:
+If you follow the recommended Docker setup, your `/usr/local/bin/nvr` script
+will contain this line:
 
 ```
-ExecStart=/usr/local/bin/moonfire-nvr run \
-    --db-dir=/var/lib/moonfire-nvr/db \
-    --http-addr=0.0.0.0:8080 \
-    --allow-unauthenticated-permissions='view_video: true'
+                --allow-unauthenticated-permissions='view_video: true'
 ```
 
-Replace the last line with `--trust-forward-hdrs`.  This change has two effects:
+Replace it with the following:
+
+```
+                --trust-forward-hdrs
+```
+
+This change has two effects:
 
    * No `--allow-unauthenticated-permissions` means that web users must
      authenticate.
@@ -167,15 +171,17 @@ Replace the last line with `--trust-forward-hdrs`.  This change has two effects:
      in the next section.
 
 If the webserver is running on the same machine as Moonfire NVR, you might
-also change `0.0.0.0:8080` to `127.0.0.1:8080`, which prevents other machines
-on the network from impersonating the proxy, effectively allowing them to lie
-about the client's IP and protocol.
+also change `--publish=8080:8080` to `--publish=127.0.0.1:8080:8080`, which
+prevents other machines on the network from impersonating the proxy,
+effectively allowing them to lie about the client's IP and protocol.
 
-Run these commands to make the configuration take effect:
+To make this take effect, you'll need to stop the running Docker container,
+delete it, and create/run a new one:
 
 ```
-$ sudo systemctl daemon-reload
-$ sudo systemctl restart moonfire-nvr
+$ nvr stop
+$ nvr rm
+$ nvr run
 ```
 
 ## 7. Configure the webserver

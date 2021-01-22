@@ -53,16 +53,10 @@ SQLite database:
           no longer in the dangerous mode.
 
 Next ensure Moonfire NVR is not running and does not automatically restart if
-the system is rebooted during the upgrade. If you are using systemd with the
-service name `moonfire-nvr`, you can do this as follows:
+the system is rebooted during the upgrade. If you followed the Docker
+instructions, you can do this as follows:
 
-    $ sudo systemctl stop moonfire-nvr
-    $ sudo systemctl disable moonfire-nvr
-
-The service takes a moment to shut down; wait until the following command
-reports that it is not running:
-
-    $ sudo systemctl status moonfire-nvr
+    $ nvr stop
 
 Then back up your SQLite database. If you are using the default path, you can
 do so as follows:
@@ -83,27 +77,34 @@ manual for write-ahead logging](https://www.sqlite.org/wal.html):
 > 3.11.0 (2016-02-15), WAL mode works as efficiently with large transactions
 > as does rollback mode.
 
-Run the upgrade procedure using the new software binary (here referred to as
-`new-moonfire-nvr`; if you are installing from source, you may find it as
-`target/release/moonfire-nvr`).
+Run the upgrade procedure using the new software binary.
 
-    $ sudo -u moonfire-nvr new-moonfire-nvr upgrade
+```
+$ nvr pull     # updates the docker image to the latest binary
+$ nvr upgrade  # runs the upgrade
+```
 
-Then run the system in read-only mode to verify correct operation:
+You can run the system in read-only mode, although you'll find this only
+works in the "insecure" setup. (Authorization requires writing the database.)
 
-    $ sudo -u moonfire-nvr new-moonfire-nvr run --read-only
+```
+$ nvr rm
+$ nvr run --read-only
+```
 
 Go to the web interface and ensure the system is operating correctly. If
-you detect a problem now, you can copy the old database back over the new one.
-If you detect a problem after enabling read-write operation, a restore will be
+you detect a problem now, you can copy the old database back over the new one
+and edit your `nvr` script to use the corresponding older Docker image. If
+you detect a problem after enabling read-write operation, a restore will be
 more complicated.
 
-Then install the new software to the path expected by your systemd
-configuration and start it up:
+Once you're satisfied, restart the system in read-write mode:
 
-    $ sudo install -m 755 new-moonfire-nvr /usr/local/bin/moonfire-nvr
-    $ sudo systemctl enable moonfire-nvr
-    $ sudo systemctl start moonfire-nvr
+```
+$ nvr stop
+$ nvr rm
+$ nvr run
+```
 
 Hopefully your system is functioning correctly. If not, there are two options
 for restore; neither are easy:
@@ -120,9 +121,7 @@ for restore; neither are easy:
    * undo the changes by hand. There's no documentation on this; you'll need
      to read the code and come up with a reverse transformation.
 
-Once you're confident of correct operation, delete the unneeded backup:
-
-    $ sudo systemctl rm /var/lib/moonfire-nvr/db/db.pre-upgrade
+The `nvr check` command will show you what problems exist on your system.
 
 ### Unversioned to version 0
 

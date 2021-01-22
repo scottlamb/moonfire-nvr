@@ -1,47 +1,109 @@
-# Downloading, installing, and configuring Moonfire NVR
+# Downloading, installing, and configuring Moonfire NVR with Docker
 
 This document describes how to download, install, and configure Moonfire NVR
-on a Debian-based Linux system (such as Ubuntu or Raspbian).
+via the prebuilt Docker images available for x86-64, arm64, and arm. If you
+instead want to build Moonfire NVR yourself, see the [Build
+instructions](build.md).
 
-(In principle, Moonfire NVR supports any POSIX-compliant system, and the main
-author uses macOS for development, but the documentation and scripts are
-intended for Linux.)
-
-## Downloading
-
-See the [github page](https://github.com/scottlamb/moonfire-nvr) (in case
-you're not reading this text there already). You can download the
-bleeding-edge version from the commandline via git:
+First, install [Docker](https://www.docker.com/) if you haven't already,
+and verify you can run the container.
 
 ```
-$ git clone https://github.com/scottlamb/moonfire-nvr.git
+$ docker run --rm -it scottlamb/moonfire-nvr:latest
+moonfire-nvr 0.6.0
+security camera network video recorder
+
+USAGE:
+    moonfire-nvr <SUBCOMMAND>
+
+...
 ```
 
-## Building and installing from source
-
-There are no binary packages of Moonfire NVR available yet, so it must be built
-from source. To do so, you can follow either of two paths:
-
-   * Scripted: You will run some shell scripts (after preparing one or two files,
-     and will be completely done. This is by far the easiest option, in
-     particular for first time builders/installers. Read more in [Scripted
-     Installation](install-scripted.md).
-   * Manual: see [instructions](install-manual.md).
+Next, you'll need to set up your filesystem and the Monfire NVR user.
 
 Moonfire NVR keeps two kinds of state:
 
-   * a SQLite database, typically <1 GiB. It should be stored on flash if
-     available.
-   * the "sample file directories", which hold the actual samples/frames of
-     H.264 video. These should be quite large and are typically stored on hard
-     drives.
+*   a SQLite database, typically <1 GiB. It should be stored on flash if
+    available. In most cases your root filesystem is on flash, so the
+    default location of `/var/lib/moonfire-nvr/db` will be fine.
+*   the "sample file directories", which hold the actual samples/frames of
+    H.264 video. These should be quite large and are typically stored on hard
+    drives. More below.
 
 (See [schema.md](schema.md) for more information.)
 
-By now Moonfire NVR's dedicated user and database should have been created for
-you. Next you need to create a sample file directory.
+On most Linux systems, you can create the user as follows:
 
-## Dedicated hard drive seutp
+```
+$ sudo useradd --user-group --create-home --home /var/lib/moonfire-nvr moonfire-nvr
+```
+
+and create a script called `nvr` to run Moonfire NVR as the intended host user.
+This script supports running Moonfire NVR's various administrative commands interactively
+and managing a long-lived Docker container for its web interface.
+
+As you set up this script, adjust the `tz` variable as appropriate for your
+time zone.
+
+```
+sudo sh -c 'cat > /usr/local/bin/nvr' <<EOF
+#!/bin/bash -e
+
+tz=America/Los_Angeles
+container_name=moonfire-nvr
+image_name=scottlamb/moonfire-nvr:latest
+common_docker_run_args=(
+        --mount=type=bind,source=/etc/localtime,destination=/etc/localtime
+        --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
+        --user="$(id -u moonfire-nvr):$(id -g moonfire-nvr)"
+        --env=RUST_BACKTRACE=1
+        --env=TZ=:/etc/localtime
+)
+
+case "$1" in
+run)
+        shift
+        exec docker run \
+                --detach=true \
+                --restart=on-failure \
+                "${common_docker_run_args[@]}" \
+                --publish=8080:8080 \
+                --name="${container_name}" \
+                "${image_name}" \
+                run \
+                --allow-unauthenticated-permissions='view_video: true' \
+                "$@"
+        ;;
+start|stop|logs|rm)
+        exec docker "$@" "${container_name}"
+        ;;
+pull)
+        exec docker pull "${image_name}"
+        ;;
+*)
+        exec docker run \
+                --interactive=true \
+                --tty \
+                --rm \
+                "${common_docker_run_args[@]}" \
+                "${image_name}" \
+                "$@"
+        ;;
+esac
+EOF
+sudo chmod a+rx /usr/local/bin/nvr
+```
+
+then try it out by initializing the database:
+
+```
+$ nvr init
+```
+
+This will create a directory `/var/lib/moonfire-nvr/db` with a SQLite3 database
+within it.
+
+## Dedicated hard drive setup
 
 If a dedicated hard drive is available, set up the mount point:
 
@@ -67,38 +129,32 @@ $ ls -l /dev/disk/by-uuid
 
 If you use the `nofail` attribute in `/etc/fstab` as described above, your
 system will boot successfully even when the hard drive is unavailable (such as
-when your external USB storage is unmounted). This is convenient, but you
-likely want to ensure the `moonfire-nvr` service only starts when the mounting
-is successful. Edit the systemd configuration to do so:
+when your external USB storage is unmounted). This can be helpful when
+recovering from problems.
+
+Add a new `--mount` line to your Docker wrapper script `/usr/local/bin/nvr`
+to expose this new volume to the Docker container, directly below the other
+mount lines. It will look similar to this:
 
 ```
-$ sudo vim /etc/systemd/system/moonfire-nvr.service
-$ sudo systemctl daemon-reload
-```
-
-You'll want to add a line similar to the following to the `[Unit]` section of
-the file:
-
-```
-RequiresMountsFor=/media/nvr
+        --mount=type=bind,source=/media/nvr/sample,destination=/media/nvr/sample
 ```
 
 ## Completing configuration through the UI
 
-Once your system is set up, it's time to initialize an empty database,
-and add the cameras and sample directories to moonfire. You can do this
+Once your system is set up, it's time to initialize an empty database
+and add the cameras and sample directories. You can do this
 by using the `moonfire-nvr` binary's text-based configuration tool.
 
 ```
-$ sudo -u moonfire-nvr moonfire-nvr init               # Initialize empty db
-$ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log # Configure cameras and storage
+$ nvr config 2>debug-log
 ```
 
 In the user interface,
 
  1. add your sample file dir(s) under "Directories and retention".
     If you used a dedicated hard drive, use the directory you precreated
-    (`/media/surveillance/sample`). Otherwise, try
+    (eg `/media/nvr/sample`). Otherwise, try
     `/var/lib/moonfire-nvr/sample`. Moonfire NVR will create the directory as
     long as it has the required permissions on the parent directory.
 
@@ -154,13 +210,15 @@ out, particularly if the machine it's running on is behind a home router's
 firewall. You might not; in that case read through [secure the
 system](secure.md) first.
 
-The following commands will start Moonfire NVR and enable it for following
-boots, respectively:
+This command will start a detached Docker container for the web interface.
+It will automatically restart when your system does.
 
 ```
-$ sudo systemctl start moonfire-nvr
-$ sudo systemctl enable moonfire-nvr
+$ nvr run
 ```
+
+You can temporarily disable the service via `nvr stop` and restart it later via
+`nvr start`.
 
 The HTTP interface is accessible on port 8080; if your web browser is running
 on the same machine, you can access it at
