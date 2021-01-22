@@ -37,32 +37,27 @@ make this possible:
   pre-encoded H.264 streams in both "main" (full-sized) and "sub" (lower
   resolution, compression quality, and/or frame rate) varieties. The "sub"
   stream is more suitable for fast computer vision work as well as
-  remote/mobile streaming. Disk space these days is quite cheap (with 3 TB
+  remote/mobile streaming. Disk space these days is quite cheap (with 4 TB
   drives costing about $100), so we can afford to keep many camera-months of
   both streams on disk.
-* decoding and analyzing only select "key" video frames (see
-  [wikipedia](https://en.wikipedia.org/wiki/Video_compression_picture_types)).
-* off-loading expensive work to a GPU. Even the Raspberry Pi has a
-  surprisingly powerful GPU.
+* off-loading on-camera analytics to an inexpensive USB or M.2 neural network
+  accelerator.
 * using [HTTP Live Streaming](https://en.wikipedia.org/wiki/HTTP_Live_Streaming)
   rather than requiring custom browser plug-ins.
-* taking advantage of cameras' built-in motion detection. This is
-  the most obvious way to reduce motion detection CPU. It's a last resort
-  because these cheap cameras' proprietary algorithms are awful compared to
-  those described on [changedetection.net](http://changedetection.net).
-  Cameras have high false-positive and false-negative rates, are hard to
-  experiment with (as opposed to rerunning against saved video files), and
-  don't provide any information beyond if motion exceeded the threshold or
-  not.
+* taking advantage of on-camera analytics. This is the lowest CPU usage option,
+  although many cameras' analytics aren't as good as what can be done on the NVR,
+  they're hard to experiment with, and even when they use modern ML-based
+  approaches, their built-in models can't be retrained.
 
 # Documentation
 
 *   [License](LICENSE.txt) — GPLv3
-*   [Building and installing](guide/install.md)
+*   [Installing](guide/install.md)
+*   [Building from source](guide/build.md)
 *   [UI Development](guide/developing-ui.md)
 *   [Troubleshooting](guide/troubleshooting.md)
 *   [Wiki](https://github.com/scottlamb/moonfire-nvr/wiki) has notes on
-    several camera models.
+    several camera models. Please add yours!
 
 # <a name="help"></a> Getting help and getting involved
 
