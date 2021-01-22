@@ -40,7 +40,7 @@ make this possible:
   remote/mobile streaming. Disk space these days is quite cheap (with 4 TB
   drives costing about $100), so we can afford to keep many camera-months of
   both streams on disk.
-* off-loading on-camera analytics to an inexpensive USB or M.2 neural network
+* off-loading on-NVR analytics to an inexpensive USB or M.2 neural network
   accelerator.
 * using [HTTP Live Streaming](https://en.wikipedia.org/wiki/HTTP_Live_Streaming)
   rather than requiring custom browser plug-ins.
