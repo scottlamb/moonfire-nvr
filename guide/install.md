@@ -57,7 +57,7 @@ common_docker_run_args=(
         --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
         --user="$(id -u moonfire-nvr):$(id -g moonfire-nvr)"
         --env=RUST_BACKTRACE=1
-        --env=TZ=:/etc/localtime
+        --env=TZ=":${tz}"
 )
 
 case "$1" in
