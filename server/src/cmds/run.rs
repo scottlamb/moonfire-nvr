@@ -286,9 +286,7 @@ pub async fn run(args: &Args) -> Result<(), Error> {
             move |req| Arc::clone(&svc).serve(req)
         }))
     });
-    let server = ::hyper::server::Server::bind(&args.http_addr)
-        .tcp_nodelay(true)
-        .serve(make_svc);
+    let server = ::hyper::Server::bind(&args.http_addr).tcp_nodelay(true).serve(make_svc);
 
     let mut int = signal(SignalKind::interrupt())?;
     let mut term = signal(SignalKind::terminate())?;

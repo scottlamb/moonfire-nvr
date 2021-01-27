@@ -30,7 +30,7 @@
 
 use base::clock::Clocks;
 use base::{ErrorKind, bail_t};
-use bytes::Bytes;
+use hyper::body::Bytes;
 use crate::body::Body;
 use crate::json;
 use crate::mp4;
@@ -398,21 +398,21 @@ impl Service {
                 .expect("stream_id refed by camera");
         }
 
-        let (parts, body) = req.into_parts();
-        let req = Request::from_parts(parts, ());
-        let response = tungstenite::handshake::server::create_response(&req)
+        let response =
+            tungstenite::handshake::server::create_response_with_body(
+                &req, hyper::Body::empty)
             .map_err(|e| bad_req(e.to_string()))?;
-        let (parts, ()) = response.into_parts();
+        let (parts, _) = response.into_parts();
 
-        tokio::spawn(self.stream_live_m4s_ws(stream_id, open_id, body, sub_rx));
+        tokio::spawn(self.stream_live_m4s_ws(stream_id, open_id, req, sub_rx));
 
         Ok(Response::from_parts(parts, Body::from("")))
     }
 
     async fn stream_live_m4s_ws(
-        self: Arc<Self>, stream_id: i32, open_id: u32, body: hyper::Body,
+        self: Arc<Self>, stream_id: i32, open_id: u32, req: hyper::Request<hyper::Body>,
         mut sub_rx: futures::channel::mpsc::UnboundedReceiver<db::LiveSegment>) {
-        let upgraded = match body.on_upgrade().await {
+        let upgraded = match hyper::upgrade::on(req).await {
             Ok(u) => u,
             Err(e) => {
                 warn!("Unable to upgrade stream to websocket: {}", e);
@@ -1125,12 +1125,11 @@ mod tests {
             let (tx, rx) = std::sync::mpsc::channel();
             let handle = ::std::thread::spawn(move || {
                 let addr = ([127, 0, 0, 1], 0).into();
-                let mut rt = tokio::runtime::Runtime::new().unwrap();
-                let srv = rt.enter(|| {
-                    hyper::server::Server::bind(&addr)
-                    .tcp_nodelay(true)
-                    .serve(make_svc)
-                });
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let srv = {
+                    let _guard = rt.enter();
+                    hyper::server::Server::bind(&addr).tcp_nodelay(true).serve(make_svc)
+                };
                 let addr = srv.local_addr();  // resolve port 0 to a real ephemeral port number.
                 tx.send(addr).unwrap();
                 rt.block_on(srv.with_graceful_shutdown(shutdown_rx.map(|_| ()))).unwrap();
@@ -1429,13 +1428,14 @@ mod bench {
                     move |req| Arc::clone(&s).serve(req)
                 }))
             });
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
-            let srv = rt.enter(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let srv = {
+                let _guard = rt.enter();
                 let addr = ([127, 0, 0, 1], 0).into();
                 hyper::server::Server::bind(&addr)
                     .tcp_nodelay(true)
                     .serve(make_svc)
-            });
+            };
             let addr = srv.local_addr();  // resolve port 0 to a real ephemeral port number.
             ::std::thread::spawn(move || {
                 rt.block_on(srv).unwrap();
@@ -1458,8 +1458,8 @@ mod bench {
         let url = reqwest::Url::parse(&format!("{}/api/cameras/{}/main/recordings", server.base_url,
                                                server.test_camera_uuid)).unwrap();
         let client = reqwest::Client::new();
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let mut f = || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let f = || {
             rt.block_on(async {
                 let resp = client.get(url.clone()).send().await.unwrap();
                 assert_eq!(resp.status(), reqwest::StatusCode::OK);

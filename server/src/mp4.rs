@@ -36,6 +36,7 @@
 //! `mdat` box for fast start. More specifically, boxes are arranged in the order suggested by
 //! ISO/IEC 14496-12 section 6.2.3 (Table 1):
 //!
+//! ```text
 //! * ftyp (file type and compatibility)
 //! * moov (container for all the metadata)
 //! ** mvhd (movie header, overall declarations)
@@ -77,7 +78,7 @@
 //! ```
 
 use base::{Error, ErrorKind, ResultExt, bail_t, format_err_t};
-use bytes::{Buf, BytesMut};
+use bytes::BytesMut;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use crate::body::{Chunk, BoxedError, wrap_error};
 use db::dir;
@@ -87,6 +88,7 @@ use futures::stream;
 use http;
 use http::header::HeaderValue;
 use http_serve;
+use hyper::body::Buf;
 use log::{debug, error, trace, warn};
 use memmap;
 use parking_lot::Once;
@@ -1632,10 +1634,15 @@ impl File {
             use futures::stream::StreamExt;
             match b.next().await {
                 Some(r) => {
-                    let chunk = r
+                    let mut chunk = r
                         .map_err(failure::Error::from_boxed_compat)
                         .err_kind(ErrorKind::Unknown)?;
-                    v.extend_from_slice(chunk.bytes())
+                    while chunk.has_remaining() {
+                        let c = chunk.chunk();
+                        v.extend_from_slice(c);
+                        let len = c.len();
+                        chunk.advance(len);
+                    }
                 },
                 None => return Ok(()),
             }
@@ -1718,8 +1725,8 @@ impl fmt::Debug for File {
 #[cfg(test)]
 mod tests {
     use base::clock::RealClocks;
-    use bytes::Buf;
     use byteorder::{BigEndian, ByteOrder};
+    use hyper::body::Buf;
     use crate::stream::{self, Opener, Stream};
     use db::recording::{self, TIME_UNITS_PER_SEC};
     use db::testutil::{self, TestDb, TEST_STREAM_ID};
@@ -1738,10 +1745,10 @@ mod tests {
     where E::Error : ::std::fmt::Debug {
         let mut p = 0;
         Pin::from(e.get_range(start .. start + slice.len() as u64))
-         .try_for_each(|chunk| {
-             let c: &[u8] = chunk.bytes();
-             slice[p .. p + c.len()].copy_from_slice(c);
-             p += c.len();
+         .try_for_each(|mut chunk| {
+             let len = chunk.remaining();
+             chunk.copy_to_slice(&mut slice[p .. p + len]);
+             p += len;
              futures::future::ok::<_, E::Error>(())
          })
         .await
@@ -1752,9 +1759,13 @@ mod tests {
     async fn digest<E: http_serve::Entity>(e: &E) -> blake3::Hash
     where E::Error : ::std::fmt::Debug {
         Pin::from(e.get_range(0 .. e.len()))
-         .try_fold(blake3::Hasher::new(), |mut hasher, chunk| {
-             let c: &[u8] = chunk.bytes();
-             hasher.update(c);
+         .try_fold(blake3::Hasher::new(), |mut hasher, mut chunk| {
+             while chunk.has_remaining() {
+                let c = chunk.chunk();
+                hasher.update(c);
+                let len = c.len();
+                chunk.advance(len);
+             }
              futures::future::ok::<_, E::Error>(hasher)
          })
          .await
@@ -2020,8 +2031,16 @@ mod tests {
         let mut out = fs::OpenOptions::new().write(true).create_new(true).open(&filename).unwrap();
         use ::std::io::Write;
         Pin::from(mp4.get_range(0 .. mp4.len()))
-           .try_for_each(|chunk| {
-               futures::future::ready(out.write_all(chunk.bytes()).map_err(|e| e.into()))
+           .try_for_each(|mut chunk| {
+               while chunk.has_remaining() {
+                    let c = chunk.chunk();
+                    let len = match out.write(c) {
+                        Err(e) => return futures::future::err(BoxedError::from(e)),
+                        Ok(l) => l,
+                    };
+                    chunk.advance(len);
+               }
+               futures::future::ok(())
            })
            .await
            .unwrap();
@@ -2522,13 +2541,14 @@ mod bench {
                         http_serve::serve(mp4.clone(), &req))
                 }))
             });
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
-            let srv = rt.enter(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let srv = {
+                let _guard = rt.enter();
                 let addr = ([127, 0, 0, 1], 0).into();
                 hyper::server::Server::bind(&addr)
                     .tcp_nodelay(true)
                     .serve(make_svc)
-            });
+            };
             let addr = srv.local_addr();  // resolve port 0 to a real ephemeral port number.
             ::std::thread::spawn(move || {
                 rt.block_on(srv).unwrap();
@@ -2578,8 +2598,8 @@ mod bench {
         let p = server.generated_len;
         b.bytes = p;
         let client = reqwest::Client::new();
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let mut run = || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let run = || {
             rt.block_on(async {
                 let resp =
                     client.get(server.url.clone())

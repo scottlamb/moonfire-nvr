@@ -23,7 +23,7 @@ members = ["base", "db"]
 base = { package = "moonfire-base", path = "base" }
 base64 = "0.13.0"
 blake3 = "0.3.7"
-bytes = "0.5.3"
+bytes = "1"
 byteorder = "1.0"
 cstr = "0.2.5"
 cursive = "0.15.0"
@@ -33,9 +33,9 @@ ffmpeg = { package = "moonfire-ffmpeg", git = "https://github.com/scottlamb/moon
 futures = "0.3"
 fnv = "1.0"
 h264-reader = { git = "https://github.com/dholroyd/h264-reader" }
-http = "0.2.0"
-http-serve = { git = "https://github.com/scottlamb/http-serve", branch = "dir", features = ["dir"] }
-hyper = "0.13.0"
+http = "0.2.3"
+http-serve = { version = "0.3.0", features = ["dir"] }
+hyper = { version = "0.14.2", features = ["http1", "server", "stream", "tcp"] }
 lazy_static = "1.0"
 libc = "0.2"
 log = { version = "0.4", features = ["release_max_level_info"] }
@@ -54,14 +54,15 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = "1.0"
 structopt = { version = "0.3.13", features = ["default", "wrap_help"] }
+sync_wrapper = "0.1.0"
 time = "0.1"
-tokio = { version = "0.2.0", features = ["blocking", "macros", "parking_lot", "rt-threaded", "signal"] }
-tokio-tungstenite = "0.11.0"
+tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "signal"] }
+tokio-tungstenite = "0.13.0"
 url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 
 [dev-dependencies]
-reqwest = { version = "0.10.1", default-features = false, features = ["json"] }
+reqwest = { version = "0.11.0", default-features = false, features = ["json"] }
 tempdir = "0.3"
 
 [profile.dev.package.scrypt]
