@@ -26,7 +26,7 @@ blake3 = "0.3.7"
 bytes = "1"
 byteorder = "1.0"
 cstr = "0.2.5"
-cursive = "0.15.0"
+cursive = "0.16.3"
 db = { package = "moonfire-db", path = "db" }
 failure = "0.1.1"
 ffmpeg = { package = "moonfire-ffmpeg", git = "https://github.com/scottlamb/moonfire-ffmpeg" }

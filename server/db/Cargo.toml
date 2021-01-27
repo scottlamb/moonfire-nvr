@@ -29,7 +29,7 @@ mylog = { git = "https://github.com/scottlamb/mylog" }
 nix = "0.19.0"
 odds = { version = "0.4.0", features = ["std-vec"] }
 parking_lot = { version = "0.11.1", features = [] }
-prettydiff = "0.3.1"
+prettydiff = "0.4.0"
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
 ring = "0.16.2"
 rusqlite = "0.24.1"
@@ -37,7 +37,7 @@ smallvec = "1.0"
 tempdir = "0.3"
 time = "0.1"
 uuid = { version = "0.8", features = ["std", "v4"] }
-itertools = "0.9.0"
+itertools = "0.10.0"
 
 [build-dependencies]
 protobuf-codegen-pure = { git = "https://github.com/stepancheg/rust-protobuf" }

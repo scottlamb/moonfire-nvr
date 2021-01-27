@@ -34,7 +34,7 @@
 //! configuration will likely be almost entirely done through a web-based UI.
 
 use base::clock;
-use cursive::{Cursive, CursiveExt};
+use cursive::Cursive;
 use cursive::views;
 use db;
 use failure::Error;
@@ -59,7 +59,7 @@ pub fn run(args: &Args) -> Result<(), Error> {
     let clocks = clock::RealClocks {};
     let db = Arc::new(db::Database::new(clocks, conn, true)?);
 
-    let mut siv = Cursive::ncurses()?;
+    let mut siv = cursive::default();
     //siv.add_global_callback('q', |s| s.quit());
 
     siv.add_layer(views::Dialog::around(
