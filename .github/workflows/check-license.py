@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # This file is part of Moonfire NVR, a security camera network video recorder.
 # Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
-# SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
+# SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 """Checks that expected header lines are present.
 
 Call in either of two modes:
@@ -19,14 +19,14 @@ import re
 import sys
 
 # Filenames matching this regexp are expected to have the header lines.
-FILENAME_MATCHER = re.compile(r'.*\.(py|rs|sh|sql)$')
+FILENAME_MATCHER = re.compile(r'.*\.([jt]sx?|html|css|py|rs|sh|sql)$')
 
 MAX_LINE_COUNT = 10
 
 EXPECTED_LINES = [
   re.compile(r'This file is part of Moonfire NVR, a security camera network video recorder\.'),
   re.compile(r'Copyright \(C\) 20\d{2} The Moonfire NVR Authors; see AUTHORS and LICENSE\.txt\.'),
-  re.compile(r'SPDX-License-Identifier: GPL-v3\.0-or-later WITH GPL-3\.0-linking-exception\.'),
+  re.compile(r'SPDX-License-Identifier: GPL-v3\.0-or-later WITH GPL-3\.0-linking-exception\.?'),
 ]
 
 def has_license(f):

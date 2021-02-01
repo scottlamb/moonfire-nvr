@@ -1233,12 +1233,18 @@ struct StaticFileRequest<'a> {
 
 impl<'a> StaticFileRequest<'a> {
     fn parse(path: &'a str) -> Option<Self> {
-        if !path.starts_with("/") {
+        if !path.starts_with("/") || path == "/index.html" {
             return None;
         }
 
         let (path, immutable) = match &path[1..] {
+            // These well-known URLs don't have content hashes in them, and
+            // thus aren't immutable.
             "" => ("index.html", false),
+            "robots.txt" => ("robots.txt", false),
+            "site.webmanifest" => ("site.webmanifest", false),
+
+            // Everything else should.
             p => (p, true),
         };
 
@@ -1253,7 +1259,10 @@ impl<'a> StaticFileRequest<'a> {
             "js" | "map" => "text/javascript",
             "json" => "application/json",
             "png" => "image/png",
-            "webapp" => "application/x-web-app-manifest+json",
+            "webmanifest" => "application/manifest+json",
+            "txt" => "text/plain",
+            "woff2" => "font/woff2",
+            "css" => "text/css",
             _ => return None,
         };
 

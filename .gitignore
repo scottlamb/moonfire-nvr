@@ -1,6 +1,3 @@
 .DS_Store
 *.swp
 /server/target
-/ui/dist
-/ui/node_modules
-/ui/yarn-error.log

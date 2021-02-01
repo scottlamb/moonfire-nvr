@@ -20,8 +20,10 @@ this in the webpack documentation.
 
 Checkout the branch you want to work on and type
 
-    $ cd ui
-    $ npm run start
+```
+$ cd ui
+$ npm run start
+```
 
 This will pack and prepare a development setup. By default the development
 server that serves up the web page(s) will listen on
@@ -39,35 +41,29 @@ process, but some will show up in the browser console, or both.
 
 ## Overriding defaults
 
-The configuration understands these environment variables:
+The UI is setup with [Create React App](https://create-react-app.dev/).
+`npm run start` will honor any of the environment variables described in their
+[Advanced Configuration](https://create-react-app.dev/docs/advanced-configuration/),
+as well as Moonfire NVR's custom `PROXY_TARGET` variable. Quick reference:
 
-| variable            | description                                 | default                  |
-| :------------------ | :------------------------------------------ | :----------------------- |
-| `MOONFIRE_URL`      | base URL of the backing Moonfire NVR server | `http://localhost:8080/` |
-| `MOONFIRE_DEV_PORT` | port to listen on                           | 3000                     |
-| `MOONFIRE_DEV_HOST` | host/IP to listen on (or `0.0.0.0`)         | `localhost` (1)          |
-
-(1) Moonfire NVR's `webpack/dev.config.js` has no default value for
-`MOONFIRE_DEV_HOST`. `webpack-dev-server` itself has a default of `localhost`,
-as described
-[here](https://webpack.js.org/configuration/dev-server/#devserverhost).
+| variable       | description                                                              | default                  |
+| :------------- | :----------------------------------------------------------------------- | :----------------------- |
+| `PROXY_TARGET` | base URL of the backing Moonfire NVR server (see `ui/src/setupProxy.js`) | `http://localhost:8080/` |
+| `PORT`         | port to listen on                                                        | 3000                     |
+| `HOST`         | host/IP to listen on (or `0.0.0.0` for all)                              | `0.0.0.0`                |
 
 Thus one could connect to a remote Moonfire NVR by specifying its URL as
 follows:
 
-    $ MOONFIRE_URL=https://nvr.example.com/ npm run start
+```
+$ PROXY_TARGET=https://nvr.example.com/ npm run start
+```
 
 This allows you to test a new UI against your stable, production Moonfire NVR
 installation with real data.
 
-The default `MOONFIRE_DEV_HOST` is suitable for connecting to the proxy server
-from a browser running on the same machine. If you want your server to be
-externally accessible, you may want to bind to `0.0.0.0` instead:
-
-    $ MOONFIRE_DEV_HOST=0.0.0.0 npm run start
-
-Be careful, though: it's insecure to send your production credentials over a
-non-`https` connection, as described more below.
+You can also set environment variables in `.env` files, as described in
+[Adding Custom Environment Variables](https://create-react-app.dev/docs/adding-custom-environment-variables/).
 
 ## A note on `https`
 
@@ -96,11 +92,10 @@ but has a couple caveats:
    * if you alternate between proxying to a test Moonfire NVR
      installation and a real one, your browser won't know the difference. It
      will supply whichever credentials were sent to it last.
-   * if you connect via a host other than localhost (and set
-     `MOONFIRE_DEV_HOST` to allow this), your browser will have a production
-     cookie that it's willing to send to a remote host over a non-`https`
-     connection. If you ever load this website using an untrustworthy DNS
-     server, your credentials can be compromised.
+   * if you connect via a host other than localhost, your browser will have a
+     production cookie that it's willing to send to a remote host over a
+     non-`https` connection. If you ever load this website using an
+     untrustworthy DNS server, your credentials can be compromised.
 
 We might add support for method 3 in the future. It's less convenient to
 configure but can avoid these problems.

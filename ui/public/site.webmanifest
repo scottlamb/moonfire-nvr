@@ -1,0 +1,21 @@
+{
+  "name": "Moonfire NVR",
+  "short_name": "Moonfire",
+  "description": "security camera network video recorder",
+  "icons": [
+    {
+      "src": "/favicons/android-chrome-192x192-22fa756c4c8a94dde.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicons/android-chrome-512x512-0403b1c77057918bb.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#e04e1b",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "start_url": "."
+}

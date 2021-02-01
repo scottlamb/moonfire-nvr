@@ -21,49 +21,51 @@ jobs:
             extra_components: rustfmt
     runs-on: ubuntu-20.04
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-    - name: Cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          server/target
-        key: ${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-    - name: Install dependencies
-      run: sudo apt-get update && sudo apt-get install libavcodec-dev libavformat-dev libavutil-dev libncurses-dev libsqlite3-dev pkgconf
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: ${{ matrix.rust }}
-        override: true
-        components: ${{ matrix.extra_components }}
-    - name: Test
-      run: cd server && cargo test ${{ matrix.extra_args }} --all
-    - name: Check formatting
-      if: matrix.rust == 'stable'
-      run: cd server && cargo fmt --all -- --check
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            server/target
+          key: ${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install libavcodec-dev libavformat-dev libavutil-dev libncurses-dev libsqlite3-dev pkgconf
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: ${{ matrix.extra_components }}
+      - name: Test
+        run: cd server && cargo test ${{ matrix.extra_args }} --all
+      - name: Check formatting
+        if: matrix.rust == 'stable'
+        run: cd server && cargo fmt --all -- --check
   js:
-    name: Build and lint Javascript frontend
+    name: Build, test, lint, and check formatting of Javascript frontend
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-node@v2
-      with:
-        node-version: '14'
-        path: ~/.npm
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
-    - run: cd ui && npm ci
-    - run: cd ui && npm run build
-    - run: cd ui && npm run lint
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v2
+        with:
+          node-version: "14"
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - run: cd ui && npm ci
+      - run: cd ui && npm run build
+      - run: cd ui && npm run test
+      - run: cd ui && npm run lint
+      - run: cd ui && npm run check-format
   license:
     name: Check copyright/license headers
     runs-on: ubuntu-20.04
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-    - run: find . -type f -print0 | xargs -0 .github/workflows/check-license.py
+      - name: Checkout
+        uses: actions/checkout@v2
+      - run: find . -type f -print0 | xargs -0 .github/workflows/check-license.py

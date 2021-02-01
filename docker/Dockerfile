@@ -68,7 +68,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     rm -rf /var/lib/apt/lists/* && \
     ln -s moonfire-nvr /usr/local/bin/nvr
 COPY --from=build-server /usr/local/bin/moonfire-nvr /usr/local/bin/moonfire-nvr
-COPY --from=build-ui /var/lib/moonfire-nvr/src/ui/dist /usr/local/lib/moonfire-nvr/ui
+COPY --from=build-ui /var/lib/moonfire-nvr/src/ui/build /usr/local/lib/moonfire-nvr/ui
 
 # The install instructions say to use --user in the docker run commandline.
 # Specify a non-root user just in case someone forgets.

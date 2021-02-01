@@ -1,11 +1,33 @@
 {
+  // General settings (notably including Javascript/Typescript).
+  "editor.detectIndentation": false,
+  "editor.tabSize": 2,
+  "editor.rulers": [
+    {
+      "column": 80,
+      "color": "#cc8888"
+    }
+  ],
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.insertSpaces": true,
+
+  // Rust-specific overrides.
+  "[rust]": {
+    "editor.tabSize": 4,
     "editor.rulers": [
-        
-        80,
-        {
-            "column": 100,
-            "color": "#cc8888"
-        }
+      80,
+      {
+        "column": 100,
+        "color": "#cc8888"
+      }
     ],
-    "rust-analyzer.inlayHints.enable": false
+
+    // It seems like rust-analyzer is supposed to be able to format
+    // Rust files, but with "matklad.rust-analyzer" here, VS Code says
+    // "There is no formatter for 'rust' files installed."
+    "editor.defaultFormatter": "matklad.rust-analyzer"
+    //"editor.defaultFormatter": null
+  },
+  "rust-analyzer.inlayHints.enable": false
 }
