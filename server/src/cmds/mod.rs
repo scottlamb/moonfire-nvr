@@ -59,12 +59,12 @@ fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
                                    format!("db dir {} not found; try running moonfire-nvr init",
                                            db_dir.display())
                                } else {
-                                   format!("unable to open db dir {}: {}", db_dir.display(), &e)
+                                   format!("unable to open db dir {}", db_dir.display())
                                }))?;
     let ro = mode == OpenMode::ReadOnly;
     dir.lock(if ro { FlockArg::LockSharedNonblock } else { FlockArg::LockExclusiveNonblock })
-       .map_err(|e| e.context(format!("db dir {} already in use; can't get {} lock",
-                                      db_dir.display(), if ro { "shared" } else { "exclusive" })))?;
+       .map_err(|e| e.context(format!("unable to get {} lock on db dir {} ",
+                                      if ro { "shared" } else { "exclusive" }, db_dir.display())))?;
     Ok(dir)
 }
 

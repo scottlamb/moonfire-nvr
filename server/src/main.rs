@@ -30,7 +30,7 @@
 
 #![cfg_attr(all(feature="nightly", test), feature(test))]
 
-use log::{error, info};
+use log::{debug, error};
 use std::str::FromStr;
 use structopt::StructOpt;
 
@@ -111,7 +111,7 @@ enum Args {
 }
 
 impl Args {
-    fn run(&self) -> Result<(), failure::Error> {
+    fn run(&self) -> Result<i32, failure::Error> {
         match self {
             Args::Check(ref a) => cmds::check::run(a),
             Args::Config(ref a) => cmds::config::run(a),
@@ -136,9 +136,18 @@ fn main() {
         .build();
     h.clone().install().unwrap();
 
-    if let Err(e) = { let _a = h.async_scope(); args.run() } {
-        error!("{:?}", e);
-        ::std::process::exit(1);
+    let r = {
+        let _a = h.async_scope();
+        args.run()
+    };
+    match r {
+        Err(e) => {
+            error!("Exiting due to error: {}", base::prettify_failure(&e));
+            ::std::process::exit(1);
+        },
+        Ok(rv) => {
+            debug!("Exiting with status {}", rv);
+            std::process::exit(rv)
+        },
     }
-    info!("Success.");
 }

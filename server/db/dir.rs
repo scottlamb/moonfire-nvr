@@ -151,7 +151,7 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     }
     let data = &data[pos..pos+len as usize];
     let mut s = protobuf::CodedInputStream::from_bytes(&data);
-    meta.merge_from(&mut s).map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
+    meta.merge_from(&mut s).map_err(|e| e.context("Unable to parse metadata proto"))?;
     Ok(meta)
 }
 
@@ -164,17 +164,18 @@ pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Err
     }
     data.resize(FIXED_DIR_META_LEN, 0);  // pad to required length.
     let mut f = crate::fs::openat(dirfd, cstr!("meta"), OFlag::O_CREAT | OFlag::O_WRONLY,
-                                  Mode::S_IRUSR | Mode::S_IWUSR)?;
-    let stat = f.metadata()?;
+                                  Mode::S_IRUSR | Mode::S_IWUSR)
+        .map_err(|e| e.context("Unable to open meta file"))?;
+    let stat = f.metadata().map_err(|e| e.context("Unable to stat meta file"))?;
     if stat.len() == 0 {
         // Need to sync not only the data but also the file metadata and dirent.
-        f.write_all(&data)?;
-        f.sync_all()?;
-        nix::unistd::fsync(dirfd)?;
+        f.write_all(&data).map_err(|e| e.context("Unable to write to meta file"))?;
+        f.sync_all().map_err(|e| e.context("Unable to sync meta file"))?;
+        nix::unistd::fsync(dirfd).map_err(|e| e.context("Unable to sync dir"))?;
     } else if stat.len() == FIXED_DIR_META_LEN as u64 {
         // Just syncing the data will suffice; existing metadata and dirent are fine.
-        f.write_all(&data)?;
-        f.sync_data()?;
+        f.write_all(&data).map_err(|e| e.context("Unable to write to meta file"))?;
+        f.sync_data().map_err(|e| e.context("Unable to sync meta file"))?;
     } else {
         bail!("Existing meta file is {}-byte; expected {}", stat.len(), FIXED_DIR_META_LEN);
     }
@@ -194,8 +195,8 @@ impl SampleFileDir {
                       FlockArg::LockExclusiveNonblock
                   } else {
                       FlockArg::LockSharedNonblock
-                  })?;
-        let dir_meta = read_meta(&s.fd)?;
+                  }).map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
+        let dir_meta = read_meta(&s.fd).map_err(|e| e.context("unable to read meta file"))?;
         if !SampleFileDir::consistent(db_meta, &dir_meta) {
             let serialized =
                 db_meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
@@ -230,7 +231,8 @@ impl SampleFileDir {
     pub(crate) fn create(path: &str, db_meta: &schema::DirMeta)
                          -> Result<Arc<SampleFileDir>, Error> {
         let s = SampleFileDir::open_self(path, true)?;
-        s.fd.lock(FlockArg::LockExclusiveNonblock)?;
+        s.fd.lock(FlockArg::LockExclusiveNonblock)
+            .map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
         let old_meta = read_meta(&s.fd)?;
 
         // Verify metadata. We only care that it hasn't been completely opened.
@@ -265,8 +267,7 @@ impl SampleFileDir {
     }
 
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
-        let fd = Fd::open(path, create)
-            .map_err(|e| format_err!("unable to open sample file dir {}: {}", path, e))?;
+        let fd = Fd::open(path, create)?;
         Ok(Arc::new(SampleFileDir {
             fd,
         }))

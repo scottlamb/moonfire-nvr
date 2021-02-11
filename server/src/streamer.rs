@@ -103,7 +103,8 @@ impl<'a, C, S> Streamer<'a, C, S> where C: 'a + Clocks + Clone, S: 'a + stream::
         while !self.shutdown.load(Ordering::SeqCst) {
             if let Err(e) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
-                warn!("{}: sleeping for {:?} after error: {:?}", self.short_name, sleep_time, e);
+                warn!("{}: sleeping for {:?} after error: {}",
+                      self.short_name, sleep_time, base::prettify_failure(&e));
                 self.db.clocks().sleep(sleep_time);
             }
         }

@@ -47,7 +47,7 @@ pub struct Args {
     compare_lens: bool,
 }
 
-pub fn run(args: &Args) -> Result<(), Error> {
+pub fn run(args: &Args) -> Result<i32, Error> {
     // TODO: ReadOnly should be sufficient but seems to fail.
     let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     check::run(&conn, &check::Options {

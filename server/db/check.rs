@@ -47,13 +47,16 @@ pub struct Options {
     pub compare_lens: bool,
 }
 
-pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
+pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
+    let mut printed_error = false;
+
     // Compare schemas.
     {
         let mut expected = rusqlite::Connection::open_in_memory()?;
         db::init(&mut expected)?;
         if let Some(diffs) = compare::get_diffs("actual", conn, "expected", &expected)? {
-            println!("{}", &diffs);
+            error!("Schema is not as expected:\n{}", &diffs);
+            printed_error = true;
         } else {
             println!("Schema is as expected.");
         }
@@ -88,7 +91,8 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
             }
 
             // Open the directory (checking its metadata) and hold it open (for the lock).
-            let dir = dir::SampleFileDir::open(&dir_path, &meta)?;
+            let dir = dir::SampleFileDir::open(&dir_path, &meta)
+                .map_err(|e| e.context(format!("unable to open dir {}", dir_path)))?;
             let mut streams = read_dir(&dir, opts)?;
             let mut rows = garbage_stmt.query(params![dir_id])?;
             while let Some(row) = rows.next()? {
@@ -113,7 +117,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
                 None => Stream::default(),
                 Some(d) => d.remove(&stream_id).unwrap_or_else(Stream::default),
             };
-            compare_stream(conn, stream_id, opts, stream)?;
+            printed_error |= compare_stream(conn, stream_id, opts, stream)?;
         }
     }
 
@@ -125,12 +129,13 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<(), Error> {
                 if r.recording_row.is_some() || r.playback_row.is_some() ||
                    r.integrity_row || !r.garbage_row {
                     error!("dir {} recording {} for unknown stream: {:#?}", dir_id, id, r);
+                    printed_error = true;
                 }
             }
         }
     }
 
-    Ok(())
+    Ok(if printed_error { 1 } else { 0 })
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -217,9 +222,10 @@ fn read_dir(d: &dir::SampleFileDir, opts: &Options) -> Result<Dir, Error> {
 
 /// Looks through a known stream for errors.
 fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
-                  mut stream: Stream) -> Result<(), Error> {
+                  mut stream: Stream) -> Result<bool, Error> {
     let start = CompositeId::new(stream_id, 0);
     let end = CompositeId::new(stream_id, i32::max_value());
+    let mut printed_error = false;
 
     // recording row.
     {
@@ -271,6 +277,7 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
                 Ok(s) => s,
                 Err(e) => {
                     error!("id {} has bad video_index: {}", id, e);
+                    printed_error = true;
                     continue;
                 },
             };
@@ -307,6 +314,7 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
                 if !recording.garbage_row || recording.playback_row.is_some() ||
                    recording.integrity_row {
                     error!("Missing recording row for {}: {:#?}", id, recording);
+                    printed_error = true;
                 }
                 continue;
             },
@@ -315,17 +323,25 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
             Some(ref p) => {
                 if r != p {
                     error!("Recording {} summary doesn't match video_index: {:#?}", id, recording);
+                    printed_error = true;
                 }
             },
-            None => error!("Recording {} missing playback row: {:#?}", id, recording),
+            None => {
+                error!("Recording {} missing playback row: {:#?}", id, recording);
+                printed_error = true;
+            },
         }
         match recording.file {
             Some(len) => if opts.compare_lens && r.bytes != len {
                 error!("Recording {} length mismatch: {:#?}", id, recording);
+                printed_error = true;
             },
-            None => error!("Recording {} missing file: {:#?}", id, recording),
+            None => {
+                error!("Recording {} missing file: {:#?}", id, recording);
+                printed_error = true;
+            },
         }
     }
 
-    Ok(())
+    Ok(printed_error)
 }

@@ -43,10 +43,10 @@ pub struct Args {
     timestamps: Vec<String>,
 }
 
-pub fn run(args: &Args) -> Result<(), Error> {
+pub fn run(args: &Args) -> Result<i32, Error> {
     for timestamp in &args.timestamps {
         let t = db::recording::Time::parse(timestamp)?;
         println!("{} == {}", t, t.0);
     }
-    Ok(())
+    Ok(0)
 }

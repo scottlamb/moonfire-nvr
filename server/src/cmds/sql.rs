@@ -32,6 +32,7 @@
 
 use failure::Error;
 use std::ffi::OsString;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 use super::OpenMode;
@@ -58,7 +59,7 @@ pub struct Args {
     arg: Vec<OsString>,
 }
 
-pub fn run(args: &Args) -> Result<(), Error> {
+pub fn run(args: &Args) -> Result<i32, Error> {
     let mode = if args.read_only { OpenMode::ReadOnly } else { OpenMode::ReadWrite };
     let _db_dir = super::open_dir(&args.db_dir, mode)?;
     let mut db = OsString::new();
@@ -68,6 +69,5 @@ pub fn run(args: &Args) -> Result<(), Error> {
     if args.read_only {
         db.push("?mode=ro");
     }
-    Command::new("sqlite3").arg(&db).args(&args.arg).status()?;
-    Ok(())
+    Err(Command::new("sqlite3").arg(&db).args(&args.arg).exec().into())
 }

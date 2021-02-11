@@ -29,7 +29,22 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use failure::{Backtrace, Context, Fail};
-use std::fmt;
+use std::fmt::{self, Write};
+
+/// Returns a pretty-and-informative version of `e`.
+pub fn prettify_failure(e: &failure::Error) -> String {
+    let mut msg = e.to_string();
+    for cause in e.iter_causes() {
+        write!(&mut msg, "caused by: {}", cause).unwrap();
+    }
+    if e.backtrace().is_empty() {
+        write!(&mut msg, "\n(set environment variable RUST_BACKTRACE=1 to see backtraces)")
+            .unwrap();
+    } else {
+        write!(&mut msg, "\nBacktrace:\n{}", e.backtrace()).unwrap();
+    }
+    msg
+}
 
 #[derive(Debug)]
 pub struct Error {

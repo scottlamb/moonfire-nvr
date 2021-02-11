@@ -1213,7 +1213,8 @@ impl LockedDatabase {
                 open.id = o.id;
                 open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
             }
-            let d = dir::SampleFileDir::open(&dir.path, &meta)?;
+            let d = dir::SampleFileDir::open(&dir.path, &meta)
+                .map_err(|e| e.context(format!("Failed to open dir {}", dir.path)))?;
             if self.open.is_none() {  // read-only mode; it's already fully opened.
                 dir.dir = Some(d);
             } else {  // read-write mode; there are more steps to do.

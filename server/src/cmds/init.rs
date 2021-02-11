@@ -41,14 +41,14 @@ pub struct Args {
     db_dir: PathBuf,
 }
 
-pub fn run(args: &Args) -> Result<(), Error> {
+pub fn run(args: &Args) -> Result<i32, Error> {
     let (_db_dir, mut conn) = super::open_conn(&args.db_dir, super::OpenMode::Create)?;
 
     // Check if the database has already been initialized.
     let cur_ver = db::get_schema_version(&conn)?;
     if let Some(v) = cur_ver {
         info!("Database is already initialized with schema version {}.", v);
-        return Ok(());
+        return Ok(0);
     }
 
     // Use WAL mode (which is the most efficient way to preserve database integrity) with a large
@@ -63,5 +63,5 @@ pub fn run(args: &Args) -> Result<(), Error> {
     "#)?;
     db::init(&mut conn)?;
     info!("Database initialized.");
-    Ok(())
+    Ok(0)
 }

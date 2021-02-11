@@ -175,7 +175,7 @@ struct Syncer {
 }
 
 #[tokio::main]
-pub async fn run(args: &Args) -> Result<(), Error> {
+pub async fn run(args: &Args) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
         &args.db_dir,
@@ -323,5 +323,5 @@ pub async fn run(args: &Args) -> Result<(), Error> {
     info!("Waiting for HTTP requests to finish.");
     server_handle.await??;
     info!("Exiting.");
-    Ok(())
+    Ok(0)
 }

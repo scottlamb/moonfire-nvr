@@ -64,7 +64,7 @@ where C: Clocks, E: Into<Error> {
             Err(e) => e.into(),
         };
         let sleep_time = Duration::seconds(1);
-        warn!("sleeping for {:?} after error: {:?}", sleep_time, e);
+        warn!("sleeping for {:?} after error: {}", sleep_time, crate::error::prettify_failure(&e));
         clocks.sleep(sleep_time);
     }
 }

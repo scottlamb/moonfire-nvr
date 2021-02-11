@@ -54,7 +54,7 @@ pub struct Args {
     db_dir: PathBuf,
 }
 
-pub fn run(args: &Args) -> Result<(), Error> {
+pub fn run(args: &Args) -> Result<i32, Error> {
     let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     let clocks = clock::RealClocks {};
     let db = Arc::new(db::Database::new(clocks, conn, true)?);
@@ -77,5 +77,5 @@ pub fn run(args: &Args) -> Result<(), Error> {
 
     siv.run();
 
-    Ok(())
+    Ok(0)
 }

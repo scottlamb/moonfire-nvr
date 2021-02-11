@@ -59,12 +59,13 @@ pub struct Args {
     no_vacuum: bool,
 }
 
-pub fn run(args: &Args) -> Result<(), Error> {
+pub fn run(args: &Args) -> Result<i32, Error> {
     let (_db_dir, mut conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
 
     db::upgrade::run(&db::upgrade::Args {
         sample_file_dir: args.sample_file_dir.as_ref().map(std::path::PathBuf::as_path),
         preset_journal: &args.preset_journal,
         no_vacuum: args.no_vacuum,
-    }, &mut conn)
+    }, &mut conn)?;
+    Ok(0)
 }

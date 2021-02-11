@@ -146,7 +146,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         }
 
         let dir = dir::Fd::open(path, false)?;
-        dir.lock(FlockArg::LockExclusiveNonblock)?;
+        dir.lock(FlockArg::LockExclusiveNonblock)
+            .map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
 
         let mut need_sync = maybe_upgrade_meta(&dir, &db_meta)?;
         if maybe_cleanup_garbage_uuids(&dir)? {

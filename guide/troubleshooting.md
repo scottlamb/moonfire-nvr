@@ -15,7 +15,7 @@ While Moonfire NVR is running, logs will be written to stderr.
      likely want to set `MOONFIRE_FORMAT=google-systemd` to format logs as
      expected by systemd.
 
-Logging options are controlled by environmental variables:
+Logging options are controlled by environment variables:
 
    * `MOONFIRE_LOG` controls the log level. Its format is similar to the
      `RUST_LOG` variable used by the
@@ -27,6 +27,7 @@ Logging options are controlled by environmental variables:
      accepted are `google` (the default, like the Google
      [glog](https://github.com/google/glog) package) and `google-systemd` (a
      variation for better systemd compatibility).
+   * Errors include a backtrace if `RUST_BACKTRACE=1` is set.
 
 If you use Docker, set these via Docker's `--env` argument.
 

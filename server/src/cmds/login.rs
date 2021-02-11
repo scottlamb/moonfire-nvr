@@ -71,7 +71,7 @@ pub struct Args {
     username: String,
 }
 
-pub fn run(args: &Args) -> Result<(), Error> {
+pub fn run(args: &Args) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     let db = std::sync::Arc::new(db::Database::new(clocks.clone(), conn, true).unwrap());
@@ -116,7 +116,7 @@ pub fn run(args: &Args) -> Result<(), Error> {
     } else {
         println!("s={}", encoded);
     }
-    Ok(())
+    Ok(0)
 }
 
 fn curl_cookie(cookie: &str, flags: i32, domain: &str) -> String {

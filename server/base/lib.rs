@@ -33,4 +33,4 @@ pub mod time;
 mod error;
 pub mod strutil;
 
-pub use crate::error::{Error, ErrorKind, ResultExt};
+pub use crate::error::{Error, ErrorKind, ResultExt, prettify_failure};
