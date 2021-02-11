@@ -84,7 +84,10 @@ $ nvr pull     # updates the docker image to the latest binary
 $ nvr upgrade  # runs the upgrade
 ```
 
-You can run the system in read-only mode, although you'll find this only
+As a rule of thumb, on a Raspberry Pi 4 with a 1 GiB database, an upgrade might
+take about four minutes for each schema version and for the final vacuum.
+
+Next, you can run the system in read-only mode, although you'll find this only
 works in the "insecure" setup. (Authorization requires writing the database.)
 
 ```

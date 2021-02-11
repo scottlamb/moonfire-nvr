@@ -30,6 +30,7 @@
 
 use db::dir;
 use failure::{Error, Fail};
+use log::info;
 use nix::fcntl::FlockArg;
 use rusqlite;
 use std::path::Path;
@@ -43,7 +44,7 @@ pub mod sql;
 pub mod ts;
 pub mod upgrade;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum OpenMode {
     ReadOnly,
     ReadWrite,
@@ -71,8 +72,11 @@ fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
 fn open_conn(db_dir: &Path, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connection), Error> {
     let dir = open_dir(db_dir, mode)?;
+    let db_path = db_dir.join("db");
+    info!("Opening {} in {:?} mode with SQLite version {}",
+          db_path.display(), mode, rusqlite::version());
     let conn = rusqlite::Connection::open_with_flags(
-        db_dir.join("db"),
+        db_path,
         match mode {
             OpenMode::ReadOnly => rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
             OpenMode::ReadWrite => rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,

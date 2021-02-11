@@ -51,9 +51,15 @@ pub fn run(args: &Args) -> Result<(), Error> {
         return Ok(());
     }
 
+    // Use WAL mode (which is the most efficient way to preserve database integrity) with a large
+    // page size (so reading large recording_playback rows doesn't require as many seeks). Changing
+    // the page size requires doing a vacuum in non-WAL mode. This will be cheap on an empty
+    // database. https://www.sqlite.org/pragma.html#pragma_page_size
     conn.execute_batch(r#"
-        pragma journal_mode = wal;
+        pragma journal_mode = delete;
         pragma page_size = 16384;
+        vacuum;
+        pragma journal_mode = wal;
     "#)?;
     db::init(&mut conn)?;
     info!("Database initialized.");

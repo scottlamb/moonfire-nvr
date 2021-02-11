@@ -88,7 +88,6 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
             bail!("Database is at negative version {}!", old_ver);
         }
         info!("Upgrading database from version {} to version {}...", old_ver, target_ver);
-        set_journal_mode(&conn, args.preset_journal)?;
         for ver in old_ver .. target_ver {
             info!("...from version {} to version {}", ver, ver + 1);
             let tx = conn.transaction()?;
@@ -106,11 +105,16 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
 
 pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     db::set_integrity_pragmas(conn)?;
+    set_journal_mode(&conn, args.preset_journal)?;
     upgrade(args, db::EXPECTED_VERSION, conn)?;
 
-    // WAL is the preferred journal mode for normal operation; it reduces the number of syncs
-    // without compromising safety.
-    set_journal_mode(&conn, "wal")?;
+    // As in "moonfire-nvr init": try for page_size=16384 and wal for the reasons explained there.
+    //
+    // Do the vacuum prior to switching back to WAL for two reasons:
+    // * page_size only takes effect on a vacuum in non-WAL mode.
+    //   https://www.sqlite.org/pragma.html#pragma_page_size
+    // * vacuum is a huge transaction, and on old versions of SQLite3, that's best done in
+    //   non-WAL mode. https://www.sqlite.org/wal.html
     if !args.no_vacuum {
         info!("...vacuuming database after upgrade.");
         conn.execute_batch(r#"
@@ -118,6 +122,8 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
             vacuum;
         "#)?;
     }
+
+    set_journal_mode(&conn, "wal")?;
     info!("...done.");
 
     Ok(())
