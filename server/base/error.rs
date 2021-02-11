@@ -38,10 +38,10 @@ pub fn prettify_failure(e: &failure::Error) -> String {
         write!(&mut msg, "\ncaused by: {}", cause).unwrap();
     }
     if e.backtrace().is_empty() {
-        write!(&mut msg, "\n(set environment variable RUST_BACKTRACE=1 to see backtraces)")
+        write!(&mut msg, "\n\n(set environment variable RUST_BACKTRACE=1 to see backtraces)")
             .unwrap();
     } else {
-        write!(&mut msg, "\nBacktrace:\n{}", e.backtrace()).unwrap();
+        write!(&mut msg, "\n\nBacktrace:\n{}", e.backtrace()).unwrap();
     }
     msg
 }
