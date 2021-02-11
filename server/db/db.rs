@@ -2025,6 +2025,28 @@ pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Er
                                     |row| row.get(0))?))
 }
 
+/// Checks that the schema version in the given database is as expected.
+pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Error> {
+    let ver = get_schema_version(conn)?.ok_or_else(|| format_err!(
+        "no such table: version. \
+        \
+        If you are starting from an \
+        empty database, see README.md to complete the \
+        installation. If you are starting from a database \
+        that predates schema versioning, see guide/schema.md."))?;
+    if ver < EXPECTED_VERSION {
+        bail!("Database schema version {} is too old (expected {}); \
+                see upgrade instructions in guide/upgrade.md.",
+                ver, EXPECTED_VERSION);
+    } else if ver > EXPECTED_VERSION {
+        bail!("Database schema version {} is too new (expected {}); \
+                must use a newer binary to match.", ver,
+                EXPECTED_VERSION);
+
+    }
+    Ok(())
+}
+
 /// The recording database. Abstracts away SQLite queries. Also maintains in-memory state
 /// (loaded on startup, and updated on successful commit) to avoid expensive scans over the
 /// recording table on common queries.
@@ -2060,25 +2082,7 @@ impl<C: Clocks + Clone> Database<C> {
     pub fn new(clocks: C, mut conn: rusqlite::Connection,
                read_write: bool) -> Result<Database<C>, Error> {
         set_integrity_pragmas(&mut conn)?;
-        {
-            let ver = get_schema_version(&conn)?.ok_or_else(|| format_err!(
-                    "no such table: version. \
-                    \
-                    If you are starting from an \
-                    empty database, see README.md to complete the \
-                    installation. If you are starting from a database \
-                    that predates schema versioning, see guide/schema.md."))?;
-            if ver < EXPECTED_VERSION {
-                bail!("Database schema version {} is too old (expected {}); \
-                       see upgrade instructions in guide/upgrade.md.",
-                      ver, EXPECTED_VERSION);
-            } else if ver > EXPECTED_VERSION {
-                bail!("Database schema version {} is too new (expected {}); \
-                       must use a newer binary to match.", ver,
-                      EXPECTED_VERSION);
-
-            }
-        }
+        check_schema_version(&conn)?;
 
         // Note: the meta check comes after the version check to improve the error message when
         // trying to open a version 0 or version 1 database (which lacked the meta table).

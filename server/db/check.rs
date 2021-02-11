@@ -50,6 +50,14 @@ pub struct Options {
 pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
     let mut printed_error = false;
 
+    // Compare stated schema version.
+    if let Err(e) = db::check_schema_version(conn) {
+        error!("Schema version is not as expected:\n{}", e);
+        printed_error = true;
+    } else {
+        info!("Schema at expected version {}.", db::EXPECTED_VERSION);
+    }
+
     // Compare schemas.
     {
         let mut expected = rusqlite::Connection::open_in_memory()?;
@@ -57,11 +65,14 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
         if let Some(diffs) = compare::get_diffs("actual", conn, "expected", &expected)? {
             error!("Schema is not as expected:\n{}", &diffs);
             printed_error = true;
-            warn!("The following analysis may be incorrect or encounter errors due to schema differences.");
         } else {
             println!("Schema is as expected.");
         }
         info!("Done comparing schemas.");
+    }
+
+    if printed_error {
+        warn!("The following analysis may be incorrect or encounter errors due to schema differences.");
     }
 
     let db_uuid = raw::get_db_uuid(&conn)?;
