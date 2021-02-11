@@ -50,6 +50,13 @@ pub struct Options {
 pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
     let mut printed_error = false;
 
+    info!("Checking SQLite database integrity...");
+    if let Err(e) = conn.execute("pragma check_integrity", params![]) {
+        error!("Database integrity error: {}", e);
+        printed_error = true;
+    }
+    info!("...done");
+
     // Compare stated schema version.
     if let Err(e) = db::check_schema_version(conn) {
         error!("Schema version is not as expected:\n{}", e);
@@ -66,9 +73,8 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
             error!("Schema is not as expected:\n{}", &diffs);
             printed_error = true;
         } else {
-            println!("Schema is as expected.");
+            info!("Schema is as expected.");
         }
-        info!("Done comparing schemas.");
     }
 
     if printed_error {
