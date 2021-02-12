@@ -36,7 +36,7 @@ use crate::dir;
 use crate::raw;
 use crate::recording;
 use failure::Error;
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use log::{info, error, warn};
 use nix::fcntl::AtFlags;
 use rusqlite::params;
@@ -45,9 +45,18 @@ use std::os::unix::io::AsRawFd;
 
 pub struct Options {
     pub compare_lens: bool,
+    pub trash_orphan_sample_files: bool,
+    pub delete_orphan_rows: bool,
+    pub trash_corrupt_rows: bool,
 }
 
-pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
+#[derive(Default)]
+pub struct Context {
+    rows_to_delete: FnvHashSet<CompositeId>,
+    files_to_trash: FnvHashSet<(i32, CompositeId)>,  // (dir_id, composite_id)
+}
+
+pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
     let mut printed_error = false;
 
     info!("Checking SQLite database integrity...");
@@ -124,6 +133,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
     }
 
     // Scan known streams.
+    let mut ctx = Context::default();
     {
         let mut stmt = conn.prepare(r#"
             select
@@ -145,7 +155,7 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
                 Some(d) => d.remove(&stream_id).unwrap_or_else(Stream::default),
             };
             stream.cum_recordings = Some(cum_recordings);
-            printed_error |= compare_stream(conn, stream_id, opts, stream)?;
+            printed_error |= compare_stream(conn, dir_id, stream_id, opts, stream, &mut ctx)?;
         }
     }
 
@@ -161,6 +171,30 @@ pub fn run(conn: &rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
                 }
             }
         }
+    }
+
+    if !ctx.rows_to_delete.is_empty() || !ctx.files_to_trash.is_empty() {
+        let tx = conn.transaction()?;
+        if !ctx.rows_to_delete.is_empty() {
+            info!("Deleting {} recording rows", ctx.rows_to_delete.len());
+            let mut d1 = tx.prepare("delete from recording where composite_id = ?")?;
+            let mut d2 = tx.prepare("delete from recording_playback where composite_id = ?")?;
+            let mut d3 = tx.prepare("delete from recording_integrity where composite_id = ?")?;
+            for &id in &ctx.rows_to_delete {
+                d1.execute(params![id.0])?;
+                d2.execute(params![id.0])?;
+                d3.execute(params![id.0])?;
+            }
+        }
+        if !ctx.files_to_trash.is_empty() {
+            info!("Trashing {} recording files", ctx.files_to_trash.len());
+            let mut g = tx.prepare(
+                "insert or ignore into garbage (sample_file_dir_id, composite_id) values (?, ?)")?;
+            for (dir_id, composite_id) in &ctx.files_to_trash {
+                g.execute(params![dir_id, composite_id.0])?;
+            }
+        }
+        tx.commit()?;
     }
 
     Ok(if printed_error { 1 } else { 0 })
@@ -254,8 +288,8 @@ fn read_dir(d: &dir::SampleFileDir, opts: &Options) -> Result<Dir, Error> {
 }
 
 /// Looks through a known stream for errors.
-fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
-                  mut stream: Stream) -> Result<bool, Error> {
+fn compare_stream(conn: &rusqlite::Connection, dir_id: i32, stream_id: i32, opts: &Options,
+                  mut stream: Stream, ctx: &mut Context) -> Result<bool, Error> {
     let start = CompositeId::new(stream_id, 0);
     let end = CompositeId::new(stream_id, i32::max_value());
     let mut printed_error = false;
@@ -312,6 +346,10 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
                 Err(e) => {
                     error!("id {} has bad video_index: {}", id, e);
                     printed_error = true;
+                    if opts.trash_corrupt_rows {
+                        ctx.rows_to_delete.insert(id);
+                        ctx.files_to_trash.insert((dir_id, id));
+                    }
                     continue;
                 },
             };
@@ -360,9 +398,18 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
             None => {
                 if db_rows_expected {
                     error!("Missing recording row for {}: {:#?}", id, recording);
+                    if opts.trash_orphan_sample_files {
+                        ctx.files_to_trash.insert((dir_id, id));
+                    }
+                    if opts.delete_orphan_rows {  // also delete playback/integrity rows, if any.
+                        ctx.rows_to_delete.insert(id);
+                    }
                     printed_error = true;
                 } else if recording.playback_row.is_some() {
                     error!("Unexpected playback row for {}: {:#?}", id, recording);
+                    if opts.delete_orphan_rows {
+                        ctx.rows_to_delete.insert(id);
+                    }
                     printed_error = true;
                 }
                 continue;
@@ -387,6 +434,9 @@ fn compare_stream(conn: &rusqlite::Connection, stream_id: i32, opts: &Options,
             },
             None => {
                 error!("Recording {} missing file: {:#?}", id, recording);
+                if opts.delete_orphan_rows {
+                    ctx.rows_to_delete.insert(id);
+                }
                 printed_error = true;
             },
         }
