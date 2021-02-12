@@ -60,9 +60,15 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
     let mut printed_error = false;
 
     info!("Checking SQLite database integrity...");
-    if let Err(e) = conn.execute("pragma check_integrity", params![]) {
-        error!("Database integrity error: {}", e);
-        printed_error = true;
+    {
+        let mut stmt = conn.prepare("pragma integrity_check")?;
+        let mut rows = stmt.query(params![])?;
+        while let Some(row) = rows.next()? {
+            let e: String = row.get(0)?;
+            if e == "ok" { continue; }
+            error!("{}", e);
+            printed_error = true;
+        }
     }
     info!("...done");
 
