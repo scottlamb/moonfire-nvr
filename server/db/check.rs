@@ -425,6 +425,12 @@ fn compare_stream(conn: &rusqlite::Connection, dir_id: i32, stream_id: i32, opts
             None => {
                 error!("Recording {} missing playback row: {:#?}", id, recording);
                 printed_error = true;
+                if opts.trash_orphan_sample_files {
+                    ctx.files_to_trash.insert((dir_id, id));
+                }
+                if opts.delete_orphan_rows {  // also delete recording/integrity rows, if any.
+                    ctx.rows_to_delete.insert(id);
+                }
             },
         }
         match recording.file {
