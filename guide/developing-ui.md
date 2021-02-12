@@ -21,7 +21,7 @@ this in the webpack documentation.
 Checkout the branch you want to work on and type
 
     $ cd ui
-    $ yarn start
+    $ npm run start
 
 This will pack and prepare a development setup. By default the development
 server that serves up the web page(s) will listen on
@@ -55,7 +55,7 @@ as described
 Thus one could connect to a remote Moonfire NVR by specifying its URL as
 follows:
 
-    $ MOONFIRE_URL=https://nvr.example.com/ yarn start
+    $ MOONFIRE_URL=https://nvr.example.com/ npm run start
 
 This allows you to test a new UI against your stable, production Moonfire NVR
 installation with real data.
@@ -64,7 +64,7 @@ The default `MOONFIRE_DEV_HOST` is suitable for connecting to the proxy server
 from a browser running on the same machine. If you want your server to be
 externally accessible, you may want to bind to `0.0.0.0` instead:
 
-    $ MOONFIRE_DEV_HOST=0.0.0.0 yarn start
+    $ MOONFIRE_DEV_HOST=0.0.0.0 npm run start
 
 Be careful, though: it's insecure to send your production credentials over a
 non-`https` connection, as described more below.

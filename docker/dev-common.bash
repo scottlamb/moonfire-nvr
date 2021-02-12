@@ -9,25 +9,17 @@ export DEBIAN_FRONTEND=noninteractive
 
 packages=()
 
-apt-get update
-
-# Add yarn repository.
-apt-get --assume-yes --no-install-recommends install curl gnupg ca-certificates
-curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
-echo "deb https://dl.yarnpkg.com/debian/ stable main" \
-    >> /etc/apt/sources.list.d/yarn.list
-
 # Install all packages necessary for building (and some for testing/debugging).
 packages+=(
     build-essential
+    curl
     pkgconf
     locales
-    nodejs
+    npm
     sudo
     sqlite3
     tzdata
     vim-nox
-    yarn
 )
 apt-get update
 apt-get install --assume-yes --no-install-recommends "${packages[@]}"

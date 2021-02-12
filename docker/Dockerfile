@@ -30,8 +30,8 @@ FROM --platform=$BUILDPLATFORM dev-common AS build-ui
 LABEL maintainer="slamb@slamb.org"
 WORKDIR /var/lib/moonfire-nvr/src/ui
 COPY ui /var/lib/moonfire-nvr/src/ui
-RUN --mount=type=cache,target=/var/lib/moonfire-nvr/src/ui/node_modules,sharing=locked,mode=1777 \
-    yarn install && yarn build
+RUN --mount=type=tmpfs,target=/var/lib/moonfire-nvr/src/ui/node_modules \
+    npm ci && npm run build
 
 # Build the Rust components. Note that dev.sh set up an environment variable
 # in .buildrc that similarly changes the target dir path.
@@ -65,7 +65,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     rm -rf /var/lib/apt/lists/* && \
     ln -s moonfire-nvr /usr/local/bin/nvr
 COPY --from=build-server /usr/local/bin/moonfire-nvr /usr/local/bin/moonfire-nvr
-COPY --from=build-ui /var/lib/moonfire-nvr/ui/dist /usr/local/lib/moonfire-nvr/ui
+COPY --from=build-ui /var/lib/moonfire-nvr/src/ui/dist /usr/local/lib/moonfire-nvr/ui
 
 # The install instructions say to use --user in the docker run commandline.
 # Specify a non-root user just in case someone forgets.

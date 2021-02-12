@@ -111,6 +111,8 @@ To build the server, you will need the following C libraries installed:
 * [`ncursesw`](https://www.gnu.org/software/ncurses/), the UTF-8 version of
   the `ncurses` library.
 
+To build the UI, you'll need [node and npm](https://nodejs.org/en/download/).
+
 On recent Ubuntu or Raspbian Linux, the following command will install
 all non-Rust dependencies:
 
@@ -122,6 +124,7 @@ $ sudo apt-get install \
                libavutil-dev \
                libncurses-dev \
                libsqlite3-dev \
+               npm \
                pkgconf \
                sqlite3 \
                tzdata
@@ -131,14 +134,11 @@ On macOS with [Homebrew](https://brew.sh/) and Xcode installed, try the
 following command:
 
 ```
-$ brew install ffmpeg yarn
+$ brew install ffmpeg node
 ```
 
 Next, you need Rust 1.45+ and Cargo. The easiest way to install them is by
 following the instructions at [rustup.rs](https://www.rustup.rs/).
-
-Finally, building the UI requires [yarn](https://yarnpkg.com/en/). (On macOS,
-the `brew` command above installs it for you. On Linux, follow yarn's guide.)
 
 Once prerequisites are installed, you can build the server and find it in
 `target/release/moonfire-nvr`:
@@ -149,12 +149,12 @@ $ cargo test
 $ cargo build --release
 ```
 
-You can build the UI via `yarn` and find it in the `ui/dist` directory:
+You can build the UI via `npm` and find it in the `ui/dist` directory:
 
 ```
 $ cd ui
-$ yarn
-$ yarn build
+$ npm install
+$ npm run build
 ```
 
 ### Running interactively straight from the working copy
