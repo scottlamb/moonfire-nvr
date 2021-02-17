@@ -3,6 +3,7 @@ name = "moonfire-nvr"
 version = "0.6.1"
 authors = ["Scott Lamb <slamb@slamb.org>"]
 edition = "2018"
+license-file = "../LICENSE.txt"
 
 [features]
 

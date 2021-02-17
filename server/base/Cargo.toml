@@ -4,6 +4,7 @@ version = "0.0.1"
 authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
 edition = "2018"
+license-file = "../../LICENSE.txt"
 
 [features]
 nightly = []

@@ -1,3 +1,14 @@
+Moonfire NVR is licensed under the GPLv3 (reproduced below). The
+following additional permissions are granted under GNU GPL version 3 section 7:
+
+If you modify this Program, or any covered work, by linking or combining it
+with OpenSSL (or a modified version of that library such as BoringSSL or ring),
+containing parts covered by the terms of the OpenSSL and/or SSLeay licenses,
+the licensors of this Program grant you additional permission to convey the
+resulting work.
+
+================================================================================
+
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 

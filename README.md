@@ -51,7 +51,10 @@ make this possible:
 
 # Documentation
 
-*   [License](LICENSE.txt) — GPLv3
+*   [License](LICENSE.txt) —
+    [GPL-3.0-or-later](https://spdx.org/licenses/GPL-3.0-or-later.html)
+    with [https://spdx.org/licenses/GPL-3.0-linking-exception.html](GPL-3.0-linking-exception)
+    for OpenSSL.
 *   [Installing](guide/install.md)
 *   [Building from source](guide/build.md)
 *   [UI Development](guide/developing-ui.md)

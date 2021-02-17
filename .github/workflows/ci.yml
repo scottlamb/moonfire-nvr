@@ -60,3 +60,10 @@ jobs:
     - run: cd ui && npm ci
     - run: cd ui && npm run build
     - run: cd ui && npm run lint
+  license:
+    name: Check copyright/license headers
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - run: find . -type f -print0 | xargs -0 .github/workflows/check-license.py
