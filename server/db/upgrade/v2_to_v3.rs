@@ -31,11 +31,10 @@
 /// Upgrades a version 2 schema to a version 3 schema.
 /// Note that a version 2 schema is never actually used; so we know the upgrade from version 1 was
 /// completed, and possibly an upgrade from 2 to 3 is half-finished.
-
 use crate::db::{self, FromSqlUuid};
 use crate::dir;
-use failure::Error;
 use crate::schema;
+use failure::Error;
 use rusqlite::params;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
@@ -47,20 +46,26 @@ use std::sync::Arc;
 /// *   it has a last completed open.
 fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFileDir>, Error> {
     let (p, s_uuid, o_id, o_uuid, db_uuid): (String, FromSqlUuid, i32, FromSqlUuid, FromSqlUuid) =
-        tx.query_row(r#"
-        select
-          s.path, s.uuid, s.last_complete_open_id, o.uuid, m.uuid
-        from
-          sample_file_dir s
-          join open o on (s.last_complete_open_id = o.id)
-          cross join meta m
-    "#, params![], |row| {
-      Ok((row.get(0)?,
-          row.get(1)?,
-          row.get(2)?,
-          row.get(3)?,
-          row.get(4)?))
-    })?;
+        tx.query_row(
+            r#"
+            select
+              s.path, s.uuid, s.last_complete_open_id, o.uuid, m.uuid
+            from
+              sample_file_dir s
+              join open o on (s.last_complete_open_id = o.id)
+              cross join meta m
+            "#,
+            params![],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )?;
     let mut meta = schema::DirMeta::default();
     meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
     meta.dir_uuid.extend_from_slice(&s_uuid.0.as_bytes()[..]);
@@ -74,30 +79,37 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     let d = open_sample_file_dir(&tx)?;
-    let mut stmt = tx.prepare(r#"
+    let mut stmt = tx.prepare(
+        r#"
         select
           composite_id,
           sample_file_uuid
         from
           recording_playback
-    "#)?;
+        "#,
+    )?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let id = db::CompositeId(row.get(0)?);
         let sample_file_uuid: FromSqlUuid = row.get(1)?;
         let from_path = super::UuidPath::from(sample_file_uuid.0);
         let to_path = crate::dir::CompositeIdPath::from(id);
-        if let Err(e) = nix::fcntl::renameat(Some(d.fd.as_raw_fd()), &from_path,
-                                             Some(d.fd.as_raw_fd()), &to_path) {
+        if let Err(e) = nix::fcntl::renameat(
+            Some(d.fd.as_raw_fd()),
+            &from_path,
+            Some(d.fd.as_raw_fd()),
+            &to_path,
+        ) {
             if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
-                continue;  // assume it was already moved.
+                continue; // assume it was already moved.
             }
             Err(e)?;
         }
     }
 
     // These create statements match the schema.sql when version 3 was the latest.
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         alter table recording_playback rename to old_recording_playback;
         create table recording_playback (
           composite_id integer primary key references recording (composite_id),
@@ -113,6 +125,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         drop table old_recording;
         drop table old_camera;
         drop table old_video_sample_entry;
-    "#)?;
+        "#,
+    )?;
     Ok(())
 }

@@ -36,11 +36,15 @@ use crate::coding;
 use crate::db::CompositeId;
 use crate::schema;
 use cstr::cstr;
-use failure::{Error, Fail, bail, format_err};
+use failure::{bail, format_err, Error, Fail};
 use log::warn;
-use protobuf::Message;
-use nix::{NixPath, fcntl::{FlockArg, OFlag}, sys::stat::Mode};
 use nix::sys::statvfs::Statvfs;
+use nix::{
+    fcntl::{FlockArg, OFlag},
+    sys::stat::Mode,
+    NixPath,
+};
+use protobuf::Message;
 use std::ffi::CStr;
 use std::fs;
 use std::io::{Read, Write};
@@ -76,11 +80,17 @@ impl CompositeIdPath {
 }
 
 impl NixPath for CompositeIdPath {
-    fn is_empty(&self) -> bool { false }
-    fn len(&self) -> usize { 16 }
+    fn is_empty(&self) -> bool {
+        false
+    }
+    fn len(&self) -> usize {
+        16
+    }
 
     fn with_nix_path<T, F>(&self, f: F) -> Result<T, nix::Error>
-    where F: FnOnce(&CStr) -> T {
+    where
+        F: FnOnce(&CStr) -> T,
+    {
         let p = CStr::from_bytes_with_nul(&self.0[..]).expect("no interior nuls");
         Ok(f(p))
     }
@@ -91,7 +101,9 @@ impl NixPath for CompositeIdPath {
 pub struct Fd(std::os::unix::io::RawFd);
 
 impl std::os::unix::io::AsRawFd for Fd {
-    fn as_raw_fd(&self) -> std::os::unix::io::RawFd { self.0 }
+    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
+        self.0
+    }
 }
 
 impl Drop for Fd {
@@ -107,7 +119,7 @@ impl Fd {
     pub fn open<P: ?Sized + NixPath>(path: &P, mkdir: bool) -> Result<Fd, nix::Error> {
         if mkdir {
             match nix::unistd::mkdir(path, nix::sys::stat::Mode::S_IRWXU) {
-                Ok(()) | Err(nix::Error::Sys(nix::errno::Errno::EEXIST)) => {},
+                Ok(()) | Err(nix::Error::Sys(nix::errno::Errno::EEXIST)) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -138,7 +150,7 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
                 return Ok(meta);
             }
             return Err(e.into());
-        },
+        }
         Ok(f) => f,
     };
     let mut data = Vec::new();
@@ -146,38 +158,63 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     let (len, pos) = coding::decode_varint32(&data, 0)
         .map_err(|_| format_err!("Unable to decode varint length in meta file"))?;
     if data.len() != FIXED_DIR_META_LEN || len as usize + pos > FIXED_DIR_META_LEN {
-        bail!("Expected a {}-byte file with a varint length of a DirMeta message; got \
-               a {}-byte file with length {}", FIXED_DIR_META_LEN, data.len(), len);
+        bail!(
+            "Expected a {}-byte file with a varint length of a DirMeta message; got \
+            a {}-byte file with length {}",
+            FIXED_DIR_META_LEN,
+            data.len(),
+            len
+        );
     }
-    let data = &data[pos..pos+len as usize];
+    let data = &data[pos..pos + len as usize];
     let mut s = protobuf::CodedInputStream::from_bytes(&data);
-    meta.merge_from(&mut s).map_err(|e| e.context("Unable to parse metadata proto"))?;
+    meta.merge_from(&mut s)
+        .map_err(|e| e.context("Unable to parse metadata proto"))?;
     Ok(meta)
 }
 
 /// Write `dir`'s metadata, clobbering existing data.
 pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Error> {
-    let mut data = meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
+    let mut data = meta
+        .write_length_delimited_to_bytes()
+        .expect("proto3->vec is infallible");
     if data.len() > FIXED_DIR_META_LEN {
-        bail!("Length-delimited DirMeta message requires {} bytes, over limit of {}",
-              data.len(), FIXED_DIR_META_LEN);
+        bail!(
+            "Length-delimited DirMeta message requires {} bytes, over limit of {}",
+            data.len(),
+            FIXED_DIR_META_LEN
+        );
     }
-    data.resize(FIXED_DIR_META_LEN, 0);  // pad to required length.
-    let mut f = crate::fs::openat(dirfd, cstr!("meta"), OFlag::O_CREAT | OFlag::O_WRONLY,
-                                  Mode::S_IRUSR | Mode::S_IWUSR)
-        .map_err(|e| e.context("Unable to open meta file"))?;
-    let stat = f.metadata().map_err(|e| e.context("Unable to stat meta file"))?;
+    data.resize(FIXED_DIR_META_LEN, 0); // pad to required length.
+    let mut f = crate::fs::openat(
+        dirfd,
+        cstr!("meta"),
+        OFlag::O_CREAT | OFlag::O_WRONLY,
+        Mode::S_IRUSR | Mode::S_IWUSR,
+    )
+    .map_err(|e| e.context("Unable to open meta file"))?;
+    let stat = f
+        .metadata()
+        .map_err(|e| e.context("Unable to stat meta file"))?;
     if stat.len() == 0 {
         // Need to sync not only the data but also the file metadata and dirent.
-        f.write_all(&data).map_err(|e| e.context("Unable to write to meta file"))?;
-        f.sync_all().map_err(|e| e.context("Unable to sync meta file"))?;
+        f.write_all(&data)
+            .map_err(|e| e.context("Unable to write to meta file"))?;
+        f.sync_all()
+            .map_err(|e| e.context("Unable to sync meta file"))?;
         nix::unistd::fsync(dirfd).map_err(|e| e.context("Unable to sync dir"))?;
     } else if stat.len() == FIXED_DIR_META_LEN as u64 {
         // Just syncing the data will suffice; existing metadata and dirent are fine.
-        f.write_all(&data).map_err(|e| e.context("Unable to write to meta file"))?;
-        f.sync_data().map_err(|e| e.context("Unable to sync meta file"))?;
+        f.write_all(&data)
+            .map_err(|e| e.context("Unable to write to meta file"))?;
+        f.sync_data()
+            .map_err(|e| e.context("Unable to sync meta file"))?;
     } else {
-        bail!("Existing meta file is {}-byte; expected {}", stat.len(), FIXED_DIR_META_LEN);
+        bail!(
+            "Existing meta file is {}-byte; expected {}",
+            stat.len(),
+            FIXED_DIR_META_LEN
+        );
     }
     Ok(())
 }
@@ -187,21 +224,26 @@ impl SampleFileDir {
     ///
     /// `db_meta.in_progress_open` should be filled if the directory should be opened in read/write
     /// mode; absent in read-only mode.
-    pub fn open(path: &str, db_meta: &schema::DirMeta)
-                -> Result<Arc<SampleFileDir>, Error> {
+    pub fn open(path: &str, db_meta: &schema::DirMeta) -> Result<Arc<SampleFileDir>, Error> {
         let read_write = db_meta.in_progress_open.is_some();
         let s = SampleFileDir::open_self(path, false)?;
         s.fd.lock(if read_write {
-                      FlockArg::LockExclusiveNonblock
-                  } else {
-                      FlockArg::LockSharedNonblock
-                  }).map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
+            FlockArg::LockExclusiveNonblock
+        } else {
+            FlockArg::LockSharedNonblock
+        })
+        .map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
         let dir_meta = read_meta(&s.fd).map_err(|e| e.context("unable to read meta file"))?;
         if !SampleFileDir::consistent(db_meta, &dir_meta) {
-            let serialized =
-                db_meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
-            bail!("metadata mismatch.\ndb: {:#?}\ndir: {:#?}\nserialized db: {:#?}",
-                  db_meta, &dir_meta, &serialized);
+            let serialized = db_meta
+                .write_length_delimited_to_bytes()
+                .expect("proto3->vec is infallible");
+            bail!(
+                "metadata mismatch.\ndb: {:#?}\ndir: {:#?}\nserialized db: {:#?}",
+                db_meta,
+                &dir_meta,
+                &serialized
+            );
         }
         if db_meta.in_progress_open.is_some() {
             s.write_meta(db_meta)?;
@@ -212,12 +254,17 @@ impl SampleFileDir {
     /// Returns true if the existing directory and database metadata are consistent; the directory
     /// is then openable.
     pub(crate) fn consistent(db_meta: &schema::DirMeta, dir_meta: &schema::DirMeta) -> bool {
-        if dir_meta.db_uuid != db_meta.db_uuid { return false; }
-        if dir_meta.dir_uuid != db_meta.dir_uuid { return false; }
+        if dir_meta.db_uuid != db_meta.db_uuid {
+            return false;
+        }
+        if dir_meta.dir_uuid != db_meta.dir_uuid {
+            return false;
+        }
 
-        if db_meta.last_complete_open.is_some() &&
-           (db_meta.last_complete_open != dir_meta.last_complete_open &&
-            db_meta.last_complete_open != dir_meta.in_progress_open) {
+        if db_meta.last_complete_open.is_some()
+            && (db_meta.last_complete_open != dir_meta.last_complete_open
+                && db_meta.last_complete_open != dir_meta.in_progress_open)
+        {
             return false;
         }
 
@@ -228,8 +275,10 @@ impl SampleFileDir {
         true
     }
 
-    pub(crate) fn create(path: &str, db_meta: &schema::DirMeta)
-                         -> Result<Arc<SampleFileDir>, Error> {
+    pub(crate) fn create(
+        path: &str,
+        db_meta: &schema::DirMeta,
+    ) -> Result<Arc<SampleFileDir>, Error> {
         let s = SampleFileDir::open_self(path, true)?;
         s.fd.lock(FlockArg::LockExclusiveNonblock)
             .map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
@@ -238,7 +287,11 @@ impl SampleFileDir {
         // Verify metadata. We only care that it hasn't been completely opened.
         // Partial opening by this or another database is fine; we won't overwrite anything.
         if old_meta.last_complete_open.is_some() {
-            bail!("Can't create dir at path {}: is already in use:\n{:?}", path, old_meta);
+            bail!(
+                "Can't create dir at path {}: is already in use:\n{:?}",
+                path,
+                old_meta
+            );
         }
         if !s.is_empty()? {
             bail!("Can't create dir at path {} with existing files", path);
@@ -248,8 +301,12 @@ impl SampleFileDir {
     }
 
     pub(crate) fn opendir(&self) -> Result<nix::dir::Dir, nix::Error> {
-        nix::dir::Dir::openat(self.fd.as_raw_fd(), ".", OFlag::O_DIRECTORY | OFlag::O_RDONLY,
-                              Mode::empty())
+        nix::dir::Dir::openat(
+            self.fd.as_raw_fd(),
+            ".",
+            OFlag::O_DIRECTORY | OFlag::O_RDONLY,
+            Mode::empty(),
+        )
     }
 
     /// Determines if the directory is empty, aside form metadata.
@@ -259,7 +316,7 @@ impl SampleFileDir {
             let e = e?;
             match e.file_name().to_bytes() {
                 b"." | b".." => continue,
-                b"meta" => continue,  // existing metadata is fine.
+                b"meta" => continue, // existing metadata is fine.
                 _ => return Ok(false),
             }
         }
@@ -268,9 +325,7 @@ impl SampleFileDir {
 
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
         let fd = Fd::open(path, create)?;
-        Ok(Arc::new(SampleFileDir {
-            fd,
-        }))
+        Ok(Arc::new(SampleFileDir { fd }))
     }
 
     /// Opens the given sample file for reading.
@@ -281,15 +336,21 @@ impl SampleFileDir {
 
     pub fn create_file(&self, composite_id: CompositeId) -> Result<fs::File, nix::Error> {
         let p = CompositeIdPath::from(composite_id);
-        crate::fs::openat(self.fd.0, &p, OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_CREAT,
-                          Mode::S_IRUSR | Mode::S_IWUSR)
+        crate::fs::openat(
+            self.fd.0,
+            &p,
+            OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_CREAT,
+            Mode::S_IRUSR | Mode::S_IWUSR,
+        )
     }
 
     pub(crate) fn write_meta(&self, meta: &schema::DirMeta) -> Result<(), Error> {
         write_meta(self.fd.0, meta)
     }
 
-    pub fn statfs(&self) -> Result<Statvfs, nix::Error> { self.fd.statfs() }
+    pub fn statfs(&self) -> Result<Statvfs, nix::Error> {
+        self.fd.statfs()
+    }
 
     /// Unlinks the given sample file within this directory.
     pub(crate) fn unlink_file(&self, id: CompositeId) -> Result<(), nix::Error> {
@@ -312,11 +373,12 @@ pub(crate) fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
     }
     let mut v: u64 = 0;
     for i in 0..16 {
-        v = (v << 4) | match id[i] {
-            b @ b'0'..=b'9' => b - b'0',
-            b @ b'a'..=b'f' => b - b'a' + 10,
-            _ => return Err(()),
-        } as u64;
+        v = (v << 4)
+            | match id[i] {
+                b @ b'0'..=b'9' => b - b'0',
+                b @ b'a'..=b'f' => b - b'a' + 10,
+                _ => return Err(()),
+            } as u64;
     }
     Ok(CompositeId(v as i64))
 }
@@ -353,7 +415,14 @@ mod tests {
             o.id = u32::max_value();
             o.uuid.extend_from_slice(fake_uuid);
         }
-        let data = meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
-        assert!(data.len() <= FIXED_DIR_META_LEN, "{} vs {}", data.len(), FIXED_DIR_META_LEN);
+        let data = meta
+            .write_length_delimited_to_bytes()
+            .expect("proto3->vec is infallible");
+        assert!(
+            data.len() <= FIXED_DIR_META_LEN,
+            "{} vs {}",
+            data.len(),
+            FIXED_DIR_META_LEN
+        );
     }
 }

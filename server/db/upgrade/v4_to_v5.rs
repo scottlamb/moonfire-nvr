@@ -32,11 +32,10 @@
 ///
 /// This just handles the directory meta files. If they're already in the new format, great.
 /// Otherwise, verify they are consistent with the database then upgrade them.
-
 use crate::db::FromSqlUuid;
 use crate::{dir, schema};
 use cstr::cstr;
-use failure::{Error, Fail, bail};
+use failure::{bail, Error, Fail};
 use log::info;
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
@@ -61,25 +60,42 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
 
     let mut s = protobuf::CodedInputStream::from_bytes(&data);
     let mut dir_meta = schema::DirMeta::new();
-    dir_meta.merge_from(&mut s)
+    dir_meta
+        .merge_from(&mut s)
         .map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
     if !dir::SampleFileDir::consistent(&db_meta, &dir_meta) {
-        bail!("Inconsistent db_meta={:?} dir_meta={:?}", &db_meta, &dir_meta);
+        bail!(
+            "Inconsistent db_meta={:?} dir_meta={:?}",
+            &db_meta,
+            &dir_meta
+        );
     }
-    let mut f = crate::fs::openat(dir.as_raw_fd(), tmp_path,
-                                  OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_WRONLY,
-                                  Mode::S_IRUSR | Mode::S_IWUSR)?;
-    let mut data =
-        dir_meta.write_length_delimited_to_bytes().expect("proto3->vec is infallible");
+    let mut f = crate::fs::openat(
+        dir.as_raw_fd(),
+        tmp_path,
+        OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_WRONLY,
+        Mode::S_IRUSR | Mode::S_IWUSR,
+    )?;
+    let mut data = dir_meta
+        .write_length_delimited_to_bytes()
+        .expect("proto3->vec is infallible");
     if data.len() > FIXED_DIR_META_LEN {
-        bail!("Length-delimited DirMeta message requires {} bytes, over limit of {}",
-              data.len(), FIXED_DIR_META_LEN);
+        bail!(
+            "Length-delimited DirMeta message requires {} bytes, over limit of {}",
+            data.len(),
+            FIXED_DIR_META_LEN
+        );
     }
-    data.resize(FIXED_DIR_META_LEN, 0);  // pad to required length.
+    data.resize(FIXED_DIR_META_LEN, 0); // pad to required length.
     f.write_all(&data)?;
     f.sync_all()?;
 
-    nix::fcntl::renameat(Some(dir.as_raw_fd()), tmp_path, Some(dir.as_raw_fd()), meta_path)?;
+    nix::fcntl::renameat(
+        Some(dir.as_raw_fd()),
+        tmp_path,
+        Some(dir.as_raw_fd()),
+        meta_path,
+    )?;
     Ok(true)
 }
 
@@ -91,8 +107,12 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
 /// Returns true if something was done (and thus a sync is needed).
 fn maybe_cleanup_garbage_uuids(dir: &dir::Fd) -> Result<bool, Error> {
     let mut need_sync = false;
-    let mut dir2 = nix::dir::Dir::openat(dir.as_raw_fd(), ".",
-                                         OFlag::O_DIRECTORY | OFlag::O_RDONLY, Mode::empty())?;
+    let mut dir2 = nix::dir::Dir::openat(
+        dir.as_raw_fd(),
+        ".",
+        OFlag::O_DIRECTORY | OFlag::O_RDONLY,
+        Mode::empty(),
+    )?;
     for e in dir2.iter() {
         let e = e?;
         let f = e.file_name();
@@ -103,8 +123,11 @@ fn maybe_cleanup_garbage_uuids(dir: &dir::Fd) -> Result<bool, Error> {
         };
         if Uuid::parse_str(f_str).is_ok() {
             info!("removing leftover garbage file {}", f_str);
-            nix::unistd::unlinkat(Some(dir.as_raw_fd()), f,
-                                  nix::unistd::UnlinkatFlags::NoRemoveDir)?;
+            nix::unistd::unlinkat(
+                Some(dir.as_raw_fd()),
+                f,
+                nix::unistd::UnlinkatFlags::NoRemoveDir,
+            )?;
             need_sync = true;
         }
     }
@@ -115,7 +138,8 @@ fn maybe_cleanup_garbage_uuids(dir: &dir::Fd) -> Result<bool, Error> {
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     let db_uuid: FromSqlUuid =
         tx.query_row_and_then(r"select uuid from meta", params![], |row| row.get(0))?;
-    let mut stmt = tx.prepare(r#"
+    let mut stmt = tx.prepare(
+        r#"
         select
           d.path,
           d.uuid,
@@ -124,7 +148,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         from
           sample_file_dir d
           left join open o on (d.last_complete_open_id = o.id);
-    "#)?;
+        "#,
+    )?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let path = row.get_raw_checked(0)?.as_str()?;
@@ -134,14 +159,16 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         let open_uuid: Option<FromSqlUuid> = row.get(3)?;
         let mut db_meta = schema::DirMeta::new();
         db_meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
-        db_meta.dir_uuid.extend_from_slice(&dir_uuid.0.as_bytes()[..]);
+        db_meta
+            .dir_uuid
+            .extend_from_slice(&dir_uuid.0.as_bytes()[..]);
         match (open_id, open_uuid) {
             (Some(id), Some(uuid)) => {
                 let mut o = db_meta.last_complete_open.set_default();
                 o.id = id;
                 o.uuid.extend_from_slice(&uuid.0.as_bytes()[..]);
-            },
-            (None, None) => {},
+            }
+            (None, None) => {}
             _ => bail!("open table missing id"),
         }
 

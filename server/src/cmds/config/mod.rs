@@ -34,8 +34,8 @@
 //! configuration will likely be almost entirely done through a web-based UI.
 
 use base::clock;
-use cursive::Cursive;
 use cursive::views;
+use cursive::Cursive;
 use db;
 use failure::Error;
 use std::path::PathBuf;
@@ -49,8 +49,12 @@ mod users;
 #[derive(StructOpt)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
-                parse(from_os_str))]
+    #[structopt(
+        long,
+        default_value = "/var/lib/moonfire-nvr/db",
+        value_name = "path",
+        parse(from_os_str)
+    )]
     db_dir: PathBuf,
 }
 
@@ -62,18 +66,20 @@ pub fn run(args: &Args) -> Result<i32, Error> {
     let mut siv = cursive::default();
     //siv.add_global_callback('q', |s| s.quit());
 
-    siv.add_layer(views::Dialog::around(
-        views::SelectView::<fn(&Arc<db::Database>, &mut Cursive)>::new()
-            .on_submit({
-                let db = db.clone();
-                move |siv, item| item(&db, siv)
-            })
-            .item("Cameras and streams".to_string(), cameras::top_dialog)
-            .item("Directories and retention".to_string(), dirs::top_dialog)
-            .item("Users".to_string(), users::top_dialog)
-            )
+    siv.add_layer(
+        views::Dialog::around(
+            views::SelectView::<fn(&Arc<db::Database>, &mut Cursive)>::new()
+                .on_submit({
+                    let db = db.clone();
+                    move |siv, item| item(&db, siv)
+                })
+                .item("Cameras and streams".to_string(), cameras::top_dialog)
+                .item("Directories and retention".to_string(), dirs::top_dialog)
+                .item("Users".to_string(), users::top_dialog),
+        )
         .button("Quit", |siv| siv.quit())
-        .title("Main menu"));
+        .title("Main menu"),
+    );
 
     siv.run();
 

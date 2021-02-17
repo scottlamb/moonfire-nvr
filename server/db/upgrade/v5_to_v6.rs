@@ -29,9 +29,8 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /// Upgrades a version 4 schema to a version 5 schema.
-
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use failure::{Error, ResultExt, bail, format_err};
+use failure::{bail, format_err, Error, ResultExt};
 use h264_reader::avcc::AvcDecoderConfigurationRecord;
 use rusqlite::{named_params, params};
 use std::convert::{TryFrom, TryInto};
@@ -39,9 +38,9 @@ use std::convert::{TryFrom, TryInto};
 // Copied from src/h264.rs. h264 stuff really doesn't belong in the db crate, but we do what we
 // must for schema upgrades.
 const PIXEL_ASPECT_RATIOS: [((u16, u16), (u16, u16)); 4] = [
-    ((320, 240), ( 4,  3)),
+    ((320, 240), (4, 3)),
     ((352, 240), (40, 33)),
-    ((640, 480), ( 4,  3)),
+    ((640, 480), (4, 3)),
     ((704, 480), (40, 33)),
 ];
 fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
@@ -59,13 +58,16 @@ fn parse(data: &[u8]) -> Result<AvcDecoderConfigurationRecord, Error> {
         bail!("data of len {} doesn't have an avcC", data.len());
     }
     let avcc_len = BigEndian::read_u32(&data[86..90]);
-    if avcc_len < 8 { // length and type.
+    if avcc_len < 8 {
+        // length and type.
         bail!("invalid avcc len {}", avcc_len);
     }
     let end_pos = 86 + usize::try_from(avcc_len)?;
     if end_pos != data.len() {
-        bail!("expected avcC to be end of extradata; there are {} more bytes.",
-              data.len() - end_pos);
+        bail!(
+            "expected avcC to be end of extradata; there are {} more bytes.",
+            data.len() - end_pos
+        );
     }
     AvcDecoderConfigurationRecord::try_from(&data[94..end_pos])
         .map_err(|e| format_err!("Bad AvcDecoderConfigurationRecord: {:?}", e))
@@ -73,7 +75,8 @@ fn parse(data: &[u8]) -> Result<AvcDecoderConfigurationRecord, Error> {
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     // These create statements match the schema.sql when version 5 was the latest.
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         alter table video_sample_entry rename to old_video_sample_entry;
 
         create table video_sample_entry (
@@ -85,19 +88,23 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           pasp_h_spacing integer not null default 1 check (pasp_h_spacing > 0),
           pasp_v_spacing integer not null default 1 check (pasp_v_spacing > 0)
         );
-    "#)?;
+        "#,
+    )?;
 
-    let mut insert = tx.prepare(r#"
+    let mut insert = tx.prepare(
+        r#"
         insert into video_sample_entry (id,  width,  height,  rfc6381_codec,  data,
                                         pasp_h_spacing,  pasp_v_spacing)
                                 values (:id, :width, :height, :rfc6381_codec, :data,
                                         :pasp_h_spacing, :pasp_v_spacing)
-    "#)?;
+        "#,
+    )?;
 
     // Only insert still-referenced video sample entries. I've had problems with
     // no-longer-referenced ones (perhaps from some ancient, buggy version of Moonfire NVR) for
     // which avcc.create_context(()) fails.
-    let mut stmt = tx.prepare(r#"
+    let mut stmt = tx.prepare(
+        r#"
         select
           id,
           width,
@@ -114,7 +121,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
               recording r
             where
               r.video_sample_entry_id = v.id)
-    "#)?;
+        "#,
+    )?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let id: i32 = row.get(0)?;
@@ -126,24 +134,31 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         if avcc.num_of_sequence_parameter_sets() != 1 {
             bail!("Multiple SPSs!");
         }
-        let ctx = avcc.create_context(())
-            .map_err(|e| format_err!("Can't load SPS+PPS for video_sample_entry_id {}: {:?}",
-                                     id, e))?;
-        let sps = ctx.sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())
+        let ctx = avcc.create_context(()).map_err(|e| {
+            format_err!(
+                "Can't load SPS+PPS for video_sample_entry_id {}: {:?}",
+                id,
+                e
+            )
+        })?;
+        let sps = ctx
+            .sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())
             .ok_or_else(|| format_err!("No SPS 0 for video_sample_entry_id {}", id))?;
-        let pasp = sps.vui_parameters.as_ref()
-                                     .and_then(|v| v.aspect_ratio_info.as_ref())
-                                     .and_then(|a| a.clone().get())
-                                     .unwrap_or_else(|| default_pixel_aspect_ratio(width, height));
+        let pasp = sps
+            .vui_parameters
+            .as_ref()
+            .and_then(|v| v.aspect_ratio_info.as_ref())
+            .and_then(|a| a.clone().get())
+            .unwrap_or_else(|| default_pixel_aspect_ratio(width, height));
         if pasp != (1, 1) {
-            data.extend_from_slice(b"\x00\x00\x00\x10pasp");  // length + box name
+            data.extend_from_slice(b"\x00\x00\x00\x10pasp"); // length + box name
             data.write_u32::<BigEndian>(pasp.0.into())?;
             data.write_u32::<BigEndian>(pasp.1.into())?;
             let len = data.len();
             BigEndian::write_u32(&mut data[0..4], u32::try_from(len)?);
         }
 
-        insert.execute_named(named_params!{
+        insert.execute_named(named_params! {
             ":id": id,
             ":width": width,
             ":height": height,
@@ -153,7 +168,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             ":pasp_v_spacing": pasp.1,
         })?;
     }
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         alter table stream rename to old_stream;
         create table stream (
           id integer primary key,
@@ -205,14 +221,16 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           video_sample_entry_id integer references video_sample_entry (id),
           check (composite_id >> 32 = stream_id)
         );
-    "#)?;
+        "#,
+    )?;
 
     // SQLite added window functions in 3.25.0. macOS still ships SQLite 3.24.0 (no support).
     // Compute cumulative columns by hand.
     let mut cur_stream_id = None;
     let mut cum_duration_90k = 0;
     let mut cum_runs = 0;
-    let mut stmt = tx.prepare(r#"
+    let mut stmt = tx.prepare(
+        r#"
         select
           composite_id,
           open_id,
@@ -228,8 +246,10 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         from
           old_recording
         order by composite_id
-    "#)?;
-    let mut insert = tx.prepare(r#"
+        "#,
+    )?;
+    let mut insert = tx.prepare(
+        r#"
         insert into recording (composite_id, open_id, stream_id, run_offset, flags,
                                sample_file_bytes, start_time_90k, prev_media_duration_90k,
                                prev_runs, wall_duration_90k, media_duration_delta_90k,
@@ -238,7 +258,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
                                :sample_file_bytes, :start_time_90k, :prev_media_duration_90k,
                                :prev_runs, :wall_duration_90k, 0, :video_samples,
                                :video_sync_samples, :video_sample_entry_id)
-    "#)?;
+        "#,
+    )?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let composite_id: i64 = row.get(0)?;
@@ -257,25 +278,28 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             cum_runs = 0;
             cur_stream_id = Some(stream_id);
         }
-        insert.execute_named(named_params!{
-            ":composite_id": composite_id,
-            ":open_id": open_id,
-            ":stream_id": stream_id,
-            ":run_offset": run_offset,
-            ":flags": flags,
-            ":sample_file_bytes": sample_file_bytes,
-            ":start_time_90k": start_time_90k,
-            ":prev_media_duration_90k": cum_duration_90k,
-            ":prev_runs": cum_runs,
-            ":wall_duration_90k": wall_duration_90k,
-            ":video_samples": video_samples,
-            ":video_sync_samples": video_sync_samples,
-            ":video_sample_entry_id": video_sample_entry_id,
-        }).with_context(|_| format!("Unable to insert composite_id {}", composite_id))?;
+        insert
+            .execute_named(named_params! {
+                ":composite_id": composite_id,
+                ":open_id": open_id,
+                ":stream_id": stream_id,
+                ":run_offset": run_offset,
+                ":flags": flags,
+                ":sample_file_bytes": sample_file_bytes,
+                ":start_time_90k": start_time_90k,
+                ":prev_media_duration_90k": cum_duration_90k,
+                ":prev_runs": cum_runs,
+                ":wall_duration_90k": wall_duration_90k,
+                ":video_samples": video_samples,
+                ":video_sync_samples": video_sync_samples,
+                ":video_sample_entry_id": video_sample_entry_id,
+            })
+            .with_context(|_| format!("Unable to insert composite_id {}", composite_id))?;
         cum_duration_90k += i64::from(wall_duration_90k);
         cum_runs += if run_offset == 0 { 1 } else { 0 };
     }
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         drop index recording_cover;
         create index recording_cover on recording (
           stream_id,
@@ -328,6 +352,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           revocation_reason_detail = 'Blake2b->Blake3 upgrade'
         where
           revocation_reason is null;
-    "#)?;
+        "#,
+    )?;
     Ok(())
 }

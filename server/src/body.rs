@@ -31,7 +31,7 @@
 //! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
 use base::Error;
-use futures::{Stream, stream};
+use futures::{stream, Stream};
 use reffers::ARefss;
 use std::error::Error as StdError;
 use std::pin::Pin;
@@ -47,28 +47,42 @@ pub fn wrap_error(e: Error) -> BoxedError {
 }
 
 impl From<ARefss<'static, [u8]>> for Chunk {
-    fn from(r: ARefss<'static, [u8]>) -> Self { Chunk(r) }
+    fn from(r: ARefss<'static, [u8]>) -> Self {
+        Chunk(r)
+    }
 }
 
 impl From<&'static [u8]> for Chunk {
-    fn from(r: &'static [u8]) -> Self { Chunk(ARefss::new(r)) }
+    fn from(r: &'static [u8]) -> Self {
+        Chunk(ARefss::new(r))
+    }
 }
 
 impl From<&'static str> for Chunk {
-    fn from(r: &'static str) -> Self { Chunk(ARefss::new(r.as_bytes())) }
+    fn from(r: &'static str) -> Self {
+        Chunk(ARefss::new(r.as_bytes()))
+    }
 }
 
 impl From<String> for Chunk {
-    fn from(r: String) -> Self { Chunk(ARefss::new(r.into_bytes()).map(|v| &v[..])) }
+    fn from(r: String) -> Self {
+        Chunk(ARefss::new(r.into_bytes()).map(|v| &v[..]))
+    }
 }
 
 impl From<Vec<u8>> for Chunk {
-    fn from(r: Vec<u8>) -> Self { Chunk(ARefss::new(r).map(|v| &v[..])) }
+    fn from(r: Vec<u8>) -> Self {
+        Chunk(ARefss::new(r).map(|v| &v[..]))
+    }
 }
 
 impl hyper::body::Buf for Chunk {
-    fn remaining(&self) -> usize { self.0.len() }
-    fn chunk(&self) -> &[u8] { &*self.0 }
+    fn remaining(&self) -> usize {
+        self.0.len()
+    }
+    fn chunk(&self) -> &[u8] {
+        &*self.0
+    }
     fn advance(&mut self, cnt: usize) {
         self.0 = ::std::mem::replace(&mut self.0, ARefss::new(&[][..])).map(|b| &b[cnt..]);
     }
@@ -83,32 +97,46 @@ impl hyper::body::HttpBody for Body {
     type Data = Chunk;
     type Error = BoxedError;
 
-    fn poll_data(self: Pin<&mut Self>, cx: &mut std::task::Context)
-        -> std::task::Poll<Option<Result<Self::Data, Self::Error>>> {
-            // This is safe because the pin is not structural.
-            // https://doc.rust-lang.org/std/pin/#pinning-is-not-structural-for-field
-            // (The field _holds_ a pin, but isn't itself pinned.)
-            unsafe { self.get_unchecked_mut() }.0.get_mut().as_mut().poll_next(cx)
+    fn poll_data(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context,
+    ) -> std::task::Poll<Option<Result<Self::Data, Self::Error>>> {
+        // This is safe because the pin is not structural.
+        // https://doc.rust-lang.org/std/pin/#pinning-is-not-structural-for-field
+        // (The field _holds_ a pin, but isn't itself pinned.)
+        unsafe { self.get_unchecked_mut() }
+            .0
+            .get_mut()
+            .as_mut()
+            .poll_next(cx)
     }
 
-    fn poll_trailers(self: Pin<&mut Self>, _cx: &mut std::task::Context)
-        -> std::task::Poll<Result<Option<http::header::HeaderMap>, Self::Error>> {
-            std::task::Poll::Ready(Ok(None))
+    fn poll_trailers(
+        self: Pin<&mut Self>,
+        _cx: &mut std::task::Context,
+    ) -> std::task::Poll<Result<Option<http::header::HeaderMap>, Self::Error>> {
+        std::task::Poll::Ready(Ok(None))
     }
 }
 
 impl From<BodyStream> for Body {
-    fn from(b: BodyStream) -> Self { Body(SyncWrapper::new(Pin::from(b))) }
+    fn from(b: BodyStream) -> Self {
+        Body(SyncWrapper::new(Pin::from(b)))
+    }
 }
 
 impl<C: Into<Chunk>> From<C> for Body {
     fn from(c: C) -> Self {
-        Body(SyncWrapper::new(Box::pin(stream::once(futures::future::ok(c.into())))))
+        Body(SyncWrapper::new(Box::pin(stream::once(
+            futures::future::ok(c.into()),
+        ))))
     }
 }
 
 impl From<Error> for Body {
     fn from(e: Error) -> Self {
-        Body(SyncWrapper::new(Box::pin(stream::once(futures::future::err(wrap_error(e))))))
+        Body(SyncWrapper::new(Box::pin(stream::once(
+            futures::future::err(wrap_error(e)),
+        ))))
     }
 }

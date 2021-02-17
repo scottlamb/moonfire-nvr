@@ -29,29 +29,31 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /// Upgrades a version 1 schema to a version 2 schema.
-
 use crate::dir;
-use failure::{Error, bail, format_err};
+use crate::schema::DirMeta;
+use failure::{bail, format_err, Error};
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
 use rusqlite::params;
-use crate::schema::DirMeta;
 use std::os::unix::io::AsRawFd;
 use uuid::Uuid;
 
 pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let sample_file_path =
-        args.sample_file_dir
-            .ok_or_else(|| format_err!("--sample-file-dir required when upgrading from \
-                                        schema version 1 to 2."))?;
+    let sample_file_path = args.sample_file_dir.ok_or_else(|| {
+        format_err!("--sample-file-dir required when upgrading from schema version 1 to 2.")
+    })?;
 
-    let mut d = nix::dir::Dir::open(sample_file_path, OFlag::O_DIRECTORY | OFlag::O_RDONLY,
-                                    Mode::empty())?;
+    let mut d = nix::dir::Dir::open(
+        sample_file_path,
+        OFlag::O_DIRECTORY | OFlag::O_RDONLY,
+        Mode::empty(),
+    )?;
     nix::fcntl::flock(d.as_raw_fd(), FlockArg::LockExclusiveNonblock)?;
     verify_dir_contents(sample_file_path, &mut d, tx)?;
 
     // These create statements match the schema.sql when version 2 was the latest.
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         create table meta (
           uuid blob not null check (length(uuid) = 16)
         );
@@ -99,13 +101,17 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           use_count not null default 0
         ) without rowid;
         create index user_session_uid on user_session (user_id);
-    "#)?;
+        "#,
+    )?;
     let db_uuid = ::uuid::Uuid::new_v4();
     let db_uuid_bytes = &db_uuid.as_bytes()[..];
     tx.execute("insert into meta (uuid) values (?)", params![db_uuid_bytes])?;
     let open_uuid = ::uuid::Uuid::new_v4();
     let open_uuid_bytes = &open_uuid.as_bytes()[..];
-    tx.execute("insert into open (uuid) values (?)", params![open_uuid_bytes])?;
+    tx.execute(
+        "insert into open (uuid) values (?)",
+        params![open_uuid_bytes],
+    )?;
     let open_id = tx.last_insert_rowid() as u32;
     let dir_uuid = ::uuid::Uuid::new_v4();
     let dir_uuid_bytes = &dir_uuid.as_bytes()[..];
@@ -121,15 +127,22 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
     }
     dir::write_meta(d.as_raw_fd(), &meta)?;
 
-    let sample_file_path = sample_file_path.to_str()
-        .ok_or_else(|| format_err!("sample file dir {} is not a valid string",
-                                   sample_file_path.display()))?;
-    tx.execute(r#"
+    let sample_file_path = sample_file_path.to_str().ok_or_else(|| {
+        format_err!(
+            "sample file dir {} is not a valid string",
+            sample_file_path.display()
+        )
+    })?;
+    tx.execute(
+        r#"
         insert into sample_file_dir (path,  uuid, last_complete_open_id)
                              values (?,     ?,    ?)
-    "#, params![sample_file_path, dir_uuid_bytes, open_id])?;
+        "#,
+        params![sample_file_path, dir_uuid_bytes, open_id],
+    )?;
 
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         drop table reserved_sample_files;
         alter table camera rename to old_camera;
         alter table recording rename to old_recording;
@@ -253,12 +266,14 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           old_camera cross join sample_file_dir
         where
           old_camera.sub_rtsp_path != '';
-    "#)?;
+        "#,
+    )?;
 
     // Add the new video_sample_entry rows, before inserting the recordings referencing them.
     fix_video_sample_entry(tx)?;
 
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         insert into recording
         select
           r.composite_id,
@@ -282,7 +297,8 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
           p.sample_file_sha1
         from
           old_recording r join recording_playback p on (r.composite_id = p.composite_id);
-    "#)?;
+        "#,
+    )?;
 
     Ok(())
 }
@@ -295,16 +311,23 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
 /// *   optional: reserved sample file uuids.
 /// *   optional: meta and meta-tmp from half-completed update attempts.
 /// *   forbidden: anything else.
-fn verify_dir_contents(sample_file_path: &std::path::Path, dir: &mut nix::dir::Dir,
-                       tx: &rusqlite::Transaction) -> Result<(), Error> {
+fn verify_dir_contents(
+    sample_file_path: &std::path::Path,
+    dir: &mut nix::dir::Dir,
+    tx: &rusqlite::Transaction,
+) -> Result<(), Error> {
     // Build a hash of the uuids found in the directory.
-    let n: i64 = tx.query_row(r#"
+    let n: i64 = tx.query_row(
+        r#"
         select
           a.c + b.c
         from
           (select count(*) as c from recording) a,
           (select count(*) as c from reserved_sample_files) b;
-    "#, params![], |r| r.get(0))?;
+        "#,
+        params![],
+        |r| r.get(0),
+    )?;
     let mut files = ::fnv::FnvHashSet::with_capacity_and_hasher(n as usize, Default::default());
     for e in dir.iter() {
         let e = e?;
@@ -315,8 +338,8 @@ fn verify_dir_contents(sample_file_path: &std::path::Path, dir: &mut nix::dir::D
                 // Ignore metadata files. These might from a half-finished update attempt.
                 // If the directory is actually an in-use >v3 format, other contents won't match.
                 continue;
-            },
-            _ => {},
+            }
+            _ => {}
         };
         let s = match f.to_str() {
             Ok(s) => s,
@@ -326,7 +349,8 @@ fn verify_dir_contents(sample_file_path: &std::path::Path, dir: &mut nix::dir::D
             Ok(u) => u,
             Err(_) => bail!("unexpected file {:?} in {:?}", f, sample_file_path),
         };
-        if s != uuid.to_hyphenated_ref().to_string() {  // non-canonical form.
+        if s != uuid.to_hyphenated_ref().to_string() {
+            // non-canonical form.
             bail!("unexpected file {:?} in {:?}", f, sample_file_path);
         }
         files.insert(uuid);
@@ -339,7 +363,11 @@ fn verify_dir_contents(sample_file_path: &std::path::Path, dir: &mut nix::dir::D
         while let Some(row) = rows.next()? {
             let uuid: crate::db::FromSqlUuid = row.get(0)?;
             if !files.remove(&uuid.0) {
-                bail!("{} is missing from dir {}!", uuid.0, sample_file_path.display());
+                bail!(
+                    "{} is missing from dir {}!",
+                    uuid.0,
+                    sample_file_path.display()
+                );
             }
         }
     }
@@ -355,20 +383,28 @@ fn verify_dir_contents(sample_file_path: &std::path::Path, dir: &mut nix::dir::D
             // a garbage file so if the upgrade transation fails this is still a valid and complete
             // version 1 database.
             let p = super::UuidPath::from(uuid.0);
-            nix::unistd::unlinkat(Some(dir.as_raw_fd()), &p,
-                                  nix::unistd::UnlinkatFlags::NoRemoveDir)?;
+            nix::unistd::unlinkat(
+                Some(dir.as_raw_fd()),
+                &p,
+                nix::unistd::UnlinkatFlags::NoRemoveDir,
+            )?;
         }
     }
 
     if !files.is_empty() {
-        bail!("{} unexpected sample file uuids in dir {}: {:?}!",
-              files.len(), sample_file_path.display(), files);
+        bail!(
+            "{} unexpected sample file uuids in dir {}: {:?}!",
+            files.len(),
+            sample_file_path.display(),
+            files
+        );
     }
     Ok(())
 }
 
 fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let mut select = tx.prepare(r#"
+    let mut select = tx.prepare(
+        r#"
         select
           id,
           sha1,
@@ -377,10 +413,13 @@ fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
           data
         from
           old_video_sample_entry
-    "#)?;
-    let mut insert = tx.prepare(r#"
+        "#,
+    )?;
+    let mut insert = tx.prepare(
+        r#"
         insert into video_sample_entry values (:id, :sha1, :width, :height, :rfc6381_codec, :data)
-    "#)?;
+        "#,
+    )?;
     let mut rows = select.query(params![])?;
     while let Some(row) = rows.next()? {
         let data: Vec<u8> = row.get(4)?;
@@ -398,12 +437,15 @@ fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
 
 // This previously lived in h264.rs. As of version 1, H.264 is the only supported codec.
 fn rfc6381_codec_from_sample_entry(sample_entry: &[u8]) -> Result<String, Error> {
-    if sample_entry.len() < 99 || &sample_entry[4..8] != b"avc1" ||
-       &sample_entry[90..94] != b"avcC" {
+    if sample_entry.len() < 99 || &sample_entry[4..8] != b"avc1" || &sample_entry[90..94] != b"avcC"
+    {
         bail!("not a valid AVCSampleEntry");
     }
     let profile_idc = sample_entry[103];
     let constraint_flags_byte = sample_entry[104];
     let level_idc = sample_entry[105];
-    Ok(format!("avc1.{:02x}{:02x}{:02x}", profile_idc, constraint_flags_byte, level_idc))
+    Ok(format!(
+        "avc1.{:02x}{:02x}{:02x}",
+        profile_idc, constraint_flags_byte, level_idc
+    ))
 }

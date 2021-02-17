@@ -30,13 +30,13 @@
 
 //! Time and durations for Moonfire NVR's internal format.
 
-use failure::{Error, bail, format_err};
+use failure::{bail, format_err, Error};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while_m_n};
 use nom::combinator::{map, map_res, opt};
 use nom::sequence::{preceded, tuple};
-use std::ops;
 use std::fmt;
+use std::ops;
 use std::str::FromStr;
 use time;
 
@@ -50,8 +50,10 @@ pub struct Time(pub i64);
 
 /// Returns a parser for a `len`-digit non-negative number which fits into an i32.
 fn fixed_len_num<'a>(len: usize) -> impl FnMut(&'a str) -> IResult<&'a str, i32> {
-    map_res(take_while_m_n(len, len, |c: char| c.is_ascii_digit()),
-            |input: &str| i32::from_str_radix(input, 10))
+    map_res(
+        take_while_m_n(len, len, |c: char| c.is_ascii_digit()),
+        |input: &str| i32::from_str_radix(input, 10),
+    )
 }
 
 /// Parses `YYYY-mm-dd` into pieces.
@@ -59,7 +61,7 @@ fn parse_datepart(input: &str) -> IResult<&str, (i32, i32, i32)> {
     tuple((
         fixed_len_num(4),
         preceded(tag("-"), fixed_len_num(2)),
-        preceded(tag("-"), fixed_len_num(2))
+        preceded(tag("-"), fixed_len_num(2)),
     ))(input)
 }
 
@@ -67,9 +69,9 @@ fn parse_datepart(input: &str) -> IResult<&str, (i32, i32, i32)> {
 fn parse_timepart(input: &str) -> IResult<&str, (i32, i32, i32, i32)> {
     let (input, (hr, _, min)) = tuple((fixed_len_num(2), tag(":"), fixed_len_num(2)))(input)?;
     let (input, stuff) = opt(tuple((
-                preceded(tag(":"), fixed_len_num(2)),
-                opt(preceded(tag(":"), fixed_len_num(5)))
-        )))(input)?;
+        preceded(tag(":"), fixed_len_num(2)),
+        opt(preceded(tag(":"), fixed_len_num(5))),
+    )))(input)?;
     let (sec, opt_subsec) = stuff.unwrap_or((0, None));
     Ok((input, (hr, min, sec, opt_subsec.unwrap_or(0))))
 }
@@ -77,18 +79,23 @@ fn parse_timepart(input: &str) -> IResult<&str, (i32, i32, i32, i32)> {
 /// Parses `Z` (UTC) or `{+,-,}HH:MM` into a time zone offset in seconds.
 fn parse_zone(input: &str) -> IResult<&str, i32> {
     alt((
-            nom::combinator::value(0, tag("Z")),
-            map(
-                tuple((
-                        opt(nom::character::complete::one_of(&b"+-"[..])),
-                        fixed_len_num(2),
-                        tag(":"),
-                        fixed_len_num(2)
-                )),
-                |(sign, hr, _, min)| {
-                    let off = hr * 3600 + min * 60;
-                    if sign == Some('-') { off } else { -off }
-                })
+        nom::combinator::value(0, tag("Z")),
+        map(
+            tuple((
+                opt(nom::character::complete::one_of(&b"+-"[..])),
+                fixed_len_num(2),
+                tag(":"),
+                fixed_len_num(2),
+            )),
+            |(sign, hr, _, min)| {
+                let off = hr * 3600 + min * 60;
+                if sign == Some('-') {
+                    off
+                } else {
+                    -off
+                }
+            },
+        ),
     ))(input)
 }
 
@@ -97,8 +104,12 @@ impl Time {
         Time(tm.sec * TIME_UNITS_PER_SEC + tm.nsec as i64 * TIME_UNITS_PER_SEC / 1_000_000_000)
     }
 
-    pub const fn min_value() -> Self { Time(i64::min_value()) }
-    pub const fn max_value() -> Self { Time(i64::max_value()) }
+    pub const fn min_value() -> Self {
+        Time(i64::min_value())
+    }
+    pub const fn max_value() -> Self {
+        Time(i64::max_value())
+    }
 
     /// Parses a time as either 90,000ths of a second since epoch or a RFC 3339-like string.
     ///
@@ -112,20 +123,21 @@ impl Time {
         // First try parsing as 90,000ths of a second since epoch.
         match i64::from_str(input) {
             Ok(i) => return Ok(Time(i)),
-            Err(_) => {},
+            Err(_) => {}
         }
 
         // If that failed, parse as a time string or bust.
-        let (remaining, ((tm_year, tm_mon, tm_mday), opt_time, opt_zone)) =
-            tuple((parse_datepart,
-                   opt(preceded(tag("T"), parse_timepart)),
-                   opt(parse_zone)))(input)
-            .map_err(|e| match e {
-                nom::Err::Incomplete(_) => format_err!("incomplete"),
-                nom::Err::Error(e) | nom::Err::Failure(e) => {
-                    format_err!("{}", nom::error::convert_error(input, e))
-                }
-            })?;
+        let (remaining, ((tm_year, tm_mon, tm_mday), opt_time, opt_zone)) = tuple((
+            parse_datepart,
+            opt(preceded(tag("T"), parse_timepart)),
+            opt(parse_zone),
+        ))(input)
+        .map_err(|e| match e {
+            nom::Err::Incomplete(_) => format_err!("incomplete"),
+            nom::Err::Error(e) | nom::Err::Failure(e) => {
+                format_err!("{}", nom::error::convert_error(input, e))
+            }
+        })?;
         if remaining != "" {
             bail!("unexpected suffix {:?} following time string", remaining);
         }
@@ -166,32 +178,44 @@ impl Time {
     }
 
     /// Convert to unix seconds by floor method (rounding down).
-    pub fn unix_seconds(&self) -> i64 { self.0 / TIME_UNITS_PER_SEC }
+    pub fn unix_seconds(&self) -> i64 {
+        self.0 / TIME_UNITS_PER_SEC
+    }
 }
 
 impl std::str::FromStr for Time {
     type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> { Self::parse(s) }
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
 }
 
 impl ops::Sub for Time {
     type Output = Duration;
-    fn sub(self, rhs: Time) -> Duration { Duration(self.0 - rhs.0) }
+    fn sub(self, rhs: Time) -> Duration {
+        Duration(self.0 - rhs.0)
+    }
 }
 
 impl ops::AddAssign<Duration> for Time {
-    fn add_assign(&mut self, rhs: Duration) { self.0 += rhs.0 }
+    fn add_assign(&mut self, rhs: Duration) {
+        self.0 += rhs.0
+    }
 }
 
 impl ops::Add<Duration> for Time {
     type Output = Time;
-    fn add(self, rhs: Duration) -> Time { Time(self.0 + rhs.0) }
+    fn add(self, rhs: Duration) -> Time {
+        Time(self.0 + rhs.0)
+    }
 }
 
 impl ops::Sub<Duration> for Time {
     type Output = Time;
-    fn sub(self, rhs: Duration) -> Time { Time(self.0 - rhs.0) }
+    fn sub(self, rhs: Duration) -> Time {
+        Time(self.0 - rhs.0)
+    }
 }
 
 impl fmt::Debug for Time {
@@ -203,11 +227,20 @@ impl fmt::Debug for Time {
 
 impl fmt::Display for Time {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let tm = time::at(time::Timespec{sec: self.0 / TIME_UNITS_PER_SEC, nsec: 0});
+        let tm = time::at(time::Timespec {
+            sec: self.0 / TIME_UNITS_PER_SEC,
+            nsec: 0,
+        });
         let zone_minutes = tm.tm_utcoff.abs() / 60;
-        write!(f, "{}:{:05}{}{:02}:{:02}", tm.strftime("%FT%T").or_else(|_| Err(fmt::Error))?,
-               self.0 % TIME_UNITS_PER_SEC,
-               if tm.tm_utcoff > 0 { '+' } else { '-' }, zone_minutes / 60, zone_minutes % 60)
+        write!(
+            f,
+            "{}:{:05}{}{:02}:{:02}",
+            tm.strftime("%FT%T").or_else(|_| Err(fmt::Error))?,
+            self.0 % TIME_UNITS_PER_SEC,
+            if tm.tm_utcoff > 0 { '+' } else { '-' },
+            zone_minutes / 60,
+            zone_minutes % 60
+        )
     }
 }
 
@@ -242,18 +275,33 @@ impl fmt::Display for Duration {
             false
         };
         if hours > 0 {
-            write!(f, "{}{} hour{}", if have_written { " " } else { "" },
-                   hours, if hours == 1 { "" } else { "s" })?;
+            write!(
+                f,
+                "{}{} hour{}",
+                if have_written { " " } else { "" },
+                hours,
+                if hours == 1 { "" } else { "s" }
+            )?;
             have_written = true;
         }
         if minutes > 0 {
-            write!(f, "{}{} minute{}", if have_written { " " } else { "" },
-                   minutes, if minutes == 1 { "" } else { "s" })?;
+            write!(
+                f,
+                "{}{} minute{}",
+                if have_written { " " } else { "" },
+                minutes,
+                if minutes == 1 { "" } else { "s" }
+            )?;
             have_written = true;
         }
         if seconds > 0 || !have_written {
-            write!(f, "{}{} second{}", if have_written { " " } else { "" },
-                   seconds, if seconds == 1 { "" } else { "s" })?;
+            write!(
+                f,
+                "{}{} second{}",
+                if have_written { " " } else { "" },
+                seconds,
+                if seconds == 1 { "" } else { "s" }
+            )?;
         }
         Ok(())
     }
@@ -261,15 +309,21 @@ impl fmt::Display for Duration {
 
 impl ops::Add for Duration {
     type Output = Duration;
-    fn add(self, rhs: Duration) -> Duration { Duration(self.0 + rhs.0) }
+    fn add(self, rhs: Duration) -> Duration {
+        Duration(self.0 + rhs.0)
+    }
 }
 
 impl ops::AddAssign for Duration {
-    fn add_assign(&mut self, rhs: Duration) { self.0 += rhs.0 }
+    fn add_assign(&mut self, rhs: Duration) {
+        self.0 += rhs.0
+    }
 }
 
 impl ops::SubAssign for Duration {
-    fn sub_assign(&mut self, rhs: Duration) { self.0 -= rhs.0 }
+    fn sub_assign(&mut self, rhs: Duration) {
+        self.0 -= rhs.0
+    }
 }
 
 #[cfg(test)]
@@ -280,17 +334,18 @@ mod tests {
     fn test_parse_time() {
         std::env::set_var("TZ", "America/Los_Angeles");
         time::tzset();
+        #[rustfmt::skip]
         let tests = &[
             ("2006-01-02T15:04:05-07:00",       102261550050000),
             ("2006-01-02T15:04:05:00001-07:00", 102261550050001),
             ("2006-01-02T15:04:05-08:00",       102261874050000),
-            ("2006-01-02T15:04:05",             102261874050000),  // implied -08:00
-            ("2006-01-02T15:04",                102261873600000),  // implied -08:00
-            ("2006-01-02T15:04:05:00001",       102261874050001),  // implied -08:00
+            ("2006-01-02T15:04:05",             102261874050000), // implied -08:00
+            ("2006-01-02T15:04",                102261873600000), // implied -08:00
+            ("2006-01-02T15:04:05:00001",       102261874050001), // implied -08:00
             ("2006-01-02T15:04:05-00:00",       102259282050000),
             ("2006-01-02T15:04:05Z",            102259282050000),
-            ("2006-01-02-08:00",                102256992000000),  // implied -08:00
-            ("2006-01-02",                      102256992000000),  // implied -08:00
+            ("2006-01-02-08:00",                102256992000000), // implied -08:00
+            ("2006-01-02",                      102256992000000), // implied -08:00
             ("2006-01-02Z",                     102254400000000),
             ("102261550050000",                 102261550050000),
         ];
@@ -303,7 +358,10 @@ mod tests {
     fn test_format_time() {
         std::env::set_var("TZ", "America/Los_Angeles");
         time::tzset();
-        assert_eq!("2006-01-02T15:04:05:00000-08:00", format!("{}", Time(102261874050000)));
+        assert_eq!(
+            "2006-01-02T15:04:05:00000-08:00",
+            format!("{}", Time(102261874050000))
+        );
     }
 
     #[test]

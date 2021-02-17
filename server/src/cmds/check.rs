@@ -38,8 +38,12 @@ use structopt::StructOpt;
 #[derive(StructOpt)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
-                parse(from_os_str))]
+    #[structopt(
+        long,
+        default_value = "/var/lib/moonfire-nvr/db",
+        value_name = "path",
+        parse(from_os_str)
+    )]
     db_dir: PathBuf,
 
     /// Compare sample file lengths on disk to the database.
@@ -70,10 +74,13 @@ pub struct Args {
 
 pub fn run(args: &Args) -> Result<i32, Error> {
     let (_db_dir, mut conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
-    check::run(&mut conn, &check::Options {
-        compare_lens: args.compare_lens,
-        trash_orphan_sample_files: args.trash_orphan_sample_files,
-        delete_orphan_rows: args.delete_orphan_rows,
-        trash_corrupt_rows: args.trash_corrupt_rows,
-    })
+    check::run(
+        &mut conn,
+        &check::Options {
+            compare_lens: args.compare_lens,
+            trash_orphan_sample_files: args.trash_orphan_sample_files,
+            delete_orphan_rows: args.delete_orphan_rows,
+            trash_corrupt_rows: args.trash_corrupt_rows,
+        },
+    )
 }

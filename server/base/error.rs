@@ -38,8 +38,11 @@ pub fn prettify_failure(e: &failure::Error) -> String {
         write!(&mut msg, "\ncaused by: {}", cause).unwrap();
     }
     if e.backtrace().is_empty() {
-        write!(&mut msg, "\n\n(set environment variable RUST_BACKTRACE=1 to see backtraces)")
-            .unwrap();
+        write!(
+            &mut msg,
+            "\n\n(set environment variable RUST_BACKTRACE=1 to see backtraces)"
+        )
+        .unwrap();
     } else {
         write!(&mut msg, "\n\nBacktrace:\n{}", e.backtrace()).unwrap();
     }
@@ -73,7 +76,9 @@ impl Fail for Error {
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Error {
-        Error { inner: Context::new(kind) }
+        Error {
+            inner: Context::new(kind),
+        }
     }
 }
 
@@ -112,6 +117,8 @@ impl fmt::Display for Error {
 /// which is a nice general-purpose classification of errors. See that link for descriptions of
 /// each error.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Fail)]
+#[non_exhaustive]
+#[rustfmt::skip]
 pub enum ErrorKind {
     #[fail(display = "Cancelled")] Cancelled,
     #[fail(display = "Unknown")] Unknown,
@@ -129,7 +136,6 @@ pub enum ErrorKind {
     #[fail(display = "Internal")] Internal,
     #[fail(display = "Unavailable")] Unavailable,
     #[fail(display = "Data loss")] DataLoss,
-    #[doc(hidden)] #[fail(display = "__Nonexhaustive")] __Nonexhaustive,
 }
 
 /// Extension methods for `Result`.
@@ -146,7 +152,10 @@ pub trait ResultExt<T, E> {
     fn err_kind(self, k: ErrorKind) -> Result<T, Error>;
 }
 
-impl<T, E> ResultExt<T, E> for Result<T, E> where E: Into<failure::Error> {
+impl<T, E> ResultExt<T, E> for Result<T, E>
+where
+    E: Into<failure::Error>,
+{
     fn err_kind(self, k: ErrorKind) -> Result<T, Error> {
         self.map_err(|e| e.into().context(k).into())
     }

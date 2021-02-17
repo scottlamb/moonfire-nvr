@@ -29,12 +29,12 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /// Upgrades a version 3 schema to a version 4 schema.
-
 use failure::Error;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     // These create statements match the schema.sql when version 4 was the latest.
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         alter table meta add column max_signal_changes integer check (max_signal_changes >= 0);
 
         create table signal (
@@ -191,6 +191,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         -- This was supposed to be present in version 2, but the upgrade procedure used to miss it.
         -- Catch up so we know a version 4 database is right.
         create index if not exists user_session_uid on user_session (user_id);
-    "#)?;
+        "#,
+    )?;
     Ok(())
 }

@@ -30,14 +30,18 @@
 
 use failure::Error;
 use log::info;
-use structopt::StructOpt;
 use std::path::PathBuf;
+use structopt::StructOpt;
 
 #[derive(StructOpt)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
-                parse(from_os_str))]
+    #[structopt(
+        long,
+        default_value = "/var/lib/moonfire-nvr/db",
+        value_name = "path",
+        parse(from_os_str)
+    )]
     db_dir: PathBuf,
 }
 
@@ -55,12 +59,14 @@ pub fn run(args: &Args) -> Result<i32, Error> {
     // page size (so reading large recording_playback rows doesn't require as many seeks). Changing
     // the page size requires doing a vacuum in non-WAL mode. This will be cheap on an empty
     // database. https://www.sqlite.org/pragma.html#pragma_page_size
-    conn.execute_batch(r#"
+    conn.execute_batch(
+        r#"
         pragma journal_mode = delete;
         pragma page_size = 16384;
         vacuum;
         pragma journal_mode = wal;
-    "#)?;
+        "#,
+    )?;
     db::init(&mut conn)?;
     info!("Database initialized.");
     Ok(0)

@@ -29,15 +29,15 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use db::auth::SessionHash;
-use failure::{Error, format_err};
-use serde::{Deserialize, Serialize};
+use failure::{format_err, Error};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ops::Not;
 use uuid::Uuid;
 
 #[derive(Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct TopLevel<'a> {
     pub time_zone_name: &'a str,
 
@@ -57,7 +57,7 @@ pub struct TopLevel<'a> {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Session {
     pub username: String,
 
@@ -67,7 +67,9 @@ pub struct Session {
 
 impl Session {
     fn serialize_csrf<S>(csrf: &SessionHash, serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    where
+        S: Serializer,
+    {
         let mut tmp = [0u8; 32];
         csrf.encode_base64(&mut tmp);
         serializer.serialize_str(::std::str::from_utf8(&tmp[..]).expect("base64 is UTF-8"))
@@ -77,7 +79,7 @@ impl Session {
 /// JSON serialization wrapper for a single camera when processing `/api/` and
 /// `/api/cameras/<uuid>/`. See `design/api.md` for details.
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Camera<'a> {
     pub uuid: Uuid,
     pub short_name: &'a str,
@@ -91,7 +93,7 @@ pub struct Camera<'a> {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct CameraConfig<'a> {
     pub onvif_host: &'a str,
     pub username: &'a str,
@@ -99,7 +101,7 @@ pub struct CameraConfig<'a> {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Stream<'a> {
     pub retain_bytes: i64,
     pub min_start_time_90k: Option<i64>,
@@ -117,13 +119,13 @@ pub struct Stream<'a> {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct StreamConfig<'a> {
     pub rtsp_url: &'a str,
 }
 
 #[derive(Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Signal<'a> {
     pub id: u32,
     #[serde(serialize_with = "Signal::serialize_cameras")]
@@ -134,27 +136,27 @@ pub struct Signal<'a> {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub enum PostSignalsEndBase {
     Epoch,
     Now,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct LoginRequest<'a> {
     pub username: &'a str,
     pub password: String,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct LogoutRequest<'a> {
     pub csrf: &'a str,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PostSignalsRequest {
     pub signal_ids: Vec<u32>,
     pub states: Vec<u16>,
@@ -164,13 +166,13 @@ pub struct PostSignalsRequest {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PostSignalsResponse {
     pub time_90k: i64,
 }
 
 #[derive(Default, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Signals {
     pub times_90k: Vec<i64>,
     pub signal_ids: Vec<u32>,
@@ -178,7 +180,7 @@ pub struct Signals {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct SignalType<'a> {
     pub uuid: Uuid,
 
@@ -187,7 +189,7 @@ pub struct SignalType<'a> {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct SignalTypeState<'a> {
     value: u16,
     name: &'a str,
@@ -198,8 +200,12 @@ pub struct SignalTypeState<'a> {
 }
 
 impl<'a> Camera<'a> {
-    pub fn wrap(c: &'a db::Camera, db: &'a db::LockedDatabase, include_days: bool,
-                include_config: bool) -> Result<Self, Error> {
+    pub fn wrap(
+        c: &'a db::Camera,
+        db: &'a db::LockedDatabase,
+        include_days: bool,
+        include_config: bool,
+    ) -> Result<Self, Error> {
         Ok(Camera {
             uuid: c.uuid,
             short_name: &c.short_name,
@@ -220,11 +226,17 @@ impl<'a> Camera<'a> {
     }
 
     fn serialize_streams<S>(streams: &[Option<Stream>; 2], serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    where
+        S: Serializer,
+    {
         let mut map = serializer.serialize_map(Some(streams.len()))?;
         for (i, s) in streams.iter().enumerate() {
             if let &Some(ref s) = s {
-                map.serialize_key(db::StreamType::from_index(i).expect("invalid stream type index").as_str())?;
+                map.serialize_key(
+                    db::StreamType::from_index(i)
+                        .expect("invalid stream type index")
+                        .as_str(),
+                )?;
                 map.serialize_value(s)?;
             }
         }
@@ -233,13 +245,20 @@ impl<'a> Camera<'a> {
 }
 
 impl<'a> Stream<'a> {
-    fn wrap(db: &'a db::LockedDatabase, id: Option<i32>, include_days: bool, include_config: bool)
-            -> Result<Option<Self>, Error> {
+    fn wrap(
+        db: &'a db::LockedDatabase,
+        id: Option<i32>,
+        include_days: bool,
+        include_config: bool,
+    ) -> Result<Option<Self>, Error> {
         let id = match id {
             Some(id) => id,
             None => return Ok(None),
         };
-        let s = db.streams_by_id().get(&id).ok_or_else(|| format_err!("missing stream {}", id))?;
+        let s = db
+            .streams_by_id()
+            .get(&id)
+            .ok_or_else(|| format_err!("missing stream {}", id))?;
         Ok(Some(Stream {
             retain_bytes: s.retain_bytes,
             min_start_time_90k: s.range.as_ref().map(|r| r.start.0),
@@ -257,9 +276,13 @@ impl<'a> Stream<'a> {
         }))
     }
 
-    fn serialize_days<S>(days: &Option<BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
-                         serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    fn serialize_days<S>(
+        days: &Option<BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let days = match days.as_ref() {
             Some(d) => d,
             None => return serializer.serialize_none(),
@@ -268,7 +291,7 @@ impl<'a> Stream<'a> {
         for (k, v) in days {
             map.serialize_key(k.as_ref())?;
             let bounds = k.bounds();
-            map.serialize_value(&StreamDayValue{
+            map.serialize_value(&StreamDayValue {
                 start_time_90k: bounds.start.0,
                 end_time_90k: bounds.end.0,
                 total_duration_90k: v.duration.0,
@@ -289,16 +312,19 @@ impl<'a> Signal<'a> {
         }
     }
 
-    fn serialize_cameras<S>(cameras: &(&db::Signal, &db::LockedDatabase),
-                         serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    fn serialize_cameras<S>(
+        cameras: &(&db::Signal, &db::LockedDatabase),
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let (s, db) = cameras;
         let mut map = serializer.serialize_map(Some(s.cameras.len()))?;
         for sc in &s.cameras {
-            let c = db.cameras_by_id()
-                      .get(&sc.camera_id)
-                      .ok_or_else(|| S::Error::custom(format!("signal has missing camera id {}",
-                                                              sc.camera_id)))?;
+            let c = db.cameras_by_id().get(&sc.camera_id).ok_or_else(|| {
+                S::Error::custom(format!("signal has missing camera id {}", sc.camera_id))
+            })?;
             map.serialize_key(&c.uuid)?;
             map.serialize_value(match sc.type_ {
                 db::signal::SignalCameraType::Direct => "direct",
@@ -317,9 +343,10 @@ impl<'a> SignalType<'a> {
         }
     }
 
-    fn serialize_states<S>(type_: &db::signal::Type,
-                            serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    fn serialize_states<S>(type_: &db::signal::Type, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let mut seq = serializer.serialize_seq(Some(type_.states.len()))?;
         for s in &type_.states {
             seq.serialize_element(&SignalTypeState::wrap(s))?;
@@ -340,7 +367,7 @@ impl<'a> SignalTypeState<'a> {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 struct StreamDayValue {
     pub start_time_90k: i64,
     pub end_time_90k: i64,
@@ -350,24 +377,33 @@ struct StreamDayValue {
 impl<'a> TopLevel<'a> {
     /// Serializes cameras as a list (rather than a map), optionally including the `days` and
     /// `cameras` fields.
-    fn serialize_cameras<S>(cameras: &(&db::LockedDatabase, bool, bool),
-                            serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    fn serialize_cameras<S>(
+        cameras: &(&db::LockedDatabase, bool, bool),
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let (db, include_days, include_config) = *cameras;
         let cs = db.cameras_by_id();
         let mut seq = serializer.serialize_seq(Some(cs.len()))?;
         for (_, c) in cs {
             seq.serialize_element(
                 &Camera::wrap(c, db, include_days, include_config)
-                .map_err(|e| S::Error::custom(e))?)?;
+                    .map_err(|e| S::Error::custom(e))?,
+            )?;
         }
         seq.end()
     }
 
     /// Serializes signals as a list (rather than a map), optionally including the `days` field.
-    fn serialize_signals<S>(signals: &(&db::LockedDatabase, bool),
-                            serializer: S) -> Result<S::Ok, S::Error>
-        where S: Serializer {
+    fn serialize_signals<S>(
+        signals: &(&db::LockedDatabase, bool),
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let (db, include_days) = *signals;
         let ss = db.signals_by_id();
         let mut seq = serializer.serialize_seq(Some(ss.len()))?;
@@ -378,9 +414,10 @@ impl<'a> TopLevel<'a> {
     }
 
     /// Serializes signals as a list (rather than a map), optionally including the `days` field.
-    fn serialize_signal_types<S>(db: &db::LockedDatabase,
-                                 serializer: S) -> Result<S::Ok, S::Error>
-        where S: Serializer {
+    fn serialize_signal_types<S>(db: &db::LockedDatabase, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let ss = db.signal_types_by_uuid();
         let mut seq = serializer.serialize_seq(Some(ss.len()))?;
         for (u, t) in ss {
@@ -391,7 +428,7 @@ impl<'a> TopLevel<'a> {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ListRecordings<'a> {
     pub recordings: Vec<Recording>,
 
@@ -403,22 +440,27 @@ pub struct ListRecordings<'a> {
 }
 
 impl<'a> ListRecordings<'a> {
-    fn serialize_video_sample_entries<S>(video_sample_entries: &(&db::LockedDatabase, Vec<i32>),
-                                         serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    fn serialize_video_sample_entries<S>(
+        video_sample_entries: &(&db::LockedDatabase, Vec<i32>),
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let (db, ref v) = *video_sample_entries;
         let mut map = serializer.serialize_map(Some(v.len()))?;
         for id in v {
             map.serialize_entry(
                 id,
-                &VideoSampleEntry::from(&db.video_sample_entries_by_id().get(id).unwrap()))?;
+                &VideoSampleEntry::from(&db.video_sample_entries_by_id().get(id).unwrap()),
+            )?;
         }
         map.end()
     }
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Recording {
     pub start_time_90k: i64,
     pub end_time_90k: i64,
@@ -439,7 +481,7 @@ pub struct Recording {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct VideoSampleEntry {
     pub width: u16,
     pub height: u16,

@@ -28,9 +28,10 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use base::clock::Clocks;
 use crate::db;
 use crate::dir;
+use crate::writer;
+use base::clock::Clocks;
 use fnv::FnvHashMap;
 use mylog;
 use rusqlite;
@@ -40,7 +41,6 @@ use std::thread;
 use tempdir::TempDir;
 use time;
 use uuid::Uuid;
-use crate::writer;
 
 static INIT: parking_lot::Once = parking_lot::Once::new();
 
@@ -101,29 +101,39 @@ impl<C: Clocks + Clone> TestDb<C> {
         {
             let mut l = db.lock();
             sample_file_dir_id = l.add_sample_file_dir(path.to_owned()).unwrap();
-            assert_eq!(TEST_CAMERA_ID, l.add_camera(db::CameraChange {
-                short_name: "test camera".to_owned(),
-                description: "".to_owned(),
-                onvif_host: "test-camera".to_owned(),
-                username: "foo".to_owned(),
-                password: "bar".to_owned(),
-                streams: [
-                    db::StreamChange {
-                        sample_file_dir_id: Some(sample_file_dir_id),
-                        rtsp_url: "rtsp://test-camera/main".to_owned(),
-                        record: true,
-                        flush_if_sec,
-                    },
-                    Default::default(),
-                ],
-            }).unwrap());
+            assert_eq!(
+                TEST_CAMERA_ID,
+                l.add_camera(db::CameraChange {
+                    short_name: "test camera".to_owned(),
+                    description: "".to_owned(),
+                    onvif_host: "test-camera".to_owned(),
+                    username: "foo".to_owned(),
+                    password: "bar".to_owned(),
+                    streams: [
+                        db::StreamChange {
+                            sample_file_dir_id: Some(sample_file_dir_id),
+                            rtsp_url: "rtsp://test-camera/main".to_owned(),
+                            record: true,
+                            flush_if_sec,
+                        },
+                        Default::default(),
+                    ],
+                })
+                .unwrap()
+            );
             test_camera_uuid = l.cameras_by_id().get(&TEST_CAMERA_ID).unwrap().uuid;
             l.update_retention(&[db::RetentionChange {
                 stream_id: TEST_STREAM_ID,
                 new_record: true,
                 new_limit: 1048576,
-            }]).unwrap();
-            dir = l.sample_file_dirs_by_id().get(&sample_file_dir_id).unwrap().get().unwrap();
+            }])
+            .unwrap();
+            dir = l
+                .sample_file_dirs_by_id()
+                .get(&sample_file_dir_id)
+                .unwrap()
+                .get()
+                .unwrap();
         }
         let mut dirs_by_stream_id = FnvHashMap::default();
         dirs_by_stream_id.insert(TEST_STREAM_ID, dir.clone());
@@ -142,48 +152,63 @@ impl<C: Clocks + Clone> TestDb<C> {
     /// Creates a recording with a fresh `RecordingToInsert` row which has been touched only by
     /// a `SampleIndexEncoder`. Fills in a video sample entry id and such to make it valid.
     /// There will no backing sample file, so it won't be possible to generate a full `.mp4`.
-    pub fn insert_recording_from_encoder(&self, r: db::RecordingToInsert)
-                                                -> db::ListRecordingsRow {
+    pub fn insert_recording_from_encoder(&self, r: db::RecordingToInsert) -> db::ListRecordingsRow {
         use crate::recording::{self, TIME_UNITS_PER_SEC};
         let mut db = self.db.lock();
-        let video_sample_entry_id = db.insert_video_sample_entry(db::VideoSampleEntryToInsert {
+        let video_sample_entry_id = db
+            .insert_video_sample_entry(db::VideoSampleEntryToInsert {
+                width: 1920,
+                height: 1080,
+                pasp_h_spacing: 1,
+                pasp_v_spacing: 1,
+                data: [0u8; 100].to_vec(),
+                rfc6381_codec: "avc1.000000".to_owned(),
+            })
+            .unwrap();
+        let (id, _) = db
+            .add_recording(
+                TEST_STREAM_ID,
+                db::RecordingToInsert {
+                    start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
+                    video_sample_entry_id,
+                    wall_duration_90k: r.media_duration_90k,
+                    ..r
+                },
+            )
+            .unwrap();
+        db.mark_synced(id).unwrap();
+        db.flush("create_recording_from_encoder").unwrap();
+        let mut row = None;
+        db.list_recordings_by_id(
+            TEST_STREAM_ID,
+            id.recording()..id.recording() + 1,
+            &mut |r| {
+                row = Some(r);
+                Ok(())
+            },
+        )
+        .unwrap();
+        row.unwrap()
+    }
+}
+
+// For benchmarking
+#[cfg(feature = "nightly")]
+pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
+    use crate::recording::{self, TIME_UNITS_PER_SEC};
+    let mut data = Vec::new();
+    data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
+    let mut db = db.lock();
+    let video_sample_entry_id = db
+        .insert_video_sample_entry(db::VideoSampleEntryToInsert {
             width: 1920,
             height: 1080,
             pasp_h_spacing: 1,
             pasp_v_spacing: 1,
             data: [0u8; 100].to_vec(),
             rfc6381_codec: "avc1.000000".to_owned(),
-        }).unwrap();
-        let (id, _) = db.add_recording(TEST_STREAM_ID, db::RecordingToInsert {
-            start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
-            video_sample_entry_id,
-            wall_duration_90k: r.media_duration_90k,
-            ..r
-        }).unwrap();
-        db.mark_synced(id).unwrap();
-        db.flush("create_recording_from_encoder").unwrap();
-        let mut row = None;
-        db.list_recordings_by_id(TEST_STREAM_ID, id.recording() .. id.recording()+1,
-                                 &mut |r| { row = Some(r); Ok(()) }).unwrap();
-        row.unwrap()
-    }
-}
-
-// For benchmarking
-#[cfg(feature="nightly")]
-pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
-    use crate::recording::{self, TIME_UNITS_PER_SEC};
-    let mut data = Vec::new();
-    data.extend_from_slice(include_bytes!("testdata/video_sample_index.bin"));
-    let mut db = db.lock();
-    let video_sample_entry_id = db.insert_video_sample_entry(db::VideoSampleEntryToInsert {
-        width: 1920,
-        height: 1080,
-        pasp_h_spacing: 1,
-        pasp_v_spacing: 1,
-        data: [0u8; 100].to_vec(),
-        rfc6381_codec: "avc1.000000".to_owned(),
-    }).unwrap();
+        })
+        .unwrap();
     let mut recording = db::RecordingToInsert {
         sample_file_bytes: 30104460,
         start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),

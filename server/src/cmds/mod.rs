@@ -37,8 +37,8 @@ use std::path::Path;
 
 pub mod check;
 pub mod config;
-pub mod login;
 pub mod init;
+pub mod login;
 pub mod run;
 pub mod sql;
 pub mod ts;
@@ -48,23 +48,35 @@ pub mod upgrade;
 enum OpenMode {
     ReadOnly,
     ReadWrite,
-    Create
+    Create,
 }
 
 /// Locks the directory without opening the database.
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
 fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
-    let dir = dir::Fd::open(db_dir, mode == OpenMode::Create)
-        .map_err(|e| e.context(if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
-                                   format!("db dir {} not found; try running moonfire-nvr init",
-                                           db_dir.display())
-                               } else {
-                                   format!("unable to open db dir {}", db_dir.display())
-                               }))?;
+    let dir = dir::Fd::open(db_dir, mode == OpenMode::Create).map_err(|e| {
+        e.context(if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
+            format!(
+                "db dir {} not found; try running moonfire-nvr init",
+                db_dir.display()
+            )
+        } else {
+            format!("unable to open db dir {}", db_dir.display())
+        })
+    })?;
     let ro = mode == OpenMode::ReadOnly;
-    dir.lock(if ro { FlockArg::LockSharedNonblock } else { FlockArg::LockExclusiveNonblock })
-       .map_err(|e| e.context(format!("unable to get {} lock on db dir {} ",
-                                      if ro { "shared" } else { "exclusive" }, db_dir.display())))?;
+    dir.lock(if ro {
+        FlockArg::LockSharedNonblock
+    } else {
+        FlockArg::LockExclusiveNonblock
+    })
+    .map_err(|e| {
+        e.context(format!(
+            "unable to get {} lock on db dir {} ",
+            if ro { "shared" } else { "exclusive" },
+            db_dir.display()
+        ))
+    })?;
     Ok(dir)
 }
 
@@ -73,8 +85,12 @@ fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
 fn open_conn(db_dir: &Path, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connection), Error> {
     let dir = open_dir(db_dir, mode)?;
     let db_path = db_dir.join("db");
-    info!("Opening {} in {:?} mode with SQLite version {}",
-          db_path.display(), mode, rusqlite::version());
+    info!(
+        "Opening {} in {:?} mode with SQLite version {}",
+        db_path.display(),
+        mode,
+        rusqlite::version()
+    );
     let conn = rusqlite::Connection::open_with_flags(
         db_path,
         match mode {
@@ -86,6 +102,7 @@ fn open_conn(db_dir: &Path, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connec
         } |
         // rusqlite::Connection is not Sync, so there's no reason to tell SQLite3 to use the
         // serialized threading mode.
-        rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
     Ok((dir, conn))
 }

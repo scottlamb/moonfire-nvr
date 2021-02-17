@@ -79,7 +79,8 @@ impl std::fmt::Display for IndexColumn {
 
 /// Returns a sorted vec of table names in the given connection.
 fn get_tables(c: &rusqlite::Connection) -> Result<Vec<String>, rusqlite::Error> {
-    c.prepare(r#"
+    c.prepare(
+        r#"
         select
             name
         from
@@ -88,66 +89,86 @@ fn get_tables(c: &rusqlite::Connection) -> Result<Vec<String>, rusqlite::Error> 
             type = 'table' and
             name not like 'sqlite_%'
         order by name
-    "#)?
-     .query_map(params![], |r| r.get(0))?
-     .collect()
+        "#,
+    )?
+    .query_map(params![], |r| r.get(0))?
+    .collect()
 }
 
 /// Returns a vec of columns in the given table.
-fn get_table_columns(c: &rusqlite::Connection, table: &str)
-                     -> Result<Vec<Column>, rusqlite::Error> {
+fn get_table_columns(
+    c: &rusqlite::Connection,
+    table: &str,
+) -> Result<Vec<Column>, rusqlite::Error> {
     // Note that placeholders aren't allowed for these pragmas. Just assume sane table names
     // (no escaping). "select * from pragma_..." syntax would be nicer but requires SQLite
     // 3.16.0 (2017-01-02). Ubuntu 16.04 Xenial (still used on Travis CI) has an older SQLite.
     c.prepare(&format!("pragma table_info(\"{}\")", table))?
-     .query_map(params![], |r| Ok(Column {
-         cid: r.get(0)?,
-         name: r.get(1)?,
-         type_: r.get(2)?,
-         notnull: r.get(3)?,
-         dflt_value: r.get(4)?,
-         pk: r.get(5)?,
-     }))?
-     .collect()
+        .query_map(params![], |r| {
+            Ok(Column {
+                cid: r.get(0)?,
+                name: r.get(1)?,
+                type_: r.get(2)?,
+                notnull: r.get(3)?,
+                dflt_value: r.get(4)?,
+                pk: r.get(5)?,
+            })
+        })?
+        .collect()
 }
 
 /// Returns a vec of indices associated with the given table.
 fn get_indices(c: &rusqlite::Connection, table: &str) -> Result<Vec<Index>, rusqlite::Error> {
     // See note at get_tables_columns about placeholders.
     c.prepare(&format!("pragma index_list(\"{}\")", table))?
-     .query_map(params![], |r| Ok(Index {
-         seq: r.get(0)?,
-         name: r.get(1)?,
-         unique: r.get(2)?,
-         origin: r.get(3)?,
-         partial: r.get(4)?,
-     }))?
-     .collect()
+        .query_map(params![], |r| {
+            Ok(Index {
+                seq: r.get(0)?,
+                name: r.get(1)?,
+                unique: r.get(2)?,
+                origin: r.get(3)?,
+                partial: r.get(4)?,
+            })
+        })?
+        .collect()
 }
 
 /// Returns a vec of all the columns in the given index.
-fn get_index_columns(c: &rusqlite::Connection, index: &str)
-                     -> Result<Vec<IndexColumn>, rusqlite::Error> {
+fn get_index_columns(
+    c: &rusqlite::Connection,
+    index: &str,
+) -> Result<Vec<IndexColumn>, rusqlite::Error> {
     // See note at get_tables_columns about placeholders.
     c.prepare(&format!("pragma index_info(\"{}\")", index))?
-     .query_map(params![], |r| Ok(IndexColumn {
-         seqno: r.get(0)?,
-         cid: r.get(1)?,
-         name: r.get(2)?,
-     }))?
-     .collect()
+        .query_map(params![], |r| {
+            Ok(IndexColumn {
+                seqno: r.get(0)?,
+                cid: r.get(1)?,
+                name: r.get(2)?,
+            })
+        })?
+        .collect()
 }
 
-pub fn get_diffs(n1: &str, c1: &rusqlite::Connection, n2: &str, c2: &rusqlite::Connection)
-           -> Result<Option<String>, Error> {
+pub fn get_diffs(
+    n1: &str,
+    c1: &rusqlite::Connection,
+    n2: &str,
+    c2: &rusqlite::Connection,
+) -> Result<Option<String>, Error> {
     let mut diffs = String::new();
 
     // Compare table list.
     let tables1 = get_tables(c1)?;
     let tables2 = get_tables(c2)?;
     if tables1 != tables2 {
-        write!(&mut diffs, "table list mismatch, {} vs {}:\n{}",
-               n1, n2, diff_slice(&tables1, &tables2))?;
+        write!(
+            &mut diffs,
+            "table list mismatch, {} vs {}:\n{}",
+            n1,
+            n2,
+            diff_slice(&tables1, &tables2)
+        )?;
     }
 
     // Compare columns and indices for each table.
@@ -155,8 +176,14 @@ pub fn get_diffs(n1: &str, c1: &rusqlite::Connection, n2: &str, c2: &rusqlite::C
         let columns1 = get_table_columns(c1, &t)?;
         let columns2 = get_table_columns(c2, &t)?;
         if columns1 != columns2 {
-            write!(&mut diffs, "table {:?} column, {} vs {}:\n{}",
-                   t, n1, n2, diff_slice(&columns1, &columns2))?;
+            write!(
+                &mut diffs,
+                "table {:?} column, {} vs {}:\n{}",
+                t,
+                n1,
+                n2,
+                diff_slice(&columns1, &columns2)
+            )?;
         }
 
         let mut indices1 = get_indices(c1, &t)?;
@@ -164,16 +191,29 @@ pub fn get_diffs(n1: &str, c1: &rusqlite::Connection, n2: &str, c2: &rusqlite::C
         indices1.sort_by(|a, b| a.name.cmp(&b.name));
         indices2.sort_by(|a, b| a.name.cmp(&b.name));
         if indices1 != indices2 {
-            write!(&mut diffs, "table {:?} indices, {} vs {}:\n{}",
-                   t, n1, n2, diff_slice(&indices1, &indices2))?;
+            write!(
+                &mut diffs,
+                "table {:?} indices, {} vs {}:\n{}",
+                t,
+                n1,
+                n2,
+                diff_slice(&indices1, &indices2)
+            )?;
         }
 
         for i in &indices1 {
             let ic1 = get_index_columns(c1, &i.name)?;
             let ic2 = get_index_columns(c2, &i.name)?;
             if ic1 != ic2 {
-                write!(&mut diffs, "table {:?} index {:?} columns {} vs {}:\n{}",
-                       t, i, n1, n2, diff_slice(&ic1, &ic2))?;
+                write!(
+                    &mut diffs,
+                    "table {:?} index {:?} columns {} vs {}:\n{}",
+                    t,
+                    i,
+                    n1,
+                    n2,
+                    diff_slice(&ic1, &ic2)
+                )?;
             }
         }
     }

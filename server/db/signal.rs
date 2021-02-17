@@ -28,16 +28,16 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use base::bail_t;
 use crate::coding;
 use crate::db::FromSqlUuid;
 use crate::recording;
-use failure::{Error, bail, format_err};
+use base::bail_t;
+use failure::{bail, format_err, Error};
 use fnv::FnvHashMap;
 use log::debug;
-use rusqlite::{Connection, Transaction, params};
-use std::collections::{BTreeMap, BTreeSet};
+use rusqlite::{params, Connection, Transaction};
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use uuid::Uuid;
 
@@ -132,7 +132,9 @@ impl Point {
 /// `from` must be an iterator of `(signal, state)` with signal numbers in monotonically increasing
 /// order.
 fn append_serialized<'a, I>(from: I, to: &mut Vec<u8>)
-where I: IntoIterator<Item = (&'a u32, &'a u16)> {
+where
+    I: IntoIterator<Item = (&'a u32, &'a u16)>,
+{
     let mut next_allowed = 0;
     for (&signal, &state) in from.into_iter() {
         assert!(signal >= next_allowed);
@@ -170,15 +172,18 @@ impl<'a> PointDataIterator<'a> {
         if self.cur_pos == self.data.len() {
             return Ok(None);
         }
-        let (signal_delta, p) = coding::decode_varint32(self.data, self.cur_pos)
-            .map_err(|()| format_err!("varint32 decode failure; data={:?} pos={}",
-                                      self.data, self.cur_pos))?;
+        let (signal_delta, p) = coding::decode_varint32(self.data, self.cur_pos).map_err(|()| {
+            format_err!(
+                "varint32 decode failure; data={:?} pos={}",
+                self.data,
+                self.cur_pos
+            )
+        })?;
         let (state, p) = coding::decode_varint32(self.data, p)
-            .map_err(|()| format_err!("varint32 decode failure; data={:?} pos={}",
-                                      self.data, p))?;
-        let signal = self.cur_signal.checked_add(signal_delta)
-                         .ok_or_else(|| format_err!("signal overflow: {} + {}",
-                                                    self.cur_signal, signal_delta))?;
+            .map_err(|()| format_err!("varint32 decode failure; data={:?} pos={}", self.data, p))?;
+        let signal = self.cur_signal.checked_add(signal_delta).ok_or_else(|| {
+            format_err!("signal overflow: {} + {}", self.cur_signal, signal_delta)
+        })?;
         if state > u16::max_value() as u32 {
             bail!("state overflow: {}", state);
         }
@@ -221,7 +226,9 @@ pub struct ListStateChangesRow {
 impl State {
     pub fn init(conn: &Connection) -> Result<Self, Error> {
         let max_signal_changes: Option<i64> =
-            conn.query_row("select max_signal_changes from meta", params![], |row| row.get(0))?;
+            conn.query_row("select max_signal_changes from meta", params![], |row| {
+                row.get(0)
+            })?;
         let mut signals_by_id = State::init_signals(conn)?;
         State::fill_signal_cameras(conn, &mut signals_by_id)?;
         Ok(State {
@@ -234,8 +241,10 @@ impl State {
     }
 
     pub fn list_changes_by_time(
-        &self, desired_time: Range<recording::Time>, f: &mut dyn FnMut(&ListStateChangesRow)) {
-
+        &self,
+        desired_time: Range<recording::Time>,
+        f: &mut dyn FnMut(&ListStateChangesRow),
+    ) {
         // First find the state immediately before. If it exists, include it.
         if let Some((&when, p)) = self.points_by_time.range(..desired_time.start).next_back() {
             for (&signal, &state) in &p.after() {
@@ -261,8 +270,11 @@ impl State {
     }
 
     pub fn update_signals(
-        &mut self, when: Range<recording::Time>, signals: &[u32], states: &[u16])
-        -> Result<(), base::Error> {
+        &mut self,
+        when: Range<recording::Time>,
+        signals: &[u32],
+        states: &[u16],
+    ) -> Result<(), base::Error> {
         // Do input validation before any mutation.
         self.update_signals_validate(signals, states)?;
 
@@ -294,11 +306,19 @@ impl State {
             None => return,
             Some(p) => p,
         };
-        debug!("Performing signal GC: have {} points, want only {}, so removing {}",
-               self.points_by_time.len(), max, to_remove);
+        debug!(
+            "Performing signal GC: have {} points, want only {}, so removing {}",
+            self.points_by_time.len(),
+            max,
+            to_remove
+        );
 
-        let remove: smallvec::SmallVec<[recording::Time; 4]> =
-            self.points_by_time.keys().take(to_remove).map(|p| *p).collect();
+        let remove: smallvec::SmallVec<[recording::Time; 4]> = self
+            .points_by_time
+            .keys()
+            .take(to_remove)
+            .map(|p| *p)
+            .collect();
 
         for p in &remove {
             self.points_by_time.remove(p);
@@ -320,14 +340,20 @@ impl State {
                 None => bail_t!(InvalidArgument, "unknown signal {}", signal),
                 Some(ref s) => {
                     let empty = Vec::new();
-                    let states = self.types_by_uuid.get(&s.type_)
-                                                   .map(|t| &t.states)
-                                                   .unwrap_or(&empty);
+                    let states = self
+                        .types_by_uuid
+                        .get(&s.type_)
+                        .map(|t| &t.states)
+                        .unwrap_or(&empty);
                     if state != 0 && states.binary_search_by_key(&state, |s| s.value).is_err() {
-                        bail_t!(FailedPrecondition, "signal {} specifies unknown state {}",
-                                signal, state);
+                        bail_t!(
+                            FailedPrecondition,
+                            "signal {} specifies unknown state {}",
+                            signal,
+                            state
+                        );
                     }
-                },
+                }
             }
             next_allowed = signal + 1;
         }
@@ -354,7 +380,10 @@ impl State {
                 // Any existing changes should still be applied. They win over reverting to prev.
                 let mut it = p.changes();
                 while let Some((signal, state)) = it.next().expect("in-mem changes is valid") {
-                    changes.entry(signal).and_modify(|e| *e = state).or_insert(state);
+                    changes
+                        .entry(signal)
+                        .and_modify(|e| *e = state)
+                        .or_insert(state);
                 }
                 self.dirty_by_time.insert(t);
                 p.swap(&mut Point::new(&prev, &serialize(&changes)));
@@ -374,20 +403,25 @@ impl State {
             return;
         }
         self.dirty_by_time.insert(end);
-        self.points_by_time.insert(end, Point::new(&prev, &serialize(&changes)));
+        self.points_by_time
+            .insert(end, Point::new(&prev, &serialize(&changes)));
     }
 
     /// Helper for `update_signals_end`. Adjusts `prev` (the state prior to the end point) to
     /// reflect the desired update (in `signals` and `states`). Adjusts `changes` (changes to
     /// execute at the end point) to undo the change.
-    fn update_signals_end_maps(signals: &[u32], states: &[u16], prev: &mut BTreeMap<u32, u16>,
-                       changes: &mut BTreeMap<u32, u16>) {
+    fn update_signals_end_maps(
+        signals: &[u32],
+        states: &[u16],
+        prev: &mut BTreeMap<u32, u16>,
+        changes: &mut BTreeMap<u32, u16>,
+    ) {
         for (&signal, &state) in signals.iter().zip(states) {
             match prev.entry(signal) {
                 Entry::Vacant(e) => {
                     changes.insert(signal, 0);
                     e.insert(state);
-                },
+                }
                 Entry::Occupied(mut e) => {
                     if state == 0 {
                         changes.insert(signal, *e.get());
@@ -396,7 +430,7 @@ impl State {
                         changes.insert(signal, *e.get());
                         *e.get_mut() = state;
                     }
-                },
+                }
             }
         }
     }
@@ -421,13 +455,13 @@ impl State {
                                     *e.get_mut() = state;
                                 }
                             }
-                        },
+                        }
                         Entry::Vacant(e) => {
                             if signal != 0 {
                                 dirty = true;
                                 e.insert(state);
                             }
-                        },
+                        }
                     }
                 }
                 if dirty {
@@ -456,14 +490,19 @@ impl State {
         }
 
         self.dirty_by_time.insert(start);
-        self.points_by_time.insert(start, Point::new(&prev, &serialize(&changes)));
+        self.points_by_time
+            .insert(start, Point::new(&prev, &serialize(&changes)));
     }
 
     /// Helper for `update_signals` to apply all points in `(when.start, when.end)`.
-    fn update_signals_middle(&mut self, when: Range<recording::Time>, signals: &[u32],
-                             states: &[u16]) {
+    fn update_signals_middle(
+        &mut self,
+        when: Range<recording::Time>,
+        signals: &[u32],
+        states: &[u16],
+    ) {
         let mut to_delete = Vec::new();
-        let after_start = recording::Time(when.start.0+1);
+        let after_start = recording::Time(when.start.0 + 1);
         for (&t, ref mut p) in self.points_by_time.range_mut(after_start..when.end) {
             let mut prev = p.prev().to_map().expect("in-mem prev is valid");
 
@@ -476,7 +515,7 @@ impl State {
                         } else if *e.get() != state {
                             *e.get_mut() = state;
                         }
-                    },
+                    }
                     Entry::Vacant(e) => {
                         if state != 0 {
                             e.insert(state);
@@ -486,14 +525,16 @@ impl State {
             }
 
             // Trim changes to omit any change to signals.
-            let mut changes = Vec::with_capacity(3*signals.len());
+            let mut changes = Vec::with_capacity(3 * signals.len());
             let mut it = p.changes();
             let mut next_allowed = 0;
             let mut dirty = false;
             while let Some((signal, state)) = it.next().expect("in-memory changes is valid") {
-                if signals.binary_search(&signal).is_ok() { // discard.
+                if signals.binary_search(&signal).is_ok() {
+                    // discard.
                     dirty = true;
-                } else { // keep.
+                } else {
+                    // keep.
                     assert!(signal >= next_allowed);
                     coding::append_varint32(signal - next_allowed, &mut changes);
                     coding::append_varint32(state as u32, &mut changes);
@@ -521,24 +562,25 @@ impl State {
     /// The caller is expected to call `post_flush` afterward if the transaction is
     /// successfully committed. No mutations should happen between these calls.
     pub fn flush(&mut self, tx: &Transaction) -> Result<(), Error> {
-        let mut i_stmt = tx.prepare(r#"
+        let mut i_stmt = tx.prepare(
+            r#"
             insert or replace into signal_change (time_90k, changes) values (?, ?)
-        "#)?;
-        let mut d_stmt = tx.prepare(r#"
+            "#,
+        )?;
+        let mut d_stmt = tx.prepare(
+            r#"
             delete from signal_change where time_90k = ?
-        "#)?;
+            "#,
+        )?;
         for &t in &self.dirty_by_time {
             match self.points_by_time.entry(t) {
                 Entry::Occupied(ref e) => {
                     let p = e.get();
-                    i_stmt.execute(params![
-                        t.0,
-                        &p.data[p.changes_off..],
-                    ])?;
-                },
+                    i_stmt.execute(params![t.0, &p.data[p.changes_off..],])?;
+                }
                 Entry::Vacant(_) => {
                     d_stmt.execute(params![t.0])?;
-                },
+                }
             }
         }
         Ok(())
@@ -553,7 +595,8 @@ impl State {
 
     fn init_signals(conn: &Connection) -> Result<BTreeMap<u32, Signal>, Error> {
         let mut signals = BTreeMap::new();
-        let mut stmt = conn.prepare(r#"
+        let mut stmt = conn.prepare(
+            r#"
             select
                 id,
                 source_uuid,
@@ -561,35 +604,41 @@ impl State {
                 short_name
             from
                 signal
-        "#)?;
+            "#,
+        )?;
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let source: FromSqlUuid = row.get(1)?;
             let type_: FromSqlUuid = row.get(2)?;
-            signals.insert(id, Signal {
+            signals.insert(
                 id,
-                source: source.0,
-                type_: type_.0,
-                short_name: row.get(3)?,
-                cameras: Vec::new(),
-            });
+                Signal {
+                    id,
+                    source: source.0,
+                    type_: type_.0,
+                    short_name: row.get(3)?,
+                    cameras: Vec::new(),
+                },
+            );
         }
         Ok(signals)
     }
 
     fn init_points(conn: &Connection) -> Result<BTreeMap<recording::Time, Point>, Error> {
-        let mut stmt = conn.prepare(r#"
+        let mut stmt = conn.prepare(
+            r#"
             select
                 time_90k,
                 changes
             from
                 signal_change
             order by time_90k
-        "#)?;
+            "#,
+        )?;
         let mut rows = stmt.query(params![])?;
         let mut points = BTreeMap::new();
-        let mut cur = BTreeMap::new();  // latest signal -> state, where state != 0
+        let mut cur = BTreeMap::new(); // latest signal -> state, where state != 0
         while let Some(row) = rows.next()? {
             let time_90k = recording::Time(row.get(0)?);
             let changes = row.get_raw_checked(1)?.as_blob()?;
@@ -607,9 +656,12 @@ impl State {
     }
 
     /// Fills the `cameras` field of the `Signal` structs within the supplied `signals`.
-    fn fill_signal_cameras(conn: &Connection, signals: &mut BTreeMap<u32, Signal>)
-                           -> Result<(), Error> {
-        let mut stmt = conn.prepare(r#"
+    fn fill_signal_cameras(
+        conn: &Connection,
+        signals: &mut BTreeMap<u32, Signal>,
+    ) -> Result<(), Error> {
+        let mut stmt = conn.prepare(
+            r#"
             select
                 signal_id,
                 camera_id,
@@ -617,13 +669,14 @@ impl State {
             from
                 signal_camera
             order by signal_id, camera_id
-        "#)?;
+            "#,
+        )?;
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let signal_id = row.get(0)?;
-            let s = signals.get_mut(&signal_id)
-                           .ok_or_else(|| format_err!("signal_camera row for unknown signal id {}",
-                                                      signal_id))?;
+            let s = signals.get_mut(&signal_id).ok_or_else(|| {
+                format_err!("signal_camera row for unknown signal id {}", signal_id)
+            })?;
             let type_ = row.get(2)?;
             s.cameras.push(SignalCamera {
                 camera_id: row.get(1)?,
@@ -639,7 +692,8 @@ impl State {
 
     fn init_types(conn: &Connection) -> Result<FnvHashMap<Uuid, Type>, Error> {
         let mut types = FnvHashMap::default();
-        let mut stmt = conn.prepare(r#"
+        let mut stmt = conn.prepare(
+            r#"
             select
                 type_uuid,
                 value,
@@ -649,22 +703,31 @@ impl State {
             from
                 signal_type_enum
             order by type_uuid, value
-        "#)?;
+            "#,
+        )?;
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let type_: FromSqlUuid = row.get(0)?;
-            types.entry(type_.0).or_insert_with(Type::default).states.push(TypeState {
-                value: row.get(1)?,
-                name: row.get(2)?,
-                motion: row.get(3)?,
-                color: row.get(4)?,
-            });
+            types
+                .entry(type_.0)
+                .or_insert_with(Type::default)
+                .states
+                .push(TypeState {
+                    value: row.get(1)?,
+                    name: row.get(2)?,
+                    motion: row.get(3)?,
+                    color: row.get(4)?,
+                });
         }
         Ok(types)
     }
 
-    pub fn signals_by_id(&self) -> &BTreeMap<u32, Signal> { &self.signals_by_id }
-    pub fn types_by_uuid(&self) -> &FnvHashMap<Uuid, Type> { & self.types_by_uuid }
+    pub fn signals_by_id(&self) -> &BTreeMap<u32, Signal> {
+        &self.signals_by_id
+    }
+    pub fn types_by_uuid(&self) -> &FnvHashMap<Uuid, Type> {
+        &self.types_by_uuid
+    }
 }
 
 /// Representation of a `signal` row.
@@ -698,9 +761,9 @@ pub struct Type {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{db, testutil};
     use rusqlite::Connection;
-    use super::*;
 
     #[test]
     fn test_point_data_it() {
@@ -719,8 +782,10 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
         let s = State::init(&conn).unwrap();
-        s.list_changes_by_time(recording::Time::min_value() .. recording::Time::max_value(),
-                               &mut |_r| panic!("no changes expected"));
+        s.list_changes_by_time(
+            recording::Time::min_value()..recording::Time::max_value(),
+            &mut |_r| panic!("no changes expected"),
+        );
     }
 
     #[test]
@@ -728,7 +793,8 @@ mod tests {
         testutil::init();
         let mut conn = Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
-        conn.execute_batch(r#"
+        conn.execute_batch(
+            r#"
             update meta set max_signal_changes = 2;
 
             insert into signal (id, source_uuid, type_uuid, short_name)
@@ -740,12 +806,16 @@ mod tests {
             insert into signal_type_enum (type_uuid, value, name, motion, color)
                values (x'EE66270FD9C648198B339720D4CBCA6B', 1, 'still', 0, 'black'),
                       (x'EE66270FD9C648198B339720D4CBCA6B', 2, 'moving', 1, 'red');
-        "#).unwrap();
+            "#,
+        )
+        .unwrap();
         let mut s = State::init(&conn).unwrap();
-        s.list_changes_by_time(recording::Time::min_value() .. recording::Time::max_value(),
-                               &mut |_r| panic!("no changes expected"));
+        s.list_changes_by_time(
+            recording::Time::min_value()..recording::Time::max_value(),
+            &mut |_r| panic!("no changes expected"),
+        );
         const START: recording::Time = recording::Time(140067462600000); // 2019-04-26T11:59:00
-        const NOW: recording::Time = recording::Time(140067468000000);   // 2019-04-26T12:00:00
+        const NOW: recording::Time = recording::Time(140067468000000); // 2019-04-26T12:00:00
         s.update_signals(START..NOW, &[1, 2], &[2, 1]).unwrap();
         let mut rows = Vec::new();
 
@@ -770,10 +840,12 @@ mod tests {
                 signal: 2,
                 state: 0,
             },
-            ];
+        ];
 
-        s.list_changes_by_time(recording::Time::min_value() .. recording::Time::max_value(),
-                               &mut |r| rows.push(*r));
+        s.list_changes_by_time(
+            recording::Time::min_value()..recording::Time::max_value(),
+            &mut |r| rows.push(*r),
+        );
         assert_eq!(&rows[..], EXPECTED);
 
         {
@@ -785,8 +857,10 @@ mod tests {
         drop(s);
         let mut s = State::init(&conn).unwrap();
         rows.clear();
-        s.list_changes_by_time(recording::Time::min_value() .. recording::Time::max_value(),
-                               &mut |r| rows.push(*r));
+        s.list_changes_by_time(
+            recording::Time::min_value()..recording::Time::max_value(),
+            &mut |r| rows.push(*r),
+        );
         assert_eq!(&rows[..], EXPECTED);
 
         // Go through it again. This time, hit the max number of signals, forcing START to be
@@ -815,9 +889,11 @@ mod tests {
                 signal: 2,
                 state: 0,
             },
-            ];
-        s.list_changes_by_time(recording::Time::min_value() .. recording::Time::max_value(),
-                               &mut |r| rows.push(*r));
+        ];
+        s.list_changes_by_time(
+            recording::Time::min_value()..recording::Time::max_value(),
+            &mut |r| rows.push(*r),
+        );
         assert_eq!(&rows[..], EXPECTED2);
 
         {
@@ -828,8 +904,10 @@ mod tests {
         drop(s);
         let s = State::init(&conn).unwrap();
         rows.clear();
-        s.list_changes_by_time(recording::Time::min_value() .. recording::Time::max_value(),
-                               &mut |r| rows.push(*r));
+        s.list_changes_by_time(
+            recording::Time::min_value()..recording::Time::max_value(),
+            &mut |r| rows.push(*r),
+        );
         assert_eq!(&rows[..], EXPECTED2);
     }
 }

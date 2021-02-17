@@ -28,13 +28,17 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::os::unix::io::{FromRawFd, RawFd};
-use nix::NixPath;
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
+use nix::NixPath;
+use std::os::unix::io::{FromRawFd, RawFd};
 
-pub fn openat<P: ?Sized + NixPath>(dirfd: RawFd, path: &P, oflag: OFlag, mode: Mode)
-                                   -> Result<std::fs::File, nix::Error> {
+pub fn openat<P: ?Sized + NixPath>(
+    dirfd: RawFd,
+    path: &P,
+    oflag: OFlag,
+    mode: Mode,
+) -> Result<std::fs::File, nix::Error> {
     let fd = nix::fcntl::openat(dirfd, path, oflag, mode)?;
     Ok(unsafe { std::fs::File::from_raw_fd(fd) })
 }

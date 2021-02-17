@@ -28,34 +28,42 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use base::clock;
 use crate::stream;
 use crate::streamer;
 use crate::web;
+use base::clock;
 use db::{dir, writer};
-use failure::{Error, bail};
+use failure::{bail, Error};
 use fnv::FnvHashMap;
 use futures::future::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use log::{info, warn};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use structopt::StructOpt;
 use tokio;
-use tokio::signal::unix::{SignalKind, signal};
+use tokio::signal::unix::{signal, SignalKind};
 
 #[derive(StructOpt)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
-                parse(from_os_str))]
+    #[structopt(
+        long,
+        default_value = "/var/lib/moonfire-nvr/db",
+        value_name = "path",
+        parse(from_os_str)
+    )]
     db_dir: PathBuf,
 
     /// Directory holding user interface files (.html, .js, etc).
-    #[structopt(long, default_value = "/usr/local/lib/moonfire-nvr/ui", value_name="path",
-                parse(from_os_str))]
+    #[structopt(
+        long,
+        default_value = "/usr/local/lib/moonfire-nvr/ui",
+        value_name = "path",
+        parse(from_os_str)
+    )]
     ui_dir: std::path::PathBuf,
 
     /// Bind address for unencrypted HTTP server.
@@ -98,7 +106,7 @@ const LOCALTIME_PATH: &'static str = "/etc/localtime";
 const TIMEZONE_PATH: &'static str = "/etc/timezone";
 const ZONEINFO_PATHS: [&'static str; 2] = [
     "/usr/share/zoneinfo/",       // Linux, macOS < High Sierra
-    "/var/db/timezone/zoneinfo/"  // macOS High Sierra
+    "/var/db/timezone/zoneinfo/", // macOS High Sierra
 ];
 
 fn trim_zoneinfo(p: &str) -> &str {
@@ -145,25 +153,32 @@ fn resolve_zone() -> Result<String, Error> {
             };
             let p = trim_zoneinfo(localtime_dest);
             if p.starts_with('/') {
-                bail!("Unable to resolve {} symlink destination {} to a timezone.",
-                      LOCALTIME_PATH, &localtime_dest);
+                bail!(
+                    "Unable to resolve {} symlink destination {} to a timezone.",
+                    LOCALTIME_PATH,
+                    &localtime_dest
+                );
             }
             return Ok(p.to_owned());
-        },
+        }
         Err(e) => {
             use ::std::io::ErrorKind;
             if e.kind() != ErrorKind::NotFound && e.kind() != ErrorKind::InvalidInput {
                 bail!("Unable to read {} symlink: {}", LOCALTIME_PATH, e);
             }
-        },
+        }
     };
 
     // If `TIMEZONE_PATH` is a file, use its contents as the zone name.
     match ::std::fs::read_to_string(TIMEZONE_PATH) {
         Ok(z) => return Ok(z),
         Err(e) => {
-            bail!("Unable to resolve timezone from TZ env, {}, or {}. Last error: {}",
-                  LOCALTIME_PATH, TIMEZONE_PATH, e);
+            bail!(
+                "Unable to resolve timezone from TZ env, {}, or {}. Last error: {}",
+                LOCALTIME_PATH,
+                TIMEZONE_PATH,
+                e
+            );
         }
     }
 }
@@ -179,7 +194,12 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
         &args.db_dir,
-        if args.read_only { super::OpenMode::ReadOnly } else { super::OpenMode::ReadWrite })?;
+        if args.read_only {
+            super::OpenMode::ReadOnly
+        } else {
+            super::OpenMode::ReadWrite
+        },
+    )?;
     let db = Arc::new(db::Database::new(clocks.clone(), conn, !args.read_only).unwrap());
     info!("Database is loaded.");
 
@@ -190,8 +210,11 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
 
     {
         let mut l = db.lock();
-        let dirs_to_open: Vec<_> =
-            l.streams_by_id().values().filter_map(|s| s.sample_file_dir_id).collect();
+        let dirs_to_open: Vec<_> = l
+            .streams_by_id()
+            .values()
+            .filter_map(|s| s.sample_file_dir_id)
+            .collect();
         l.open_sample_file_dirs(&dirs_to_open)?;
     }
     info!("Directories are opened.");
@@ -212,7 +235,9 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
     let syncers = if !args.read_only {
         let l = db.lock();
         let mut dirs = FnvHashMap::with_capacity_and_hasher(
-            l.sample_file_dirs_by_id().len(), Default::default());
+            l.sample_file_dirs_by_id().len(),
+            Default::default(),
+        );
         let streams = l.streams_by_id().len();
         let env = streamer::Environment {
             db: &db,
@@ -236,11 +261,7 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
         let mut syncers = FnvHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
         for (id, dir) in dirs.drain() {
             let (channel, join) = writer::start_syncer(db.clone(), id)?;
-            syncers.insert(id, Syncer {
-                dir,
-                channel,
-                join,
-            });
+            syncers.insert(id, Syncer { dir, channel, join });
         }
 
         // Then start up streams.
@@ -253,10 +274,14 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
             let sample_file_dir_id = match stream.sample_file_dir_id {
                 Some(s) => s,
                 None => {
-                    warn!("Can't record stream {} ({}/{}) because it has no sample file dir",
-                          id, camera.short_name, stream.type_.as_str());
+                    warn!(
+                        "Can't record stream {} ({}/{}) because it has no sample file dir",
+                        id,
+                        camera.short_name,
+                        stream.type_.as_str()
+                    );
                     continue;
-                },
+                }
             };
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let syncer = syncers.get(&sample_file_dir_id).unwrap();
@@ -264,20 +289,33 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
                 db::StreamType::SUB => object_detector.as_ref().map(|a| Arc::clone(a)),
                 _ => None,
             };
-            let mut streamer = streamer::Streamer::new(&env, syncer.dir.clone(),
-                                                       syncer.channel.clone(), *id, camera, stream,
-                                                       rotate_offset_sec,
-                                                       streamer::ROTATE_INTERVAL_SEC,
-                                                       object_detector)?;
+            let mut streamer = streamer::Streamer::new(
+                &env,
+                syncer.dir.clone(),
+                syncer.channel.clone(),
+                *id,
+                camera,
+                stream,
+                rotate_offset_sec,
+                streamer::ROTATE_INTERVAL_SEC,
+                object_detector,
+            )?;
             info!("Starting streamer for {}", streamer.short_name());
             let name = format!("s-{}", streamer.short_name());
-            streamers.push(thread::Builder::new().name(name).spawn(move|| {
-                streamer.run();
-            }).expect("can't create thread"));
+            streamers.push(
+                thread::Builder::new()
+                    .name(name)
+                    .spawn(move || {
+                        streamer.run();
+                    })
+                    .expect("can't create thread"),
+            );
         }
         drop(l);
         Some(syncers)
-    } else { None };
+    } else {
+        None
+    };
 
     // Start the web interface.
     let make_svc = make_service_fn(move |_conn| {
@@ -286,13 +324,13 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
             move |req| Arc::clone(&svc).serve(req)
         }))
     });
-    let server = ::hyper::Server::bind(&args.http_addr).tcp_nodelay(true).serve(make_svc);
+    let server = ::hyper::Server::bind(&args.http_addr)
+        .tcp_nodelay(true)
+        .serve(make_svc);
 
     let mut int = signal(SignalKind::interrupt())?;
     let mut term = signal(SignalKind::terminate())?;
-    let shutdown = futures::future::select(
-        Box::pin(int.recv()),
-        Box::pin(term.recv()));
+    let shutdown = futures::future::select(Box::pin(int.recv()), Box::pin(term.recv()));
 
     let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
     let server = server.with_graceful_shutdown(shutdown_rx.map(|_| ()));

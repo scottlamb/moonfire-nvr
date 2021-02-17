@@ -29,7 +29,6 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /// Upgrades a version 0 schema to a version 1 schema.
-
 use crate::db;
 use crate::recording;
 use failure::Error;
@@ -39,7 +38,8 @@ use std::collections::HashMap;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     // These create statements match the schema.sql when version 1 was the latest.
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
         alter table camera rename to old_camera;
         create table camera (
           id integer primary key,
@@ -103,13 +103,16 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           1 as next_recording_id
         from
           old_camera;
-    "#)?;
+    "#,
+    )?;
     let camera_state = fill_recording(tx)?;
     update_camera(tx, camera_state)?;
-    tx.execute_batch(r#"
+    tx.execute_batch(
+        r#"
       drop table old_recording;
       drop table old_camera;
-    "#)?;
+    "#,
+    )?;
     Ok(())
 }
 
@@ -130,7 +133,8 @@ fn has_trailing_zero(video_index: &[u8]) -> Result<bool, Error> {
 /// Fills the `recording` and `recording_playback` tables from `old_recording`, returning
 /// the `camera_state` map for use by a following call to `fill_cameras`.
 fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState>, Error> {
-    let mut select = tx.prepare(r#"
+    let mut select = tx.prepare(
+        r#"
       select
         camera_id,
         sample_file_bytes,
@@ -146,27 +150,32 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
         id
       from
         old_recording
-    "#)?;
-    let mut insert1 = tx.prepare(r#"
+    "#,
+    )?;
+    let mut insert1 = tx.prepare(
+        r#"
       insert into recording values (:composite_id, :camera_id, :run_offset, :flags,
                                     :sample_file_bytes, :start_time_90k, :duration_90k,
                                     :local_time_delta_90k, :video_samples, :video_sync_samples,
                                     :video_sample_entry_id)
-    "#)?;
-    let mut insert2 = tx.prepare(r#"
+    "#,
+    )?;
+    let mut insert2 = tx.prepare(
+        r#"
       insert into recording_playback values (:composite_id, :sample_file_uuid, :sample_file_sha1,
                                              :video_index)
-    "#)?;
+    "#,
+    )?;
     let mut rows = select.query(params![])?;
     let mut camera_state: HashMap<i32, CameraState> = HashMap::new();
     while let Some(row) = rows.next()? {
         let camera_id: i32 = row.get(0)?;
-        let camera_state = camera_state.entry(camera_id).or_insert_with(|| {
-            CameraState{
+        let camera_state = camera_state
+            .entry(camera_id)
+            .or_insert_with(|| CameraState {
                 current_run: None,
                 next_recording_id: 1,
-            }
-        });
+            });
         let composite_id = ((camera_id as i64) << 32) | (camera_state.next_recording_id as i64);
         camera_state.next_recording_id += 1;
         let sample_file_bytes: i32 = row.get(1)?;
@@ -181,9 +190,15 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
         let video_index: Vec<u8> = row.get(10)?;
         let old_id: i32 = row.get(11)?;
         let trailing_zero = has_trailing_zero(&video_index).unwrap_or_else(|e| {
-            warn!("recording {}/{} (sample file {}, formerly recording {}) has corrupt \
-                  video_index: {}",
-                  camera_id, composite_id & 0xFFFF, sample_file_uuid.0, old_id, e);
+            warn!(
+                "recording {}/{} (sample file {}, formerly recording {}) has corrupt \
+                video_index: {}",
+                camera_id,
+                composite_id & 0xFFFF,
+                sample_file_uuid.0,
+                old_id,
+                e
+            );
             false
         });
         let run_id = match camera_state.current_run {
@@ -194,7 +209,14 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
             (":composite_id", &composite_id),
             (":camera_id", &camera_id),
             (":run_offset", &(composite_id - run_id)),
-            (":flags", &(if trailing_zero { db::RecordingFlags::TrailingZero as i32 } else { 0 })),
+            (
+                ":flags",
+                &(if trailing_zero {
+                    db::RecordingFlags::TrailingZero as i32
+                } else {
+                    0
+                }),
+            ),
             (":sample_file_bytes", &sample_file_bytes),
             (":start_time_90k", &start_time_90k),
             (":duration_90k", &duration_90k),
@@ -218,11 +240,15 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
     Ok(camera_state)
 }
 
-fn update_camera(tx: &rusqlite::Transaction, camera_state: HashMap<i32, CameraState>)
-                -> Result<(), Error> {
-    let mut stmt = tx.prepare(r#"
+fn update_camera(
+    tx: &rusqlite::Transaction,
+    camera_state: HashMap<i32, CameraState>,
+) -> Result<(), Error> {
+    let mut stmt = tx.prepare(
+        r#"
       update camera set next_recording_id = :next_recording_id where id = :id
-    "#)?;
+    "#,
+    )?;
     for (ref id, ref state) in &camera_state {
         stmt.execute_named(&[
             (":id", &id),

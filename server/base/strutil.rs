@@ -28,12 +28,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use nom::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while1};
 use nom::character::complete::space0;
 use nom::combinator::{map, map_res, opt};
 use nom::sequence::{delimited, tuple};
+use nom::IResult;
 use std::fmt::Write as _;
 
 static MULTIPLIERS: [(char, u64); 4] = [
@@ -48,7 +48,7 @@ static MULTIPLIERS: [(char, u64); 4] = [
 pub fn encode_size(mut raw: i64) -> String {
     let mut encoded = String::new();
     for &(c, n) in &MULTIPLIERS {
-        if raw >= 1i64<<n {
+        if raw >= 1i64 << n {
             write!(&mut encoded, "{}{} ", raw >> n, c).unwrap();
             raw &= (1i64 << n) - 1;
         }
@@ -56,7 +56,7 @@ pub fn encode_size(mut raw: i64) -> String {
     if raw > 0 || encoded.len() == 0 {
         write!(&mut encoded, "{}", raw).unwrap();
     } else {
-        encoded.pop();  // remove trailing space.
+        encoded.pop(); // remove trailing space.
     }
     encoded
 }
@@ -64,24 +64,24 @@ pub fn encode_size(mut raw: i64) -> String {
 fn decode_sizepart(input: &str) -> IResult<&str, i64> {
     map(
         tuple((
-            map_res(take_while1(|c: char| c.is_ascii_digit()),
-                    |input: &str| i64::from_str_radix(input, 10)),
+            map_res(take_while1(|c: char| c.is_ascii_digit()), |input: &str| {
+                i64::from_str_radix(input, 10)
+            }),
             opt(alt((
-                nom::combinator::value(1<<40, tag("T")),
-                nom::combinator::value(1<<30, tag("G")),
-                nom::combinator::value(1<<20, tag("M")),
-                nom::combinator::value(1<<10, tag("K"))
-            )))
+                nom::combinator::value(1 << 40, tag("T")),
+                nom::combinator::value(1 << 30, tag("G")),
+                nom::combinator::value(1 << 20, tag("M")),
+                nom::combinator::value(1 << 10, tag("K")),
+            ))),
         )),
-        |(n, opt_unit)| n * opt_unit.unwrap_or(1)
+        |(n, opt_unit)| n * opt_unit.unwrap_or(1),
     )(input)
 }
 
 fn decode_size_internal(input: &str) -> IResult<&str, i64> {
-    nom::multi::fold_many1(
-        delimited(space0, decode_sizepart, space0),
-        0,
-        |sum, i| sum + i)(input)
+    nom::multi::fold_many1(delimited(space0, decode_sizepart, space0), 0, |sum, i| {
+        sum + i
+    })(input)
 }
 
 /// Decodes a human-readable size as output by encode_size.
@@ -95,12 +95,15 @@ pub fn decode_size(encoded: &str) -> Result<i64, ()> {
 
 /// Returns a hex-encoded version of the input.
 pub fn hex(raw: &[u8]) -> String {
-    const HEX_CHARS: [u8; 16] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7',
-                                 b'8', b'9', b'a', b'b', b'c', b'd', b'e', b'f'];
+    #[rustfmt::skip]
+    const HEX_CHARS: [u8; 16] = [
+        b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7',
+        b'8', b'9', b'a', b'b', b'c', b'd', b'e', b'f',
+    ];
     let mut hex = Vec::with_capacity(2 * raw.len());
     for b in raw {
         hex.push(HEX_CHARS[((b & 0xf0) >> 4) as usize]);
-        hex.push(HEX_CHARS[( b & 0x0f      ) as usize]);
+        hex.push(HEX_CHARS[(b & 0x0f) as usize]);
     }
     unsafe { String::from_utf8_unchecked(hex) }
 }
@@ -108,8 +111,8 @@ pub fn hex(raw: &[u8]) -> String {
 /// Returns [0, 16) or error.
 fn dehex_byte(hex_byte: u8) -> Result<u8, ()> {
     match hex_byte {
-        b'0' ..= b'9' => Ok(hex_byte - b'0'),
-        b'a' ..= b'f' => Ok(hex_byte - b'a' + 10),
+        b'0'..=b'9' => Ok(hex_byte - b'0'),
+        b'a'..=b'f' => Ok(hex_byte - b'a' + 10),
         _ => Err(()),
     }
 }
@@ -122,7 +125,7 @@ pub fn dehex(hexed: &[u8]) -> Result<[u8; 20], ()> {
     }
     let mut out = [0; 20];
     for i in 0..20 {
-        out[i] = (dehex_byte(hexed[i<<1])? << 4) + dehex_byte(hexed[(i<<1) + 1])?;
+        out[i] = (dehex_byte(hexed[i << 1])? << 4) + dehex_byte(hexed[(i << 1) + 1])?;
     }
     Ok(out)
 }

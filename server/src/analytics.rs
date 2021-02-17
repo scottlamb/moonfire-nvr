@@ -50,7 +50,7 @@
 //!     interval to cut down on expense.
 
 use cstr::cstr;
-use failure::{Error, format_err};
+use failure::{format_err, Error};
 use ffmpeg;
 use log::info;
 use std::sync::Arc;
@@ -163,17 +163,28 @@ impl ObjectDetector {
         let model = moonfire_tflite::Model::from_static(MODEL)
             .map_err(|()| format_err!("TensorFlow Lite model initialization failed"))?;
         let devices = moonfire_tflite::edgetpu::Devices::list();
-        let device = devices.first().ok_or_else(|| format_err!("No Edge TPU device available"))?;
-        info!("Using device {:?}/{:?} for object detection", device.type_(), device.path());
+        let device = devices
+            .first()
+            .ok_or_else(|| format_err!("No Edge TPU device available"))?;
+        info!(
+            "Using device {:?}/{:?} for object detection",
+            device.type_(),
+            device.path()
+        );
         let mut builder = moonfire_tflite::Interpreter::builder();
-        builder.add_owned_delegate(device.create_delegate()
-            .map_err(|()| format_err!("Unable to create delegate for {:?}/{:?}",
-                                      device.type_(), device.path()))?);
-        let interpreter = builder.build(&model)
+        builder.add_owned_delegate(device.create_delegate().map_err(|()| {
+            format_err!(
+                "Unable to create delegate for {:?}/{:?}",
+                device.type_(),
+                device.path()
+            )
+        })?);
+        let interpreter = builder
+            .build(&model)
             .map_err(|()| format_err!("TensorFlow Lite initialization failed"))?;
         Ok(Arc::new(Self {
             interpreter: parking_lot::Mutex::new(interpreter),
-            width: 300,  // TODO
+            width: 300, // TODO
             height: 300,
         }))
     }
@@ -194,17 +205,19 @@ fn copy(from: &ffmpeg::avutil::VideoFrame, to: &mut moonfire_tflite::Tensor) {
     let mut from_i = 0;
     let mut to_i = 0;
     for _y in 0..h {
-        to[to_i..to_i+3*w].copy_from_slice(&from.data[from_i..from_i+3*w]);
+        to[to_i..to_i + 3 * w].copy_from_slice(&from.data[from_i..from_i + 3 * w]);
         from_i += from.linesize;
-        to_i += 3*w;
+        to_i += 3 * w;
     }
 }
 
 const SCORE_THRESHOLD: f32 = 0.5;
 
 impl ObjectDetectorStream {
-    pub fn new(par: ffmpeg::avcodec::InputCodecParameters<'_>,
-               detector: &ObjectDetector) -> Result<Self, Error> {
+    pub fn new(
+        par: ffmpeg::avcodec::InputCodecParameters<'_>,
+        detector: &ObjectDetector,
+    ) -> Result<Self, Error> {
         let mut dopt = ffmpeg::avutil::Dictionary::new();
         dopt.set(cstr!("refcounted_frames"), cstr!("0"))?;
         let decoder = par.new_decoder(&mut dopt)?;
@@ -223,15 +236,20 @@ impl ObjectDetectorStream {
         })
     }
 
-    pub fn process_frame(&mut self, pkt: &ffmpeg::avcodec::Packet<'_>,
-                         detector: &ObjectDetector) -> Result<(), Error> {
+    pub fn process_frame(
+        &mut self,
+        pkt: &ffmpeg::avcodec::Packet<'_>,
+        detector: &ObjectDetector,
+    ) -> Result<(), Error> {
         if !self.decoder.decode_video(pkt, &mut self.frame)? {
             return Ok(());
         }
         self.scaler.scale(&self.frame, &mut self.scaled);
         let mut interpreter = detector.interpreter.lock();
         copy(&self.scaled, &mut interpreter.inputs()[0]);
-        interpreter.invoke().map_err(|()| format_err!("TFLite interpreter invocation failed"))?;
+        interpreter
+            .invoke()
+            .map_err(|()| format_err!("TFLite interpreter invocation failed"))?;
         let outputs = interpreter.outputs();
         let classes = outputs[1].f32s();
         let scores = outputs[2].f32s();

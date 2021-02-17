@@ -30,19 +30,23 @@
 
 //! Subcommand to run a SQLite shell.
 
+use super::OpenMode;
 use failure::Error;
 use std::ffi::OsString;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use super::OpenMode;
 use structopt::StructOpt;
 
 #[derive(StructOpt)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(long, default_value = "/var/lib/moonfire-nvr/db", value_name="path",
-                parse(from_os_str))]
+    #[structopt(
+        long,
+        default_value = "/var/lib/moonfire-nvr/db",
+        value_name = "path",
+        parse(from_os_str)
+    )]
     db_dir: PathBuf,
 
     /// Opens the database in read-only mode and locks it only for shared access.
@@ -60,7 +64,11 @@ pub struct Args {
 }
 
 pub fn run(args: &Args) -> Result<i32, Error> {
-    let mode = if args.read_only { OpenMode::ReadOnly } else { OpenMode::ReadWrite };
+    let mode = if args.read_only {
+        OpenMode::ReadOnly
+    } else {
+        OpenMode::ReadWrite
+    };
     let _db_dir = super::open_dir(&args.db_dir, mode)?;
     let mut db = OsString::new();
     db.push("file:");
@@ -69,5 +77,9 @@ pub fn run(args: &Args) -> Result<i32, Error> {
     if args.read_only {
         db.push("?mode=ro");
     }
-    Err(Command::new("sqlite3").arg(&db).args(&args.arg).exec().into())
+    Err(Command::new("sqlite3")
+        .arg(&db)
+        .args(&args.arg)
+        .exec()
+        .into())
 }

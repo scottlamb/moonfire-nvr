@@ -29,8 +29,8 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 pub mod clock;
-pub mod time;
 mod error;
 pub mod strutil;
+pub mod time;
 
-pub use crate::error::{Error, ErrorKind, ResultExt, prettify_failure};
+pub use crate::error::{prettify_failure, Error, ErrorKind, ResultExt};
