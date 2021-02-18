@@ -48,7 +48,12 @@ test("success", async () => {
   await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
 });
 
-test("close while pending", async () => {
+// TODO: fix and re-enable this test.
+// Currently it makes "CI=true npm run test" hang.
+// I think the problem is that npmjs doesn't really support aborting requests,
+// so the delay("infinite") request just sticks around, even though the fetch
+// has been aborted. Maybe https://github.com/mswjs/msw/pull/585 will fix it.
+xtest("close while pending", async () => {
   const handleClose = jest.fn();
   const onSuccess = jest.fn();
   const { rerender } = renderWithCtx(
