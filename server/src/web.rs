@@ -712,7 +712,7 @@ impl Service {
                 open_id: row.open_id,
                 first_uncommitted: row.first_uncommitted,
                 video_samples: row.video_samples,
-                video_sample_entry_id: row.video_sample_entry_id.to_string(),
+                video_sample_entry_id: row.video_sample_entry_id,
                 growing: row.growing,
             });
             if !out
