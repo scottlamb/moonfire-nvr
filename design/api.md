@@ -113,21 +113,21 @@ The `application/json` response will have a dict as follows:
             *   `rtsp_url`
 *   `signals`: a list of all *signals* known to the server. Each is a dictionary
     with the following properties:
-       * `id`: an integer identifier.
-       * `shortName`: a unique, human-readable description of the signal
-       * `cameras`: a map of associated cameras' UUIDs to the type of association:
-         `direct` or `indirect`. See `db/schema.sql` for more description.
-       * `type`: a UUID, expected to match one of `signalTypes`.
-       * `days`: as in `cameras.streams.days` above.
+    *   `id`: an integer identifier.
+    *   `shortName`: a unique, human-readable description of the signal
+    *   `cameras`: a map of associated cameras' UUIDs to the type of association:
+        `direct` or `indirect`. See `db/schema.sql` for more description.
+    *   `type`: a UUID, expected to match one of `signalTypes`.
+    *   `days`: as in `cameras.streams.days` above.
          **status: unimplemented**
 *   `signalTypes`: a list of all known signal types.
-       * `uuid`: in text format.
-       * `states`: a map of all possible states of the enumeration to more
-         information about them:
-            * `color`: a recommended color to use in UIs to represent this state,
-              as in the [HTML specification](https://html.spec.whatwg.org/#colours).
-            * `motion`: if present and true, directly associated cameras will be
-              considered to have motion when this signal is in this state.
+    *   `uuid`: in text format.
+    *   `states`: a map of all possible states of the enumeration to more
+        information about them:
+        *   `color`: a recommended color to use in UIs to represent this state,
+            as in the [HTML specification](https://html.spec.whatwg.org/#colours).
+        *   `motion`: if present and true, directly associated cameras will be
+            considered to have motion when this signal is in this state.
 *   `session`: if logged in, a dict with the following properties:
     *   `username`
     *   `csrf`: a cross-site request forgery token for use in `POST` requests.
@@ -299,6 +299,7 @@ arbitrary order. Each recording object has the following properties:
     map.mp4` URL.
 *   `videoSamples`: the number of samples (aka frames) of video in this
     recording.
+*   `sampleFileBytes`: the number of bytes of video in this recording.
 
 Under the property `videoSampleEntries`, an object mapping ids to objects with
 the following properties:
@@ -331,7 +332,7 @@ Example response:
       "startTime90k": 130985461191810,
       "endTime90k": 130985466591817,
       "sampleFileBytes": 8405564,
-      "videoSampleEntryId": "1",
+      "videoSampleEntryId": 1,
     },
     {
       "endTime90k": 130985461191810,

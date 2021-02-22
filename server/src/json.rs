@@ -440,7 +440,7 @@ pub struct Recording {
     pub end_time_90k: i64,
     pub sample_file_bytes: i64,
     pub video_samples: i64,
-    pub video_sample_entry_id: String,
+    pub video_sample_entry_id: i32,
     pub start_id: i32,
     pub open_id: u32,
 
