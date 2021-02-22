@@ -9,8 +9,20 @@
     }
   ],
   "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "modifications",
+  "editor.formatOnType": true,
+  "editor.formatOnPaste": true,
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.insertSpaces": true,
+
+  "[markdown]": {
+    "editor.tabSize": 4,
+
+    // I find Prettier's markdown style jarring, including converting `*`
+    // bullets to `-` and two-column indents. It's not customizable either.
+    // Don't use it.
+    "editor.defaultFormatter": null
+  },
 
   // Rust-specific overrides.
   "[rust]": {
