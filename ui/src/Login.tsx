@@ -3,14 +3,15 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import Avatar from "@material-ui/core/Avatar";
-import Button from "@material-ui/core/Button";
 import Dialog from "@material-ui/core/Dialog";
 import DialogActions from "@material-ui/core/DialogActions";
 import DialogTitle from "@material-ui/core/DialogTitle";
+import FormControl from "@material-ui/core/FormControl";
+import FormHelperText from "@material-ui/core/FormHelperText";
 import { makeStyles, Theme } from "@material-ui/core/styles";
 import TextField from "@material-ui/core/TextField";
 import LockOutlinedIcon from "@material-ui/icons/LockOutlined";
-import Alert from "@material-ui/lab/Alert";
+import LoadingButton from "@material-ui/lab/LoadingButton";
 import React, { useEffect } from "react";
 import * as api from "./api";
 import { useSnackbars } from "./snackbars";
@@ -18,9 +19,6 @@ import { useSnackbars } from "./snackbars";
 const useStyles = makeStyles((theme: Theme) => ({
   avatar: {
     backgroundColor: theme.palette.secondary.main,
-  },
-  noError: {
-    visibility: "hidden",
   },
 }));
 
@@ -102,8 +100,6 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
     e.preventDefault();
 
     // Suppress duplicate login attempts when latency is high.
-    // It'd be nice to also provide a visual indication, but we might
-    // just wait for LoadingButton in material-ui 5 rather than reinventing it.
     if (pending !== null) {
       return;
     }
@@ -129,39 +125,41 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
       </DialogTitle>
 
       <form onSubmit={onSubmit}>
-        <TextField
-          id="username"
-          label="Username"
-          variant="filled"
-          required
-          autoComplete="username"
-          fullWidth
-          inputRef={usernameRef}
-        />
-        <TextField
-          id="password"
-          label="Password"
-          variant="filled"
-          type="password"
-          required
-          autoComplete="current-password"
-          fullWidth
-          inputRef={passwordRef}
-        />
+        <FormControl error={error != null} fullWidth>
+          <TextField
+            id="username"
+            label="Username"
+            variant="filled"
+            required
+            autoComplete="username"
+            fullWidth
+            inputRef={usernameRef}
+          />
+          <TextField
+            id="password"
+            label="Password"
+            variant="filled"
+            type="password"
+            required
+            autoComplete="current-password"
+            fullWidth
+            inputRef={passwordRef}
+          />
 
-        {/* reserve space for an error; show when there's something to see */}
-        <Alert
-          severity="error"
-          className={error === null ? classes.noError : undefined}
-        >
-          {error}
-        </Alert>
+          {/* reserve space for an error; show when there's something to see */}
+          <FormHelperText>{error == null ? " " : error}</FormHelperText>
 
-        <DialogActions>
-          <Button type="submit" variant="contained" color="secondary">
-            Log in
-          </Button>
-        </DialogActions>
+          <DialogActions>
+            <LoadingButton
+              type="submit"
+              variant="contained"
+              color="secondary"
+              pending={pending !== null}
+            >
+              Log in
+            </LoadingButton>
+          </DialogActions>
+        </FormControl>
       </form>
     </Dialog>
   );

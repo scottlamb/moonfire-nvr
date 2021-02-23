@@ -3,11 +3,9 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import CssBaseline from "@material-ui/core/CssBaseline";
-import {
-  ThemeProvider,
-  unstable_createMuiStrictModeTheme as createMuiTheme,
-} from "@material-ui/core/styles";
-import "fontsource-roboto";
+import { ThemeProvider, createMuiTheme } from "@material-ui/core/styles";
+import StyledEngineProvider from "@material-ui/core/StyledEngineProvider";
+import "@fontsource/roboto";
 import React from "react";
 import ReactDOM from "react-dom";
 import App from "./App";
@@ -27,14 +25,16 @@ const theme = createMuiTheme({
 
 ReactDOM.render(
   <React.StrictMode>
-    <CssBaseline />
-    <ThemeProvider theme={theme}>
-      <ErrorBoundary>
-        <SnackbarProvider autoHideDuration={5000}>
-          <App />
-        </SnackbarProvider>
-      </ErrorBoundary>
-    </ThemeProvider>
+    <StyledEngineProvider injectFirst>
+      <CssBaseline />
+      <ThemeProvider theme={theme}>
+        <ErrorBoundary>
+          <SnackbarProvider autoHideDuration={5000}>
+            <App />
+          </SnackbarProvider>
+        </ErrorBoundary>
+      </ThemeProvider>
+    </StyledEngineProvider>
   </React.StrictMode>,
   document.getElementById("root")
 );
