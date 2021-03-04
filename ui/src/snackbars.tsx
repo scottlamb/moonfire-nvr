@@ -40,7 +40,7 @@ export interface MySnackbarProps
     | "anchorOrigin"
     | "open"
     | "handleClosed"
-    | "handleExited"
+    | "TransitionProps"
     | "actions"
   > {
   key?: React.Key;
@@ -164,7 +164,9 @@ export class SnackbarProvider
             onClose={(event, reason) =>
               this.handleCloseSnackbar(first.key, event, reason)
             }
-            onExited={() => this.handleSnackbarExited(first.key)}
+            TransitionProps={{
+              onExited: () => this.handleSnackbarExited(first.key),
+            }}
             action={
               <IconButton
                 size="small"
