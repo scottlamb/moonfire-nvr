@@ -10,7 +10,7 @@ module.exports = (app) => {
   app.use(
     "/api",
     createProxyMiddleware({
-      target: process.env.PROXY_TARGET ?? "http://localhost:8080/",
+      target: process.env.PROXY_TARGET || "http://localhost:8080/",
       ws: true,
       changeOrigin: true,
 
