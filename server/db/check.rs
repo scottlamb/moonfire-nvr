@@ -171,9 +171,9 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
         let tx = conn.transaction()?;
         if !ctx.rows_to_delete.is_empty() {
             info!("Deleting {} recording rows", ctx.rows_to_delete.len());
-            let mut d1 = tx.prepare("delete from recording where composite_id = ?")?;
-            let mut d2 = tx.prepare("delete from recording_playback where composite_id = ?")?;
-            let mut d3 = tx.prepare("delete from recording_integrity where composite_id = ?")?;
+            let mut d1 = tx.prepare("delete from recording_playback where composite_id = ?")?;
+            let mut d2 = tx.prepare("delete from recording_integrity where composite_id = ?")?;
+            let mut d3 = tx.prepare("delete from recording where composite_id = ?")?;
             for &id in &ctx.rows_to_delete {
                 d1.execute(params![id.0])?;
                 d2.execute(params![id.0])?;
