@@ -2173,7 +2173,7 @@ impl LockedDatabase {
         &mut self,
         req: auth::Request,
         sid: &auth::SessionHash,
-    ) -> Result<(&auth::Session, &User), Error> {
+    ) -> Result<(&auth::Session, &User), base::Error> {
         self.auth.authenticate_session(&self.conn, req, sid)
     }
 

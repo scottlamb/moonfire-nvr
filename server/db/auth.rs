@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use crate::schema::Permissions;
-use base::strutil;
+use base::{bail_t, format_err_t, strutil, ErrorKind, ResultExt};
 use failure::{bail, format_err, Error};
 use fnv::FnvHashMap;
 use lazy_static::lazy_static;
@@ -678,23 +678,31 @@ impl State {
         conn: &Connection,
         req: Request,
         hash: &SessionHash,
-    ) -> Result<(&Session, &User), Error> {
+    ) -> Result<(&Session, &User), base::Error> {
         let s = match self.sessions.entry(*hash) {
             ::std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
-            ::std::collections::hash_map::Entry::Vacant(e) => e.insert(lookup_session(conn, hash)?),
+            ::std::collections::hash_map::Entry::Vacant(e) => {
+                let s = lookup_session(conn, hash).map_err(|e| {
+                    e.map(|k| match k {
+                        ErrorKind::NotFound => ErrorKind::Unauthenticated,
+                        e => e,
+                    })
+                })?;
+                e.insert(s)
+            }
         };
         let u = match self.users_by_id.get(&s.user_id) {
-            None => bail!("session references nonexistent user!"),
+            None => bail_t!(Internal, "session references nonexistent user!"),
             Some(u) => u,
         };
         if let Some(r) = s.revocation_reason {
-            bail!("session is no longer valid (reason={})", r);
+            bail_t!(Unauthenticated, "session is no longer valid (reason={})", r);
         }
         s.last_use = req;
         s.use_count += 1;
         s.dirty = true;
         if u.disabled() {
-            bail!("user {:?} is disabled", &u.username);
+            bail_t!(Unauthenticated, "user {:?} is disabled", &u.username);
         }
         Ok((s, u))
     }
@@ -811,9 +819,10 @@ impl State {
     }
 }
 
-fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Error> {
-    let mut stmt = conn.prepare_cached(
-        r#"
+fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, base::Error> {
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
         select
             user_id,
             seed,
@@ -839,39 +848,52 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, Erro
         where
             session_id_hash = ?
         "#,
-    )?;
-    let mut rows = stmt.query(params![&hash.0[..]])?;
-    let row = rows.next()?.ok_or_else(|| format_err!("no such session"))?;
-    let creation_addr: FromSqlIpAddr = row.get(8)?;
-    let revocation_addr: FromSqlIpAddr = row.get(11)?;
-    let last_use_addr: FromSqlIpAddr = row.get(16)?;
+        )
+        .err_kind(ErrorKind::Internal)?;
+    let mut rows = stmt
+        .query(params![&hash.0[..]])
+        .err_kind(ErrorKind::Internal)?;
+    let row = rows
+        .next()
+        .err_kind(ErrorKind::Internal)?
+        .ok_or_else(|| format_err_t!(NotFound, "no such session"))?;
+    let creation_addr: FromSqlIpAddr = row.get(8).err_kind(ErrorKind::Internal)?;
+    let revocation_addr: FromSqlIpAddr = row.get(11).err_kind(ErrorKind::Internal)?;
+    let last_use_addr: FromSqlIpAddr = row.get(16).err_kind(ErrorKind::Internal)?;
     let mut permissions = Permissions::new();
-    permissions.merge_from_bytes(row.get_raw_checked(18)?.as_blob()?)?;
+    permissions
+        .merge_from_bytes(
+            row.get_raw_checked(18)
+                .err_kind(ErrorKind::Internal)?
+                .as_blob()
+                .err_kind(ErrorKind::Internal)?,
+        )
+        .err_kind(ErrorKind::Internal)?;
     Ok(Session {
-        user_id: row.get(0)?,
-        seed: row.get(1)?,
-        flags: row.get(2)?,
-        domain: row.get(3)?,
-        description: row.get(4)?,
-        creation_password_id: row.get(5)?,
+        user_id: row.get(0).err_kind(ErrorKind::Internal)?,
+        seed: row.get(1).err_kind(ErrorKind::Internal)?,
+        flags: row.get(2).err_kind(ErrorKind::Internal)?,
+        domain: row.get(3).err_kind(ErrorKind::Internal)?,
+        description: row.get(4).err_kind(ErrorKind::Internal)?,
+        creation_password_id: row.get(5).err_kind(ErrorKind::Internal)?,
         creation: Request {
-            when_sec: row.get(6)?,
-            user_agent: row.get(7)?,
+            when_sec: row.get(6).err_kind(ErrorKind::Internal)?,
+            user_agent: row.get(7).err_kind(ErrorKind::Internal)?,
             addr: creation_addr.0,
         },
         revocation: Request {
-            when_sec: row.get(9)?,
-            user_agent: row.get(10)?,
+            when_sec: row.get(9).err_kind(ErrorKind::Internal)?,
+            user_agent: row.get(10).err_kind(ErrorKind::Internal)?,
             addr: revocation_addr.0,
         },
-        revocation_reason: row.get(12)?,
-        revocation_reason_detail: row.get(13)?,
+        revocation_reason: row.get(12).err_kind(ErrorKind::Internal)?,
+        revocation_reason_detail: row.get(13).err_kind(ErrorKind::Internal)?,
         last_use: Request {
-            when_sec: row.get(14)?,
-            user_agent: row.get(15)?,
+            when_sec: row.get(14).err_kind(ErrorKind::Internal)?,
+            user_agent: row.get(15).err_kind(ErrorKind::Internal)?,
             addr: last_use_addr.0,
         },
-        use_count: row.get(17)?,
+        use_count: row.get(17).err_kind(ErrorKind::Internal)?,
         dirty: false,
         permissions,
     })
@@ -969,7 +991,10 @@ mod tests {
         let e = state
             .authenticate_session(&conn, req.clone(), &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
+        assert_eq!(
+            format!("{}", e),
+            "Unauthenticated: session is no longer valid (reason=1)"
+        );
 
         // Everything should persist across reload.
         drop(state);
@@ -977,7 +1002,10 @@ mod tests {
         let e = state
             .authenticate_session(&conn, req, &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
+        assert_eq!(
+            format!("{}", e),
+            "Unauthenticated: session is no longer valid (reason=1)"
+        );
     }
 
     #[test]
@@ -1028,7 +1056,10 @@ mod tests {
         let e = state
             .authenticate_session(&conn, req, &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "session is no longer valid (reason=1)");
+        assert_eq!(
+            format!("{}", e),
+            "Unauthenticated: session is no longer valid (reason=1)"
+        );
     }
 
     #[test]
@@ -1159,7 +1190,10 @@ mod tests {
         let e = state
             .authenticate_session(&conn, req.clone(), &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
+        assert_eq!(
+            format!("{}", e),
+            "Unauthenticated: user \"slamb\" is disabled"
+        );
 
         // The user should still be disabled after reload.
         drop(state);
@@ -1167,7 +1201,10 @@ mod tests {
         let e = state
             .authenticate_session(&conn, req, &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
+        assert_eq!(
+            format!("{}", e),
+            "Unauthenticated: user \"slamb\" is disabled"
+        );
     }
 
     #[test]
@@ -1206,7 +1243,7 @@ mod tests {
         let e = state
             .authenticate_session(&conn, req.clone(), &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "no such session");
+        assert_eq!(format!("{}", e), "Unauthenticated: no such session");
 
         // The user should still be deleted after reload.
         drop(state);
@@ -1215,7 +1252,7 @@ mod tests {
         let e = state
             .authenticate_session(&conn, req.clone(), &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "no such session");
+        assert_eq!(format!("{}", e), "Unauthenticated: no such session");
     }
 
     #[test]

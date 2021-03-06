@@ -36,6 +36,15 @@ impl Error {
     pub fn compat(self) -> failure::Compat<Context<ErrorKind>> {
         self.inner.compat()
     }
+
+    pub fn map<F>(self, op: F) -> Self
+    where
+        F: FnOnce(ErrorKind) -> ErrorKind,
+    {
+        Self {
+            inner: self.inner.map(op),
+        }
+    }
 }
 
 impl Fail for Error {

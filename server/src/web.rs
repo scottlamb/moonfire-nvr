@@ -1180,6 +1180,18 @@ impl Service {
         serve_json(req, &signals)
     }
 
+    /// Authenticates the session (if any) and returns a Caller.
+    ///
+    /// If there's no session,
+    /// 1.  if `allow_unauthenticated_permissions` is configured, returns okay
+    ///     with those permissions.
+    /// 2.  if the caller specifies `unauth_path`, returns okay with no
+    ///     permissions.
+    /// 3.  returns `Unauthenticated` error otherwise.
+    ///
+    /// Does no authorization. That is, this doesn't check that the returned
+    /// permissions are sufficient for whatever operation the caller is
+    /// performing.
     fn authenticate(
         &self,
         req: &Request<hyper::Body>,
@@ -1188,22 +1200,28 @@ impl Service {
         if let Some(sid) = extract_sid(req) {
             let authreq = self.authreq(req);
 
-            // TODO: real error handling! this assumes all errors are due to lack of
-            // authentication, when they could be logic errors in SQL or such.
-            if let Ok((s, u)) = self
+            match self
                 .db
                 .lock()
                 .authenticate_session(authreq.clone(), &sid.hash())
             {
-                return Ok(Caller {
-                    permissions: s.permissions.clone(),
-                    session: Some(json::Session {
-                        username: u.username.clone(),
-                        csrf: s.csrf(),
-                    }),
-                });
-            }
-            info!("authenticate_session failed");
+                Ok((s, u)) => {
+                    return Ok(Caller {
+                        permissions: s.permissions.clone(),
+                        session: Some(json::Session {
+                            username: u.username.clone(),
+                            csrf: s.csrf(),
+                        }),
+                    })
+                }
+                Err(e) if e.kind() == base::ErrorKind::Unauthenticated => {
+                    // Log the specific reason this session is unauthenticated.
+                    // Don't let the API client see it, as it may have a
+                    // revocation reason that isn't for their eyes.
+                    warn!("Session authentication failed: {:?}", &e);
+                }
+                Err(e) => return Err(e),
+            };
         }
 
         if let Some(s) = self.allow_unauthenticated_permissions.as_ref() {
