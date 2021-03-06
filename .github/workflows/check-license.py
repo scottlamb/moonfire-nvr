@@ -50,7 +50,7 @@ def has_license(f):
 def file_has_license(filename):
   with open(filename, 'r') as f:
     return has_license(f)
-    
+
 
 def main(args):
   if not args:
@@ -59,8 +59,8 @@ def main(args):
   missing = [f for f in args
              if FILENAME_MATCHER.match(f) and not file_has_license(f)]
   if missing:
-    print('The following files are missing expected copyright/license headers:')
-    print('\n'.join(missing))
+    print('The following files are missing expected copyright/license headers:', file=sys.stderr)
+    print('\n'.join(missing), file=sys.stderr)
     sys.exit(1)
 
 

@@ -2,7 +2,6 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import AppBar from "@material-ui/core/AppBar";
 import Button from "@material-ui/core/Button";
 import IconButton from "@material-ui/core/IconButton";
 import Menu from "@material-ui/core/Menu";
@@ -28,6 +27,7 @@ interface Props {
   setSession: (session: Session | null) => void;
   requestLogin: () => void;
   logout: () => void;
+  menuClick?: () => void;
 }
 
 // https://material-ui.com/components/app-bar/
@@ -56,9 +56,14 @@ function MoonfireMenu(props: Props) {
   };
 
   return (
-    <AppBar position="static">
+    <>
       <Toolbar variant="dense">
-        <IconButton edge="start" color="inherit" aria-label="menu">
+        <IconButton
+          edge="start"
+          color="inherit"
+          aria-label="menu"
+          onClick={props.menuClick}
+        >
           <MenuIcon />
         </IconButton>
         <Typography variant="h6" className={classes.title}>
@@ -101,7 +106,7 @@ function MoonfireMenu(props: Props) {
           </div>
         )}
       </Toolbar>
-    </AppBar>
+    </>
   );
 }
 

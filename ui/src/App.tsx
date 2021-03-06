@@ -8,7 +8,9 @@ import * as api from "./api";
 import MoonfireMenu from "./AppMenu";
 import Login from "./Login";
 import { useSnackbars } from "./snackbars";
-import { Session } from "./types";
+import { Camera, Session } from "./types";
+import List from "./List";
+import AppBar from "@material-ui/core/AppBar";
 
 type LoginState =
   | "logged-in"
@@ -18,6 +20,8 @@ type LoginState =
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
+  const [cameras, setCameras] = useState<Camera[] | null>(null);
+  const [timeZoneName, setTimeZoneName] = useState<string | null>(null);
   const [fetchSeq, setFetchSeq] = useState(0);
   const [loginState, setLoginState] = useState<LoginState>("not-logged-in");
   const [error, setError] = useState<api.FetchError | null>(null);
@@ -71,6 +75,8 @@ function App() {
             resp.response.session === undefined ? "not-logged-in" : "logged-in"
           );
           setSession(resp.response.session || null);
+          setCameras(resp.response.cameras);
+          setTimeZoneName(resp.response.timeZoneName);
       }
     };
     console.debug("Toplevel fetch num", fetchSeq);
@@ -80,17 +86,18 @@ function App() {
       abort.abort();
     };
   }, [fetchSeq]);
-
   return (
     <>
-      <MoonfireMenu
-        session={session}
-        setSession={setSession}
-        requestLogin={() => {
-          setLoginState("user-requested-login");
-        }}
-        logout={logout}
-      />
+      <AppBar position="static">
+        <MoonfireMenu
+          session={session}
+          setSession={setSession}
+          requestLogin={() => {
+            setLoginState("user-requested-login");
+          }}
+          logout={logout}
+        />
+      </AppBar>
       <Login
         onSuccess={onLoginSuccess}
         open={
@@ -112,6 +119,9 @@ function App() {
             reloading the page once you believe the problem is resolved.
           </p>
         </Container>
+      )}
+      {cameras != null && cameras.length > 0 && (
+        <List cameras={cameras} timeZoneName={timeZoneName!} />
       )}
     </>
   );

@@ -13,12 +13,14 @@
 
 import { Camera, Session } from "./types";
 
-interface FetchSuccess<T> {
+export type StreamType = "main" | "sub";
+
+export interface FetchSuccess<T> {
   status: "success";
   response: T;
 }
 
-interface FetchAborted {
+export interface FetchAborted {
   status: "aborted";
 }
 
@@ -28,7 +30,7 @@ export interface FetchError {
   httpStatus?: number;
 }
 
-type FetchResult<T> = FetchSuccess<T> | FetchAborted | FetchError;
+export type FetchResult<T> = FetchSuccess<T> | FetchAborted | FetchError;
 
 async function myfetch(
   url: string,
@@ -124,21 +126,31 @@ async function json<T>(
   };
 }
 
-export type ToplevelResponse = {
+export interface ToplevelResponse {
   timeZoneName: string;
   cameras: Camera[];
   session: Session | undefined;
-};
+}
 
 /** Fetches the top-level API data. */
 export async function toplevel(init: RequestInit) {
-  return await json<ToplevelResponse>("/api/", init);
+  const resp = await json<ToplevelResponse>("/api/?days=true", init);
+  if (resp.status === "success") {
+    resp.response.cameras.forEach((c) => {
+      for (const key in c.streams) {
+        const s = c.streams[key as StreamType];
+        s.camera = c;
+        s.streamType = key as StreamType;
+      }
+    });
+  }
+  return resp;
 }
 
-export type LoginRequest = {
+export interface LoginRequest {
   username: string;
   password: string;
-};
+}
 
 /** Logs in. */
 export async function login(req: LoginRequest, init: RequestInit) {
@@ -152,9 +164,9 @@ export async function login(req: LoginRequest, init: RequestInit) {
   });
 }
 
-export type LogoutRequest = {
+export interface LogoutRequest {
   csrf: string;
-};
+}
 
 /** Logs out. */
 export async function logout(req: LogoutRequest, init: RequestInit) {
@@ -165,5 +177,90 @@ export async function logout(req: LogoutRequest, init: RequestInit) {
     },
     body: JSON.stringify(req),
     ...init,
+  });
+}
+
+export interface Recording {
+  startId: number;
+  endId?: number;
+  firstUncommited?: number;
+  growing?: boolean;
+  openId: number;
+  startTime90k: number;
+  endTime90k: number;
+  videoSampleEntryId: number;
+  videoSamples: number;
+  sampleFileBytes: number;
+}
+
+export interface VideoSampleEntry {
+  width: number;
+  height: number;
+  pixelHSpacing?: number;
+  pixelVSpacing?: number;
+}
+
+export interface RecordingsRequest {
+  cameraUuid: string;
+  stream: StreamType;
+  startTime90k?: number;
+  endTime90k?: number;
+  split90k?: number;
+}
+
+export interface RecordingsResponse {
+  recordings: Recording[];
+  videoSampleEntries: { [id: number]: VideoSampleEntry };
+}
+
+function withQuery(baseUrl: string, params: { [key: string]: any }): string {
+  const p = new URLSearchParams();
+  for (const k in params) {
+    const v = params[k];
+    if (v !== undefined) {
+      p.append(k, v.toString());
+    }
+  }
+  const ps = p.toString();
+  return ps !== "" ? `${baseUrl}?${ps}` : baseUrl;
+}
+
+export async function recordings(req: RecordingsRequest, init: RequestInit) {
+  const p = new URLSearchParams();
+  if (req.startTime90k !== undefined) {
+    p.append("startTime90k", req.startTime90k.toString());
+  }
+  if (req.endTime90k !== undefined) {
+    p.append("endTime90k", req.endTime90k.toString());
+  }
+  if (req.split90k !== undefined) {
+    p.append("split90k", req.split90k.toString());
+  }
+  const url = withQuery(
+    `/api/cameras/${req.cameraUuid}/${req.stream}/recordings`,
+    {
+      startTime90k: req.startTime90k,
+      endTime90k: req.endTime90k,
+      split90k: req.split90k,
+    }
+  );
+  return await json<RecordingsResponse>(url, init);
+}
+
+export function recordingUrl(
+  cameraUuid: string,
+  stream: StreamType,
+  r: Recording
+): string {
+  let s = `${r.startId}`;
+  if (r.endId !== undefined) {
+    s += `-${r.endId}`;
+  }
+  if (r.firstUncommited !== undefined) {
+    s += `@${r.openId}`;
+  }
+  return withQuery(`/api/cameras/${cameraUuid}/${stream}/view.mp4`, {
+    s,
+    ts: true,
   });
 }
