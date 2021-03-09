@@ -4,6 +4,20 @@ Here are some tips for diagnosing various problems with Moonfire NVR. Feel free
 to open an [issue](https://github.com/scottlamb/moonfire-nvr/issues) if you
 need more help.
 
+* [Troubleshooting](#troubleshooting)
+    * [Viewing Moonfire NVR's logs](#viewing-moonfire-nvrs-logs)
+        * [Flushes](#flushes)
+        * [`thread '...' panicked` errors](#thread--panicked-errors)
+        * [Slow operations](#slow-operations)
+        * [Camera stream errors](#camera-stream-errors)
+    * [Problems](#problems)
+        * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
+        * [`moonfire-nvr config` displays garbage](#moonfire-nvr-config-displays-garbage)
+        * [Moonfire NVR reports problems with the database or filesystem](#moonfire-nvr-reports-problems-with-the-database-or-filesystem)
+        * [<a name="kernel-errors"></a> Errors in kernel logs](#-errors-in-kernel-logs)
+            * [UAS errors](#uas-errors)
+            * [Filesystem errors](#filesystem-errors)
+
 ## Viewing Moonfire NVR's logs
 
 While Moonfire NVR is running, logs will be written to stderr.
@@ -52,24 +66,41 @@ mm   = month
 dd   = day
 HH   = hour (using a 24-hour clock)
 MM   = minute
-SS   = section
+SS   = second
 FFF  = fractional portion of the second
 TTTT = thread name (if set) or tid (otherwise)
 PPPP = module path
 ...  = message body
 ```
 
-You can use the following command to teach [lnav](http://lnav.org/) Moonfire
+You can use the following command to teach [`lnav`](http://lnav.org/) Moonfire
 NVR's log format:
 
 ```
 $ lnav -i misc/moonfire_log.json
 ```
 
-### Flush log lines
+`lnav` versions prior to 0.9.0 print a (harmless) warning message on startup:
+
+```
+$ lnav -i git/moonfire-nvr/misc/moonfire_log.json
+warning:git/moonfire-nvr/misc/moonfire_log.json:line 2
+warning:  unexpected path --
+warning:    /$schema
+warning:  accepted paths --
+warning:    /(?<format_name>\w+)/  -- The definition of a log file format.
+info: installed: /home/slamb/.lnav/formats/installed/moonfire_log.json
+```
+
+You can avoid this by removing the `$schema` line from `moonfire_log.json`
+and rerunning the `lnav -i` command.
+
+Below are some interesting log lines you may encounter.
+
+### Flushes
 
 During normal operation, Moonfire NVR will periodically flush changes to its
-SQLite3 database. Every flush is logged, as in the following message:
+SQLite3 database. Every flush is logged, as in the following info message:
 
 ```
 I20210308 23:14:18.388 sync-/media/14tb/sample moonfire_db::db] Flush 3810 (why: 120 sec after start of 1 minute 14 seconds courtyard-main recording 3/1842086):
@@ -89,12 +120,10 @@ This log message is packed with debugging information:
     the recording, in the form `stream_id/recording_id`. It corresponds to the
     file `/media/14tb/sample/00000003001c1ba6`. On-disk files are named by
     a fixed eight hexadecimal digits for the stream id and eight hexadecimal
-    digits for the recording id. You can convert with Python:
+    digits for the recording id. You can convert with `printf`:
     ```
-    $ python3
-    >>> '%08x%08x' % (3, 1842086)
-    '00000003001c1ba6'
-    >>>
+    $ printf '%08x%08x\n' 3 1842086
+    00000003001c1ba6
     ```
 *   For each affected sample file directory (`/media/6tb/sample` and
     `/media/14tb/sample`), a line showing the exact changes included in the
@@ -116,6 +145,47 @@ This log message is packed with debugging information:
     (`98M 864K 842B` represents 10,3646,026 bytes, or about 99 MiB), numbers
     of recordings, and the IDs of each recording. For GCed recordings, the
     sizes are omitted (as this information is not stored).
+
+### `thread '...' panicked` errors
+
+Errors like the one below indicate a serious bug in Moonfire NVR. Please
+file a bug if you see one. It's helpful to set the `RUST_BACKTRACE`
+environment variable to include more information.
+
+```
+thread 's-peck_west-main' panicked at 'should always be an unindexed sample', /usr/local/src/moonfire-nvr/server/db/writer.rs:750:54
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+```
+
+### Slow operations
+
+Warnings like the following indicate that some operation took more than 1
+second to perform. `PT2.070715796S` means about 2 seconds.
+
+It's normal to see these warnings on startup and occasionally while running.
+Frequent occurrences may indicate a performance problem.
+
+```
+W20201129 12:01:21.128 s-driveway-main moonfire_base::clock] opening rtsp://admin:redacted@192.168.5.108/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif took PT2.070715796S!
+W20201129 12:32:15.870 s-west_side-sub moonfire_base::clock] getting next packet took PT10.158121387S!
+W20201228 12:09:29.050 s-back_east-sub moonfire_base::clock] database lock acquisition took PT8.122452
+W20201228 21:22:32.012 main moonfire_base::clock] database operation took PT39.526386958S!
+W20201228 21:27:11.402 s-driveway-sub moonfire_base::clock] writing 37 bytes took PT20.701894190S!
+```
+
+### Camera stream errors
+
+Warnings like the following indicate that a camera stream was lost due to some
+error and Moonfire NVR will try reconnecting shortly. In this case,
+`End of file` means that the camera ended the stream. This might happen when the
+camera is rebooting or if Moonfire is not consuming packets quickly enough.
+In the latter case, you'll likely see a `getting next packet took PT...S!`
+message as described above.
+
+```
+W20210309 00:28:55.527 s-courtyard-sub moonfire_nvr::streamer] courtyard-sub: sleeping for Duration { secs: 1, nanos: 0 } after error: End of file
+(set environment variable RUST_BACKTRACE=1 to see backtraces)
+```
 
 ## Problems
 
