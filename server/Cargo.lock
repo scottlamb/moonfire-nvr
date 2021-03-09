@@ -1274,7 +1274,7 @@ dependencies = [
 [[package]]
 name = "mylog"
 version = "0.1.0"
-source = "git+https://github.com/scottlamb/mylog#45cdec74e11b05d02b55d49cfb1a8391e0f281a5"
+source = "git+https://github.com/scottlamb/mylog#64519c6d9d4587d803900b82a83b45b35939b8f7"
 dependencies = [
  "chrono",
  "log",

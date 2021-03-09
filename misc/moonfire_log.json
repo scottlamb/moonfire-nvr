@@ -1,0 +1,41 @@
+{
+    "$schema": "https://lnav.org/schemas/format-v1.schema.json",
+    "moonfire_log": {
+        "title": "Moonfire Log",
+        "description": "The Moonfire NVR log format.",
+        "timestamp-format": ["%Y%m%d %H:%M:%S.%L"],
+        "url": "https://github.com/scottlamb/mylog/blob/master/src/lib.rs",
+        "regex": {
+            "std": {
+                "pattern": "^(?<level>[EWIDT])(?<timestamp>\\d{4} \\d{2}\\d{2}\\d{2}\\.\\d{3}) +(?<thread>[^ ]+) (?<module_path>[^ \\]]+)\\] (?<body>(?:.|\\n)*)"
+            }
+        },
+        "level-field": "level",
+        "level": {
+            "error": "E",
+            "warning": "W",
+            "info": "I",
+            "debug": "D",
+            "trace": "T"
+        },
+        "opid-field": "thread",
+        "value": {
+            "thread": {
+                "kind": "string",
+                "identifier": true
+            },
+            "module_path": {
+                "kind": "string",
+                "identifier": true
+            }
+        },
+        "sample": [
+            {
+                "line": "I20210308 21:31:24.255 main moonfire_nvr] Success."
+            },
+            {
+                "line": "W20210303 22:20:53.081 s-west_side-main moonfire_base::clock] getting next packet took PT8.153173367S!"
+            }
+        ]
+    }
+}

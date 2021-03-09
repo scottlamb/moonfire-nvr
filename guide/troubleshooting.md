@@ -8,32 +8,114 @@ need more help.
 
 While Moonfire NVR is running, logs will be written to stderr.
 
-   * When running the configuration UI, you typically should redirect stderr
-     to a text file to avoid poor interaction between the interactive stdout
-     output and the logging. If you use the recommended
-     `nvr config 2>debug-log` command, output will be in the `debug-log` file.
-   * When running detached through Docker, Docker saves the logs for you.
-     Try `nvr logs` or `docker logs moonfire-nvr`.
-   * When running through systemd, stderr will be redirected to the journal.
-     Try `sudo journalctl --unit moonfire-nvr` to view the logs. You also
-     likely want to set `MOONFIRE_FORMAT=google-systemd` to format logs as
-     expected by systemd.
+*   When running the configuration UI, you typically should redirect stderr
+    to a text file to avoid poor interaction between the interactive stdout
+    output and the logging. If you use the recommended
+    `nvr config 2>debug-log` command, output will be in the `debug-log` file.
+*   When running detached through Docker, Docker saves the logs for you.
+    Try `nvr logs` or `docker logs moonfire-nvr`.
+*   When running through systemd, stderr will be redirected to the journal.
+    Try `sudo journalctl --unit moonfire-nvr` to view the logs. You also
+    likely want to set `MOONFIRE_FORMAT=google-systemd` to format logs as
+    expected by systemd.
 
 Logging options are controlled by environment variables:
 
-   * `MOONFIRE_LOG` controls the log level. Its format is similar to the
-     `RUST_LOG` variable used by the
-     [env-logger](http://rust-lang-nursery.github.io/log/env_logger/) crate.
-     `MOONFIRE_LOG=info` is the default.
-     `MOONFIRE_LOG=info,moonfire_nvr=debug` gives more detailed logging of the
-     `moonfire_nvr` crate itself.
-   * `MOONFIRE_FORMAT` selects the output format. The two options currently
-     accepted are `google` (the default, like the Google
-     [glog](https://github.com/google/glog) package) and `google-systemd` (a
-     variation for better systemd compatibility).
-   * Errors include a backtrace if `RUST_BACKTRACE=1` is set.
+*   `MOONFIRE_LOG` controls the log level. Its format is similar to the
+    `RUST_LOG` variable used by the
+    [env-logger](http://rust-lang-nursery.github.io/log/env_logger/) crate.
+    `MOONFIRE_LOG=info` is the default.
+    `MOONFIRE_LOG=info,moonfire_nvr=debug` gives more detailed logging of the
+    `moonfire_nvr` crate itself.
+*   `MOONFIRE_FORMAT` selects the output format. The two options currently
+    accepted are `google` (the default, like the Google
+    [glog](https://github.com/google/glog) package) and `google-systemd` (a
+    variation for better systemd compatibility).
+*   Errors include a backtrace if `RUST_BACKTRACE=1` is set.
 
 If you use Docker, set these via Docker's `--env` argument.
+
+With the default `MOONFIRE_FORMAT=glog`, log lines are in the following
+format:
+
+```text
+I20210308 21:31:24.255 main moonfire_nvr] Success.
+LYYYYmmdd HH:MM:SS.FFF TTTT PPPPPPPPPPPP] ...
+L    = level:
+       E = error
+       W = warn
+       I = info
+       D = debug
+       T = trace
+YYYY = year
+mm   = month
+dd   = day
+HH   = hour (using a 24-hour clock)
+MM   = minute
+SS   = section
+FFF  = fractional portion of the second
+TTTT = thread name (if set) or tid (otherwise)
+PPPP = module path
+...  = message body
+```
+
+You can use the following command to teach [lnav](http://lnav.org/) Moonfire
+NVR's log format:
+
+```
+$ lnav -i misc/moonfire_log.json
+```
+
+### Flush log lines
+
+During normal operation, Moonfire NVR will periodically flush changes to its
+SQLite3 database. Every flush is logged, as in the following message:
+
+```
+I20210308 23:14:18.388 sync-/media/14tb/sample moonfire_db::db] Flush 3810 (why: 120 sec after start of 1 minute 14 seconds courtyard-main recording 3/1842086):
+/media/6tb/sample: added 98M 864K 842B in 8 recordings (4/1839795, 7/1503516, 6/1853939, 1/1838087, 2/1852096, 12/1516945, 8/1514942, 10/1506111), deleted 111M 435K 587B in 5 (4/1801170, 4/1801171, 6/1799708, 1/1801528, 2/1815572), GCed 9 recordings (6/1799707, 7/1376577, 4/1801168, 1/1801527, 4/1801167, 4/1801169, 10/1243252, 2/1815571, 12/1418785).
+/media/14tb/sample: added 8M 364K 643B in 3 recordings (3/1842086, 9/1505359, 11/1516695), deleted 0B in 0 (), GCed 0 recordings ().
+```
+
+This log message is packed with debugging information:
+
+*   the date and time: `20210308 23:14:18.388`.
+*   the name of the thread that prompted the flush: `sync-/media/14tb/sample`.
+*   a sequence number: `3810`. This is handy for checking how often Moonfire NVR
+    is flushing.
+*   a reason for the flush: `120 sec after start of 1 minute 14 seconds courtyard-main recording 3/1842086`.
+    This was a regular periodic flush at the `flush_if_sec` for the stream,
+    as described in [install.md](install.md). `3/1842086` is an identifier for
+    the recording, in the form `stream_id/recording_id`. It corresponds to the
+    file `/media/14tb/sample/00000003001c1ba6`. On-disk files are named by
+    a fixed eight hexadecimal digits for the stream id and eight hexadecimal
+    digits for the recording id. You can convert with Python:
+    ```
+    $ python3
+    >>> '%08x%08x' % (3, 1842086)
+    '00000003001c1ba6'
+    >>>
+    ```
+*   For each affected sample file directory (`/media/6tb/sample` and
+    `/media/14tb/sample`), a line showing the exact changes included in the
+    flush. There are three kinds of changes:
+
+    *   added recordings–these files are already fully written in the sample
+        file directory and now are being added to the database.
+    *   deleted recordings–these are being removed from the database's
+        `recording` table (and added to the `garbage` table) in preparation
+        for being deleted from the sample file directory. They can no longer
+        be accessed after this flush.
+    *   GCed (garbage-collected) recordings—these have been fully removed from
+        disk and no longer will be referenced in the database at all.
+
+    You can learn more about these in the "Lifecycle of a recording" section
+    of the [recording schema design document](../design/schema.md).
+
+    For added and deleted recordings, the line includes sizes in bytes
+    (`98M 864K 842B` represents 10,3646,026 bytes, or about 99 MiB), numbers
+    of recordings, and the IDs of each recording. For GCed recordings, the
+    sizes are omitted (as this information is not stored).
 
 ## Problems
 
