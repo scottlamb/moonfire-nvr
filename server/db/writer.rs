@@ -709,7 +709,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
         // We must restore it on all success or error paths.
 
         if let Some(unindexed) = w.unindexed_sample.take() {
-            let duration = i32::try_from(pts_90k - i64::from(unindexed.pts_90k))?;
+            let duration = pts_90k - unindexed.pts_90k;
             if duration <= 0 {
                 w.unindexed_sample = Some(unindexed); // restore invariant.
                 bail!(
@@ -718,6 +718,17 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
                     pts_90k
                 );
             }
+            let duration = match i32::try_from(duration) {
+                Ok(d) => d,
+                Err(_) => {
+                    w.unindexed_sample = Some(unindexed); // restore invariant.
+                    bail!(
+                        "excessive pts jump from {} to {}",
+                        unindexed.pts_90k,
+                        pts_90k
+                    )
+                }
+            };
             if let Err(e) = w.add_sample(
                 duration,
                 unindexed.len,
@@ -1039,7 +1050,7 @@ mod tests {
         drop(tdb.syncer_channel);
         tdb.syncer_join.join().unwrap();
 
-        // Start a mocker syncer.
+        // Start a mock syncer.
         let dir = MockDir::new();
         let syncer = super::Syncer {
             dir_id: *tdb
@@ -1078,6 +1089,59 @@ mod tests {
     }
     fn nix_eio() -> nix::Error {
         nix::Error::Sys(nix::errno::Errno::EIO)
+    }
+
+    #[test]
+    fn excessive_pts_jump() {
+        testutil::init();
+        let mut h = new_harness(0);
+        let video_sample_entry_id =
+            h.db.lock()
+                .insert_video_sample_entry(VideoSampleEntryToInsert {
+                    width: 1920,
+                    height: 1080,
+                    pasp_h_spacing: 1,
+                    pasp_v_spacing: 1,
+                    data: [0u8; 100].to_vec(),
+                    rfc6381_codec: "avc1.000000".to_owned(),
+                })
+                .unwrap();
+        let mut w = Writer::new(
+            &h.dir,
+            &h.db,
+            &h.channel,
+            testutil::TEST_STREAM_ID,
+            video_sample_entry_id,
+        );
+        h.dir.expect(MockDirAction::Create(
+            CompositeId::new(1, 0),
+            Box::new(|_id| Err(nix_eio())),
+        ));
+        let f = MockFile::new();
+        h.dir.expect(MockDirAction::Create(
+            CompositeId::new(1, 0),
+            Box::new({
+                let f = f.clone();
+                move |_id| Ok(f.clone())
+            }),
+        ));
+        f.expect(MockFileAction::Write(Box::new(|_| Ok(1))));
+        f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
+        w.write(b"1", recording::Time(1), 0, true).unwrap();
+
+        let e = w
+            .write(b"2", recording::Time(2), i32::max_value() as i64 + 1, true)
+            .unwrap_err();
+        assert!(e.to_string().contains("excessive pts jump"));
+        h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
+        drop(w);
+        assert!(h.syncer.iter(&h.syncer_rcv)); // AsyncSave
+        assert_eq!(h.syncer.planned_flushes.len(), 1);
+        assert!(h.syncer.iter(&h.syncer_rcv)); // planned flush
+        assert_eq!(h.syncer.planned_flushes.len(), 0);
+        assert!(h.syncer.iter(&h.syncer_rcv)); // DatabaseFlushed
+        f.ensure_done();
+        h.dir.ensure_done();
     }
 
     /// Tests the database flushing while a syncer is still processing a previous flush event.
