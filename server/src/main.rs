@@ -5,6 +5,7 @@
 #![cfg_attr(all(feature = "nightly", test), feature(test))]
 
 use log::{debug, error};
+use std::fmt::Write;
 use std::str::FromStr;
 use structopt::StructOpt;
 
@@ -107,6 +108,34 @@ impl Args {
     }
 }
 
+/// Custom panic hook that logs instead of directly writing to stderr.
+///
+/// This means it includes a timestamp and is more recognizable as a serious
+/// error (including console color coding by default, a format `lnav` will
+/// recognize, etc.).
+fn panic_hook(p: &std::panic::PanicInfo) {
+    let mut msg;
+    if let Some(l) = p.location() {
+        msg = format!("panic at '{}'", l);
+    } else {
+        msg = "panic".to_owned();
+    }
+    if let Some(s) = p.payload().downcast_ref::<&str>() {
+        write!(&mut msg, ": {}", s).unwrap();
+    }
+    let b = failure::Backtrace::new();
+    if b.is_empty() {
+        write!(
+            &mut msg,
+            "\n\n(set environment variable RUST_BACKTRACE=1 to see backtraces)"
+        )
+        .unwrap();
+    } else {
+        write!(&mut msg, "\n\nBacktrace:\n{}", b).unwrap();
+    }
+    error!("{}", msg);
+}
+
 fn main() {
     let args = Args::from_args();
     let mut h = mylog::Builder::new()
@@ -125,6 +154,8 @@ fn main() {
         .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or("info".to_owned()))
         .build();
     h.clone().install().unwrap();
+
+    std::panic::set_hook(Box::new(&panic_hook));
 
     let r = {
         let _a = h.async_scope();

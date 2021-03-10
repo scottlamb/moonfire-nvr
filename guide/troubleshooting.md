@@ -7,7 +7,7 @@ need more help.
 * [Troubleshooting](#troubleshooting)
     * [Viewing Moonfire NVR's logs](#viewing-moonfire-nvrs-logs)
         * [Flushes](#flushes)
-        * [`thread '...' panicked` errors](#thread--panicked-errors)
+        * [Panic errors](#panic-errors)
         * [Slow operations](#slow-operations)
         * [Camera stream errors](#camera-stream-errors)
     * [Problems](#problems)
@@ -75,6 +75,17 @@ TTTT = thread name (if set) or tid (otherwise)
 PPPP = module path
 ...  = message body
 ```
+
+Moonfire NVR names a few important thread types as follows:
+
+*   `main`: during `moonfire-nvr run`, the main thread does initial setup then
+    just waits for the other threads. In other subcommands, it does everything.
+*   `s-CAMERA-TYPE`: there is one of these threads for every recorded stream
+    (up to two per camera, where `TYPE` is `main` or `sub`). These threads read
+    frames from the cameras via RTSP and write them to disk.
+*   `sync-PATH`: there is one of these threads for every sample file directory.
+    These threads call `fsync` to commit sample files to disk, delete old sample
+    files, and flush the database.
 
 You can use the following command to teach [`lnav`](http://lnav.org/) Moonfire
 NVR's log format:
@@ -149,16 +160,20 @@ This log message is packed with debugging information:
     of recordings, and the IDs of each recording. For GCed recordings, the
     sizes are omitted (as this information is not stored).
 
-### `thread '...' panicked` errors
+### Panic errors
 
 Errors like the one below indicate a serious bug in Moonfire NVR. Please
 file a bug if you see one. It's helpful to set the `RUST_BACKTRACE`
 environment variable to include more information.
 
 ```
-thread 's-peck_west-main' panicked at 'should always be an unindexed sample', /usr/local/src/moonfire-nvr/server/db/writer.rs:750:54
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+E20210304 11:09:29.230 main s-peck_west-main] panic at 'src/moonfire-nvr/server/db/writer.rs:750:54': should always be an unindexed sample
+
+(set environment variable RUST_BACKTRACE=1 to see backtraces)"
 ```
+
+In this case, a stream thread (one starting with `s-`) panicked. That stream
+won't record again until Moonfire NVR is restarted.
 
 ### Slow operations
 
