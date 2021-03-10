@@ -45,11 +45,14 @@ Logging options are controlled by environment variables:
     accepted are `google` (the default, like the Google
     [glog](https://github.com/google/glog) package) and `google-systemd` (a
     variation for better systemd compatibility).
+*   `MOONFIRE_COLOR` controls color coding when using the `google` format.
+    It accepts `on`, `off`, or `auto`. `auto` means to color code if stderr
+    is a terminal.
 *   Errors include a backtrace if `RUST_BACKTRACE=1` is set.
 
 If you use Docker, set these via Docker's `--env` argument.
 
-With the default `MOONFIRE_FORMAT=glog`, log lines are in the following
+With the default `MOONFIRE_FORMAT=google`, log lines are in the following
 format:
 
 ```text

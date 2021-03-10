@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 #![cfg_attr(all(feature = "nightly", test), feature(test))]
@@ -115,6 +115,12 @@ fn main() {
                 .map_err(|_| ())
                 .and_then(|s| mylog::Format::from_str(&s))
                 .unwrap_or(mylog::Format::Google),
+        )
+        .set_color(
+            ::std::env::var("MOONFIRE_COLOR")
+                .map_err(|_| ())
+                .and_then(|s| mylog::ColorMode::from_str(&s))
+                .unwrap_or(mylog::ColorMode::Auto),
         )
         .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or("info".to_owned()))
         .build();
