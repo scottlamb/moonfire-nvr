@@ -158,10 +158,10 @@ where
 #[macro_export]
 macro_rules! bail_t {
     ($t:ident, $e:expr) => {
-        return Err(failure::err_msg($e).context($crate::ErrorKind::$t).into());
+        return Err($crate::Error::from(failure::err_msg($e).context($crate::ErrorKind::$t)).into());
     };
     ($t:ident, $fmt:expr, $($arg:tt)+) => {
-        return Err(failure::err_msg(format!($fmt, $($arg)+)).context($crate::ErrorKind::$t).into());
+        return Err($crate::Error::from(failure::err_msg(format!($fmt, $($arg)+)).context($crate::ErrorKind::$t)).into());
     };
 }
 
