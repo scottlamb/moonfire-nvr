@@ -10,6 +10,14 @@ tracker](https://github.com/scottlamb/moonfire-nvr/issues) or
 [mailing list](https://groups.google.com/d/forum/moonfire-nvr-users) when
 stuck. Please also send pull requests to improve this doc.
 
+* [Building Moonfire NVR](#building-moonfire-nvr)
+    * [Downloading](#downloading)
+    * [Docker builds](#docker-builds)
+        * [Release procedure](#release-procedure)
+    * [Non-Docker setup](#non-docker-setup)
+        * [Running interactively straight from the working copy](#running-interactively-straight-from-the-working-copy)
+        * [Running as a `systemd` service](#running-as-a-systemd-service)
+
 ## Downloading
 
 See the [github page](https://github.com/scottlamb/moonfire-nvr) (in case
@@ -35,7 +43,8 @@ which you can use from its shell via `docker run` or via something like
 Visual Studio Code's Docker plugin.
 
 ```
-$ docker buildx build --load --tag=moonfire-dev --target=dev 
+$ docker buildx build \
+        --load --tag=moonfire-dev --target=dev -f docker/Dockerfile .
 ...
 $ docker run \
         --rm --interactive=true --tty \
@@ -83,6 +92,51 @@ caveats:
     $ docker buildx build --platform=linux/arm64/v8,linux/arm/v7,linux/amd64 ...
     $ docker buildx build --load --platform=arm64/v8 ...
     ```
+
+On Linux hosts (as opposed to when using Docker Desktop on macOS/Windows),
+you'll likely see errors like the ones below. The solution is to [install
+emulators](https://github.com/tonistiigi/binfmt#installing-emulators).
+
+```
+Error while loading /usr/sbin/dpkg-split: No such file or directory
+Error while loading /usr/sbin/dpkg-deb: No such file or directory
+```
+
+Moonfire NVR's `Dockerfile` has some built-in debugging tools:
+
+*   Each stage saves some debug info to `/docker-build-debug/<stage>`, and
+    the `deploy` stage preserves the output from previous stages. The debug
+    info includes:
+    *    output (stdout + stderr) from the build script, running long operations
+         through the `time` command.
+    *    `ls -laFR` of cache mounts before and after.
+*   Each stage accepts a `INVALIDATE_CACHE_<stage>` argument. You can use eg
+    `--build-arg=INVALIDATE_CACHE_BUILD_SERVER=$(date +%s)` to force the
+    `build-server` stage to be rebuilt rather than use cached Docker layers.
+
+### Release procedure
+
+Releases are currently a bit manual. From a completely clean git work tree,
+
+1.  manually verify the current commit is pushed to github's master branch and
+    has a green checkmark indicating CI passed.
+2.  update versions:
+    *   update `server/Cargo.toml` version by hand; run `cargo test --workspace`
+        to update `Cargo.lock`.
+    *   ensure `README.md`, `CHANGELOG.md`, and `guide/install.md` refer to the
+        new version.
+3.  run commands:
+    ```bash
+    VERSION=x.y.z
+    git commit -am "prepare version ${VERSION}"
+    git tag -a "v${VERSION}" -m "version ${VERSION}"
+    ./release.bash
+    git push
+    git push origin "v${VERSION}"
+    ```
+
+The `release.bash` script needs [`jq`](https://stedolan.github.io/jq/)
+installed to work.
 
 ## Non-Docker setup
 
@@ -186,7 +240,7 @@ terminal, with no extra arguments, until you abort with Ctrl-C. Likewise,
 some of the shell script's subcommands that wrap Docker (`start`, `stop`, and
 `logs`) have no parallel with this `nvr`.
 
-## Running as a `systemd` service
+### Running as a `systemd` service
 
 If you want to deploy a non-Docker build on Linux, you may want to use
 `systemd`. Create `/etc/systemd/system/moonfire-nvr.service`:

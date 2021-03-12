@@ -1204,7 +1204,7 @@ dependencies = [
 [[package]]
 name = "moonfire-ffmpeg"
 version = "0.0.1"
-source = "git+https://github.com/scottlamb/moonfire-ffmpeg#d008cebe93e12dcdeeb341cc39b60ca6daf07226"
+source = "git+https://github.com/scottlamb/moonfire-ffmpeg#16d3b7c951a5d93900d3a6731f1ad79a610ad69a"
 dependencies = [
  "cc",
  "libc",
@@ -1215,7 +1215,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-nvr"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "base64",
  "blake3",
@@ -1274,9 +1274,10 @@ dependencies = [
 [[package]]
 name = "mylog"
 version = "0.1.0"
-source = "git+https://github.com/scottlamb/mylog#45cdec74e11b05d02b55d49cfb1a8391e0f281a5"
+source = "git+https://github.com/scottlamb/mylog#2b1085cfb3bd0b1f2afe7d8085045d81858c0050"
 dependencies = [
  "chrono",
+ "libc",
  "log",
  "parking_lot",
 ]

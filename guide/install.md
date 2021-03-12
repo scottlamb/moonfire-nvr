@@ -10,7 +10,7 @@ and verify you can run the container.
 
 ```
 $ docker run --rm -it scottlamb/moonfire-nvr:latest
-moonfire-nvr 0.6.1
+moonfire-nvr 0.6.2
 security camera network video recorder
 
 USAGE:
@@ -46,14 +46,13 @@ As you set up this script, adjust the `tz` variable as appropriate for your
 time zone.
 
 ```
-sudo sh -c 'cat > /usr/local/bin/nvr' <<EOF
+sudo sh -c 'cat > /usr/local/bin/nvr' <<'EOF'
 #!/bin/bash -e
 
 tz=America/Los_Angeles
 container_name=moonfire-nvr
 image_name=scottlamb/moonfire-nvr:latest
 common_docker_run_args=(
-        --mount=type=bind,source=/etc/localtime,destination=/etc/localtime
         --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
         --user="$(id -u moonfire-nvr):$(id -g moonfire-nvr)"
         --env=RUST_BACKTRACE=1

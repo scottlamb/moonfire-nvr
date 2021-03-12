@@ -20,7 +20,7 @@ console-based (rather than web-based) configuration UI.
 
 ![screenshot](screenshot.png)
 
-Moonfire NVR is currently at version 0.6.1. Until version 1.0, there will be no
+Moonfire NVR is currently at version 0.6.2. Until version 1.0, there will be no
 compatibility guarantees: configuration and storage formats may change from
 version to version. There is an [upgrade procedure](guide/schema.md) but it is
 not for the faint of heart.

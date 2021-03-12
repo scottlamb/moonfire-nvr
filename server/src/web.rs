@@ -5,8 +5,8 @@
 use crate::body::Body;
 use crate::json;
 use crate::mp4;
-use base::clock::Clocks;
 use base::{bail_t, ErrorKind};
+use base::{clock::Clocks, format_err_t};
 use bytes::{BufMut, BytesMut};
 use core::borrow::Borrow;
 use core::str::FromStr;
@@ -34,6 +34,26 @@ use std::sync::Arc;
 use tokio_tungstenite::tungstenite;
 use url::form_urlencoded;
 use uuid::Uuid;
+
+/// An HTTP error response.
+/// This is a thin wrapper over the hyper response type; it doesn't even verify
+/// that the response actually uses a non-2xx status code. Its purpose is to
+/// allow automatic conversion from `base::Error`. Rust's orphan rule prevents
+/// this crate from defining a direct conversion from `base::Error` to
+/// `hyper::Response`.
+struct HttpError(Response<Body>);
+
+impl From<Response<Body>> for HttpError {
+    fn from(response: Response<Body>) -> Self {
+        HttpError(response)
+    }
+}
+
+impl From<base::Error> for HttpError {
+    fn from(err: base::Error) -> Self {
+        HttpError(from_base_error(err))
+    }
+}
 
 #[derive(Debug, Eq, PartialEq)]
 enum Path {
@@ -141,23 +161,28 @@ fn plain_response<B: Into<Body>>(status: http::StatusCode, body: B) -> Response<
         .expect("hardcoded head should be valid")
 }
 
-fn not_found<B: Into<Body>>(body: B) -> Response<Body> {
-    plain_response(StatusCode::NOT_FOUND, body)
+fn not_found<B: Into<Body>>(body: B) -> HttpError {
+    HttpError(plain_response(StatusCode::NOT_FOUND, body))
 }
 
-fn bad_req<B: Into<Body>>(body: B) -> Response<Body> {
-    plain_response(StatusCode::BAD_REQUEST, body)
+fn bad_req<B: Into<Body>>(body: B) -> HttpError {
+    HttpError(plain_response(StatusCode::BAD_REQUEST, body))
 }
 
-fn internal_server_err<E: Into<Error>>(err: E) -> Response<Body> {
-    plain_response(StatusCode::INTERNAL_SERVER_ERROR, err.into().to_string())
+fn internal_server_err<E: Into<Error>>(err: E) -> HttpError {
+    HttpError(plain_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        err.into().to_string(),
+    ))
 }
 
 fn from_base_error(err: base::Error) -> Response<Body> {
+    use ErrorKind::*;
     let status_code = match err.kind() {
-        ErrorKind::PermissionDenied | ErrorKind::Unauthenticated => StatusCode::UNAUTHORIZED,
-        ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
-        ErrorKind::NotFound => StatusCode::NOT_FOUND,
+        Unauthenticated => StatusCode::UNAUTHORIZED,
+        PermissionDenied => StatusCode::FORBIDDEN,
+        InvalidArgument | FailedPrecondition => StatusCode::BAD_REQUEST,
+        NotFound => StatusCode::NOT_FOUND,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     plain_response(status_code, err.to_string())
@@ -232,7 +257,7 @@ struct Caller {
     session: Option<json::Session>,
 }
 
-type ResponseResult = Result<Response<Body>, Response<Body>>;
+type ResponseResult = Result<Response<Body>, HttpError>;
 
 fn serve_json<T: serde::ser::Serialize>(req: &Request<hyper::Body>, out: &T) -> ResponseResult {
     let (mut resp, writer) = http_serve::streaming_body(&req).build();
@@ -277,12 +302,9 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
 /// This returns the request body as bytes rather than performing
 /// deserialization. Keeping the bytes allows the caller to use a `Deserialize`
 /// that borrows from the bytes.
-async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, Response<Body>> {
+async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, HttpError> {
     if *req.method() != http::method::Method::POST {
-        return Err(plain_response(
-            StatusCode::METHOD_NOT_ALLOWED,
-            "POST expected",
-        ));
+        return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
     }
     let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(t) if t == "application/json" => true,
@@ -376,10 +398,7 @@ impl Service {
         stream_type: db::StreamType,
     ) -> ResponseResult {
         if !caller.permissions.view_video {
-            return Err(plain_response(
-                StatusCode::UNAUTHORIZED,
-                "view_video required",
-            ));
+            bail_t!(PermissionDenied, "view_video required");
         }
 
         let stream_id;
@@ -389,10 +408,10 @@ impl Service {
             let mut db = self.db.lock();
             open_id = match db.open {
                 None => {
-                    return Err(plain_response(
-                        StatusCode::PRECONDITION_FAILED,
-                        "database is read-only; there are no live streams",
-                    ))
+                    bail_t!(
+                        FailedPrecondition,
+                        "database is read-only; there are no live streams"
+                    );
                 }
                 Some(o) => o.id,
             };
@@ -400,10 +419,7 @@ impl Service {
                 plain_response(StatusCode::NOT_FOUND, format!("no such camera {}", uuid))
             })?;
             stream_id = camera.streams[stream_type.index()].ok_or_else(|| {
-                plain_response(
-                    StatusCode::NOT_FOUND,
-                    format!("no such stream {}/{}", uuid, stream_type),
-                )
+                format_err_t!(NotFound, "no such stream {}/{}", uuid, stream_type)
             })?;
             db.watch_live(
                 stream_id,
@@ -525,10 +541,15 @@ impl Service {
             _ => Err(plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
                 "POST, GET, or HEAD expected",
-            )),
+            )
+            .into()),
         }
     }
 
+    /// Serves an HTTP request.
+    /// Note that the `serve` wrapper handles responses the same whether they
+    /// are `Ok` or `Err`. But returning `Err` here with the `?` operator is
+    /// convenient for error paths.
     async fn serve_inner(
         self: Arc<Self>,
         req: Request<::hyper::Body>,
@@ -586,6 +607,12 @@ impl Service {
         Ok(response)
     }
 
+    /// Serves an HTTP request.
+    /// An error return from this method causes hyper to abruptly drop the
+    /// HTTP connection rather than respond. That's not terribly useful, so this
+    /// method always returns `Ok`. It delegates to a `serve_inner` which is
+    /// allowed to generate `Err` results with the `?` operator, but returns
+    /// them to hyper as `Ok` results.
     pub async fn serve(
         self: Arc<Self>,
         req: Request<::hyper::Body>,
@@ -600,7 +627,10 @@ impl Service {
             Ok(c) => c,
             Err(e) => return Ok(from_base_error(e)),
         };
-        Ok(self.serve_inner(req, p, caller).await.unwrap_or_else(|e| e))
+        Ok(self
+            .serve_inner(req, p, caller)
+            .await
+            .unwrap_or_else(|e| e.0))
     }
 
     fn top_level(&self, req: &Request<::hyper::Body>, caller: Caller) -> ResponseResult {
@@ -619,10 +649,7 @@ impl Service {
 
         if camera_configs {
             if !caller.permissions.read_camera_configs {
-                return Err(plain_response(
-                    StatusCode::UNAUTHORIZED,
-                    "read_camera_configs required",
-                ));
+                bail_t!(PermissionDenied, "read_camera_configs required");
             }
         }
 
@@ -756,10 +783,7 @@ impl Service {
         debug: bool,
     ) -> ResponseResult {
         if !caller.permissions.view_video {
-            return Err(plain_response(
-                StatusCode::UNAUTHORIZED,
-                "view_video required",
-            ));
+            bail_t!(PermissionDenied, "view_video required");
         }
         let (stream_id, camera_name);
         {
@@ -884,10 +908,11 @@ impl Service {
                         };
                         if let Some(end) = s.end_time {
                             if end > cur_off {
-                                return Err(plain_response(
-                                    StatusCode::BAD_REQUEST,
-                                    format!("end time {} is beyond specified recordings", end),
-                                ));
+                                bail_t!(
+                                    InvalidArgument,
+                                    "end time {} is beyond specified recordings",
+                                    end
+                                );
                             }
                         }
                     }
@@ -1019,6 +1044,10 @@ impl Service {
         ))
     }
 
+    /// Returns true iff the client is connected over `https`.
+    /// Moonfire NVR currently doesn't directly serve `https`, but it supports
+    /// proxies which set the `X-Forwarded-Proto` header. See `guide/secure.md`
+    /// for more information.
     fn is_secure(&self, req: &Request<::hyper::Body>) -> bool {
         self.trust_forward_hdrs
             && req
@@ -1124,10 +1153,7 @@ impl Service {
 
     async fn post_signals(&self, mut req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
         if !caller.permissions.update_signals {
-            return Err(plain_response(
-                StatusCode::UNAUTHORIZED,
-                "update_signals required",
-            ));
+            bail_t!(PermissionDenied, "update_signals required");
         }
         let r = extract_json_body(&mut req).await?;
         let r: json::PostSignalsRequest =
@@ -1180,6 +1206,18 @@ impl Service {
         serve_json(req, &signals)
     }
 
+    /// Authenticates the session (if any) and returns a Caller.
+    ///
+    /// If there's no session,
+    /// 1.  if `allow_unauthenticated_permissions` is configured, returns okay
+    ///     with those permissions.
+    /// 2.  if the caller specifies `unauth_path`, returns okay with no
+    ///     permissions.
+    /// 3.  returns `Unauthenticated` error otherwise.
+    ///
+    /// Does no authorization. That is, this doesn't check that the returned
+    /// permissions are sufficient for whatever operation the caller is
+    /// performing.
     fn authenticate(
         &self,
         req: &Request<hyper::Body>,
@@ -1188,22 +1226,28 @@ impl Service {
         if let Some(sid) = extract_sid(req) {
             let authreq = self.authreq(req);
 
-            // TODO: real error handling! this assumes all errors are due to lack of
-            // authentication, when they could be logic errors in SQL or such.
-            if let Ok((s, u)) = self
+            match self
                 .db
                 .lock()
                 .authenticate_session(authreq.clone(), &sid.hash())
             {
-                return Ok(Caller {
-                    permissions: s.permissions.clone(),
-                    session: Some(json::Session {
-                        username: u.username.clone(),
-                        csrf: s.csrf(),
-                    }),
-                });
-            }
-            info!("authenticate_session failed");
+                Ok((s, u)) => {
+                    return Ok(Caller {
+                        permissions: s.permissions.clone(),
+                        session: Some(json::Session {
+                            username: u.username.clone(),
+                            csrf: s.csrf(),
+                        }),
+                    })
+                }
+                Err(e) if e.kind() == base::ErrorKind::Unauthenticated => {
+                    // Log the specific reason this session is unauthenticated.
+                    // Don't let the API client see it, as it may have a
+                    // revocation reason that isn't for their eyes.
+                    warn!("Session authentication failed: {:?}", &e);
+                }
+                Err(e) => return Err(e),
+            };
         }
 
         if let Some(s) = self.allow_unauthenticated_permissions.as_ref() {

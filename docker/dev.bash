@@ -13,6 +13,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 packages=()
 
+mkdir -p /docker-build-debug/dev
+ls -laFR /var/cache/apt > /docker-build-debug/dev/var-cache-apt-before
+
 if [[ "${BUILDARCH}" != "${TARGETARCH}" ]]; then
     # Set up cross compilation.
     case "${TARGETARCH}" in
@@ -44,7 +47,7 @@ if [[ "${BUILDARCH}" != "${TARGETARCH}" ]]; then
     *) host_is_port=1 ;;
     esac
 
-    dpkg --add-architecture "${dpkg_arch}"
+    time dpkg --add-architecture "${dpkg_arch}"
 
     if [[ $target_is_port -ne $host_is_port ]]; then
         # Ubuntu stores non-x86 architectures at a different URL, so futz the
@@ -67,7 +70,7 @@ if [[ "${BUILDARCH}" != "${TARGETARCH}" ]]; then
     )
 fi
 
-apt-get update
+time apt-get update
 
 # Install the packages for the target architecture.
 packages+=(
@@ -78,10 +81,8 @@ packages+=(
     libncurses-dev"${apt_target_suffix}"
     libsqlite3-dev"${apt_target_suffix}"
 )
-apt-get update
-apt-get install --assume-yes --no-install-recommends "${packages[@]}"
-apt-get clean
-rm -rf /var/lib/apt/lists/*
+time apt-get update
+time apt-get install --assume-yes --no-install-recommends "${packages[@]}"
 
 # Set environment variables for cross-compiling.
 # Also set up a symlink that points to the release binary, because the
@@ -113,3 +114,5 @@ EOF
 else
     su moonfire-nvr -lc "ln -s target/release/moonfire-nvr ."
 fi
+
+ls -laFR /var/cache/apt > /docker-build-debug/dev/var-cache-apt-after

@@ -11,6 +11,16 @@ set -o xtrace
 
 export DEBIAN_FRONTEND=noninteractive
 
+mkdir --mode=1777 /docker-build-debug
+mkdir /docker-build-debug/dev-common
+exec > >(tee -i /docker-build-debug/dev-common/output) 2>&1
+ls -laFR /var/cache/apt > /docker-build-debug/dev-common/var-cache-apt-before
+
+# This file cleans apt caches after every invocation. Instead, we use a
+# buildkit cachemount to avoid putting them in the image while still allowing
+# some reuse.
+rm /etc/apt/apt.conf.d/docker-clean
+
 packages=()
 
 # Install all packages necessary for building (and some for testing/debugging).
@@ -25,10 +35,8 @@ packages+=(
     tzdata
     vim-nox
 )
-apt-get update
-apt-get install --assume-yes --no-install-recommends "${packages[@]}"
-apt-get clean
-rm -rf /var/lib/apt/lists/*
+time apt-get update
+time apt-get install --assume-yes --no-install-recommends "${packages[@]}"
 
 # Create the user. On the dev environment, allow sudo.
 groupadd \
@@ -44,9 +52,11 @@ useradd \
     moonfire-nvr
 echo 'moonfire-nvr ALL=(ALL) NOPASSWD: ALL' >>/etc/sudoers
 
+
 # Install Rust. Note curl was already installed for yarn above.
-su moonfire-nvr -lc "curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs |
-                     sh -s - -y"
+time su moonfire-nvr -lc "
+    curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs |
+    sh -s - -y"
 
 # Put configuration for the Rust build into a new ".buildrc" which is used
 # both (1) interactively from ~/.bashrc when logging into the dev container
@@ -62,3 +72,5 @@ source \$HOME/.cargo/env
 export CARGO_BUILD_TARGET_DIR=/var/lib/moonfire-nvr/target
 EOF
 chown moonfire-nvr:moonfire-nvr /var/lib/moonfire-nvr/.buildrc
+
+ls -laFR /var/cache/apt > /docker-build-debug/dev-common/var-cache-apt-after
