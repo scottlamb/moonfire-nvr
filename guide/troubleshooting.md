@@ -46,8 +46,8 @@ Logging options are controlled by environment variables:
     [glog](https://github.com/google/glog) package) and `google-systemd` (a
     variation for better systemd compatibility).
 *   `MOONFIRE_COLOR` controls color coding when using the `google` format.
-    It accepts `on`, `off`, or `auto`. `auto` means to color code if stderr
-    is a terminal.
+    It accepts `always`, `never`, or `auto`. `auto` means to color code if
+    stderr is a terminal.
 *   Errors include a backtrace if `RUST_BACKTRACE=1` is set.
 
 If you use Docker, set these via Docker's `--env` argument.
@@ -59,8 +59,8 @@ format:
 I20210308 21:31:24.255 main moonfire_nvr] Success.
 LYYYYmmdd HH:MM:SS.FFF TTTT PPPPPPPPPPPP] ...
 L    = level:
-       E = error
-       W = warn
+       E = error; when color mode is on, the message will be bright red.
+       W = warn;  "    "     "    "  "   "   "       "    "  "      yellow.
        I = info
        D = debug
        T = trace
@@ -72,7 +72,7 @@ MM   = minute
 SS   = second
 FFF  = fractional portion of the second
 TTTT = thread name (if set) or tid (otherwise)
-PPPP = module path
+PPPP = log target (usually a module path)
 ...  = message body
 ```
 
