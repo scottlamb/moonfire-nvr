@@ -20,7 +20,7 @@ set_latest() {
 }
 
 version="$(git describe --dirty)"
-if [[ ! "${version}" =~ v[0-9]+\.[0-9]+\.[0-9]+-dirty ]]; then
+if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Expected a vX.Y.Z version tag, got ${version}." >&2
     exit 1
 fi
