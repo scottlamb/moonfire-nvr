@@ -10,7 +10,7 @@ and verify you can run the container.
 
 ```
 $ docker run --rm -it scottlamb/moonfire-nvr:latest
-moonfire-nvr 0.6.1
+moonfire-nvr 0.6.2
 security camera network video recorder
 
 USAGE:

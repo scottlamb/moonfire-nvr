@@ -6,13 +6,15 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## `v0.6.2` (in progress)
+## `v0.6.2`
 
-*   Fix panics when a stream's PTS has extreme jumps (#113)
+*   Fix panics when a stream's PTS has extreme jumps
+    ([#113](https://github.com/scottlamb/moonfire-nvr/issues/113))
 *   Improve logging. Console log output is now color-coded. ffmpeg errors
     and panics are now logged in the same way as other messages.
-*   Fix an error that could prevent the `moonfire-nvr check --delete-orphan-rows`
-    command from actually deleting rows.
+*   Fix an error that could prevent the
+    `moonfire-nvr check --delete-orphan-rows` command from actually deleting
+    rows.
 
 ## `v0.6.1`
 
@@ -23,7 +25,8 @@ Each release is tagged in Git and on the Docker repository
     can be caused by filesystem corruption.
 *   Set the page size to 16 KiB on `moonfire-nvr init` and
     `moonfire-nvr upgrade`. This improves performance.
-*   Fix mangled favicons (#105)
+*   Fix mangled favicons
+    ([#105](https://github.com/scottlamb/moonfire-nvr/issues/105))
 
 ## `v0.6.0`
 
