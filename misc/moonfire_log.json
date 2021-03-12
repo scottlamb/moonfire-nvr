@@ -3,11 +3,14 @@
     "moonfire_log": {
         "title": "Moonfire Log",
         "description": "The Moonfire NVR log format.",
-        "timestamp-format": ["%Y%m%d %H:%M:%S.%L"],
+        "timestamp-format": [
+            "%Y%m%d %H:%M:%S.%L",
+            "%m%d %H%M%S.%L"
+        ],
         "url": "https://github.com/scottlamb/mylog/blob/master/src/lib.rs",
         "regex": {
             "std": {
-                "pattern": "^(?<level>[EWIDT])(?<timestamp>\\d{4} \\d{2}\\d{2}\\d{2}\\.\\d{3}) +(?<thread>[^ ]+) (?<module_path>[^ \\]]+)\\] (?<body>(?:.|\\n)*)"
+                "pattern": "^(?<level>[EWIDT])(?<timestamp>\\d{8} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}|\\d{4} \\d{6}\\.\\d{3}) +(?<thread>[^ ]+) (?<module_path>[^ \\]]+)\\] (?<body>(?:.|\\n)*)"
             }
         },
         "level-field": "level",
@@ -32,6 +35,9 @@
         "sample": [
             {
                 "line": "I20210308 21:31:24.255 main moonfire_nvr] Success."
+            },
+            {
+                "line": "I0308 213124.255 main moonfire_nvr] Older style."
             },
             {
                 "line": "W20210303 22:20:53.081 s-west_side-main moonfire_base::clock] getting next packet took PT8.153173367S!"
