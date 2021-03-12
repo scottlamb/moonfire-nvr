@@ -132,7 +132,7 @@ Releases are currently a bit manual. From a completely clean git work tree,
     git tag -a "v${VERSION}" -m "version ${VERSION}"
     ./release.bash
     git push
-    git push "v${VERSION}"
+    git push origin "v${VERSION}"
     ```
 
 The `release.bash` script needs [`jq`](https://stedolan.github.io/jq/)
