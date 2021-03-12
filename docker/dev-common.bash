@@ -11,6 +11,11 @@ set -o xtrace
 
 export DEBIAN_FRONTEND=noninteractive
 
+# This file cleans apt caches after every invocation. Instead, we use a
+# buildkit cachemount to avoid putting them in the image while still allowing
+# some reuse.
+rm /etc/apt/apt.conf.d/docker-clean
+
 packages=()
 
 # Install all packages necessary for building (and some for testing/debugging).
@@ -27,8 +32,6 @@ packages+=(
 )
 apt-get update
 apt-get install --assume-yes --no-install-recommends "${packages[@]}"
-apt-get clean
-rm -rf /var/lib/apt/lists/*
 
 # Create the user. On the dev environment, allow sudo.
 groupadd \

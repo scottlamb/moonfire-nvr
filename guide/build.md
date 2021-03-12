@@ -35,7 +35,8 @@ which you can use from its shell via `docker run` or via something like
 Visual Studio Code's Docker plugin.
 
 ```
-$ docker buildx build --load --tag=moonfire-dev --target=dev 
+$ docker buildx build \
+        --load --tag=moonfire-dev --target=dev -f docker/Dockerfile .
 ...
 $ docker run \
         --rm --interactive=true --tty \
@@ -83,6 +84,15 @@ caveats:
     $ docker buildx build --platform=linux/arm64/v8,linux/arm/v7,linux/amd64 ...
     $ docker buildx build --load --platform=arm64/v8 ...
     ```
+
+On Linux hosts (as opposed to when using Docker Desktop on macOS/Windows),
+you'll likely see errors like the ones below. The solution is to [install
+emulators](https://github.com/tonistiigi/binfmt#installing-emulators).
+
+```
+Error while loading /usr/sbin/dpkg-split: No such file or directory
+Error while loading /usr/sbin/dpkg-deb: No such file or directory
+```
 
 ## Non-Docker setup
 

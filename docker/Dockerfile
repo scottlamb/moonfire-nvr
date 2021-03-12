@@ -14,8 +14,9 @@ ARG BUILD_UID=1000
 ARG BUILD_GID=1000
 ENV LC_ALL=C.UTF-8
 COPY docker/dev-common.bash /
-RUN /dev-common.bash
-CMD	[ "/bin/bash", "--login" ]
+RUN --mount=type=cache,id=var-cache-apt,target=/var/cache/apt,sharing=locked \
+    /dev-common.bash
+CMD [ "/bin/bash", "--login" ]
 
 # "dev" is a full development environment, suitable for shelling into or
 # using with the VS Code container plugin.
@@ -24,7 +25,8 @@ ARG BUILDARCH
 ARG TARGETARCH
 LABEL maintainer="slamb@slamb.org"
 COPY docker/dev.bash /
-RUN /dev.bash
+RUN --mount=type=cache,id=var-cache-apt,target=/var/cache/apt,sharing=locked \
+    /dev.bash
 USER moonfire-nvr:moonfire-nvr
 WORKDIR /var/lib/moonfire-nvr
 
@@ -38,12 +40,18 @@ RUN --mount=type=tmpfs,target=/var/lib/moonfire-nvr/src/ui/node_modules \
 
 # Build the Rust components. Note that dev.sh set up an environment variable
 # in .buildrc that similarly changes the target dir path.
+#
+# The "mode" argument to cache mounts doesn't seem to work reliably (as of
+# Docker version 20.10.5, build 55c4c88, using a docker-container builder),
+# thus the chmod command.
 FROM --platform=$BUILDPLATFORM dev AS build-server
 LABEL maintainer="slamb@slamb.org"
-RUN --mount=type=cache,id=target,target=/var/lib/moonfire-nvr/target,sharing=locked,mode=1777 \
+RUN --mount=type=cache,id=target,target=/var/lib/moonfire-nvr/target,sharing=locked,mode=777 \
+    --mount=type=cache,id=cargo-registry,target=/var/lib/moonfire-nvr/.cargo/registry,sharing=locked,mode=777 \
     --mount=type=bind,source=server,target=/var/lib/moonfire-nvr/src/server,readonly \
     bash -c 'set -o xtrace && \
              source ~/.buildrc && \
+             sudo chmod 777 /var/lib/moonfire-nvr/{.cargo/registry,target} && \
              cd src/server && \
              cargo test && \
              cargo build --release && \
@@ -53,7 +61,8 @@ RUN --mount=type=cache,id=target,target=/var/lib/moonfire-nvr/target,sharing=loc
 FROM --platform=$TARGETPLATFORM ubuntu:20.04 AS deploy
 LABEL maintainer="slamb@slamb.org"
 ENV LC_ALL=C.UTF-8
-RUN export DEBIAN_FRONTEND=noninteractive && \
+RUN --mount=type=cache,id=var-cache-apt,target=/var/cache/apt,sharing=locked \
+    export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
     apt-get install --assume-yes --no-install-recommends \
         ffmpeg \
@@ -64,7 +73,6 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
         sqlite3 \
         tzdata \
         vim-nox && \
-    apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     ln -s moonfire-nvr /usr/local/bin/nvr
 COPY --from=build-server /usr/local/bin/moonfire-nvr /usr/local/bin/moonfire-nvr
