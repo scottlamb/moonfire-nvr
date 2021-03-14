@@ -183,7 +183,7 @@ export async function logout(req: LogoutRequest, init: RequestInit) {
 export interface Recording {
   startId: number;
   endId?: number;
-  firstUncommited?: number;
+  firstUncommitted?: number;
   growing?: boolean;
   openId: number;
   startTime90k: number;
@@ -256,7 +256,7 @@ export function recordingUrl(
   if (r.endId !== undefined) {
     s += `-${r.endId}`;
   }
-  if (r.firstUncommited !== undefined) {
+  if (r.firstUncommitted !== undefined) {
     s += `@${r.openId}`;
   }
   return withQuery(`/api/cameras/${cameraUuid}/${stream}/view.mp4`, {
