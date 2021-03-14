@@ -153,7 +153,8 @@ const Main = ({ cameras, timeZoneName }: Props) => {
             src={api.recordingUrl(
               activeRecording[0].camera.uuid,
               activeRecording[0].streamType,
-              activeRecording[1]
+              activeRecording[1],
+              range90k!
             )}
           />
         </Modal>

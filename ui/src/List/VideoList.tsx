@@ -94,8 +94,12 @@ const VideoList = ({
           key={r.startId}
           onClick={() => setActiveRecording([stream, r])}
         >
-          <TableCell>{formatTime(r.startTime90k)}</TableCell>
-          <TableCell>{formatTime(r.endTime90k)}</TableCell>
+          <TableCell>
+            {formatTime(Math.max(r.startTime90k, range90k![0]))}
+          </TableCell>
+          <TableCell>
+            {formatTime(Math.min(r.endTime90k, range90k![1]))}
+          </TableCell>
           <TableCell>
             {vse.width}x{vse.height}
           </TableCell>

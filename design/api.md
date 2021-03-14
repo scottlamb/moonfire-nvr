@@ -296,7 +296,7 @@ arbitrary order. Each recording object has the following properties:
     Note this may be greater than the requested `endTime90k` if this recording
     was ongoing at the requested time.
 *   `videoSampleEntryId`: a reference to an entry in the `videoSampleEntries`
-    map.mp4` URL.
+    object.
 *   `videoSamples`: the number of samples (aka frames) of video in this
     recording.
 *   `sampleFileBytes`: the number of bytes of video in this recording.

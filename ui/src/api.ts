@@ -5,7 +5,9 @@
 /**
  * @file Convenience wrapper around the Moonfire NVR API layer.
  *
- * See <tt>design/api.md</tt> for a description of the API.
+ * See <tt>design/api.md</tt> for a description of the API. Some of the
+ * documentation is copied into the docstrings here for convenience, but
+ * that doc is authoritative.
  *
  * The functions here return a Typescript discriminating union of status.
  * This seems convenient for ensuring the caller handles all possibilities.
@@ -180,16 +182,72 @@ export async function logout(req: LogoutRequest, init: RequestInit) {
   });
 }
 
+/**
+ * Represents a range of one or more recordings as in a single array entry of
+ * <tt>GET /api/cameras/&lt;uuid>/&lt;stream>/&lt;recordings></tt>.
+ */
 export interface Recording {
+  /** id of the first recording in this range. */
   startId: number;
+
+  /**
+   * If present, indicates that recordings <tt>startId, endId</tt> (inclusive)
+   * are described here.
+   */
   endId?: number;
+
+  /**
+   * If this range is not fully committed to the database, the first id that is
+   * uncommitted. This is significant because it's possible that after a crash
+   * and restart, this id will refer to a completely different recording. That
+   * recording will have a different openId.
+   */
   firstUncommitted?: number;
+
+  /**
+   * If this boolean is true, the recording endId is still being written to.
+   * Accesses to this id (such as view.mp4) may retrieve more data than
+   * described here if not bounded by duration. Additionally, if startId ==
+   * endId, the start time of the recording is "unanchored" and may change in
+   * subsequent accesses.
+   */
   growing?: boolean;
+
+  /**
+   * Each time Moonfire NVR starts in read-write mode, it is assigned an
+   * increasing "open id". This field is the open id as of when these
+   * recordings were written. This can be used to disambiguate ids referring to
+   * uncommitted recordings.
+   */
   openId: number;
+
+  /**
+   * start time of the given recording, in the wall time scale. Note this
+   * may be less than the requested startTime90k if this recording was ongoing
+   * at the requested time.
+   */
   startTime90k: number;
+
+  /**
+   * end time of the given recording, in the wall time scale. Note this may be
+   * greater than the requested endTime90k if this recording was ongoing at the
+   * requested time.
+   */
   endTime90k: number;
+
+  /**
+   * a reference to an entry in the videoSampleEntries object.
+   */
   videoSampleEntryId: number;
+
+  /**
+   * the number of samples (aka frames) of video in this recording.
+   */
   videoSamples: number;
+
+  /**
+   * the number of bytes of video in this recording.
+   */
   sampleFileBytes: number;
 }
 
@@ -247,17 +305,38 @@ export async function recordings(req: RecordingsRequest, init: RequestInit) {
   return await json<RecordingsResponse>(url, init);
 }
 
+/**
+ * Returns a URL to a <tt>.mp4</tt> of the given recording.
+ * If <tt>trimToRange90k</tt> is supplied, the <tt>.mp4</tt> will include
+ * only the portion of the recording which overlaps with the given half-open
+ * interval.
+ */
 export function recordingUrl(
   cameraUuid: string,
   stream: StreamType,
-  r: Recording
+  r: Recording,
+  trimToRange90k?: [number, number]
 ): string {
   let s = `${r.startId}`;
   if (r.endId !== undefined) {
     s += `-${r.endId}`;
   }
   if (r.firstUncommitted !== undefined) {
-    s += `@${r.openId}`;
+    s += `@${r.openId}`; // disambiguate.
+  }
+  let rel = "";
+  if (trimToRange90k !== undefined && r.startTime90k < trimToRange90k[0]) {
+    rel += trimToRange90k[0] - r.startTime90k;
+  }
+  rel += "-";
+  if (trimToRange90k !== undefined && r.endTime90k > trimToRange90k[1]) {
+    rel += trimToRange90k[1] - r.startTime90k;
+  } else if (r.growing) {
+    // View just the portion described by recording, not anything added later.
+    rel += r.endTime90k - r.startTime90k;
+  }
+  if (rel !== "-") {
+    s += "." + rel;
   }
   return withQuery(`/api/cameras/${cameraUuid}/${stream}/view.mp4`, {
     s,
