@@ -55,7 +55,12 @@ const VideoList = ({
         startTime90k: range90k[0],
         endTime90k: range90k[1],
       };
-      setResponse(await api.recordings(req, { signal }));
+      let r = await api.recordings(req, { signal });
+      if (r.status === "success") {
+        // Sort recordings in descending order by start time.
+        r.response.recordings.sort((a, b) => b.startId - a.startId);
+      }
+      setResponse(r);
     };
     if (range90k != null) {
       doFetch(abort.signal, range90k);
