@@ -62,13 +62,15 @@ const VideoList = ({
       }
       setResponse(r);
     };
-    if (range90k != null) {
+    if (range90k !== null) {
       doFetch(abort.signal, range90k);
       const timeout = setTimeout(() => setShowLoading(true), 1000);
       return () => {
         abort.abort();
         clearTimeout(timeout);
       };
+    } else {
+      setResponse(null);
     }
   }, [range90k, snackbars, stream]);
 
