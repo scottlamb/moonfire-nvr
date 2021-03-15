@@ -101,22 +101,22 @@ const VideoList = ({
           key={r.startId}
           onClick={() => setActiveRecording([stream, r])}
         >
-          <TableCell>
+          <TableCell align="right">
             {formatTime(Math.max(r.startTime90k, range90k![0]))}
           </TableCell>
-          <TableCell>
+          <TableCell align="right">
             {formatTime(Math.min(r.endTime90k, range90k![1]))}
           </TableCell>
-          <TableCell>
+          <TableCell className="opt" align="right">
             {vse.width}x{vse.height}
           </TableCell>
-          <TableCell>
+          <TableCell className="opt" align="right">
             {frameRateFmt.format(r.videoSamples / durationSec)}
           </TableCell>
-          <TableCell>
+          <TableCell className="opt" align="right">
             {sizeFmt.format(r.sampleFileBytes / 1048576)} MiB
           </TableCell>
-          <TableCell>
+          <TableCell align="right">
             {sizeFmt.format((r.sampleFileBytes / durationSec) * 0.000008)} Mbps
           </TableCell>
         </TableRow>

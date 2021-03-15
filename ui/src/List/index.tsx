@@ -22,18 +22,13 @@ import TimerangeSelector from "./TimerangeSelector";
 const useStyles = makeStyles((theme: Theme) => ({
   root: {
     display: "flex",
-    [theme.breakpoints.down("md")]: {
-      flexDirection: "column",
-    },
+    flexWrap: "wrap",
     margin: theme.spacing(2),
   },
   selectors: {
-    [theme.breakpoints.up("md")]: {
-      marginRight: theme.spacing(2),
-    },
-    [theme.breakpoints.down("md")]: {
-      marginBottom: theme.spacing(2),
-    },
+    marginRight: theme.spacing(2),
+    marginBottom: theme.spacing(2),
+    width: "max-content",
   },
   video: {
     objectFit: "contain",
@@ -46,11 +41,20 @@ const useStyles = makeStyles((theme: Theme) => ({
     color: theme.palette.primary.contrastText,
   },
   videoTable: {
-    flexGrow: 1,
+    width: "max-content",
+    height: "max-content",
     "& .MuiTableBody-root:not(:last-child):after": {
       content: "''",
       display: "block",
       height: theme.spacing(2),
+    },
+    "& tbody tr": {
+      cursor: "pointer",
+    },
+    "& .opt": {
+      [theme.breakpoints.down("lg")]: {
+        display: "none",
+      },
     },
   },
 }));
@@ -99,12 +103,18 @@ const Main = ({ cameras, timeZoneName }: Props) => {
             </TableCell>
           </TableRow>
           <TableRow>
-            <TableCell>start</TableCell>
-            <TableCell>end</TableCell>
-            <TableCell>resolution</TableCell>
-            <TableCell>fps</TableCell>
-            <TableCell>storage</TableCell>
-            <TableCell>bitrate</TableCell>
+            <TableCell align="right">start</TableCell>
+            <TableCell align="right">end</TableCell>
+            <TableCell className="opt" align="right">
+              resolution
+            </TableCell>
+            <TableCell className="opt" align="right">
+              fps
+            </TableCell>
+            <TableCell className="opt" align="right">
+              storage
+            </TableCell>
+            <TableCell align="right">bitrate</TableCell>
           </TableRow>
         </TableHead>
         <VideoList
@@ -121,10 +131,8 @@ const Main = ({ cameras, timeZoneName }: Props) => {
     setActiveRecording(null);
   };
   const recordingsTable = (
-    <TableContainer component={Paper}>
-      <Table size="small" className={classes.videoTable}>
-        {videoLists}
-      </Table>
+    <TableContainer component={Paper} className={classes.videoTable}>
+      <Table size="small">{videoLists}</Table>
     </TableContainer>
   );
   return (
