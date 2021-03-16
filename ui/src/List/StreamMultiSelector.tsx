@@ -59,7 +59,7 @@ const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
     if (!foundAny) {
       for (const c of cameras) {
         if (c.streams[st] !== undefined) {
-          updated.add(c.streams[st]);
+          updated.add(c.streams[st as StreamType]!);
         }
       }
     }
@@ -69,7 +69,7 @@ const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
     const updated = new Set(selected);
     let foundAny = false;
     for (const st in c.streams) {
-      const s = c.streams[st as StreamType];
+      const s = c.streams[st as StreamType]!;
       if (selected.has(s)) {
         updated.delete(s);
         foundAny = true;
@@ -77,7 +77,7 @@ const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
     }
     if (!foundAny) {
       for (const st in c.streams) {
-        updated.add(c.streams[st as StreamType]);
+        updated.add(c.streams[st as StreamType]!);
       }
     }
     setSelected(updated);

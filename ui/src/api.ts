@@ -140,7 +140,7 @@ export async function toplevel(init: RequestInit) {
   if (resp.status === "success") {
     resp.response.cameras.forEach((c) => {
       for (const key in c.streams) {
-        const s = c.streams[key as StreamType];
+        const s = c.streams[key as StreamType]!;
         s.camera = c;
         s.streamType = key as StreamType;
       }

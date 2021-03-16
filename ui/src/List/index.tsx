@@ -11,10 +11,7 @@ import Modal from "@material-ui/core/Modal";
 import format from "date-fns/format";
 import utcToZonedTime from "date-fns-tz/utcToZonedTime";
 import Table from "@material-ui/core/Table";
-import TableCell from "@material-ui/core/TableCell";
 import TableContainer from "@material-ui/core/TableContainer";
-import TableHead from "@material-ui/core/TableHead";
-import TableRow from "@material-ui/core/TableRow";
 import Paper from "@material-ui/core/Paper";
 import StreamMultiSelector from "./StreamMultiSelector";
 import TimerangeSelector from "./TimerangeSelector";
@@ -36,19 +33,20 @@ const useStyles = makeStyles((theme: Theme) => ({
     height: "100%",
     background: "#000",
   },
-  camera: {
-    background: theme.palette.primary.light,
-    color: theme.palette.primary.contrastText,
-  },
   videoTable: {
+    flexGrow: 1,
     width: "max-content",
     height: "max-content",
+    "& .streamHeader": {
+      background: theme.palette.primary.light,
+      color: theme.palette.primary.contrastText,
+    },
     "& .MuiTableBody-root:not(:last-child):after": {
       content: "''",
       display: "block",
       height: theme.spacing(2),
     },
-    "& tbody tr": {
+    "& tbody .recording": {
       cursor: "pointer",
     },
     "& .opt": {
@@ -95,35 +93,13 @@ const Main = ({ cameras, timeZoneName }: Props) => {
   let videoLists = [];
   for (const s of selectedStreams) {
     videoLists.push(
-      <React.Fragment key={`${s.camera.uuid}-${s.streamType}`}>
-        <TableHead>
-          <TableRow>
-            <TableCell colSpan={6} className={classes.camera}>
-              {s.camera.shortName} {s.streamType}
-            </TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell align="right">start</TableCell>
-            <TableCell align="right">end</TableCell>
-            <TableCell className="opt" align="right">
-              resolution
-            </TableCell>
-            <TableCell className="opt" align="right">
-              fps
-            </TableCell>
-            <TableCell className="opt" align="right">
-              storage
-            </TableCell>
-            <TableCell align="right">bitrate</TableCell>
-          </TableRow>
-        </TableHead>
-        <VideoList
-          stream={s}
-          range90k={range90k}
-          setActiveRecording={setActiveRecording}
-          formatTime={formatTime}
-        />
-      </React.Fragment>
+      <VideoList
+        key={`${s.camera.uuid}-${s.streamType}`}
+        stream={s}
+        range90k={range90k}
+        setActiveRecording={setActiveRecording}
+        formatTime={formatTime}
+      />
     );
   }
   const closeModal = (event: {}, reason: string) => {

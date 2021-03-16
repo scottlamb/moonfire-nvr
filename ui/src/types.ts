@@ -18,7 +18,7 @@ export interface Camera {
   uuid: string;
   shortName: string;
   description: string;
-  streams: Record<StreamType, Stream>;
+  streams: Partial<Record<StreamType, Stream>>;
 }
 
 export interface Stream {
