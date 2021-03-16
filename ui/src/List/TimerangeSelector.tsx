@@ -16,6 +16,7 @@ import FormLabel from "@material-ui/core/FormLabel";
 import Radio from "@material-ui/core/Radio";
 import RadioGroup from "@material-ui/core/RadioGroup";
 import TimePicker, { TimePickerProps } from "@material-ui/lab/TimePicker";
+import Collapse from "@material-ui/core/Collapse";
 
 interface Props {
   selectedStreams: Set<Stream>;
@@ -28,6 +29,7 @@ const MyTimePicker = (
   props: Pick<TimePickerProps, "value" | "onChange" | "disabled">
 ) => (
   <TimePicker
+    label="Time"
     views={["hours", "minutes", "seconds"]}
     renderInput={(params) => <TextField size="small" {...params} />}
     inputFormat="HH:mm:ss"
@@ -307,21 +309,25 @@ const TimerangeSelector = ({
             label="Other day"
           />
         </RadioGroup>
-        <StaticDatePicker
-          displayStaticWrapperAs="desktop"
-          value={endDate}
-          shouldDisableDate={(d: Date | null) =>
-            days.endType !== "other-day" || shouldDisableDate(d)
-          }
-          maxDate={
-            startDate === null ? today : new Date(days.allowed!.maxMillis)
-          }
-          minDate={startDate === null ? today : startDate}
-          onChange={(d: Date | null) => {
-            updateDays({ op: "set-end-day", newEndDate: d! });
-          }}
-          renderInput={(params) => <TextField {...params} variant="outlined" />}
-        />
+        <Collapse in={days.endType === "other-day"}>
+          <StaticDatePicker
+            displayStaticWrapperAs="desktop"
+            value={endDate}
+            shouldDisableDate={(d: Date | null) =>
+              days.endType !== "other-day" || shouldDisableDate(d)
+            }
+            maxDate={
+              startDate === null ? today : new Date(days.allowed!.maxMillis)
+            }
+            minDate={startDate === null ? today : startDate}
+            onChange={(d: Date | null) => {
+              updateDays({ op: "set-end-day", newEndDate: d! });
+            }}
+            renderInput={(params) => (
+              <TextField {...params} variant="outlined" />
+            )}
+          />
+        </Collapse>
         <MyTimePicker
           value={endTime}
           onChange={(newValue) => {
