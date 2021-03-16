@@ -31,12 +31,6 @@ const useStyles = makeStyles((theme: Theme) => ({
       marginBottom: theme.spacing(2),
     },
   },
-  video: {
-    objectFit: "contain",
-    width: "100%",
-    height: "100%",
-    background: "#000",
-  },
   videoTable: {
     flexGrow: 1,
     width: "max-content",
@@ -57,6 +51,21 @@ const useStyles = makeStyles((theme: Theme) => ({
       [theme.breakpoints.down("lg")]: {
         display: "none",
       },
+    },
+  },
+
+  // When there's a video modal up, make the content as large as possible
+  // without distorting it. Center it in the screen and ensure that the video
+  // element only takes up the space actually used by the content, so that
+  // clicking outside it will dismiss the modal.
+  videoModal: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    "& video": {
+      objectFit: "contain",
+      maxWidth: "100%",
+      maxHeight: "100%",
     },
   },
 }));
@@ -150,12 +159,11 @@ const Main = ({ cameras, timeZoneName, showMenu }: Props) => {
       </Box>
       {videoLists.length > 0 && recordingsTable}
       {activeRecording != null && (
-        <Modal open onClose={closeModal}>
+        <Modal open onClose={closeModal} className={classes.videoModal}>
           <video
             controls
             preload="auto"
             autoPlay
-            className={classes.video}
             src={api.recordingUrl(
               activeRecording[0].camera.uuid,
               activeRecording[0].streamType,
