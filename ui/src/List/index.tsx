@@ -15,6 +15,7 @@ import TableContainer from "@material-ui/core/TableContainer";
 import Paper from "@material-ui/core/Paper";
 import StreamMultiSelector from "./StreamMultiSelector";
 import TimerangeSelector from "./TimerangeSelector";
+import DisplaySelector from "./DisplaySelector";
 
 const useStyles = makeStyles((theme: Theme) => ({
   root: {
@@ -23,9 +24,11 @@ const useStyles = makeStyles((theme: Theme) => ({
     margin: theme.spacing(2),
   },
   selectors: {
-    marginRight: theme.spacing(2),
-    marginBottom: theme.spacing(2),
     width: "max-content",
+    "& .MuiCard-root": {
+      marginRight: theme.spacing(2),
+      marginBottom: theme.spacing(2),
+    },
   },
   video: {
     objectFit: "contain",
@@ -78,6 +81,11 @@ const Main = ({ cameras, timeZoneName }: Props) => {
   /** Selected time range. */
   const [range90k, setRange90k] = useState<[number, number] | null>(null);
 
+  const [split90k, setSplit90k] = useState<number | undefined>(undefined);
+
+  const [trimStartAndEnd, setTrimStartAndEnd] = useState(true);
+  const [timestampTrack, setTimestampTrack] = useState(true);
+
   const [activeRecording, setActiveRecording] = useState<
     [Stream, api.Recording] | null
   >(null);
@@ -97,6 +105,8 @@ const Main = ({ cameras, timeZoneName }: Props) => {
         key={`${s.camera.uuid}-${s.streamType}`}
         stream={s}
         range90k={range90k}
+        split90k={split90k}
+        trimStartAndEnd={trimStartAndEnd}
         setActiveRecording={setActiveRecording}
         formatTime={formatTime}
       />
@@ -125,6 +135,14 @@ const Main = ({ cameras, timeZoneName }: Props) => {
           setRange90k={setRange90k}
           timeZoneName={timeZoneName}
         />
+        <DisplaySelector
+          split90k={split90k}
+          setSplit90k={setSplit90k}
+          trimStartAndEnd={trimStartAndEnd}
+          setTrimStartAndEnd={setTrimStartAndEnd}
+          timestampTrack={timestampTrack}
+          setTimestampTrack={setTimestampTrack}
+        />
       </div>
       {videoLists.length > 0 && recordingsTable}
       {activeRecording != null && (
@@ -138,7 +156,8 @@ const Main = ({ cameras, timeZoneName }: Props) => {
               activeRecording[0].camera.uuid,
               activeRecording[0].streamType,
               activeRecording[1],
-              range90k!
+              timestampTrack,
+              trimStartAndEnd ? range90k! : undefined
             )}
           />
         </Modal>

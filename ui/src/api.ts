@@ -315,6 +315,7 @@ export function recordingUrl(
   cameraUuid: string,
   stream: StreamType,
   r: Recording,
+  timestampTrack: boolean,
   trimToRange90k?: [number, number]
 ): string {
   let s = `${r.startId}`;
@@ -340,6 +341,6 @@ export function recordingUrl(
   }
   return withQuery(`/api/cameras/${cameraUuid}/${stream}/view.mp4`, {
     s,
-    ts: true,
+    ts: timestampTrack,
   });
 }

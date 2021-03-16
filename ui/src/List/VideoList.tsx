@@ -15,6 +15,8 @@ import Alert from "@material-ui/core/Alert";
 interface Props {
   stream: Stream;
   range90k: [number, number] | null;
+  split90k?: number;
+  trimStartAndEnd: boolean;
   setActiveRecording: (recording: [Stream, api.Recording] | null) => void;
   formatTime: (time90k: number) => string;
 }
@@ -85,6 +87,8 @@ const Row = ({
 const VideoList = ({
   stream,
   range90k,
+  split90k,
+  trimStartAndEnd,
   setActiveRecording,
   formatTime,
 }: Props) => {
@@ -102,6 +106,7 @@ const VideoList = ({
         stream: stream.streamType,
         startTime90k: range90k[0],
         endTime90k: range90k[1],
+        split90k,
       };
       let response = await api.recordings(req, { signal });
       if (response.status === "success") {
@@ -122,7 +127,7 @@ const VideoList = ({
         clearTimeout(timerId);
       };
     }
-  }, [range90k, snackbars, stream]);
+  }, [range90k, split90k, snackbars, stream]);
 
   if (state === null) {
     return null;
@@ -154,13 +159,19 @@ const VideoList = ({
       const vse = resp.videoSampleEntries[r.videoSampleEntryId];
       const durationSec = (r.endTime90k - r.startTime90k) / 90000;
       const rate = (r.sampleFileBytes / durationSec) * 0.000008;
+      const start = trimStartAndEnd
+        ? Math.max(r.startTime90k, state.range90k[0])
+        : r.startTime90k;
+      const end = trimStartAndEnd
+        ? Math.min(r.endTime90k, state.range90k[1])
+        : r.endTime90k;
       return (
         <Row
           key={r.startId}
           className="recording"
           onClick={() => setActiveRecording([stream, r])}
-          start={formatTime(Math.max(r.startTime90k, state.range90k[0]))}
-          end={formatTime(Math.min(r.endTime90k, state.range90k[1]))}
+          start={formatTime(start)}
+          end={formatTime(end)}
           resolution={`${vse.width}x${vse.height}`}
           fps={frameRateFmt.format(r.videoSamples / durationSec)}
           storage={`${sizeFmt.format(r.sampleFileBytes / 1048576)} MiB`}
