@@ -2,20 +2,21 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import React, { useMemo, useState } from "react";
-import { Camera, Stream } from "../types";
-import * as api from "../api";
-import VideoList from "./VideoList";
-import { makeStyles, Theme } from "@material-ui/core/styles";
+import Box from "@material-ui/core/Box";
 import Modal from "@material-ui/core/Modal";
-import format from "date-fns/format";
-import utcToZonedTime from "date-fns-tz/utcToZonedTime";
+import Paper from "@material-ui/core/Paper";
+import { makeStyles, Theme } from "@material-ui/core/styles";
 import Table from "@material-ui/core/Table";
 import TableContainer from "@material-ui/core/TableContainer";
-import Paper from "@material-ui/core/Paper";
+import utcToZonedTime from "date-fns-tz/utcToZonedTime";
+import format from "date-fns/format";
+import React, { useMemo, useState } from "react";
+import * as api from "../api";
+import { Camera, Stream } from "../types";
+import DisplaySelector from "./DisplaySelector";
 import StreamMultiSelector from "./StreamMultiSelector";
 import TimerangeSelector from "./TimerangeSelector";
-import DisplaySelector from "./DisplaySelector";
+import VideoList from "./VideoList";
 
 const useStyles = makeStyles((theme: Theme) => ({
   root: {
@@ -62,11 +63,11 @@ const useStyles = makeStyles((theme: Theme) => ({
 
 interface Props {
   timeZoneName: string;
-
   cameras: Camera[];
+  showMenu: boolean;
 }
 
-const Main = ({ cameras, timeZoneName }: Props) => {
+const Main = ({ cameras, timeZoneName, showMenu }: Props) => {
   const classes = useStyles();
 
   /**
@@ -123,7 +124,10 @@ const Main = ({ cameras, timeZoneName }: Props) => {
   );
   return (
     <div className={classes.root}>
-      <div className={classes.selectors}>
+      <Box
+        className={classes.selectors}
+        sx={{ display: showMenu ? "block" : "none" }}
+      >
         <StreamMultiSelector
           cameras={cameras}
           selected={selectedStreams}
@@ -143,7 +147,7 @@ const Main = ({ cameras, timeZoneName }: Props) => {
           timestampTrack={timestampTrack}
           setTimestampTrack={setTimestampTrack}
         />
-      </div>
+      </Box>
       {videoLists.length > 0 && recordingsTable}
       {activeRecording != null && (
         <Modal open onClose={closeModal}>

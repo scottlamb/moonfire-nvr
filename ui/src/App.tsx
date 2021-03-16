@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import Container from "@material-ui/core/Container";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useReducer, useState } from "react";
 import * as api from "./api";
 import MoonfireMenu from "./AppMenu";
 import Login from "./Login";
@@ -19,6 +19,7 @@ type LoginState =
   | "user-requested-login";
 
 function App() {
+  const [showMenu, toggleShowMenu] = useReducer((m: boolean) => !m, true);
   const [session, setSession] = useState<Session | null>(null);
   const [cameras, setCameras] = useState<Camera[] | null>(null);
   const [timeZoneName, setTimeZoneName] = useState<string | null>(null);
@@ -96,6 +97,7 @@ function App() {
             setLoginState("user-requested-login");
           }}
           logout={logout}
+          menuClick={toggleShowMenu}
         />
       </AppBar>
       <Login
@@ -121,7 +123,11 @@ function App() {
         </Container>
       )}
       {cameras != null && cameras.length > 0 && (
-        <List cameras={cameras} timeZoneName={timeZoneName!} />
+        <List
+          cameras={cameras}
+          showMenu={showMenu}
+          timeZoneName={timeZoneName!}
+        />
       )}
     </>
   );
