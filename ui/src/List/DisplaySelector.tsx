@@ -49,6 +49,7 @@ const DisplaySelector = (props: Props) => {
         </InputLabel>
         <Select
           labelId="split90k-label"
+          label="Max video duration"
           id="split90k"
           value={props.split90k}
           onChange={(e) => props.setSplit90k(e.target.value)}
