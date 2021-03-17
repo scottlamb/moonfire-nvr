@@ -21,6 +21,15 @@ interface Props {
   setTimestampTrack: (timestampTrack: boolean) => void;
 }
 
+const DURATIONS: [string, number | undefined][] = [
+  ["1 hour", 60 * 60 * 90000],
+  ["4 hours", 4 * 60 * 60 * 90000],
+  ["24 hours", 24 * 60 * 60 * 90000],
+  ["infinite", undefined],
+];
+
+export const DEFAULT_DURATION = DURATIONS[0][1];
+
 /**
  * Returns a card for setting options relating to how videos are displayed.
  */
@@ -34,18 +43,6 @@ const DisplaySelector = (props: Props) => {
         flexDirection: "column",
       }}
     >
-      {/*<TextField
-        select
-        label="Max video duration"
-        value={split90k}
-        onChange={(e) => setSplit90k(e.target.value)}
-        variant="outlined"
-      >
-        <MenuItem value={60 * 60 * 90000}>1 hour</MenuItem>
-        <MenuItem value={4 * 60 * 60 * 90000}>4 hours</MenuItem>
-        <MenuItem value={24 * 60 * 60 * 90000}>24 hours</MenuItem>
-        <MenuItem value={undefined}>infinite</MenuItem>
-      </TextField>*/}
       <FormControl fullWidth variant="outlined">
         <InputLabel id="split90k-label" shrink>
           Max video duration
@@ -57,10 +54,11 @@ const DisplaySelector = (props: Props) => {
           onChange={(e) => props.setSplit90k(e.target.value)}
           displayEmpty
         >
-          <MenuItem value={60 * 60 * 90000}>1 hour</MenuItem>
-          <MenuItem value={4 * 60 * 60 * 90000}>4 hours</MenuItem>
-          <MenuItem value={24 * 60 * 60 * 90000}>24 hours</MenuItem>
-          <MenuItem value={undefined}>infinite</MenuItem>
+          {DURATIONS.map(([l, d]) => (
+            <MenuItem key={l} value={d}>
+              {l}
+            </MenuItem>
+          ))}
         </Select>
       </FormControl>
       <FormControlLabel

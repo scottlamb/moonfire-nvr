@@ -13,7 +13,7 @@ import format from "date-fns/format";
 import React, { useMemo, useState } from "react";
 import * as api from "../api";
 import { Camera, Stream } from "../types";
-import DisplaySelector from "./DisplaySelector";
+import DisplaySelector, { DEFAULT_DURATION } from "./DisplaySelector";
 import StreamMultiSelector from "./StreamMultiSelector";
 import TimerangeSelector from "./TimerangeSelector";
 import VideoList from "./VideoList";
@@ -91,10 +91,10 @@ const Main = ({ cameras, timeZoneName, showMenu }: Props) => {
   /** Selected time range. */
   const [range90k, setRange90k] = useState<[number, number] | null>(null);
 
-  const [split90k, setSplit90k] = useState<number | undefined>(undefined);
+  const [split90k, setSplit90k] = useState(DEFAULT_DURATION);
 
   const [trimStartAndEnd, setTrimStartAndEnd] = useState(true);
-  const [timestampTrack, setTimestampTrack] = useState(true);
+  const [timestampTrack, setTimestampTrack] = useState(false);
 
   const [activeRecording, setActiveRecording] = useState<
     [Stream, api.Recording] | null
