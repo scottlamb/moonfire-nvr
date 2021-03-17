@@ -31,7 +31,7 @@ const MyTimePicker = (
   <TimePicker
     label="Time"
     views={["hours", "minutes", "seconds"]}
-    renderInput={(params) => <TextField size="small" {...params} />}
+    renderInput={(params) => <TextField fullWidth size="small" {...params} />}
     inputFormat="HH:mm:ss"
     mask="__:__:__"
     ampm={false}
