@@ -80,10 +80,8 @@ function App() {
           setTimeZoneName(resp.response.timeZoneName);
       }
     };
-    console.debug("Toplevel fetch num", fetchSeq);
     doFetch(abort.signal);
     return () => {
-      console.log("Aborting toplevel fetch num", fetchSeq);
       abort.abort();
     };
   }, [fetchSeq]);

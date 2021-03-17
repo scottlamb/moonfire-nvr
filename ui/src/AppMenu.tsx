@@ -44,7 +44,6 @@ function MoonfireMenu(props: Props) {
   };
 
   const handleClose = () => {
-    console.log("handleAccountMenuClose");
     setAccountMenuAnchor(null);
   };
 

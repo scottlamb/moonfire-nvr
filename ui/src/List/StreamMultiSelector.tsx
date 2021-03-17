@@ -38,7 +38,6 @@ const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
   const theme = useTheme();
   const classes = useStyles();
   const setStream = (s: Stream, checked: boolean) => {
-    console.log("toggle", s.camera.shortName, s.streamType);
     const updated = new Set(selected);
     if (checked) {
       updated.add(s);
@@ -110,7 +109,6 @@ const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
     <Card
       sx={{
         padding: theme.spacing(1),
-        marginBottom: theme.spacing(2),
       }}
     >
       <table className={classes.streamSelectorTable}>

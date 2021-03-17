@@ -278,7 +278,6 @@ const TimerangeSelector = ({
         <MyTimePicker
           value={startTime}
           onChange={(newValue) => {
-            console.log("start time onChange", newValue);
             if (newValue === null || isFinite((newValue as Date).getTime())) {
               setStartTime(newValue);
             }

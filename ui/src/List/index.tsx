@@ -123,7 +123,6 @@ const Main = ({ cameras, timeZoneName, showMenu }: Props) => {
     );
   }
   const closeModal = (event: {}, reason: string) => {
-    console.log("closeModal", reason);
     setActiveRecording(null);
   };
   const recordingsTable = (
