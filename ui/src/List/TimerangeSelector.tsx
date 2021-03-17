@@ -9,11 +9,7 @@ import { zonedTimeToUtc } from "date-fns-tz";
 import { addDays, addMilliseconds, differenceInMilliseconds } from "date-fns";
 import startOfDay from "date-fns/startOfDay";
 import Card from "@material-ui/core/Card";
-import {
-  ThemeProvider,
-  createMuiTheme,
-  useTheme,
-} from "@material-ui/core/styles";
+import { useTheme } from "@material-ui/core/styles";
 import TextField from "@material-ui/core/TextField";
 import FormControlLabel from "@material-ui/core/FormControlLabel";
 import FormLabel from "@material-ui/core/FormLabel";
@@ -217,17 +213,6 @@ const TimerangeSelector = ({
   setRange90k,
 }: Props) => {
   const theme = useTheme();
-
-  // StaticDatePicker doesn't have an obvious way to use the secondary theme
-  // colors, so make a new theme with swapped colors.
-  const swappedTheme = createMuiTheme({
-    ...theme,
-    palette: {
-      ...theme.palette,
-      primary: theme.palette.secondary,
-      secondary: theme.palette.primary,
-    },
-  });
   const [days, updateDays] = React.useReducer(daysStateReducer, {
     allowed: null,
     rangeMillis: null,
@@ -275,25 +260,21 @@ const TimerangeSelector = ({
     <Card sx={{ padding: theme.spacing(1) }}>
       <div>
         <FormLabel component="legend">From</FormLabel>
-        <ThemeProvider theme={swappedTheme}>
-          <StaticDatePicker
-            displayStaticWrapperAs="desktop"
-            value={startDate}
-            shouldDisableDate={shouldDisableDate}
-            maxDate={
-              days.allowed === null ? today : new Date(days.allowed.maxMillis)
-            }
-            minDate={
-              days.allowed === null ? today : new Date(days.allowed.minMillis)
-            }
-            onChange={(d: Date | null) => {
-              updateDays({ op: "set-start-day", newStartDate: d });
-            }}
-            renderInput={(params) => (
-              <TextField {...params} variant="outlined" />
-            )}
-          />
-        </ThemeProvider>
+        <StaticDatePicker
+          displayStaticWrapperAs="desktop"
+          value={startDate}
+          shouldDisableDate={shouldDisableDate}
+          maxDate={
+            days.allowed === null ? today : new Date(days.allowed.maxMillis)
+          }
+          minDate={
+            days.allowed === null ? today : new Date(days.allowed.minMillis)
+          }
+          onChange={(d: Date | null) => {
+            updateDays({ op: "set-start-day", newStartDate: d });
+          }}
+          renderInput={(params) => <TextField {...params} variant="outlined" />}
+        />
         <MyTimePicker
           value={startTime}
           onChange={(newValue) => {
@@ -328,25 +309,23 @@ const TimerangeSelector = ({
           />
         </RadioGroup>
         <Collapse in={days.endType === "other-day"}>
-          <ThemeProvider theme={swappedTheme}>
-            <StaticDatePicker
-              displayStaticWrapperAs="desktop"
-              value={endDate}
-              shouldDisableDate={(d: Date | null) =>
-                days.endType !== "other-day" || shouldDisableDate(d)
-              }
-              maxDate={
-                startDate === null ? today : new Date(days.allowed!.maxMillis)
-              }
-              minDate={startDate === null ? today : startDate}
-              onChange={(d: Date | null) => {
-                updateDays({ op: "set-end-day", newEndDate: d! });
-              }}
-              renderInput={(params) => (
-                <TextField {...params} variant="outlined" />
-              )}
-            />
-          </ThemeProvider>
+          <StaticDatePicker
+            displayStaticWrapperAs="desktop"
+            value={endDate}
+            shouldDisableDate={(d: Date | null) =>
+              days.endType !== "other-day" || shouldDisableDate(d)
+            }
+            maxDate={
+              startDate === null ? today : new Date(days.allowed!.maxMillis)
+            }
+            minDate={startDate === null ? today : startDate}
+            onChange={(d: Date | null) => {
+              updateDays({ op: "set-end-day", newEndDate: d! });
+            }}
+            renderInput={(params) => (
+              <TextField {...params} variant="outlined" />
+            )}
+          />
         </Collapse>
         <MyTimePicker
           value={endTime}
