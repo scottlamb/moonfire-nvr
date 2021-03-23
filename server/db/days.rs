@@ -7,8 +7,10 @@
 use crate::recording::{self, Time};
 use failure::Error;
 use log::{error, trace};
+use smallvec::SmallVec;
 use std::cmp;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::io::Write;
 use std::ops::Range;
 use std::str;
@@ -78,6 +80,72 @@ impl Value for StreamValue {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SignalValue {
+    /// `states[i]` represents the amount of time spent in state `i+1`.
+    /// (The signal is the unknown state, 0, for the remainder of the time.)
+    pub states: SmallVec<[u32; 4]>,
+}
+
+impl Value for SignalValue {
+    type Change = SignalChange;
+
+    fn apply(&mut self, c: &SignalChange) {
+        if self.states.len() < usize::try_from(c.new_state).unwrap() {
+            self.states.resize(c.new_state as usize, 0);
+        }
+
+        if c.new_state > 0 {
+            // add to new state.
+            let s = &mut self.states[c.new_state as usize - 1];
+            let n = s
+                .checked_add(c.duration)
+                .unwrap_or_else(|| panic!("add range violation: s={:?} c={:?}", s, c));
+            *s = n;
+        }
+
+        if c.old_state > 0 {
+            // remove from old state.
+            let i = usize::try_from(c.old_state).unwrap() - 1;
+            assert!(
+                self.states.len() > i,
+                "no such old state: s={:?} c={:?}",
+                self,
+                c
+            );
+            let s = &mut self.states[c.old_state as usize - 1];
+            let n = s
+                .checked_sub(c.duration)
+                .unwrap_or_else(|| panic!("sub range violation: s={:?} c={:?}", s, c));
+            *s = n;
+        }
+
+        // Normalize.
+        let mut l = self.states.len();
+        while l > 0 && self.states[l - 1] == 0 {
+            l -= 1;
+        }
+        self.states.truncate(l);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.states.is_empty()
+    }
+}
+
+/// A change to a signal within a single day.
+#[derive(Debug)]
+pub struct SignalChange {
+    /// The duration of time being altered.
+    duration: u32,
+
+    /// The state of the given range before this change.
+    old_state: i16,
+
+    /// The state of the given range after this change.
+    new_state: i16,
+}
+
 #[derive(Clone, Debug)]
 pub struct Map<V: Value>(BTreeMap<Key, V>);
 
@@ -129,16 +197,14 @@ impl Map<StreamValue> {
     /// not much that can be done about them. (The database operation has already gone through.)
     pub(crate) fn adjust(&mut self, r: Range<Time>, sign: i64) {
         // Find first day key.
-        let mut my_tm = time::at(time::Timespec {
-            sec: r.start.unix_seconds(),
-            nsec: 0,
-        });
+        let sec = r.start.unix_seconds();
+        let mut my_tm = time::at(time::Timespec { sec, nsec: 0 });
         let day = match Key::new(my_tm) {
             Ok(d) => d,
             Err(ref e) => {
                 error!(
-                    "Unable to fill first day key from {:?}: {}; will ignore.",
-                    my_tm, e
+                    "Unable to fill first day key from {:?}->{:?}: {}; will ignore.",
+                    r.start, my_tm, e
                 );
                 return;
             }
@@ -188,10 +254,84 @@ impl Map<StreamValue> {
 }
 
 #[cfg(test)]
+impl Map<SignalValue> {
+    /// Adjusts `self` to reflect the range of the given recording.
+    /// Note that the specified range may span several days (unlike StreamValue).
+    ///
+    /// This function swallows/logs date formatting errors because they shouldn't happen and there's
+    /// not much that can be done about them. (The database operation has already gone through.)
+    pub(crate) fn adjust(&mut self, mut r: Range<i64>, old_state: i16, new_state: i16) {
+        // Find first day key.
+        let mut my_tm = time::at(time::Timespec {
+            sec: r.start,
+            nsec: 0,
+        });
+        let mut day = match Key::new(my_tm) {
+            Ok(d) => d,
+            Err(ref e) => {
+                error!(
+                    "Unable to fill first day key from {:?}->{:?}: {}; will ignore.",
+                    r.start, my_tm, e
+                );
+                return;
+            }
+        };
+
+        // Determine the start of the next day.
+        // Use mytm to hold a non-normalized representation of the boundary.
+        my_tm.tm_isdst = -1;
+        my_tm.tm_hour = 0;
+        my_tm.tm_min = 0;
+        my_tm.tm_sec = 0;
+
+        loop {
+            my_tm.tm_mday += 1;
+            let boundary = my_tm.to_timespec().sec;
+
+            // Adjust this day.
+            let duration = cmp::min(r.end, boundary) - r.start;
+            assert!(0 <= duration && duration < i32::max_value().into());
+            self.adjust_day(
+                day,
+                SignalChange {
+                    old_state,
+                    new_state,
+                    duration: u32::try_from(duration).unwrap(),
+                },
+            );
+
+            if r.end <= boundary {
+                return;
+            }
+
+            // Fill day with the next day. This requires a normalized representation so
+            // recalculate. (The C mktime(3) already normalized for us once, but .to_timespec()
+            // discarded that result.)
+            let my_tm = time::at(time::Timespec {
+                sec: boundary,
+                nsec: 0,
+            });
+            day = match Key::new(my_tm) {
+                Ok(d) => d,
+                Err(ref e) => {
+                    error!(
+                        "Unable to fill day key from {:?}: {}; will ignore.",
+                        my_tm, e
+                    );
+                    return;
+                }
+            };
+            r.start = boundary;
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use super::{Key, Map, StreamValue};
+    use super::{Key, Map, SignalValue, StreamValue};
     use crate::recording::{self, TIME_UNITS_PER_SEC};
     use crate::testutil;
+    use smallvec::smallvec;
 
     #[test]
     fn test_adjust_stream() {
@@ -299,6 +439,75 @@ mod tests {
         // Remove two days.
         m.adjust(test_time..test_time + three_min, -1);
         assert_eq!(0, m.len());
+    }
+
+    #[test]
+    fn test_adjust_signal() {
+        testutil::init();
+        let mut m: Map<SignalValue> = Map::new();
+
+        let test_sec = 1451635140i64; // 2015-12-31 23:59:00 (Pacific).
+        const SEC_PER_MIN: i64 = 60;
+        const SEC_PER_HOUR: i64 = 60 * SEC_PER_MIN;
+        let test_day1 = &Key(*b"2015-12-31");
+        let test_day2 = &Key(*b"2016-01-01");
+        let test_day3 = &Key(*b"2016-01-02");
+        m.adjust(test_sec..test_sec + 30 * SEC_PER_HOUR, 0, 3);
+        assert_eq!(3, m.len());
+        assert_eq!(
+            m.get(test_day1),
+            Some(&SignalValue {
+                states: smallvec![0, 0, SEC_PER_MIN as u32],
+            })
+        );
+        assert_eq!(
+            m.get(test_day2),
+            Some(&SignalValue {
+                states: smallvec![0, 0, (24 * SEC_PER_HOUR) as u32],
+            })
+        );
+        assert_eq!(
+            m.get(test_day3),
+            Some(&SignalValue {
+                states: smallvec![0, 0, (5 * SEC_PER_HOUR + 59 * SEC_PER_MIN) as u32],
+            })
+        );
+
+        m.adjust(1451635200..1451721600, 3, 1); // entire 2016-01-01
+        assert_eq!(3, m.len());
+        assert_eq!(
+            m.get(test_day1),
+            Some(&SignalValue {
+                states: smallvec![0, 0, SEC_PER_MIN as u32],
+            })
+        );
+        assert_eq!(
+            m.get(test_day2),
+            Some(&SignalValue {
+                states: smallvec![(24 * SEC_PER_HOUR) as u32],
+            })
+        );
+        assert_eq!(
+            m.get(test_day3),
+            Some(&SignalValue {
+                states: smallvec![0, 0, (5 * SEC_PER_HOUR + 59 * SEC_PER_MIN) as u32],
+            })
+        );
+
+        m.adjust(1451635200..1451721600, 1, 0); // entire 2016-01-01
+        assert_eq!(2, m.len());
+        assert_eq!(
+            m.get(test_day1),
+            Some(&SignalValue {
+                states: smallvec![0, 0, SEC_PER_MIN as u32],
+            })
+        );
+        assert_eq!(
+            m.get(test_day3),
+            Some(&SignalValue {
+                states: smallvec![0, 0, (5 * SEC_PER_HOUR + 59 * SEC_PER_MIN) as u32],
+            })
+        );
     }
 
     #[test]
