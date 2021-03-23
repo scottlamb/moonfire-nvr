@@ -6,7 +6,6 @@ use db::auth::SessionHash;
 use failure::{format_err, Error};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::ops::Not;
 use uuid::Uuid;
 
@@ -86,7 +85,7 @@ pub struct Stream<'a> {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
-    pub days: Option<BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+    pub days: Option<db::days::Map<db::days::StreamValue>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<StreamConfig<'a>>,
@@ -251,7 +250,7 @@ impl<'a> Stream<'a> {
     }
 
     fn serialize_days<S>(
-        days: &Option<BTreeMap<db::StreamDayKey, db::StreamDayValue>>,
+        days: &Option<db::days::Map<db::days::StreamValue>>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where

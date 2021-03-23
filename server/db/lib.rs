@@ -8,6 +8,7 @@ pub mod auth;
 pub mod check;
 mod coding;
 mod compare;
+pub mod days;
 pub mod db;
 pub mod dir;
 mod fs;
