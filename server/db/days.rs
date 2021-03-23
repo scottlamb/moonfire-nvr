@@ -4,7 +4,7 @@
 
 //! In-memory indexes by calendar day.
 
-use crate::recording::{self, Time};
+use base::time::{Duration, Time, TIME_UNITS_PER_SEC};
 use failure::Error;
 use log::{error, trace};
 use smallvec::SmallVec;
@@ -30,12 +30,12 @@ impl Key {
         let mut my_tm = time::strptime(self.as_ref(), "%Y-%m-%d").expect("days must be parseable");
         my_tm.tm_utcoff = 1; // to the time crate, values != 0 mean local time.
         my_tm.tm_isdst = -1;
-        let start = Time(my_tm.to_timespec().sec * recording::TIME_UNITS_PER_SEC);
+        let start = Time(my_tm.to_timespec().sec * TIME_UNITS_PER_SEC);
         my_tm.tm_hour = 0;
         my_tm.tm_min = 0;
         my_tm.tm_sec = 0;
         my_tm.tm_mday += 1;
-        let end = Time(my_tm.to_timespec().sec * recording::TIME_UNITS_PER_SEC);
+        let end = Time(my_tm.to_timespec().sec * TIME_UNITS_PER_SEC);
         start..end
     }
 }
@@ -64,7 +64,7 @@ pub struct StreamValue {
     /// The total duration recorded on this day. This can be 0; because frames' durations are taken
     /// from the time of the next frame, a recording that ends unexpectedly after a single frame
     /// will have 0 duration of that frame and thus the whole recording.
-    pub duration: recording::Duration,
+    pub duration: Duration,
 }
 
 impl Value for StreamValue {
@@ -84,7 +84,7 @@ impl Value for StreamValue {
 pub struct SignalValue {
     /// `states[i]` represents the amount of time spent in state `i+1`.
     /// (The signal is the unknown state, 0, for the remainder of the time.)
-    pub states: SmallVec<[u32; 4]>,
+    pub states: SmallVec<[u64; 4]>,
 }
 
 impl Value for SignalValue {
@@ -99,7 +99,7 @@ impl Value for SignalValue {
             // add to new state.
             let s = &mut self.states[c.new_state as usize - 1];
             let n = s
-                .checked_add(c.duration)
+                .checked_add(u64::try_from(c.duration.0).unwrap())
                 .unwrap_or_else(|| panic!("add range violation: s={:?} c={:?}", s, c));
             *s = n;
         }
@@ -115,7 +115,7 @@ impl Value for SignalValue {
             );
             let s = &mut self.states[c.old_state as usize - 1];
             let n = s
-                .checked_sub(c.duration)
+                .checked_sub(u64::try_from(c.duration.0).unwrap())
                 .unwrap_or_else(|| panic!("sub range violation: s={:?} c={:?}", s, c));
             *s = n;
         }
@@ -137,7 +137,7 @@ impl Value for SignalValue {
 #[derive(Debug)]
 pub struct SignalChange {
     /// The duration of time being altered.
-    duration: u32,
+    duration: Duration,
 
     /// The state of the given range before this change.
     old_state: i16,
@@ -204,7 +204,7 @@ impl Map<StreamValue> {
             Err(ref e) => {
                 error!(
                     "Unable to fill first day key from {:?}->{:?}: {}; will ignore.",
-                    r.start, my_tm, e
+                    r, my_tm, e
                 );
                 return;
             }
@@ -218,12 +218,12 @@ impl Map<StreamValue> {
         my_tm.tm_sec = 0;
         my_tm.tm_mday += 1;
         let boundary = my_tm.to_timespec();
-        let boundary_90k = boundary.sec * recording::TIME_UNITS_PER_SEC;
+        let boundary_90k = boundary.sec * TIME_UNITS_PER_SEC;
 
         // Adjust the first day.
         let first_day_delta = StreamValue {
             recordings: sign,
-            duration: recording::Duration(sign * (cmp::min(r.end.0, boundary_90k) - r.start.0)),
+            duration: Duration(sign * (cmp::min(r.end.0, boundary_90k) - r.start.0)),
         };
         self.adjust_day(day, first_day_delta);
 
@@ -247,7 +247,7 @@ impl Map<StreamValue> {
         };
         let second_day_delta = StreamValue {
             recordings: sign,
-            duration: recording::Duration(sign * (r.end.0 - boundary_90k)),
+            duration: Duration(sign * (r.end.0 - boundary_90k)),
         };
         self.adjust_day(day, second_day_delta);
     }
@@ -260,18 +260,16 @@ impl Map<SignalValue> {
     ///
     /// This function swallows/logs date formatting errors because they shouldn't happen and there's
     /// not much that can be done about them. (The database operation has already gone through.)
-    pub(crate) fn adjust(&mut self, mut r: Range<i64>, old_state: i16, new_state: i16) {
+    pub(crate) fn adjust(&mut self, mut r: Range<Time>, old_state: i16, new_state: i16) {
         // Find first day key.
-        let mut my_tm = time::at(time::Timespec {
-            sec: r.start,
-            nsec: 0,
-        });
+        let sec = r.start.unix_seconds();
+        let mut my_tm = time::at(time::Timespec { sec, nsec: 0 });
         let mut day = match Key::new(my_tm) {
             Ok(d) => d,
             Err(ref e) => {
                 error!(
                     "Unable to fill first day key from {:?}->{:?}: {}; will ignore.",
-                    r.start, my_tm, e
+                    r, my_tm, e
                 );
                 return;
             }
@@ -286,21 +284,20 @@ impl Map<SignalValue> {
 
         loop {
             my_tm.tm_mday += 1;
-            let boundary = my_tm.to_timespec().sec;
+            let boundary_90k = my_tm.to_timespec().sec * TIME_UNITS_PER_SEC;
 
             // Adjust this day.
-            let duration = cmp::min(r.end, boundary) - r.start;
-            assert!(0 <= duration && duration < i32::max_value().into());
+            let duration = Duration(cmp::min(r.end.0, boundary_90k) - r.start.0);
             self.adjust_day(
                 day,
                 SignalChange {
                     old_state,
                     new_state,
-                    duration: u32::try_from(duration).unwrap(),
+                    duration,
                 },
             );
 
-            if r.end <= boundary {
+            if r.end.0 <= boundary_90k {
                 return;
             }
 
@@ -308,7 +305,7 @@ impl Map<SignalValue> {
             // recalculate. (The C mktime(3) already normalized for us once, but .to_timespec()
             // discarded that result.)
             let my_tm = time::at(time::Timespec {
-                sec: boundary,
+                sec: Time(boundary_90k).unix_seconds(),
                 nsec: 0,
             });
             day = match Key::new(my_tm) {
@@ -321,7 +318,7 @@ impl Map<SignalValue> {
                     return;
                 }
             };
-            r.start = boundary;
+            r.start.0 = boundary_90k;
         }
     }
 }
@@ -329,8 +326,8 @@ impl Map<SignalValue> {
 #[cfg(test)]
 mod tests {
     use super::{Key, Map, SignalValue, StreamValue};
-    use crate::recording::{self, TIME_UNITS_PER_SEC};
     use crate::testutil;
+    use base::time::{Duration, Time, TIME_UNITS_PER_SEC};
     use smallvec::smallvec;
 
     #[test]
@@ -339,11 +336,11 @@ mod tests {
         let mut m: Map<StreamValue> = Map::new();
 
         // Create a day.
-        let test_time = recording::Time(130647162600000i64); // 2015-12-31 23:59:00 (Pacific).
-        let one_min = recording::Duration(60 * TIME_UNITS_PER_SEC);
-        let two_min = recording::Duration(2 * 60 * TIME_UNITS_PER_SEC);
-        let three_min = recording::Duration(3 * 60 * TIME_UNITS_PER_SEC);
-        let four_min = recording::Duration(4 * 60 * TIME_UNITS_PER_SEC);
+        let test_time = Time(130647162600000i64); // 2015-12-31 23:59:00 (Pacific).
+        let one_min = Duration(60 * TIME_UNITS_PER_SEC);
+        let two_min = Duration(2 * 60 * TIME_UNITS_PER_SEC);
+        let three_min = Duration(3 * 60 * TIME_UNITS_PER_SEC);
+        let four_min = Duration(4 * 60 * TIME_UNITS_PER_SEC);
         let test_day1 = &Key(*b"2015-12-31");
         let test_day2 = &Key(*b"2016-01-01");
         m.adjust(test_time..test_time + one_min, 1);
@@ -446,66 +443,65 @@ mod tests {
         testutil::init();
         let mut m: Map<SignalValue> = Map::new();
 
-        let test_sec = 1451635140i64; // 2015-12-31 23:59:00 (Pacific).
-        const SEC_PER_MIN: i64 = 60;
-        const SEC_PER_HOUR: i64 = 60 * SEC_PER_MIN;
+        let test_time = Time(130646844000000i64); // 2015-12-31 23:00:00 (Pacific).
+        let hr = Duration(60 * 60 * TIME_UNITS_PER_SEC);
         let test_day1 = &Key(*b"2015-12-31");
         let test_day2 = &Key(*b"2016-01-01");
         let test_day3 = &Key(*b"2016-01-02");
-        m.adjust(test_sec..test_sec + 30 * SEC_PER_HOUR, 0, 3);
+        m.adjust(test_time..test_time + hr * 30, 0, 3);
         assert_eq!(3, m.len());
         assert_eq!(
             m.get(test_day1),
             Some(&SignalValue {
-                states: smallvec![0, 0, SEC_PER_MIN as u32],
+                states: smallvec![0, 0, hr.0 as u64],
             })
         );
         assert_eq!(
             m.get(test_day2),
             Some(&SignalValue {
-                states: smallvec![0, 0, (24 * SEC_PER_HOUR) as u32],
+                states: smallvec![0, 0, 24 * hr.0 as u64],
             })
         );
         assert_eq!(
             m.get(test_day3),
             Some(&SignalValue {
-                states: smallvec![0, 0, (5 * SEC_PER_HOUR + 59 * SEC_PER_MIN) as u32],
+                states: smallvec![0, 0, 5 * hr.0 as u64],
             })
         );
 
-        m.adjust(1451635200..1451721600, 3, 1); // entire 2016-01-01
+        m.adjust(Time(130647168000000)..Time(130654944000000), 3, 1); // entire 2016-01-01
         assert_eq!(3, m.len());
         assert_eq!(
             m.get(test_day1),
             Some(&SignalValue {
-                states: smallvec![0, 0, SEC_PER_MIN as u32],
+                states: smallvec![0, 0, hr.0 as u64],
             })
         );
         assert_eq!(
             m.get(test_day2),
             Some(&SignalValue {
-                states: smallvec![(24 * SEC_PER_HOUR) as u32],
+                states: smallvec![24 * hr.0 as u64],
             })
         );
         assert_eq!(
             m.get(test_day3),
             Some(&SignalValue {
-                states: smallvec![0, 0, (5 * SEC_PER_HOUR + 59 * SEC_PER_MIN) as u32],
+                states: smallvec![0, 0, 5 * hr.0 as u64],
             })
         );
 
-        m.adjust(1451635200..1451721600, 1, 0); // entire 2016-01-01
+        m.adjust(Time(130647168000000)..Time(130654944000000), 1, 0); // entire 2016-01-01
         assert_eq!(2, m.len());
         assert_eq!(
             m.get(test_day1),
             Some(&SignalValue {
-                states: smallvec![0, 0, SEC_PER_MIN as u32],
+                states: smallvec![0, 0, hr.0 as u64],
             })
         );
         assert_eq!(
             m.get(test_day3),
             Some(&SignalValue {
-                states: smallvec![0, 0, (5 * SEC_PER_HOUR + 59 * SEC_PER_MIN) as u32],
+                states: smallvec![0, 0, 5 * hr.0 as u64],
             })
         );
     }
@@ -515,15 +511,15 @@ mod tests {
         testutil::init();
         assert_eq!(
             Key(*b"2017-10-10").bounds(), // normal day (24 hrs)
-            recording::Time(135685692000000)..recording::Time(135693468000000)
+            Time(135685692000000)..Time(135693468000000)
         );
         assert_eq!(
             Key(*b"2017-03-12").bounds(), // spring forward (23 hrs)
-            recording::Time(134037504000000)..recording::Time(134044956000000)
+            Time(134037504000000)..Time(134044956000000)
         );
         assert_eq!(
             Key(*b"2017-11-05").bounds(), // fall back (25 hrs)
-            recording::Time(135887868000000)..recording::Time(135895968000000)
+            Time(135887868000000)..Time(135895968000000)
         );
     }
 }
