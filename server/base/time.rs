@@ -281,6 +281,13 @@ impl fmt::Display for Duration {
     }
 }
 
+impl ops::Mul<i64> for Duration {
+    type Output = Self;
+    fn mul(self, rhs: i64) -> Self::Output {
+        Duration(self.0 * rhs)
+    }
+}
+
 impl ops::Add for Duration {
     type Output = Duration;
     fn add(self, rhs: Duration) -> Duration {

@@ -16,8 +16,8 @@ use std::ops::Range;
 use std::str;
 
 /// A calendar day in `YYYY-mm-dd` format.
-#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct Key([u8; 10]);
+#[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub struct Key(pub(crate) [u8; 10]);
 
 impl Key {
     fn new(tm: time::Tm) -> Result<Self, Error> {
@@ -43,6 +43,12 @@ impl Key {
 impl AsRef<str> for Key {
     fn as_ref(&self) -> &str {
         str::from_utf8(&self.0[..]).expect("days are always UTF-8")
+    }
+}
+
+impl std::fmt::Debug for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self.as_ref())
     }
 }
 
@@ -140,14 +146,14 @@ pub struct SignalChange {
     duration: Duration,
 
     /// The state of the given range before this change.
-    old_state: i16,
+    old_state: u16,
 
     /// The state of the given range after this change.
-    new_state: i16,
+    new_state: u16,
 }
 
-#[derive(Clone, Debug)]
-pub struct Map<V: Value>(BTreeMap<Key, V>);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Map<V: Value>(pub(crate) BTreeMap<Key, V>);
 
 impl<V: Value> Map<V> {
     pub fn new() -> Self {
@@ -253,14 +259,13 @@ impl Map<StreamValue> {
     }
 }
 
-#[cfg(test)]
 impl Map<SignalValue> {
     /// Adjusts `self` to reflect the range of the given recording.
     /// Note that the specified range may span several days (unlike StreamValue).
     ///
     /// This function swallows/logs date formatting errors because they shouldn't happen and there's
     /// not much that can be done about them. (The database operation has already gone through.)
-    pub(crate) fn adjust(&mut self, mut r: Range<Time>, old_state: i16, new_state: i16) {
+    pub(crate) fn adjust(&mut self, mut r: Range<Time>, old_state: u16, new_state: u16) {
         // Find first day key.
         let sec = r.start.unix_seconds();
         let mut my_tm = time::at(time::Timespec { sec, nsec: 0 });

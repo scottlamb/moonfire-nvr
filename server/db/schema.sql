@@ -412,6 +412,7 @@ create table user_session (
 
 create index user_session_uid on user_session (user_id);
 
+-- Timeseries with an enum value.
 create table signal (
   id integer primary key,
 
@@ -427,8 +428,8 @@ create table signal (
   -- uuids, such as "Elk security system watcher".
   type_uuid blob not null check (length(type_uuid) = 16),
 
-  -- a short human-readable description of the event to use in mouseovers or event
-  -- lists, such as "driveway motion" or "front door open".
+  -- a short human-readable description to use in mouseovers or event lists,
+  -- such as "driveway motion" or "front door open".
   short_name not null,
 
   unique (source_uuid, type_uuid)

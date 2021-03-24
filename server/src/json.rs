@@ -106,6 +106,10 @@ pub struct Signal<'a> {
     pub source: Uuid,
     pub type_: Uuid,
     pub short_name: &'a str,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "Signal::serialize_days")]
+    pub days: Option<&'a db::days::Map<db::days::SignalValue>>,
 }
 
 #[derive(Deserialize)]
@@ -275,13 +279,14 @@ impl<'a> Stream<'a> {
 }
 
 impl<'a> Signal<'a> {
-    pub fn wrap(s: &'a db::Signal, db: &'a db::LockedDatabase, _include_days: bool) -> Self {
+    pub fn wrap(s: &'a db::Signal, db: &'a db::LockedDatabase, include_days: bool) -> Self {
         Signal {
             id: s.id,
             cameras: (s, db),
             source: s.source,
             type_: s.type_,
             short_name: &s.short_name,
+            days: if include_days { Some(&s.days) } else { None },
         }
     }
 
@@ -302,6 +307,30 @@ impl<'a> Signal<'a> {
             map.serialize_value(match sc.type_ {
                 db::signal::SignalCameraType::Direct => "direct",
                 db::signal::SignalCameraType::Indirect => "indirect",
+            })?;
+        }
+        map.end()
+    }
+
+    fn serialize_days<S>(
+        days: &Option<&db::days::Map<db::days::SignalValue>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let days = match *days {
+            Some(d) => d,
+            None => return serializer.serialize_none(),
+        };
+        let mut map = serializer.serialize_map(Some(days.len()))?;
+        for (k, v) in days {
+            map.serialize_key(k.as_ref())?;
+            let bounds = k.bounds();
+            map.serialize_value(&SignalDayValue {
+                start_time_90k: bounds.start.0,
+                end_time_90k: bounds.end.0,
+                states: &v.states[..],
             })?;
         }
         map.end()
@@ -345,6 +374,14 @@ struct StreamDayValue {
     pub start_time_90k: i64,
     pub end_time_90k: i64,
     pub total_duration_90k: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SignalDayValue<'a> {
+    pub start_time_90k: i64,
+    pub end_time_90k: i64,
+    pub states: &'a [u64],
 }
 
 impl<'a> TopLevel<'a> {
