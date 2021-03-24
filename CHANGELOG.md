@@ -6,6 +6,10 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## `v0.6.3` (in progress)
+
+*   Compile fix for nightly rust 2021-03-14 and beyond.
+
 ## `v0.6.2`
 
 *   Fix panics when a stream's PTS has extreme jumps

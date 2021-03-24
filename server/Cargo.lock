@@ -1629,12 +1629,12 @@ dependencies = [
 [[package]]
 name = "protobuf"
 version = "3.0.0-pre"
-source = "git+https://github.com/stepancheg/rust-protobuf#5f3ed259acf9ae42014e4e49f7c4d62917685584"
+source = "git+https://github.com/stepancheg/rust-protobuf#c27743ae4ce421f5d9a61ef0d1885eface278d6c"
 
 [[package]]
 name = "protobuf-codegen"
 version = "3.0.0-pre"
-source = "git+https://github.com/stepancheg/rust-protobuf#5f3ed259acf9ae42014e4e49f7c4d62917685584"
+source = "git+https://github.com/stepancheg/rust-protobuf#c27743ae4ce421f5d9a61ef0d1885eface278d6c"
 dependencies = [
  "protobuf",
 ]
@@ -1642,7 +1642,7 @@ dependencies = [
 [[package]]
 name = "protobuf-codegen-pure"
 version = "3.0.0-pre"
-source = "git+https://github.com/stepancheg/rust-protobuf#5f3ed259acf9ae42014e4e49f7c4d62917685584"
+source = "git+https://github.com/stepancheg/rust-protobuf#c27743ae4ce421f5d9a61ef0d1885eface278d6c"
 dependencies = [
  "protobuf",
  "protobuf-codegen",
