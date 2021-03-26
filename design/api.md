@@ -490,6 +490,8 @@ followed by by a `.mp4` media segment. The following headers will be included:
 *   `X-Media-Time-Range`: the relative media start and end times of these
     frames within the recording, as a half-open interval.
 
+The server will also send pings, currently at 30-second intervals.
+
 The WebSocket will always open immediately but will receive messages only while the
 backing RTSP stream is connected.
 

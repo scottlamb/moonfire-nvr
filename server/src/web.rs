@@ -14,8 +14,8 @@ use db::dir::SampleFileDir;
 use db::{auth, recording};
 use failure::{bail, format_err, Error};
 use fnv::FnvHashMap;
-use futures::sink::SinkExt;
 use futures::stream::StreamExt;
+use futures::{future::Either, sink::SinkExt};
 use http::header::{self, HeaderValue};
 use http::{status::StatusCode, Request, Response};
 use http_serve::dir::FsDir;
@@ -443,7 +443,7 @@ impl Service {
         stream_id: i32,
         open_id: u32,
         req: hyper::Request<hyper::Body>,
-        mut sub_rx: futures::channel::mpsc::UnboundedReceiver<db::LiveSegment>,
+        sub_rx: futures::channel::mpsc::UnboundedReceiver<db::LiveSegment>,
     ) {
         let upgraded = match hyper::upgrade::on(req).await {
             Ok(u) => u,
@@ -452,33 +452,60 @@ impl Service {
                 return;
             }
         };
-        let mut ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+        let ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
             upgraded,
             tungstenite::protocol::Role::Server,
             None,
         )
         .await;
 
-        // Start the first segment at a key frame to reduce startup latency.
-        let mut start_at_key = true;
-        loop {
-            let live = match sub_rx.next().await {
-                Some(l) => l,
-                None => return,
-            };
-
-            info!("chunk: is_key={:?}", live.is_key);
-            if let Err(e) = self
-                .stream_live_m4s_chunk(open_id, stream_id, &mut ws, live, start_at_key)
-                .await
-            {
-                info!("Dropping WebSocket after error: {}", e);
-                return;
-            }
-            start_at_key = false;
+        if let Err(e) = self
+            .stream_live_m4s_ws_loop(stream_id, open_id, sub_rx, ws)
+            .await
+        {
+            info!("Dropping WebSocket after error: {}", e);
         }
     }
 
+    /// Helper for `stream_live_m4s_ws` that returns error when the stream is dropped.
+    /// The outer function logs the error.
+    async fn stream_live_m4s_ws_loop(
+        self: Arc<Self>,
+        stream_id: i32,
+        open_id: u32,
+        sub_rx: futures::channel::mpsc::UnboundedReceiver<db::LiveSegment>,
+        mut ws: tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>,
+    ) -> Result<(), Error> {
+        let keepalive = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
+            std::time::Duration::new(30, 0),
+        ));
+        let mut combo = futures::stream::select(
+            sub_rx.map(|s| Either::Left(s)),
+            keepalive.map(|_| Either::Right(())),
+        );
+
+        // On the first LiveSegment, send all the data from the previous key frame onward.
+        // For LiveSegments, it's okay to send a single non-key frame at a time.
+        let mut start_at_key = true;
+        loop {
+            let next = combo
+                .next()
+                .await
+                .unwrap_or_else(|| unreachable!("timer stream never ends"));
+            match next {
+                Either::Left(live) => {
+                    self.stream_live_m4s_chunk(open_id, stream_id, &mut ws, live, start_at_key)
+                        .await?;
+                    start_at_key = false;
+                }
+                Either::Right(_) => {
+                    ws.send(tungstenite::Message::Ping(Vec::new())).await?;
+                }
+            }
+        }
+    }
+
+    /// Sends a single live segment chunk of a `live.m4s` stream.
     async fn stream_live_m4s_chunk(
         &self,
         open_id: u32,
