@@ -192,7 +192,8 @@ create table recording (
   wall_duration_90k integer not null
       check (wall_duration_90k >= 0 and wall_duration_90k < 5*60*90000),
 
-  -- TODO: comment.
+  -- The media-time duration of the recording, relative to wall_duration_90k.
+  -- That is, media_duration_90k = wall_duration_90k + media_duration_delta_90k.
   media_duration_delta_90k integer not null,
 
   video_samples integer not null check (video_samples > 0),

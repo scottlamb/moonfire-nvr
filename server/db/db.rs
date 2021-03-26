@@ -826,7 +826,7 @@ impl LockedDatabase {
             Some(s) => {
                 let l = s.lock();
                 r.prev_media_duration =
-                    l.prev_media_duration + recording::Duration(l.wall_duration_90k.into());
+                    l.prev_media_duration + recording::Duration(l.media_duration_90k.into());
                 r.prev_runs = l.prev_runs + if l.run_offset == 0 { 1 } else { 0 };
             }
             None => {
