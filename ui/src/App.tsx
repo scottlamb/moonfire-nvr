@@ -9,25 +9,49 @@ import MoonfireMenu from "./AppMenu";
 import Login from "./Login";
 import { useSnackbars } from "./snackbars";
 import { Camera, Session } from "./types";
-import List from "./List";
+import ListActivity from "./List";
 import AppBar from "@material-ui/core/AppBar";
+import LiveActivity, { MultiviewChooser } from "./Live";
+import Drawer from "@material-ui/core/Drawer";
+import List from "@material-ui/core/List";
+import ListItem from "@material-ui/core/ListItem";
+import ListItemText from "@material-ui/core/ListItemText";
+import ListIcon from "@material-ui/icons/List";
+import Videocam from "@material-ui/icons/Videocam";
+import ListItemIcon from "@material-ui/core/ListItemIcon";
+import FilterList from "@material-ui/icons/FilterList";
+import IconButton from "@material-ui/core/IconButton";
 
-type LoginState =
+export type LoginState =
+  | "unknown"
   | "logged-in"
   | "not-logged-in"
   | "server-requires-login"
   | "user-requested-login";
 
+type Activity = "list" | "live";
+
 function App() {
-  const [showMenu, toggleShowMenu] = useReducer((m: boolean) => !m, true);
+  const [showMenu, toggleShowMenu] = useReducer((m: boolean) => !m, false);
+  const [showListSelectors, toggleShowListSelectors] = useReducer(
+    (m: boolean) => !m,
+    true
+  );
+  const [activity, setActivity] = useState<Activity>("list");
+  const [multiviewLayoutIndex, setMultiviewLayoutIndex] = useState(0);
   const [session, setSession] = useState<Session | null>(null);
   const [cameras, setCameras] = useState<Camera[] | null>(null);
   const [timeZoneName, setTimeZoneName] = useState<string | null>(null);
   const [fetchSeq, setFetchSeq] = useState(0);
-  const [loginState, setLoginState] = useState<LoginState>("not-logged-in");
+  const [loginState, setLoginState] = useState<LoginState>("unknown");
   const [error, setError] = useState<api.FetchError | null>(null);
   const needNewFetch = () => setFetchSeq((seq) => seq + 1);
   const snackbars = useSnackbars();
+
+  const clickActivity = (activity: Activity) => {
+    toggleShowMenu();
+    setActivity(activity);
+  };
 
   const onLoginSuccess = () => {
     setLoginState("logged-in");
@@ -85,19 +109,79 @@ function App() {
       abort.abort();
     };
   }, [fetchSeq]);
+  let activityMenu = null;
+  let activityMain = null;
+  if (error === null && cameras !== null && cameras.length > 0) {
+    switch (activity) {
+      case "list":
+        activityMenu = (
+          <IconButton
+            aria-label="selectors"
+            onClick={toggleShowListSelectors}
+            color="inherit"
+            size="small"
+          >
+            <FilterList />
+          </IconButton>
+        );
+        activityMain = (
+          <ListActivity
+            cameras={cameras}
+            showSelectors={showListSelectors}
+            timeZoneName={timeZoneName!}
+          />
+        );
+        break;
+      case "live":
+        activityMenu = (
+          <MultiviewChooser
+            layoutIndex={multiviewLayoutIndex}
+            onChoice={setMultiviewLayoutIndex}
+          />
+        );
+        activityMain = (
+          <LiveActivity cameras={cameras} layoutIndex={multiviewLayoutIndex} />
+        );
+        break;
+    }
+  }
   return (
     <>
       <AppBar position="static">
         <MoonfireMenu
-          session={session}
+          loginState={loginState}
           setSession={setSession}
           requestLogin={() => {
             setLoginState("user-requested-login");
           }}
           logout={logout}
           menuClick={toggleShowMenu}
+          activityMenuPart={activityMenu}
         />
       </AppBar>
+      <Drawer
+        variant="temporary"
+        open={showMenu}
+        onClose={toggleShowMenu}
+        ModalProps={{
+          keepMounted: true,
+        }}
+      >
+        <List>
+          <ListItem button key="list" onClick={() => clickActivity("list")}>
+            <ListItemIcon>
+              <ListIcon />
+            </ListItemIcon>
+            <ListItemText primary="List view" />
+          </ListItem>
+          <ListItem button key="live" onClick={() => clickActivity("live")}>
+            <ListItemIcon>
+              <Videocam />
+            </ListItemIcon>
+            <ListItemText primary="Live view (experimental)" />
+          </ListItem>
+        </List>
+      </Drawer>
       <Login
         onSuccess={onLoginSuccess}
         open={
@@ -110,7 +194,7 @@ function App() {
           );
         }}
       />
-      {error != null && (
+      {error !== null && (
         <Container>
           <h2>Error querying server</h2>
           <pre>{error.message}</pre>
@@ -120,13 +204,7 @@ function App() {
           </p>
         </Container>
       )}
-      {cameras != null && cameras.length > 0 && (
-        <List
-          cameras={cameras}
-          showMenu={showMenu}
-          timeZoneName={timeZoneName!}
-        />
-      )}
+      {activityMain}
     </>
   );
 }

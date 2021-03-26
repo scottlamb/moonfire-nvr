@@ -73,10 +73,10 @@ const useStyles = makeStyles((theme: Theme) => ({
 interface Props {
   timeZoneName: string;
   cameras: Camera[];
-  showMenu: boolean;
+  showSelectors: boolean;
 }
 
-const Main = ({ cameras, timeZoneName, showMenu }: Props) => {
+const Main = ({ cameras, timeZoneName, showSelectors }: Props) => {
   const classes = useStyles();
 
   /**
@@ -134,7 +134,7 @@ const Main = ({ cameras, timeZoneName, showMenu }: Props) => {
     <div className={classes.root}>
       <Box
         className={classes.selectors}
-        sx={{ display: showMenu ? "block" : "none" }}
+        sx={{ display: showSelectors ? "block" : "none" }}
       >
         <StreamMultiSelector
           cameras={cameras}

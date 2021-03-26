@@ -80,10 +80,10 @@ async function myfetch(
 
 /** Fetches an initialization segment. */
 export async function init(
-  hash: string,
+  videoSampleEntryId: number,
   init: RequestInit
 ): Promise<FetchResult<ArrayBuffer>> {
-  const url = `/api/init/${hash}.mp4`;
+  const url = `/api/init/${videoSampleEntryId}.mp4`;
   const fetchRes = await myfetch(url, init);
   if (fetchRes.status !== "success") {
     return fetchRes;

@@ -12,6 +12,7 @@ import Typography from "@material-ui/core/Typography";
 import AccountCircle from "@material-ui/icons/AccountCircle";
 import MenuIcon from "@material-ui/icons/Menu";
 import React from "react";
+import { LoginState } from "./App";
 import { Session } from "./types";
 
 const useStyles = makeStyles((theme: Theme) =>
@@ -19,21 +20,24 @@ const useStyles = makeStyles((theme: Theme) =>
     title: {
       flexGrow: 1,
     },
+    activity: {
+      marginRight: theme.spacing(2),
+    },
   })
 );
 
 interface Props {
-  session: Session | null;
+  loginState: LoginState;
   setSession: (session: Session | null) => void;
   requestLogin: () => void;
   logout: () => void;
   menuClick?: () => void;
+  activityMenuPart: JSX.Element | null;
 }
 
 // https://material-ui.com/components/app-bar/
 function MoonfireMenu(props: Props) {
   const classes = useStyles();
-  const auth = props.session !== null;
   const [
     accountMenuAnchor,
     setAccountMenuAnchor,
@@ -68,12 +72,15 @@ function MoonfireMenu(props: Props) {
         <Typography variant="h6" className={classes.title}>
           Moonfire NVR
         </Typography>
-        {auth || (
+        {props.activityMenuPart !== null && (
+          <div className={classes.activity}>{props.activityMenuPart}</div>
+        )}
+        {props.loginState !== "unknown" && props.loginState !== "logged-in" && (
           <Button color="inherit" onClick={props.requestLogin}>
             Log in
           </Button>
         )}
-        {auth && (
+        {props.loginState === "logged-in" && (
           <div>
             <IconButton
               aria-label="account of current user"
