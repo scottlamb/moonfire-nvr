@@ -51,6 +51,7 @@ const DisplaySelector = (props: Props) => {
           labelId="split90k-label"
           label="Max video duration"
           id="split90k"
+          size="small"
           value={props.split90k}
           onChange={(e) => props.setSplit90k(e.target.value)}
           displayEmpty
@@ -70,6 +71,7 @@ const DisplaySelector = (props: Props) => {
         control={
           <Checkbox
             checked={props.trimStartAndEnd}
+            size="small"
             onChange={(_, checked: boolean) =>
               props.setTrimStartAndEnd(checked)
             }
@@ -84,6 +86,7 @@ const DisplaySelector = (props: Props) => {
         control={
           <Checkbox
             checked={props.timestampTrack}
+            size="small"
             onChange={(_, checked: boolean) => props.setTimestampTrack(checked)}
             name="timestamp-track"
           />
