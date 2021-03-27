@@ -6,6 +6,14 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## `v0.6.3` (in progress)
+
+*   Compile fix for nightly rust 2021-03-14 and beyond.
+*   Fix incorrect `prev_media_duration_90k` calculation. No current impact.
+    This field is intended to be used in an upcoming scrub bar UI, and when
+    not calculated properly there might be unexpected gaps or overlaps in
+    playback.
+
 ## `v0.6.2`
 
 *   Fix panics when a stream's PTS has extreme jumps

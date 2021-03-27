@@ -91,7 +91,7 @@ The `application/json` response will have a dict as follows:
             this stream. This is slightly more than `totalSampleFileBytes`
             because it also includes the wasted portion of the final
             filesystem block allocated to each file.
-        *   `days`: (only included if request pararameter `days` is true)
+        *   `days`: (only included if request parameter `days` is true)
             dictionary representing calendar days (in the server's time zone)
             with non-zero total duration of recordings for that day. Currently
             this includes uncommitted and growing recordings. This is likely
@@ -118,8 +118,11 @@ The `application/json` response will have a dict as follows:
     *   `cameras`: a map of associated cameras' UUIDs to the type of association:
         `direct` or `indirect`. See `db/schema.sql` for more description.
     *   `type`: a UUID, expected to match one of `signalTypes`.
-    *   `days`: as in `cameras.streams.days` above.
-         **status: unimplemented**
+    *   `days`: (only included if request parameter `days` is true) similar to
+        `cameras.days` above. Values are objects with the following attributes:
+        *   `states`: an array of the time the signal is in each state, starting
+            from 1. These may not sum to the entire day; if so, the rest of the
+            day is in state 0 (`unknown`).
 *   `signalTypes`: a list of all known signal types.
     *   `uuid`: in text format.
     *   `states`: a map of all possible states of the enumeration to more
@@ -183,7 +186,7 @@ Example response:
         "2016-05-01": {
            "endTime90k": 131595516000000,
            "startTime90k": 131587740000000,
-           "totalDuration90k": 5400000
+           "states": [5400000]
          }
        }
     }
@@ -487,6 +490,8 @@ followed by by a `.mp4` media segment. The following headers will be included:
 *   `X-Media-Time-Range`: the relative media start and end times of these
     frames within the recording, as a half-open interval.
 
+The server will also send pings, currently at 30-second intervals.
+
 The WebSocket will always open immediately but will receive messages only while the
 backing RTSP stream is connected.
 
@@ -577,8 +582,7 @@ Valid request parameters:
     This will return the current state as of the latest change (to any signal)
     before the start time (if any), then all changes in the interval. This
     allows the caller to determine the state at every moment during the
-    selected timespan, as well as observe all events (even instantaneous
-    ones).
+    selected timespan, as well as observe all events.
 
 Responses are several parallel arrays for each observation:
 

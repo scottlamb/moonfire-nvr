@@ -57,7 +57,8 @@ smallvec = "1.0"
 structopt = { version = "0.3.13", features = ["default", "wrap_help"] }
 sync_wrapper = "0.1.0"
 time = "0.1"
-tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "signal"] }
+tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "signal", "time"] }
+tokio-stream = "0.1.5"
 tokio-tungstenite = "0.13.0"
 url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }

@@ -192,7 +192,8 @@ create table recording (
   wall_duration_90k integer not null
       check (wall_duration_90k >= 0 and wall_duration_90k < 5*60*90000),
 
-  -- TODO: comment.
+  -- The media-time duration of the recording, relative to wall_duration_90k.
+  -- That is, media_duration_90k = wall_duration_90k + media_duration_delta_90k.
   media_duration_delta_90k integer not null,
 
   video_samples integer not null check (video_samples > 0),
@@ -412,6 +413,7 @@ create table user_session (
 
 create index user_session_uid on user_session (user_id);
 
+-- Timeseries with an enum value.
 create table signal (
   id integer primary key,
 
@@ -427,8 +429,8 @@ create table signal (
   -- uuids, such as "Elk security system watcher".
   type_uuid blob not null check (length(type_uuid) = 16),
 
-  -- a short human-readable description of the event to use in mouseovers or event
-  -- lists, such as "driveway motion" or "front door open".
+  -- a short human-readable description to use in mouseovers or event lists,
+  -- such as "driveway motion" or "front door open".
   short_name not null,
 
   unique (source_uuid, type_uuid)

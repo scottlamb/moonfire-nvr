@@ -1336,7 +1336,7 @@ impl FileBuilder {
         struct Entry {
             segment_duration: u64,
             media_time: u64,
-        };
+        }
         let mut flushed: Vec<Entry> = Vec::new();
         let mut unflushed: Entry = Default::default();
         let mut cur_media_time: u64 = 0;
