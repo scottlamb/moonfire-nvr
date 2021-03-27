@@ -11,6 +11,8 @@ set -o xtrace
 
 mkdir /docker-build-debug/build-server
 exec > >(tee -i /docker-build-debug/build-server/output) 2>&1
+date
+uname -a
 ls -laFR /cargo-cache > /docker-build-debug/build-server/cargo-cache-before
 ls -laFR /var/lib/moonfire-nvr/target \
     > /docker-build-debug/build-server/target-before
@@ -32,3 +34,4 @@ sudo install -m 755 ~/moonfire-nvr /usr/local/bin/moonfire-nvr
 ls -laFR /cargo-cache > /docker-build-debug/build-server/cargo-cache-after
 ls -laFR /var/lib/moonfire-nvr/target \
     > /docker-build-debug/build-server/target-after
+date

@@ -9,12 +9,15 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
-export DEBIAN_FRONTEND=noninteractive
-
 mkdir --mode=1777 /docker-build-debug
 mkdir /docker-build-debug/dev-common
 exec > >(tee -i /docker-build-debug/dev-common/output) 2>&1
+
+date
+uname -a
 ls -laFR /var/cache/apt > /docker-build-debug/dev-common/var-cache-apt-before
+
+export DEBIAN_FRONTEND=noninteractive
 
 # This file cleans apt caches after every invocation. Instead, we use a
 # buildkit cachemount to avoid putting them in the image while still allowing
@@ -74,3 +77,4 @@ EOF
 chown moonfire-nvr:moonfire-nvr /var/lib/moonfire-nvr/.buildrc
 
 ls -laFR /var/cache/apt > /docker-build-debug/dev-common/var-cache-apt-after
+date

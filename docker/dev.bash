@@ -9,12 +9,16 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+mkdir /docker-build-debug/dev
+exec > >(tee -i /docker-build-debug/dev/output) 2>&1
+
+date
+uname -a
+ls -laFR /var/cache/apt > /docker-build-debug/dev/var-cache-apt-before
+
 export DEBIAN_FRONTEND=noninteractive
 
 packages=()
-
-mkdir -p /docker-build-debug/dev
-ls -laFR /var/cache/apt > /docker-build-debug/dev/var-cache-apt-before
 
 if [[ "${BUILDARCH}" != "${TARGETARCH}" ]]; then
     # Set up cross compilation.
@@ -116,3 +120,4 @@ else
 fi
 
 ls -laFR /var/cache/apt > /docker-build-debug/dev/var-cache-apt-after
+date

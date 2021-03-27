@@ -12,7 +12,11 @@ set -o xtrace
 mkdir /docker-build-debug/build-ui
 exec > >(tee -i /docker-build-debug/build-ui/output) 2>&1
 
+date
+uname -a
 time npm ci
 time npm run build
+
 ls -laFR /var/lib/moonfire-nvr/src/ui/node_modules \
     > /docker-build-debug/build-ui/node_modules-after
+date

@@ -14,6 +14,8 @@ exec > >(tee -i /docker-build-debug/deploy/output) 2>&1
 ls -laFR /var/cache/apt \
     > /docker-build-debug/deploy/var-cache-apt-before
 
+date
+uname -a
 export DEBIAN_FRONTEND=noninteractive
 time apt-get update
 time apt-get install --assume-yes --no-install-recommends \
@@ -24,9 +26,10 @@ time apt-get install --assume-yes --no-install-recommends \
     sudo \
     sqlite3 \
     tzdata \
-    vim-nox && \
+    vim-nox
 rm -rf /var/lib/apt/lists/*
 ln -s moonfire-nvr /usr/local/bin/nvr
 
 ls -laFR /var/cache/apt \
     > /docker-build-debug/deploy/var-cache-apt-after
+date
