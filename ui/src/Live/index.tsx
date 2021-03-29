@@ -16,7 +16,9 @@ const Live = ({ cameras, layoutIndex }: LiveProps) => {
     <Multiview
       layoutIndex={layoutIndex}
       cameras={cameras}
-      renderCamera={(camera: Camera) => <LiveCamera camera={camera} />}
+      renderCamera={(camera: Camera | null, chooser: JSX.Element) => (
+        <LiveCamera camera={camera} chooser={chooser} />
+      )}
     />
   );
 };

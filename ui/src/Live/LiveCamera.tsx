@@ -11,7 +11,8 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 import Alert from "@material-ui/core/Alert";
 
 interface LiveCameraProps {
-  camera: Camera;
+  camera: Camera | null;
+  chooser: JSX.Element;
 }
 
 interface BufferStateClosed {
@@ -274,11 +275,15 @@ class LiveCameraDriver {
 
 /**
  * A live view of a camera.
+ *
+ * The caller is currently expected to put this into a 16x9 block.
+ *
  * Note there's a significant setup cost to creating a LiveCamera, so the parent
  * should use React's <tt>key</tt> attribute to avoid unnecessarily mounting
  * and unmounting a camera.
+ *
  */
-const LiveCamera = ({ camera }: LiveCameraProps) => {
+const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const [playbackState, setPlaybackState] = React.useState<PlaybackState>({
     state: "normal",
@@ -287,6 +292,10 @@ const LiveCamera = ({ camera }: LiveCameraProps) => {
   // Load the camera driver.
   const [driver, setDriver] = React.useState<LiveCameraDriver | null>(null);
   React.useEffect(() => {
+    if (camera === null) {
+      setDriver(null);
+      return;
+    }
     const d = new LiveCameraDriver(camera, setPlaybackState, videoRef);
     setDriver(d);
     return () => {
@@ -308,43 +317,10 @@ const LiveCamera = ({ camera }: LiveCameraProps) => {
     return () => clearTimeout(timerId);
   }, [playbackState]);
 
-  if (driver === null) {
-    return <Box />;
-  }
-  return (
-    <Box
-      sx={{
-        "& video": { width: "100%", height: "100%", objectFit: "contain" },
-        "& .progress-overlay": {
-          position: "absolute",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100%",
-          width: "100%",
-          zIndex: 1,
-        },
-        "& .alert-overlay": {
-          position: "absolute",
-          display: "flex",
-          height: "100%",
-          width: "100%",
-          alignItems: "flex-end",
-          zIndex: 1,
-          p: 1,
-        },
-      }}
-    >
-      {showProgress && (
-        <div className="progress-overlay">
-          <CircularProgress />
-        </div>
-      )}
-      {playbackState.state === "error" && (
-        <div className="alert-overlay">
-          <Alert severity="error">{playbackState.message}</Alert>
-        </div>
-      )}
+  const videoElement =
+    driver === null ? (
+      <video />
+    ) : (
       <video
         ref={videoRef}
         muted
@@ -356,6 +332,62 @@ const LiveCamera = ({ camera }: LiveCameraProps) => {
         onTimeUpdate={driver.tryTrimBuffer}
         onWaiting={driver.videoWaiting}
       />
+    );
+  return (
+    <Box
+      sx={{
+        width: "100%",
+        height: "100%",
+        position: "relative",
+        "& video": {
+          width: "100%",
+          height: "100%",
+
+          // It'd be nice to use "contain" here so non-16x9 videos display
+          // with letterboxing rather than by being stretched. Unfortunately
+          // Firefox 87.0 doesn't honor the PixelAspectRatioBox of anamorphic
+          // sub streams. For now, make anamorphic 16x9 sub streams display
+          // correctly (at the expense of non-16x9 streams).
+          // TODO: adjust width/height dynamically to handle the letterboxing
+          // on non-16x9 streams.
+          objectFit: "fill",
+        },
+        "& .controls": {
+          position: "absolute",
+          width: "100%",
+          height: "100%",
+          zIndex: 1,
+        },
+        "& .progress-overlay": {
+          position: "absolute",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          height: "100%",
+        },
+        "& .alert-overlay": {
+          position: "absolute",
+          display: "flex",
+          width: "100%",
+          height: "100%",
+          alignItems: "flex-end",
+          p: 1,
+        },
+      }}
+    >
+      <div className="controls">{chooser}</div>
+      {showProgress && (
+        <div className="progress-overlay">
+          <CircularProgress />
+        </div>
+      )}
+      {playbackState.state === "error" && (
+        <div className="alert-overlay">
+          <Alert severity="error">{playbackState.message}</Alert>
+        </div>
+      )}
+      {videoElement}
     </Box>
   );
 };
