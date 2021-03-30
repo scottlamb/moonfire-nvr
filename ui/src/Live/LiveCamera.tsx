@@ -92,7 +92,6 @@ class LiveCameraDriver {
     console.error(`${this.camera.shortName}: aborting due to ${reason}`);
     this.stopStream(reason);
     this.buf = { state: "error" };
-    this.src.endOfStream("network");
     this.setPlaybackState({ state: "error", message: reason });
   };
 
@@ -230,7 +229,7 @@ class LiveCameraDriver {
   };
 
   bufEvent = (e: Event) => {
-    this.error(`bufEvent: ${e}`);
+    this.error(`SourceBuffer ${e.type}`);
   };
 
   videoPlaying = (e: SyntheticEvent<HTMLVideoElement, Event>) => {
