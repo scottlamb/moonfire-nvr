@@ -21,13 +21,24 @@ module.exports = (app) => {
       // this attribute in the proxy with code from here:
       // https://github.com/chimurai/http-proxy-middleware/issues/169#issuecomment-575027907
       // See also discussion in guide/developing-ui.md.
+      //
+      // Additionally, Safari appears to (sometimes?) prevent http-only cookies
+      // (meaning cookies that Javascript shouldn't be able to access) from
+      // being passed to WebSocket requests (possibly only when not using
+      // https/wss). Also strip HttpOnly when using Safari.
+      // https://developer.apple.com/forums/thread/104488
       onProxyRes: (proxyRes, req, res) => {
         const sc = proxyRes.headers["set-cookie"];
         if (Array.isArray(sc)) {
           proxyRes.headers["set-cookie"] = sc.map((sc) => {
             return sc
               .split(";")
-              .filter((v) => v.trim().toLowerCase() !== "secure")
+              .filter(
+                (v) =>
+                  v.trim().toLowerCase() !== "secure" &&
+                  (v.trim().toLowerCase() !== "httponly" ||
+                    !req.headers["user-agent"].includes("Safari"))
+              )
               .join("; ");
           });
         }
