@@ -82,14 +82,14 @@ use std::time::SystemTime;
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes to be output for a particular set of `FileBuilder` options. Incrementing this value will
 /// cause the etag to change as well.
-const FORMAT_VERSION: [u8; 1] = [0x07];
+const FORMAT_VERSION: [u8; 1] = [0x08];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
 const NORMAL_FTYP_BOX: &'static [u8] = &[
     0x00, 0x00, 0x00, 0x20, // length = 32, sizeof(NORMAL_FTYP_BOX)
     b'f', b't', b'y', b'p', // type
     b'i', b's', b'o', b'm', // major_brand
-    0x00, 0x00, 0x02, 0x00, // minor_version
+    0x00, 0x00, 0x00, 0x00, // minor_version
     b'i', b's', b'o', b'm', // compatible_brands[0]
     b'i', b's', b'o', b'2', // compatible_brands[1]
     b'a', b'v', b'c', b'1', // compatible_brands[2]
@@ -98,11 +98,16 @@ const NORMAL_FTYP_BOX: &'static [u8] = &[
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box for an initialization segment.
 /// More restrictive brands because of the default-base-is-moof flag.
+/// Eg ISO/IEC 14496-12 section A.2 says "NOTE The default‐base‐is‐moof flag
+/// (8.8.7.1) cannot be set where a file is marked with [the avc1 brand]."
+/// Note that Safari insists there be a compatible brand set in this list. The
+/// major brand is not enough.
 const INIT_SEGMENT_FTYP_BOX: &'static [u8] = &[
-    0x00, 0x00, 0x00, 0x10, // length = 16, sizeof(INIT_SEGMENT_FTYP_BOX)
+    0x00, 0x00, 0x00, 0x14, // length = 20, sizeof(INIT_SEGMENT_FTYP_BOX)
     b'f', b't', b'y', b'p', // type
     b'i', b's', b'o', b'5', // major_brand
-    0x00, 0x00, 0x02, 0x00, // minor_version
+    0x00, 0x00, 0x00, 0x00, // minor_version
+    b'i', b's', b'o', b'5', // compatible_brands[0]
 ];
 
 /// An `hdlr` (ISO/IEC 14496-12 section 8.4.3 `HandlerBox`) box suitable for video.
@@ -1052,7 +1057,7 @@ impl FileBuilder {
         let initial_sample_byte_pos = match self.type_ {
             Type::MediaSegment => {
                 self.append_moof()?;
-                let p = self.append_mdat()?;
+                let p = self.append_media_mdat()?;
 
                 // If the segment is > 4 GiB, the 32-bit trun data offsets are untrustworthy.
                 // We'd need multiple moof+mdat sequences to support large media segments properly.
@@ -1076,7 +1081,7 @@ impl FileBuilder {
             Type::Normal => {
                 self.body.append_static(StaticBytestring::NormalFtypBox)?;
                 self.append_moov(creation_ts)?;
-                self.append_mdat()?
+                self.append_normal_mdat()?
             }
         };
 
@@ -1128,16 +1133,7 @@ impl FileBuilder {
         })))
     }
 
-    fn append_mdat(&mut self) -> Result<u64, Error> {
-        // Write the mdat header. Use the large format to support files over 2^32-1 bytes long.
-        // Write zeroes for the length as a placeholder; fill it in after it's known.
-        // It'd be nice to use the until-EOF form, but QuickTime Player doesn't support it.
-        self.body
-            .buf
-            .extend_from_slice(b"\x00\x00\x00\x01mdat\x00\x00\x00\x00\x00\x00\x00\x00");
-        let mdat_len_pos = self.body.buf.len() - 8;
-        self.body.flush_buf()?;
-        let initial_sample_byte_pos = self.body.slices.len();
+    fn append_mdat_contents(&mut self) -> Result<(), Error> {
         for (i, s) in self.segments.iter().enumerate() {
             let r = s.s.sample_file_range();
             self.body
@@ -1154,11 +1150,49 @@ impl FileBuilder {
                 )?;
             }
         }
-        // Fill in the length left as a placeholder above. Note the 16 here is the length
-        // of the mdat header.
+        Ok(())
+    }
+
+    /// Appends an mdat suitable for a normal `.mp4`, returning initial sample
+    /// file byte position.
+    fn append_normal_mdat(&mut self) -> Result<u64, Error> {
+        // Use the large format to support >= 4 GiB of media data.
+        // It'd be nice to use the until-EOF form, but QuickTime Player doesn't support it.
+        self.body
+            .buf
+            .extend_from_slice(b"\x00\x00\x00\x01mdat\x00\x00\x00\x00\x00\x00\x00\x00");
+        let mdat_len_pos = self.body.buf.len() - 8;
+        self.body.flush_buf()?;
+        let initial_sample_byte_pos = self.body.slices.len();
+        self.append_mdat_contents()?;
+        // 16 is the length of the large mdat header.
         BigEndian::write_u64(
             &mut self.body.buf[mdat_len_pos..mdat_len_pos + 8],
             16 + self.body.slices.len() - initial_sample_byte_pos,
+        );
+        Ok(initial_sample_byte_pos)
+    }
+
+    /// Appends an mdat suitable for a media `.mp4`, returning initial sample
+    /// file byte position. Caller should verify that the file doesn't exceed
+    /// 32 bits.
+    fn append_media_mdat(&mut self) -> Result<u64, Error> {
+        // Write the mdat header with zeroes for the length as a placeholder;
+        // fill it in after it's known.
+        // Safari 14.0.3 (14610.4.3.1.7) doesn't support the large mdat
+        // format in media segments. Media segments are unlikely to exceed 4
+        // GiB anyway, and the trun offsets would also be problematic.
+        let mdat_len_pos = self.body.buf.len();
+        self.body.buf.extend_from_slice(b"\x00\x00\x00\x00mdat");
+        self.body.flush_buf()?;
+        let initial_sample_byte_pos = self.body.slices.len();
+        self.append_mdat_contents()?;
+        // Fill in the length left as a placeholder above.
+        // 8 is the length of the small mdat header.
+        // Don't bother checking for overflow; the caller does that.
+        BigEndian::write_u32(
+            &mut self.body.buf[mdat_len_pos..mdat_len_pos + 4],
+            (8 + self.body.slices.len() - initial_sample_byte_pos) as u32,
         );
         Ok(initial_sample_byte_pos)
     }
@@ -1186,21 +1220,20 @@ impl FileBuilder {
             // Appends a `TrackExtendsBox`, `trex` (ISO/IEC 14496-12 section 8.8.3) for the video
             // track.
             write_length!(self, {
+                #[rustfmt::skip]
                 self.body.buf.extend_from_slice(&[
                     b't', b'r', b'e', b'x', 0x00, 0x00, 0x00, 0x00, // version + flags
                     0x00, 0x00, 0x00, 0x01, // track_id
                     0x00, 0x00, 0x00, 0x01, // default_sample_description_index
                     0x00, 0x00, 0x00, 0x00, // default_sample_duration
                     0x00, 0x00, 0x00, 0x00, // default_sample_size
-                    0x09, 0x21, 0x00,
-                    0x00, // default_sample_flags (non sync):
-                          // is_leading: not a leading sample
-                          // sample_depends_on: does depend on others
-                          // sample_is_depend_on: unknown
-                          // sample_has_redundancy: no
-                          // no padding
-                          // sample_is_non_sync_sample: 1
-                          // sample_degradation_priority: 0
+                    0x09, 0x21, 0x00, 0x00, // default_sample_flags (non sync):
+                                            // is_leading: not a leading sample
+                                            // sample_depends_on: does depend on others
+                                            // sample_is_depend_on: unknown
+                                            // sample_has_redundancy: no padding
+                                            // sample_is_non_sync_sample: 1
+                                            // sample_degradation_priority: 0
                 ]);
             })?;
         })
@@ -1223,21 +1256,26 @@ impl FileBuilder {
 
                 // TrackFragmentHeaderBox, tfhd (ISO/IEC 14496-12 section 8.8.7).
                 write_length!(self, {
+                    #[rustfmt::skip]
                     self.body.buf.extend_from_slice(&[
-                        b't', b'f', b'h', b'd', 0x00, 0x02, 0x00,
-                        0x00, // version + flags (default-base-is-moof)
+                        b't', b'f', b'h', b'd',
+                        0x00, 0x02, 0x00, 0x00, // version + flags (default-base-is-moof)
                         0x00, 0x00, 0x00, 0x01, // track_id = 1
                     ]);
                 })?;
-                self.append_truns()?;
-
-                // `TrackFragmentBaseMediaDecodeTimeBox` (ISO/IEC 14496-12 section 8.8.12).
+                // `TrackFragmentBaseMediaDecodeTimeBox`, tfdt (ISO/IEC 14496-12 section 8.8.12).
+                // This is mandated by the Media Source Extensions ISO BMFF byte format spec.
+                // ISO/IEC 14496-12:2015 section 8.8.12.1 says "The Track
+                // Fragment Base Media Decode Time Box, if present, shall be
+                // positioned after the Track Fragment Header Box and before the
+                // first Track Fragment Run box." Safari cares deeply that this rule is followed.
                 write_length!(self, {
                     self.body.buf.extend_from_slice(&[
                         b't', b'f', b'd', b't', 0x00, 0x00, 0x00, 0x00, // version + flags
                         0x00, 0x00, 0x00, 0x00, // TODO: baseMediaDecodeTime
                     ]);
                 })?;
+                self.append_truns()?;
             })?;
         })
     }
@@ -1410,13 +1448,13 @@ impl FileBuilder {
         })
     }
 
-    /// Appends a `MediaHeaderBox` (ISO/IEC 14496-12 section 8.4.2.) suitable for either the video
+    /// Appends a `MediaHeaderBox` (ISO/IEC 14496-12 section 8.4.2) suitable for either the video
     /// or subtitle track.
     fn append_mdhd(&mut self, creation_ts: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"mdhd\x01\x00\x00\x00");
-            self.body.append_u64(creation_ts as u64);
-            self.body.append_u64(creation_ts as u64);
+            self.body.append_u64(u64::from(creation_ts));
+            self.body.append_u64(u64::from(creation_ts));
             self.body.append_u32(TIME_UNITS_PER_SEC as u32);
             self.body.append_u64(self.media_duration_90k);
             self.body.append_u32(0x55c40000); // language=und + pre_defined
@@ -1449,7 +1487,9 @@ impl FileBuilder {
             self.append_video_stsc()?;
             self.append_video_stsz()?;
             self.append_video_co64()?;
-            self.append_video_stss()?;
+            if self.type_ != Type::InitSegment {
+                self.append_video_stss()?;
+            }
         })
     }
 
@@ -2635,6 +2675,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_init_segment() {
+        testutil::init();
+        let db = TestDb::new(RealClocks {});
+        let ent = {
+            let mut l = db.db.lock();
+            let id = l
+                .insert_video_sample_entry(db::VideoSampleEntryToInsert {
+                    width: 1920,
+                    height: 1080,
+                    pasp_h_spacing: 1,
+                    pasp_v_spacing: 1,
+                    data: [0u8; 100].to_vec(),
+                    rfc6381_codec: "avc1.000000".to_owned(),
+                })
+                .unwrap();
+            l.video_sample_entries_by_id().get(&id).unwrap().clone()
+        };
+        let mut builder = FileBuilder::new(Type::InitSegment);
+        builder.append_video_sample_entry(ent);
+        let mp4 = builder
+            .build(db.db.clone(), db.dirs_by_stream_id.clone())
+            .unwrap();
+        traverse(mp4.clone()).await;
+    }
+
+    #[tokio::test]
     async fn test_media_segment() {
         testutil::init();
         let db = TestDb::new(RealClocks {});
@@ -2738,11 +2804,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "e95f2d261cdebac5b9983abeea59e8eb053dc4efac866722544c665d9de7c49d",
+            "383800da9066123b65399bd2f54d8459fc4d583b4ef44552bf13b57800240b39",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"61031ab36449b4d1186e9513b5e40df84e78bfb2807c0035b360437bb905cdd5\"";
+            "\"51c10e6bb75e6f629612bba60b7372a4cec2ae7a0a5c65df0d07d8e9c6ad6624\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2767,11 +2833,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "77e09be8ee5ca353ca56f9a80bb7420680713c80a0831d236fac45a96aa3b3d4",
+            "6bc801bc277e19b584ef2af2feea9538c56be9862cad9d2f12960435af91cfad",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"8e048b22b21c9b93d889e8dfbeeb56fa1b17dc0956190f5c3acc84f6f674089f\"";
+            "\"b1a0cc34e87412030f34a18f113e002bb18326a8b3d1479bec3ce7a1d8f10a87\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2796,11 +2862,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "f9807cfc6b96a399f3a5ad62d090f55a18543a9eeb1f48d59f86564ffd9b1e84",
+            "9914fc56ba35cd0e0e7ec1a6fcf4a3b5047db3fc52e69404bd347f2704dfb344",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"196192eccd8be2c840dfc4073355efe5c917999641e3d0a2b87e0d2eab40267f\"";
+            "\"8e9f94d89d48b254d087847571eeda1ee0888e2da6c38d6a38725f6c4eec6e07\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2826,11 +2892,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "7aef371e9ab5e871893fd9b1963cb71c1c9b093b5d4ff36cb1340b65155a8aa2",
+            "a0b7915ef19cf3dec74f13a348ef672d3c7506b5facc18663666fc8d6509ccba",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"84cafd9db7a5c0c32961d9848582d2dca436a58d25cbedfb02d7450bc6ce1229\"";
+            "\"1fc6135c7b167a66449302716cc32817d4b1af522ab137327b454ea78b7c45de\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2855,11 +2921,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "5211104e1fdfe3bbc0d7d7d479933940305ff7f23201e97308db23a022ee6339",
+            "9524e5eab0cf7c2ba4698384cb7bab3a58186f824fd8388cecfa272bccba84f0",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"9e50099d86ae1c742e65f7a4151c4427f42051a87158405a35b4e5550fd05c30\"";
+            "\"ef9172439648679a4b4ff9cdeb1ea923f0dc55a02e0a85717d5831f007702330\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
