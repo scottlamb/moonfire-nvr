@@ -84,6 +84,7 @@ class LiveCameraDriver {
     const url = `${proto}://${loc.host}/api/cameras/${this.camera.uuid}/sub/live.m4s`;
     this.ws = new WebSocket(url);
     this.ws.addEventListener("close", this.onWsClose);
+    this.ws.addEventListener("open", this.onWsOpen);
     this.ws.addEventListener("error", this.onWsError);
     this.ws.addEventListener("message", this.onWsMessage);
   };
@@ -99,8 +100,12 @@ class LiveCameraDriver {
     this.error(`ws close: ${e.code} ${e.reason}`);
   };
 
-  onWsError = (_e: Event) => {
-    this.error("ws error");
+  onWsOpen = (e: Event) => {
+    console.debug(`${this.camera.shortName}: ws open`);
+  };
+
+  onWsError = (e: Event) => {
+    console.error(`${this.camera.shortName}: ws error`);
   };
 
   onWsMessage = async (e: MessageEvent) => {
@@ -112,7 +117,7 @@ class LiveCameraDriver {
       return;
     }
     if (this.buf.state === "error") {
-      console.log("onWsMessage while in state error");
+      console.log(`${this.camera.shortName}: onWsMessage while in state error`);
       return;
     }
     let result = parsePart(raw);
@@ -155,7 +160,9 @@ class LiveCameraDriver {
 
   bufUpdateEnd = () => {
     if (this.buf.state !== "open") {
-      console.error("bufUpdateEnd in state", this.buf.state);
+      console.error(
+        `${this.camera.shortName}: bufUpdateEnd in state ${this.buf.state}`
+      );
       return;
     }
     if (!this.buf.busy) {
@@ -252,6 +259,7 @@ class LiveCameraDriver {
     const NORMAL_CLOSURE = 1000; // https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent
     this.ws.close(NORMAL_CLOSURE);
     this.ws.removeEventListener("close", this.onWsClose);
+    this.ws.removeEventListener("open", this.onWsOpen);
     this.ws.removeEventListener("error", this.onWsError);
     this.ws.removeEventListener("message", this.onWsMessage);
     this.ws = undefined;
@@ -291,6 +299,7 @@ const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
   // Load the camera driver.
   const [driver, setDriver] = React.useState<LiveCameraDriver | null>(null);
   React.useEffect(() => {
+    setPlaybackState({ state: "normal" });
     if (camera === null) {
       setDriver(null);
       return;
