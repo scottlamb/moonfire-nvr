@@ -14,13 +14,22 @@ less than 10% of the machine's total CPU.
 
 So far, the web interface is basic: a filterable list of video segments,
 with support for trimming them to arbitrary time ranges. No scrub bar yet.
-There's also no support for motion detection, no https/SSL/TLS support (you'll
+There's also an experimental live view UI.
+
+<table>
+  <tbody>
+    <tr valign=top>
+      <td><a href="screenshots/list.png"><img src="screenshots/list.png" width=360 height=345 alt="list view screenshot"></a></td>
+      <td><a href="screenshots/live.jpg"><img src="screenshots/live.jpg" width=360 height=212 alt="live view screenshot"></a></td>
+    </tr>
+  </tbody>
+</table>
+
+There's no support yet for motion detection, no https/SSL/TLS support (you'll
 need a proxy server, as described [here](guide/secure.md)), and only a
 console-based (rather than web-based) configuration UI.
 
-![screenshot](screenshot.png)
-
-Moonfire NVR is currently at version 0.6.2. Until version 1.0, there will be no
+Moonfire NVR is currently at version 0.6.3. Until version 1.0, there will be no
 compatibility guarantees: configuration and storage formats may change from
 version to version. There is an [upgrade procedure](guide/schema.md) but it is
 not for the faint of heart.
@@ -42,8 +51,6 @@ make this possible:
   both streams on disk.
 * off-loading on-NVR analytics to an inexpensive USB or M.2 neural network
   accelerator.
-* using [HTTP Live Streaming](https://en.wikipedia.org/wiki/HTTP_Live_Streaming)
-  rather than requiring custom browser plug-ins.
 * taking advantage of on-camera analytics. This is the lowest CPU usage option,
   although many cameras' analytics aren't as good as what can be done on the NVR,
   they're hard to experiment with, and even when they use modern ML-based

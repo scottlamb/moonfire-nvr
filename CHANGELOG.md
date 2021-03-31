@@ -6,8 +6,10 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## `v0.6.3` (in progress)
+## `v0.6.3`
 
+*   New user interface! Besides a more modern appearance, it has better
+    error handling and an experimental live view UI.
 *   Compile fix for nightly rust 2021-03-14 and beyond.
 *   Fix incorrect `prev_media_duration_90k` calculation. No current impact.
     This field is intended to be used in an upcoming scrub bar UI, and when
