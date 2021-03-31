@@ -26,7 +26,7 @@ The request should have an `application/json` body containing a dict with
 `username` and `password` keys.
 
 On successful authentication, the server will return an HTTP 204 (no content)
-with a `Set-Cookie` header for the `s` cookie, which is an opaque, HttpOnly
+with a `Set-Cookie` header for the `s` cookie, which is an opaque, `HttpOnly`
 (unavailable to Javascript) session identifier.
 
 If authentication or authorization fails, the server will return a HTTP 403

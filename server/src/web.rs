@@ -7,7 +7,6 @@ use crate::json;
 use crate::mp4;
 use base::{bail_t, ErrorKind};
 use base::{clock::Clocks, format_err_t};
-use bytes::{BufMut, BytesMut};
 use core::borrow::Borrow;
 use core::str::FromStr;
 use db::dir::SampleFileDir;
@@ -1100,34 +1099,32 @@ impl Service {
         }
         .to_owned();
         let mut l = self.db.lock();
+
+        // If the request came in over https, tell the browser to only send the cookie on https
+        // requests also.
         let is_secure = self.is_secure(&req);
-        let flags = (auth::SessionFlag::HttpOnly as i32)
-            | (auth::SessionFlag::SameSite as i32)
-            | (auth::SessionFlag::SameSiteStrict as i32)
+
+        // Use SameSite=Lax rather than SameSite=Strict. Safari apparently doesn't send
+        // SameSite=Strict cookies on WebSocket upgrade requests. There's no real security
+        // difference for Moonfire NVR anyway. SameSite=Strict exists as CSRF protection for
+        // sites that (unlike Moonfire NVR) don't follow best practices by (a)
+        // mutating based on GET requests and (b) not using CSRF tokens.
+        use auth::SessionFlag;
+        let flags = (SessionFlag::HttpOnly as i32)
+            | (SessionFlag::SameSite as i32)
             | if is_secure {
-                auth::SessionFlag::Secure as i32
+                SessionFlag::Secure as i32
             } else {
                 0
             };
         let (sid, _) = l
             .login_by_password(authreq, &r.username, r.password, Some(domain), flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
-        let s_suffix = if is_secure {
-            &b"; HttpOnly; Secure; SameSite=Strict; Max-Age=2147483648; Path=/"[..]
-        } else {
-            &b"; HttpOnly; SameSite=Strict; Max-Age=2147483648; Path=/"[..]
-        };
-        let mut encoded = [0u8; 64];
-        base64::encode_config_slice(&sid, base64::STANDARD_NO_PAD, &mut encoded);
-        let mut cookie = BytesMut::with_capacity("s=".len() + encoded.len() + s_suffix.len());
-        cookie.put(&b"s="[..]);
-        cookie.put(&encoded[..]);
-        cookie.put(s_suffix);
+        let cookie = encode_sid(sid, flags);
         Ok(Response::builder()
             .header(
                 header::SET_COOKIE,
-                HeaderValue::from_maybe_shared(cookie.freeze())
-                    .expect("cookie can't have invalid bytes"),
+                HeaderValue::try_from(cookie).expect("cookie can't have invalid bytes"),
             )
             .status(StatusCode::NO_CONTENT)
             .body(b""[..].into())
@@ -1293,6 +1290,27 @@ impl Service {
 
         bail_t!(Unauthenticated, "unauthenticated");
     }
+}
+
+/// Encodes a session into `Set-Cookie` header value form.
+fn encode_sid(sid: db::RawSessionId, flags: i32) -> String {
+    let mut cookie = String::with_capacity(128);
+    cookie.push_str("s=");
+    base64::encode_config_buf(&sid, base64::STANDARD_NO_PAD, &mut cookie);
+    use auth::SessionFlag;
+    if (flags & SessionFlag::HttpOnly as i32) != 0 {
+        cookie.push_str("; HttpOnly");
+    }
+    if (flags & SessionFlag::Secure as i32) != 0 {
+        cookie.push_str("; Secure");
+    }
+    if (flags & SessionFlag::SameSiteStrict as i32) != 0 {
+        cookie.push_str("; SameSite=Strict");
+    } else if (flags & SessionFlag::SameSite as i32) != 0 {
+        cookie.push_str("; SameSite=Lax");
+    }
+    cookie.push_str("; Max-Age=2147483648; Path=/");
+    cookie
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1729,6 +1747,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn encode_sid() {
+        use super::encode_sid;
+        use db::auth::{RawSessionId, SessionFlag};
+        let s64 = "3LbrruP5vj/hpE8kvYTz/rNDg4BleRiTCHGA3Ocm91z/YrtxHDxexmrz46biZJxJ";
+        let s = RawSessionId::decode_base64(s64.as_bytes()).unwrap();
+        assert_eq!(
+            encode_sid(
+                s,
+                (SessionFlag::Secure as i32)
+                    | (SessionFlag::HttpOnly as i32)
+                    | (SessionFlag::SameSite as i32)
+                    | (SessionFlag::SameSiteStrict as i32)
+            ),
+            format!(
+                "s={}; HttpOnly; Secure; SameSite=Strict; Max-Age=2147483648; Path=/",
+                s64
+            )
+        );
+        assert_eq!(
+            encode_sid(s, SessionFlag::SameSite as i32),
+            format!("s={}; SameSite=Lax; Max-Age=2147483648; Path=/", s64)
+        );
     }
 }
 

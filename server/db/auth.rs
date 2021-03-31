@@ -233,6 +233,7 @@ impl Session {
 }
 
 /// A raw session id (not base64-encoded). Sensitive. Never stored in the database.
+#[derive(Copy, Clone)]
 pub struct RawSessionId([u8; 48]);
 
 impl RawSessionId {
