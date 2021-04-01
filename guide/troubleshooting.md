@@ -11,11 +11,15 @@ need more help.
         * [Slow operations](#slow-operations)
         * [Camera stream errors](#camera-stream-errors)
     * [Problems](#problems)
-        * [Live stream always fails with `ws close: 1006`](#live-stream-always-fails-with-ws-close-1006)
-        * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
-        * [`moonfire-nvr config` displays garbage](#moonfire-nvr-config-displays-garbage)
-        * [Moonfire NVR reports problems with the database or filesystem](#moonfire-nvr-reports-problems-with-the-database-or-filesystem)
-        * [<a name="kernel-errors"></a> Errors in kernel logs](#-errors-in-kernel-logs)
+        * [Server errors](#server-errors)
+            * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
+            * [Out of disk space](#out-of-disk-space)
+            * [Database or filesystem corruption errors](#database-or-filesystem-corruption-errors)
+        * [Configuration interface problems](#configuration-interface-problems)
+            * [`moonfire-nvr config` displays garbage](#moonfire-nvr-config-displays-garbage)
+        * [Browser user interface problems](#browser-user-interface-problems)
+            * [Live stream always fails with `ws close: 1006`](#live-stream-always-fails-with-ws-close-1006)
+        * [Errors in kernel logs](#errors-in-kernel-logs)
             * [UAS errors](#uas-errors)
             * [Filesystem errors](#filesystem-errors)
 
@@ -208,34 +212,9 @@ W20210309 00:28:55.527 s-courtyard-sub moonfire_nvr::streamer] courtyard-sub: sl
 
 ## Problems
 
-### Live stream always fails with `ws close: 1006`
+### Server errors
 
-Moonfire NVR's UI uses a
-[WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
-connection to the server for the live view. If you see an alert in the lower
-left corner of a live stream area that says `ws close: 1006`, this means that
-the WebSocket connection failed. Unfortunately this is all the UI knows;
-the WebSocket spec [deliberately withholds](https://html.spec.whatwg.org/multipage/web-sockets.html#closeWebSocket) additional debugging information
-for security reasons.
-
-You might be able to learn more through your browser's Javascript console.
-
-If you consistently see this error when other parts of the UI work properly,
-here are some things to check:
-
-*   If you are using Safari and haven't logged out since Moonfire NVR v0.6.3
-    was released, try logging out and back in. Safari apparently doesn't send
-    [`SameSite=Strict`
-    cookies](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite#strict)
-    on WebSocket requests. Since v0.6.3, Moonfire NVR uses `SameSite=Lax`
-    instead.
-*   If you are using a proxy server, check that it is properly configured for
-    Websockets. In particular, if you followed the [Securing Moonfire NVR
-    guide](schema.md) prior to 29 Feb 2020, look at [this
-    update](https://github.com/scottlamb/moonfire-nvr/commit/92266612b5c9163eb6096c580ba751280a403648#diff-e8bdd96dda101a25a541a6629675ea46bd6eaf670c6417c76662db5397c50c19)
-    to those instructions.
-
-### `Error: pts not monotonically increasing; got 26615520 then 26539470`
+#### `Error: pts not monotonically increasing; got 26615520 then 26539470`
 
 If your streams cut out and you see error messages like this one in Moonfire
 NVR logs, it might mean that your camera outputs [B
@@ -244,20 +223,41 @@ If you believe this is the case, file a feature request; Moonfire NVR
 currently doesn't support B frames. You may be able to configure your camera
 to disable B frames in the meantime.
 
-### `moonfire-nvr config` displays garbage
+#### Out of disk space
 
-This happens if your machine is configured to a non-UTF-8 locale, due to
-gyscos/Cursive#13. As a workaround, try setting the environment variable
-`LC_ALL=C.UTF-8`. This should automatically be set with the Docker container.
+If Moonfire NVR runs out of disk space on a sample file directory, recording
+will be stuck and you'll see log messages like the following:
 
-### Moonfire NVR reports problems with the database or filesystem
+```
+W20210401 11:21:07.365 s-driveway-main moonfire_base::clock] sleeping for Duration { secs: 1, nanos: 0 } after error: No space left on device (os error 28)
+```
+
+If something else used more disk space on the filesystem than planned, just
+clean up the excess files. Moonfire NVR will start working again immediately.
+
+If Moonfire NVR's own files are too large, follow this procedure:
+
+1.  Shut it down via `SIGKILL`:
+    ```
+    $ sudo killall -KILL moonfire-nvr
+    ```
+    (Be sure to use `-KILL`. It won't shut down properly on `SIGTERM` or `SIGINT`
+    when out of disk space due to [issue
+    #117](https://github.com/scottlamb/moonfire-nvr/issues/117).)
+2.  Reconfigure it use less disk space. See [Completing configuration through
+    the UI](install.md#completing-configuration-through-the-ui) in the
+    installation guide. Pay attention to the note about slack space.
+3.  Start Moonfire NVR again. It will clean up the excess disk files on
+    startup and should run properly.
+
+#### Database or filesystem corruption errors
 
 It's helpful to check out your system's overall health when diagnosing
-problems with Moonfire NVR.
+this kind of problem with Moonfire NVR.
 
 1.  Look at your kernel logs. On most Linux systems, you can browse them via
     `journalctl`, `dmesg`, or `less /var/log/messages`. See [Errors in kernel
-    logs](#error) below for some common problems.
+    logs](#errors-in-kernel-logs) below for some common problems.
 2.  Use [`smartctl`](https://linuxconfig.org/how-to-check-an-hard-drive-health-from-the-command-line-using-smartctl) to
     look at SMART ("Self-Monitoring, Analysis and Reporting Technology System
     (SMART)") attributes on your flash and hard drives. Backblaze
@@ -286,7 +286,45 @@ After the system as a whole is verified healthy, run `moonfire-nvr check` while
 Moonfire NVR is stopped to verify integrity of the SQLite database and sample
 file directories.
 
-### <a name="kernel-errors"></a> Errors in kernel logs
+### Configuration interface problems
+
+#### `moonfire-nvr config` displays garbage
+
+This happens if you're not using the premade Docker containers and have
+configured your machine is configured to a non-UTF-8 locale, due to
+gyscos/Cursive#13. As a workaround, try setting the environment variable
+`LC_ALL=C.UTF-8`.
+
+### Browser user interface problems
+
+#### Live stream always fails with `ws close: 1006`
+
+Moonfire NVR's UI uses a
+[WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
+connection to the server for the live view. If you see an alert in the lower
+left corner of a live stream area that says `ws close: 1006`, this means that
+the WebSocket connection failed. Unfortunately this is all the UI knows;
+the WebSocket spec [deliberately withholds](https://html.spec.whatwg.org/multipage/web-sockets.html#closeWebSocket) additional debugging information
+for security reasons.
+
+You might be able to learn more through your browser's Javascript console.
+
+If you consistently see this error when other parts of the UI work properly,
+here are some things to check:
+
+*   If you are using Safari and haven't logged out since Moonfire NVR v0.6.3
+    was released, try logging out and back in. Safari apparently doesn't send
+    [`SameSite=Strict`
+    cookies](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite#strict)
+    on WebSocket requests. Since v0.6.3, Moonfire NVR uses `SameSite=Lax`
+    instead.
+*   If you are using a proxy server, check that it is properly configured for
+    Websockets. In particular, if you followed the [Securing Moonfire NVR
+    guide](schema.md) prior to 29 Feb 2020, look at [this
+    update](https://github.com/scottlamb/moonfire-nvr/commit/92266612b5c9163eb6096c580ba751280a403648#diff-e8bdd96dda101a25a541a6629675ea46bd6eaf670c6417c76662db5397c50c19)
+    to those instructions.
+
+### Errors in kernel logs
 
 #### UAS errors
 
