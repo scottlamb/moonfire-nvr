@@ -65,6 +65,7 @@ could use to make this possible:
     [GPL-3.0-or-later](https://spdx.org/licenses/GPL-3.0-or-later.html)
     with [https://spdx.org/licenses/GPL-3.0-linking-exception.html](GPL-3.0-linking-exception)
     for OpenSSL.
+*   [Change log](CHANGELOG.md) / release notes.
 *   [Guides](guide/)
     *   [Installing](guide/install.md)
     *   [Building from source](guide/build.md)
@@ -72,4 +73,4 @@ could use to make this possible:
     *   [Troubleshooting](guide/troubleshooting.md)
 *   [Design documents](design/)
 *   [Wiki](https://github.com/scottlamb/moonfire-nvr/wiki) has hardware
-    recommendations and notes on several camera models. Please add yours!
+    recommendations, notes on several camera models, etc. Please add more!

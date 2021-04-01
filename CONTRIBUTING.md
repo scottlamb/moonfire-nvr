@@ -97,6 +97,9 @@ other work on a development branch. You have to start over.
 The [Building Moonfire NVR](guide/build.md) and [Working on UI
 development](guide/developing-ui.md) guides should help you get started.
 The [design documents](design/) will help you fit your work into the whole.
+The wiki has a page to help you find copies of [standards and
+specifications](https://github.com/scottlamb/moonfire-nvr/wiki/Standards-and-specifications)
+that Moonfire NVR interacts with.
 
 Please tell me when you get stuck! Every software developer knows in theory
 there's parts of their code that aren't as clear and well-documented as they
