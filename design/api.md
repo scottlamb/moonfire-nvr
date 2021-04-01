@@ -1,6 +1,26 @@
-# Moonfire NVR API
+# Moonfire NVR API <!-- omit in toc -->
 
 Status: **current**.
+
+* [Objective](#objective)
+* [Detailed design](#detailed-design)
+    * [`POST /api/login`](#post-apilogin)
+    * [`POST /api/logout`](#post-apilogout)
+    * [`GET /api/`](#get-api)
+    * [`GET /api/cameras/<uuid>/`](#get-apicamerasuuid)
+    * [`GET /api/cameras/<uuid>/<stream>/recordings`](#get-apicamerasuuidstreamrecordings)
+    * [`GET /api/cameras/<uuid>/<stream>/view.mp4`](#get-apicamerasuuidstreamviewmp4)
+    * [`GET /api/cameras/<uuid>/<stream>/view.mp4.txt`](#get-apicamerasuuidstreamviewmp4txt)
+    * [`GET /api/cameras/<uuid>/<stream>/view.m4s`](#get-apicamerasuuidstreamviewm4s)
+    * [`GET /api/cameras/<uuid>/<stream>/view.m4s.txt`](#get-apicamerasuuidstreamviewm4stxt)
+    * [`GET /api/cameras/<uuid>/<stream>/live.m4s`](#get-apicamerasuuidstreamlivem4s)
+    * [`GET /api/init/<id>.mp4`](#get-apiinitidmp4)
+    * [`GET /api/init/<id>.mp4.txt`](#get-apiinitidmp4txt)
+    * [`GET /api/signals`](#get-apisignals)
+    * [`POST /api/signals`](#post-apisignals)
+        * [Request 1](#request-1)
+        * [Request 2](#request-2)
+        * [Request 3](#request-3)
 
 ## Objective
 
@@ -704,7 +724,7 @@ Response:
 }
 ```
 
-### Request 3
+#### Request 3
 
 5 seconds later, the client observes motion has ended. It leaves the prior
 data alone and predicts no more motion.

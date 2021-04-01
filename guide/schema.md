@@ -1,4 +1,12 @@
-# Moonfire NVR Schema Guide
+# Moonfire NVR Schema Guide <!-- omit in toc -->
+
+* [Upgrading](#upgrading)
+    * [Procedure](#procedure)
+    * [Unversioned to version 0](#unversioned-to-version-0)
+    * [Version 0 to version 1](#version-0-to-version-1)
+    * [Version 1 to version 2 to version 3](#version-1-to-version-2-to-version-3)
+    * [Version 3 to version 4 to version 5](#version-3-to-version-4-to-version-5)
+    * [Version 6](#version-6)
 
 This document has notes about the Moonfire NVR storage schema. As described in
 [README.md](../README.md), this consists of two kinds of state:
@@ -26,42 +34,46 @@ read-only mode prior to deleting the old database.
 First ensure there is sufficient space available for four copies of the
 SQLite database:
 
-   * copy 1: the copy to upgrade
-   * copy 2: a backup you manually create so that you can restore if you
-     discover a problem while running the new software against the upgraded
-     database in read-only mode. If disk space is tight, you can save this
-     to a different filesystem than the primary copy.
-   * copies 3 and 4: internal copies made and destroyed by Moonfire NVR and
-     SQLite during the upgrade:
+*   copy 1: the copy to upgrade
+*   copy 2: a backup you manually create so that you can restore if you
+    discover a problem while running the new software against the upgraded
+    database in read-only mode. If disk space is tight, you can save this
+    to a different filesystem than the primary copy.
+*   copies 3 and 4: internal copies made and destroyed by Moonfire NVR and
+    SQLite during the upgrade:
 
-        * during earlier steps, possibly duplicate copies of tables, which
-          may occupy space both in the main database and the journal
-        * during the final vacuum step, a complete database copy
+    *   during earlier steps, possibly duplicate copies of tables, which
+        may occupy space both in the main database and the journal
+    *   during the final vacuum step, a complete database copy
 
-     If disk space is tight, and you are _very careful_, you can skip these
-     copies with the `--preset-journal=off --no-vacuum` arguments to
-     the updater. If you aren't confident in your ability to do this, *don't
-     do it*. If you are confident, take additional safety precautions anyway:
+    If disk space is tight, and you are _very careful_, you can skip these
+    copies with the `--preset-journal=off --no-vacuum` arguments to
+    the updater. If you aren't confident in your ability to do this, *don't
+    do it*. If you are confident, take additional safety precautions anyway:
 
-        * double-check you have the full backup described above. Without the
-          journal any problems during the upgrade will corrupt your database
-          and you will need to restore.
-        * ensure you re-enable journalling via `pragma journal_mode = wal;`
-          before using the upgraded database, or any problems after the
-          upgrade will corrupt your database. The upgrade procedure should do
-          this automatically, but you will want to verify by hand that you are
-          no longer in the dangerous mode.
+    *   double-check you have the full backup described above. Without the
+        journal any problems during the upgrade will corrupt your database
+        and you will need to restore.
+    *   ensure you re-enable journalling via `pragma journal_mode = wal;`
+        before using the upgraded database, or any problems after the
+        upgrade will corrupt your database. The upgrade procedure should do
+        this automatically, but you will want to verify by hand that you are
+        no longer in the dangerous mode.
 
 Next ensure Moonfire NVR is not running and does not automatically restart if
 the system is rebooted during the upgrade. If you followed the Docker
 instructions, you can do this as follows:
 
-    $ nvr stop
+```
+$ nvr stop
+```
 
 Then back up your SQLite database. If you are using the default path, you can
 do so as follows:
 
-    $ sudo -u moonfire-nvr cp /var/lib/moonfire-nvr/db/db{,.pre-upgrade}
+```
+$ sudo -u moonfire-nvr cp /var/lib/moonfire-nvr/db/db{,.pre-upgrade}
+```
 
 By default, the upgrade command will reset the SQLite `journal_mode` to
 `delete` prior to the upgrade. This works around a problem with
@@ -112,17 +124,17 @@ $ nvr run
 Hopefully your system is functioning correctly. If not, there are two options
 for restore; neither are easy:
 
-   * go back to your old database. There will be two classes of problems:
-        * If the new system deleted any recordings, the old system will
-          incorrectly believe they are still present. You could wait until all
-          existing files are rotated away, or you could try to delete them
-          manually from the database.
-        * if the new system created any recordings, the old system will not
-          know about them and will not delete them. Your disk may become full.
-          You should find some way to discover these files and manually delete
-          them.
-   * undo the changes by hand. There's no documentation on this; you'll need
-     to read the code and come up with a reverse transformation.
+*   go back to your old database. There will be two classes of problems:
+    *   If the new system deleted any recordings, the old system will
+        incorrectly believe they are still present. You could wait until all
+        existing files are rotated away, or you could try to delete them
+        manually from the database.
+    *   If the new system created any recordings, the old system will not
+        know about them and will not delete them. Your disk may become full.
+        You should find some way to discover these files and manually delete
+        them.
+*  undo the changes by hand. There's no documentation on this; you'll need
+    to read the code and come up with a reverse transformation.
 
 The `nvr check` command will show you what problems exist on your system.
 
@@ -136,9 +148,9 @@ will also accept a version 0 database.
 
 Version 0 makes two changes:
 
-   * it adds schema versioning, as described above.
-   * it adds a column (`video_sync_samples`) to a database index to speed up
-     certain operations.
+*   it adds schema versioning, as described above.
+*   it adds a column (`video_sync_samples`) to a database index to speed up
+    certain operations.
 
 There's a special procedure for this upgrade. The good news is that a backup
 is unnecessary; there's no risk with this procedure.
@@ -150,8 +162,10 @@ Then use `sqlite3` to manually edit the database. The default
 path is `/var/lib/moonfire-nvr/db/db`; if you've specified a different
 `--db_dir`, use that directory with a suffix of `/db`.
 
-    $ sudo -u moonfire-nvr sqlite3 /var/lib/moonfire-nvr/db/db
-    sqlite3>
+```
+$ sudo -u moonfire-nvr sqlite3 /var/lib/moonfire-nvr/db/db
+sqlite3>
+```
 
 At the prompt, run the following commands:
 

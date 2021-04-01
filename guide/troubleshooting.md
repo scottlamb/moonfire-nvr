@@ -1,27 +1,26 @@
-# Troubleshooting
+# Troubleshooting <!-- omit in toc -->
 
 Here are some tips for diagnosing various problems with Moonfire NVR. Feel free
 to open an [issue](https://github.com/scottlamb/moonfire-nvr/issues) if you
 need more help.
 
-* [Troubleshooting](#troubleshooting)
-    * [Viewing Moonfire NVR's logs](#viewing-moonfire-nvrs-logs)
-        * [Flushes](#flushes)
-        * [Panic errors](#panic-errors)
-        * [Slow operations](#slow-operations)
-        * [Camera stream errors](#camera-stream-errors)
-    * [Problems](#problems)
-        * [Server errors](#server-errors)
-            * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
-            * [Out of disk space](#out-of-disk-space)
-            * [Database or filesystem corruption errors](#database-or-filesystem-corruption-errors)
-        * [Configuration interface problems](#configuration-interface-problems)
-            * [`moonfire-nvr config` displays garbage](#moonfire-nvr-config-displays-garbage)
-        * [Browser user interface problems](#browser-user-interface-problems)
-            * [Live stream always fails with `ws close: 1006`](#live-stream-always-fails-with-ws-close-1006)
-        * [Errors in kernel logs](#errors-in-kernel-logs)
-            * [UAS errors](#uas-errors)
-            * [Filesystem errors](#filesystem-errors)
+* [Viewing Moonfire NVR's logs](#viewing-moonfire-nvrs-logs)
+    * [Flushes](#flushes)
+    * [Panic errors](#panic-errors)
+    * [Slow operations](#slow-operations)
+    * [Camera stream errors](#camera-stream-errors)
+* [Problems](#problems)
+    * [Server errors](#server-errors)
+        * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
+        * [Out of disk space](#out-of-disk-space)
+        * [Database or filesystem corruption errors](#database-or-filesystem-corruption-errors)
+    * [Configuration interface problems](#configuration-interface-problems)
+        * [`moonfire-nvr config` displays garbage](#moonfire-nvr-config-displays-garbage)
+    * [Browser user interface problems](#browser-user-interface-problems)
+        * [Live stream always fails with `ws close: 1006`](#live-stream-always-fails-with-ws-close-1006)
+    * [Errors in kernel logs](#errors-in-kernel-logs)
+        * [UAS errors](#uas-errors)
+        * [Filesystem errors](#filesystem-errors)
 
 ## Viewing Moonfire NVR's logs
 

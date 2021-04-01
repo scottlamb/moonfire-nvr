@@ -1,4 +1,8 @@
-# Working on UI development
+# Working on UI development <!-- omit in toc -->
+
+* [Getting started](#getting-started)
+* [Overriding defaults](#overriding-defaults)
+* [A note on `https`](#a-note-on-https)
 
 The UI is presented from a single HTML page (index.html) and any number
 of Javascript files, css files, images, etc. These are "packed" together

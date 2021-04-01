@@ -21,7 +21,7 @@
     // I find Prettier's markdown style jarring, including converting `*`
     // bullets to `-` and two-column indents. It's not customizable either.
     // Don't use it.
-    "editor.defaultFormatter": null
+    "editor.defaultFormatter": "yzhang.markdown-all-in-one"
   },
 
   // Rust-specific overrides.
@@ -41,5 +41,7 @@
     "editor.defaultFormatter": "matklad.rust-analyzer"
     //"editor.defaultFormatter": null
   },
-  "rust-analyzer.inlayHints.enable": false
+  "rust-analyzer.inlayHints.enable": false,
+  "markdown.extension.list.indentationSize": "inherit",
+  "markdown.extension.toc.unorderedList.marker": "*"
 }

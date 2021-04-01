@@ -1,4 +1,4 @@
-# Building Moonfire NVR
+# Building Moonfire NVR <!-- omit in toc -->
 
 This document has notes for software developers on building Moonfire NVR from
 source code for development. If you just want to install precompiled
@@ -10,13 +10,12 @@ tracker](https://github.com/scottlamb/moonfire-nvr/issues) or
 [mailing list](https://groups.google.com/d/forum/moonfire-nvr-users) when
 stuck. Please also send pull requests to improve this doc.
 
-* [Building Moonfire NVR](#building-moonfire-nvr)
-    * [Downloading](#downloading)
-    * [Docker builds](#docker-builds)
-        * [Release procedure](#release-procedure)
-    * [Non-Docker setup](#non-docker-setup)
-        * [Running interactively straight from the working copy](#running-interactively-straight-from-the-working-copy)
-        * [Running as a `systemd` service](#running-as-a-systemd-service)
+* [Downloading](#downloading)
+* [Docker builds](#docker-builds)
+    * [Release procedure](#release-procedure)
+* [Non-Docker setup](#non-docker-setup)
+    * [Running interactively straight from the working copy](#running-interactively-straight-from-the-working-copy)
+    * [Running as a `systemd` service](#running-as-a-systemd-service)
 
 ## Downloading
 
@@ -151,19 +150,19 @@ Linux VM and filesystem overlay.
 
 To build the server, you will need the following C libraries installed:
 
-* [ffmpeg](http://ffmpeg.org/) version 2.x or 3.x, including `libavutil`,
-  `libavcodec` (to inspect H.264 frames), and `libavformat` (to connect to RTSP
-  servers and write `.mp4` files).
+*   [ffmpeg](http://ffmpeg.org/) version 2.x or 3.x, including `libavutil`,
+    `libavcodec` (to inspect H.264 frames), and `libavformat` (to connect to
+    RTSP servers and write `.mp4` files).
 
-  Note ffmpeg library versions older than 55.1.101, along with all versions of
-  the competing project [libav](http://libav.org), don't support socket
-  timeouts for RTSP. For reliable reconnections on error, it's strongly
-  recommended to use ffmpeg library versions >= 55.1.101.
+    Note ffmpeg library versions older than 55.1.101, along with all versions of
+    the competing project [libav](http://libav.org), don't support socket
+    timeouts for RTSP. For reliable reconnections on error, it's strongly
+    recommended to use ffmpeg library versions >= 55.1.101.
 
-* [SQLite3](https://www.sqlite.org/).
+*   [SQLite3](https://www.sqlite.org/).
 
-* [`ncursesw`](https://www.gnu.org/software/ncurses/), the UTF-8 version of
-  the `ncurses` library.
+*   [`ncursesw`](https://www.gnu.org/software/ncurses/), the UTF-8 version of
+    the `ncurses` library.
 
 To build the UI, you'll need [node and npm](https://nodejs.org/en/download/).
 

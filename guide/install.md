@@ -1,4 +1,11 @@
-# Downloading, installing, and configuring Moonfire NVR with Docker
+# Installing Moonfire NVR <!-- omit in toc -->
+
+* [Downloading, installing, and configuring Moonfire NVR with Docker](#downloading-installing-and-configuring-moonfire-nvr-with-docker)
+    * [Dedicated hard drive setup](#dedicated-hard-drive-setup)
+    * [Completing configuration through the UI](#completing-configuration-through-the-ui)
+    * [Starting it up](#starting-it-up)
+
+## Downloading, installing, and configuring Moonfire NVR with Docker
 
 This document describes how to download, install, and configure Moonfire NVR
 via the prebuilt Docker images available for x86-64, arm64, and arm. If you
@@ -102,7 +109,7 @@ $ nvr init
 This will create a directory `/var/lib/moonfire-nvr/db` with a SQLite3 database
 within it.
 
-## Dedicated hard drive setup
+### Dedicated hard drive setup
 
 If a dedicated hard drive is available, set up the mount point:
 
@@ -139,7 +146,7 @@ mount lines. It will look similar to this:
         --mount=type=bind,source=/media/nvr/sample,destination=/media/nvr/sample
 ```
 
-## Completing configuration through the UI
+### Completing configuration through the UI
 
 Once your system is set up, it's time to initialize an empty database
 and add the cameras and sample directories. You can do this
@@ -159,28 +166,28 @@ In the user interface,
 
 2.  add cameras under "Cameras and streams".
 
-    * See the [wiki](https://github.com/scottlamb/moonfire-nvr/wiki) for notes
-      about specific camera models.
+    *   See the [wiki](https://github.com/scottlamb/moonfire-nvr/wiki) for notes
+        about specific camera models.
 
-    * There's a "Test" button to verify your settings directly from the add/edit
-      camera dialog.
+    *   There's a "Test" button to verify your settings directly from the add/edit
+        camera dialog.
 
-    * Be sure to assign each stream you want to capture to a sample file
-      directory and check the "record" box.
+    *   Be sure to assign each stream you want to capture to a sample file
+        directory and check the "record" box.
 
-    * `flush_if_sec` should typically be 120 seconds. This causes the database to
-      be flushed when the first instant of one of this stream's completed
-      recordings is 2 minutes old. A "recording" is a segment of a video
-      stream that is 60–120 seconds when first establishing the stream, about
-      60 seconds midstream, and shorter when an error or server shutdown
-      terminates the stream. Thus, a value just below 60 will cause the
-      database to be flushed once per minute per stream in the steady state. A
-      value around 180 will cause the database to be once every 3 minutes per
-      stream, or less frequently if other streams cause flushes first. Lower
-      values cause less video to be lost on power loss. Higher values reduce
-      wear on the SSD holding the SQLite database, particularly when you have
-      many cameras and when you record both the "main" and "sub" streams of
-      each camera.
+    *   `flush_if_sec` should typically be 120 seconds. This causes the database to
+        be flushed when the first instant of one of this stream's completed
+        recordings is 2 minutes old. A "recording" is a segment of a video
+        stream that is 60–120 seconds when first establishing the stream,
+        about 60 seconds midstream, and shorter when an error or server
+        shutdown terminates the stream. Thus, a value just below 60 will
+        cause the database to be flushed once per minute per stream in the
+        steady state. A value around 180 will cause the database to be once
+        every 3 minutes per stream, or less frequently if other streams cause
+        flushes first. Lower values cause less video to be lost on power
+        loss. Higher values reduce wear on the SSD holding the SQLite
+        database, particularly when you have many cameras and when you record
+        both the "main" and "sub" streams of each camera.
 
 3.  Assign disk space to your cameras back in "Directories and retention".
     Leave a little slack between the total limit and the filesystem capacity,
@@ -202,7 +209,7 @@ In the user interface,
 4.  Add a user for yourself (and optionally others) under "Users". You'll need
     this to access the web UI once you enable authentication.
 
-## Starting it up
+### Starting it up
 
 Note that at this stage, Moonfire NVR's web interface is **insecure**: it
 doesn't use `https` and doesn't require you to authenticate

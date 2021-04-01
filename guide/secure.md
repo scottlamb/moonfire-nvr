@@ -1,4 +1,16 @@
-# Securing Moonfire NVR and exposing it to the Internet
+# Securing Moonfire NVR and exposing it to the Internet <!-- omit in toc -->
+
+* [The problem](#the-problem)
+* [VPN or port forwarding?](#vpn-or-port-forwarding)
+* [Overview](#overview)
+* [1. Install a webserver](#1-install-a-webserver)
+* [2. Configure a static internal IP](#2-configure-a-static-internal-ip)
+* [3. Set up port forwarding](#3-set-up-port-forwarding)
+* [4. Configure a public DNS name](#4-configure-a-public-dns-name)
+* [5. Install a TLS certificate](#5-install-a-tls-certificate)
+* [6. Reconfigure Moonfire NVR](#6-reconfigure-moonfire-nvr)
+* [7. Configure the webserver](#7-configure-the-webserver)
+* [Verify it works](#verify-it-works)
 
 ## The problem
 

@@ -1,4 +1,4 @@
-# Moonfire NVR Time Handling
+# Moonfire NVR Time Handling <!-- omit in toc -->
 
 Status: **current**.
 
@@ -7,6 +7,19 @@ Status: **current**.
 >
 > — Segal's law
 
+* [Objective](#objective)
+* [Background](#background)
+* [Overview](#overview)
+* [Detailed design](#detailed-design)
+* [Caveats](#caveats)
+    * [Stream mismatches](#stream-mismatches)
+    * [Time discontinuities](#time-discontinuities)
+    * [Leap seconds](#leap-seconds)
+        * [Use `clock_gettime(CLOCK_TAI, ...)` timestamps](#use-clock_gettimeclock_tai--timestamps)
+        * [Use a leap second table when calculating differences](#use-a-leap-second-table-when-calculating-differences)
+        * [Use smeared time](#use-smeared-time)
+* [Alternatives considered](#alternatives-considered)
+
 ## Objective
 
 Maximize the likelihood Moonfire NVR's timestamps are useful.
@@ -14,20 +27,20 @@ Maximize the likelihood Moonfire NVR's timestamps are useful.
 The timestamp corresponding to a video frame should roughly match timestamps
 from other sources:
 
-   * another video stream from the same camera. Given a video frame from the
-     "main" stream, a video frame from the "sub" stream with a similar
-     timestamp should have been recorded near the same time, and vice versa.
-     This minimizes confusion when switching between views of these streams,
-     and when viewing the "main" stream timestamps corresponding to a motion
-     event gathered from the less CPU-intensive "sub" stream.
-   * on-camera motion events from the same camera. If the video frame reflects
-     the motion event, its timestamp should be roughly within the event's
-     timespan.
-   * streams from other cameras. Recorded views from two cameras of the same
-     event should have similar timestamps.
-   * events noted by the owner of the system, neighbors, police, etc., for the
-     purpose of determining chronology, to the extent those persons use
-     accurate clocks.
+*   another video stream from the same camera. Given a video frame from the
+    "main" stream, a video frame from the "sub" stream with a similar
+    timestamp should have been recorded near the same time, and vice versa.
+    This minimizes confusion when switching between views of these streams,
+    and when viewing the "main" stream timestamps corresponding to a motion
+    event gathered from the less CPU-intensive "sub" stream.
+*  on-camera motion events from the same camera. If the video frame reflects
+    the motion event, its timestamp should be roughly within the event's
+    timespan.
+*   streams from other cameras. Recorded views from two cameras of the same
+    event should have similar timestamps.
+*   events noted by the owner of the system, neighbors, police, etc., for the
+    purpose of determining chronology, to the extent those persons use
+    accurate clocks.
 
 Two recordings from the same stream should not overlap. This would make it
 impossible for a user interface to present a simple timeline for accessing all
@@ -35,28 +48,28 @@ recorded video.
 
 Durations should be useful over short timescales:
 
-   * If an object's motion is recorded, distance travelled divided by the
-     duration of the frames over which this motion occurred should reflect the
-     object's average speed.
-   * Motion should appear smooth. There shouldn't be excessive frame-to-frame
-     jitter due to such factors as differences in encoding time or network
-     transmission.
+*   If an object's motion is recorded, distance travelled divided by the
+    duration of the frames over which this motion occurred should reflect the
+    object's average speed.
+*   Motion should appear smooth. There shouldn't be excessive frame-to-frame
+    jitter due to such factors as differences in encoding time or network
+    transmission.
 
 This document describes an approach to achieving these goals when the
 following statements are true:
 
-   * the NVR's system clock is within a second of correct on startup. (True
-     when NTP is functioning or when the system has a real-time clock battery
-     to preserve a previous correct time.)
-   * the NVR's system time does not experience forward or backward "step"
-     corrections (as opposed to frequency correction) during operation.
-   * the NVR's system time advances at roughly the correct frequency. (NTP
-     achieves this through frequency correction when operating correctly.)
-   * the cameras' clock frequencies are off by no more than 500 parts per
-     million (roughly 43 seconds per day).
-   * the cameras are geographically close to the NVR, so in most cases network
-     transmission time is under 50 ms. (Occasional delays are to be expected,
-     however.)
+*   the NVR's system clock is within a second of correct on startup. (True
+    when NTP is functioning or when the system has a real-time clock battery
+    to preserve a previous correct time.)
+*   the NVR's system time does not experience forward or backward "step"
+    corrections (as opposed to frequency correction) during operation.
+*   the NVR's system time advances at roughly the correct frequency. (NTP
+    achieves this through frequency correction when operating correctly.)
+*   the cameras' clock frequencies are off by no more than 500 parts per
+    million (roughly 43 seconds per day).
+*   the cameras are geographically close to the NVR, so in most cases network
+    transmission time is under 50 ms. (Occasional delays are to be expected,
+    however.)
 
 When one or more of those statements are false, the system should degrade
 gracefully: preserve what properties it can, gather video anyway, and when
@@ -81,40 +94,40 @@ so such problems are to be expected.
 Moonfire NVR typically has access to the following sources of time
 information:
 
-   * the local `CLOCK_REALTIME`. Ideally this is maintained by `ntpd`:
-     synchronized on startup, and frequency-corrected during operation. A
-     hardware real-time clock and battery keep accurate time across restarts
-     if the network is unavailable on startup. In the worst case, the system
-     has no real-time clock or no battery and a network connection is
-     unavailable. The time is far in the past on startup and is never
-     corrected or is corrected via a step while Moonfire NVR is running.
-   * the local `CLOCK_MONOTONIC`. This should be frequency-corrected by `ntpd`
-     and guaranteed to never experience "steps", though its reference point is
-     unspecified.
-   * the local `ntpd`, which can be used to determine if the system is
-     synchronized to NTP and quantify the precision of synchronization.
-   * each camera's clock. The ONVIF specification mandates cameras must
-     support synchronizing clocks via NTP, but in practice cameras appear to
-     use SNTP clients which simply step time periodically and provide no
-     interface to determine if the clock is currently synchronized. This
-     document's author owns several cameras with clocks that run roughly 20
-     ppm fast (2 seconds per day) and are adjusted via steps.
-   * the RTP timestamps from each of a camera's streams. As described in
-     [RFC 3550 section 5.1](https://tools.ietf.org/html/rfc3550#section-5.1),
-     these are monotonically increasing with an unspecified reference point.
-     They can't be directly compared to other cameras or other streams from
-     the same camera. Emperically, budget cameras don't appear to do any
-     frequency correction on these timestamps.
-   * in some cases, RTCP sender reports, as described in
-     [RFC 3550 section 6.4](https://tools.ietf.org/html/rfc3550#section-6.4).
-     These correlate RTP timestamps with the camera's real time clock.
-     However, these are only sent periodically, not necessarily at the
-     beginning of the session.  Some cameras omit them entirely depending on
-     firmware version, as noted in
-     [this forum post](https://www.cctvforum.com/topic/40914-video-sync-with-hikvision-ipcams-tech-query-about-rtcp/).
-     Additionally, Moonfire NVR currently uses ffmpeg's libavformat for RTSP
-     protocol handling; this library exposes these reports in a limited
-     fashion.
+*   the local `CLOCK_REALTIME`. Ideally this is maintained by `ntpd`:
+    synchronized on startup, and frequency-corrected during operation. A
+    hardware real-time clock and battery keep accurate time across restarts
+    if the network is unavailable on startup. In the worst case, the system
+    has no real-time clock or no battery and a network connection is
+    unavailable. The time is far in the past on startup and is never
+    corrected or is corrected via a step while Moonfire NVR is running.
+*   the local `CLOCK_MONOTONIC`. This should be frequency-corrected by `ntpd`
+    and guaranteed to never experience "steps", though its reference point is
+    unspecified.
+*   the local `ntpd`, which can be used to determine if the system is
+    synchronized to NTP and quantify the precision of synchronization.
+*   each camera's clock. The ONVIF specification mandates cameras must
+    support synchronizing clocks via NTP, but in practice cameras appear to
+    use SNTP clients which simply step time periodically and provide no
+    interface to determine if the clock is currently synchronized. This
+    document's author owns several cameras with clocks that run roughly 20
+    ppm fast (2 seconds per day) and are adjusted via steps.
+*   the RTP timestamps from each of a camera's streams. As described in
+    [RFC 3550 section 5.1](https://tools.ietf.org/html/rfc3550#section-5.1),
+    these are monotonically increasing with an unspecified reference point.
+    They can't be directly compared to other cameras or other streams from
+    the same camera. Emperically, budget cameras don't appear to do any
+    frequency correction on these timestamps.
+*   in some cases, RTCP sender reports, as described in
+    [RFC 3550 section 6.4](https://tools.ietf.org/html/rfc3550#section-6.4).
+    These correlate RTP timestamps with the camera's real time clock.
+    However, these are only sent periodically, not necessarily at the
+    beginning of the session.  Some cameras omit them entirely depending on
+    firmware version, as noted in
+    [this forum post](https://www.cctvforum.com/topic/40914-video-sync-with-hikvision-ipcams-tech-query-about-rtcp/).
+    Additionally, Moonfire NVR currently uses ffmpeg's libavformat for RTSP
+    protocol handling; this library exposes these reports in a limited
+    fashion.
 
 The camera records video frames as in the diagram below:
 
@@ -224,14 +237,14 @@ wall clock, and thus calculate the camera's time as of the first frame.
 The _start time_ of the first recording could be either its local start time
 or its camera start time, determined via the following rules:
 
-   1. if there is no camera start time (due to the lack of a RTCP sender
-      report), the local start time wins by default.
-   2. if the camera start time is before 2016-01-01 00:00:00 UTC, the local
-      start time wins.
-   3. if the local start time is before 2016-01-01 00:00:00 UTC, the camera
-      start time wins.
-   4. if the times differ by more than 5 seconds, the local start time wins.
-   5. otherwise, the camera start time wins.
+1.  if there is no camera start time (due to the lack of a RTCP sender
+    report), the local start time wins by default.
+2.  if the camera start time is before 2016-01-01 00:00:00 UTC, the local
+    start time wins.
+3.  if the local start time is before 2016-01-01 00:00:00 UTC, the camera
+    start time wins.
+4.  if the times differ by more than 5 seconds, the local start time wins.
+5.  otherwise, the camera start time wins.
 
 These rules are a compromise. When a system starts up without NTP or a clock
 battery, it typically reverts to a time in the distant past. Therefore times
@@ -259,10 +272,10 @@ happened](https://github.com/scottlamb/moonfire-nvr/issues/9#issuecomment-322663
 Moonfire NVR will continue to use the initial wall clock time for as long as
 the recording lasts. This can result in some unfortunate behaviors:
 
-   * a recording that lasts for months might have an incorrect time all the
-     way through because `ntpd` took a few minutes on startup.
-   * two recordings that were in fact simultaneous might be recorded with very
-     different times because a time jump happened between their starts.
+*   a recording that lasts for months might have an incorrect time all the
+    way through because `ntpd` took a few minutes on startup.
+*   two recordings that were in fact simultaneous might be recorded with very
+    different times because a time jump happened between their starts.
 
 It might be better to use the new time (assuming that ntpd has made a
 correction) retroactively. This is unimplemented, but the
@@ -299,18 +312,18 @@ Timestamps in the TAI clock system don't skip leap seconds. There's a system
 interface intended to provide timestamps in this clock system, and Moonfire
 NVR could use it. Unfortunately this has several problems:
 
-   * `CLOCK_TAI` is only available on Linux. It'd be preferable to handle
-     timestamps in a consistent way on other platforms. (At least on macOS,
-     Moonfire NVR's current primary development platform.)
-   * `CLOCK_TAI` is wrong on startup and possibly adjusted later. The offset
-     between TAI and UTC is initially assumed to be 0. It's corrected when/if
-     a sufficiently new `ntpd` starts.
-   * We'd need a leap second table to translate this into calendar time. One
-     would have to be downloaded from the Internet periodically, and we'd need
-     to consider the case in which the available table is expired.
-   * `CLOCK_TAI` likely doesn't work properly with leap smear systems. Where
-     the leap smear prevents a time jump for `CLOCK_REALTIME`, it likely
-     introduces one for `CLOCK_TAI`.
+*   `CLOCK_TAI` is only available on Linux. It'd be preferable to handle
+    timestamps in a consistent way on other platforms. (At least on macOS,
+    Moonfire NVR's current primary development platform.)
+*   `CLOCK_TAI` is wrong on startup and possibly adjusted later. The offset
+    between TAI and UTC is initially assumed to be 0. It's corrected when/if
+    a sufficiently new `ntpd` starts.
+*   We'd need a leap second table to translate this into calendar time. One
+    would have to be downloaded from the Internet periodically, and we'd need
+    to consider the case in which the available table is expired.
+*   `CLOCK_TAI` likely doesn't work properly with leap smear systems. Where
+    the leap smear prevents a time jump for `CLOCK_REALTIME`, it likely
+    introduces one for `CLOCK_TAI`.
 
 #### Use a leap second table when calculating differences
 
