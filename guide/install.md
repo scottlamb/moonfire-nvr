@@ -151,13 +151,13 @@ $ nvr config 2>debug-log
 
 In the user interface,
 
- 1. add your sample file dir(s) under "Directories and retention".
+1.  add your sample file dir(s) under "Directories and retention".
     If you used a dedicated hard drive, use the directory you precreated
     (eg `/media/nvr/sample`). Otherwise, try
     `/var/lib/moonfire-nvr/sample`. Moonfire NVR will create the directory as
     long as it has the required permissions on the parent directory.
 
- 2. add cameras under "Cameras and streams".
+2.  add cameras under "Cameras and streams".
 
     * See the [wiki](https://github.com/scottlamb/moonfire-nvr/wiki) for notes
       about specific camera models.
@@ -182,22 +182,24 @@ In the user interface,
       many cameras and when you record both the "main" and "sub" streams of
       each camera.
 
- 3. Assign disk space to your cameras back in "Directories and retention".
-    Leave a little slack (at least 100 MB per camera) between the total limit
-    and the filesystem capacity, even if you store nothing else on the disk.
-    There are several reasons this is needed:
+3.  Assign disk space to your cameras back in "Directories and retention".
+    Leave a little slack between the total limit and the filesystem capacity,
+    even if you store nothing else on the disk. 1 GiB per camera should be
+    plenty. This is needed for a few reasons:
 
-    * The limit currently controls fully-written files only. There will be up
-      to two minutes of video per camera of additional video.
-    * The rotation happens after the limit is exceeded, not proactively.
-    * Moonfire NVR currently doesn't account for the unused space in the final
-      filesystem block at the end of each file.
-    * Moonfire NVR doesn't account for the space used for directory listings.
-    * If a file is open when it is deleted (such as if a HTTP client is
-      downloading it), it stays around until the file is closed. Moonfire NVR
-      currently doesn't account for this.
+    *   Up to `max(120, flush_if_sec)` seconds of video can be written before
+        being counted toward the usage because the recording doesn't count until
+        it's fully written, and old recordings can't be deleted until the
+        next database flush. So a 8 Mbps video stream with `flush_if_sec=300`
+        will take up to (8 Mbps * 300 sec / 8 bits/byte) = 300 MB ~= 286 MiB
+        of extra disk space.
+    *   If a file is open when it is deleted (such as if a HTTP client is
+        downloading it), it stays around until the file is closed. Moonfire NVR
+        currently doesn't account for this.
+    *   Smaller factors: deletion isn't instantaneous, and directories
+        themselves take up some disk space.
 
- 4. Add a user for yourself (and optionally others) under "Users". You'll need
+4.  Add a user for yourself (and optionally others) under "Users". You'll need
     this to access the web UI once you enable authentication.
 
 ## Starting it up
