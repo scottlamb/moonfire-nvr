@@ -1,11 +1,14 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 //! `.mp4` virtual file serving.
 //!
 //! The `mp4` module builds virtual files representing ISO/IEC 14496-12 (ISO base media format /
-//! MPEG-4 / `.mp4`) video. These can be constructed from one or more recordings and are suitable
+//! MPEG-4 / `.mp4`) video. See [the wiki page on standards and specifications](https://github.com/scottlamb/moonfire-nvr/wiki/Standards-and-specifications)
+//! to find a copy of the relevant standards. This code won't make much sense without them!
+//!
+//! The virtual files can be constructed from one or more recordings and are suitable
 //! for HTTP range serving or download. The generated `.mp4` file has the `moov` box before the
 //! `mdat` box for fast start. More specifically, boxes are arranged in the order suggested by
 //! ISO/IEC 14496-12 section 6.2.3 (Table 1):

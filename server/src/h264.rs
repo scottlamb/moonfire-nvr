@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 //! H.264 decoding
@@ -9,6 +9,10 @@
 //! When streaming from RTSP, ffmpeg supplies the former. We need the latter to stick into `.mp4`
 //! files. This file manages the conversion, both for the ffmpeg "extra data" (which should become
 //! the ISO/IEC 14496-15 section 5.2.4.1 `AVCDecoderConfigurationRecord`) and the actual samples.
+//!
+//! See the [wiki page on standards and
+//! specifications](https://github.com/scottlamb/moonfire-nvr/wiki/Standards-and-specifications)
+//! for help finding a copy of the relevant standards. This code won't make much sense without them!
 //!
 //! ffmpeg of course has logic to do the same thing, but unfortunately it is not exposed except
 //! through ffmpeg's own generated `.mp4` file. Extracting just this part of their `.mp4` files
