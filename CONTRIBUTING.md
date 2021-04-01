@@ -70,6 +70,8 @@ configure your Linux system and network for recording, hardware
 recommendations, etc. This area is less formal. No review is necessary; just
 make a change.
 
+You could be the first to create a [YouTube tour](https://github.com/scottlamb/moonfire-nvr/issues/82) or start other forms of documentation!
+
 ## Contributing code and UI changes
 
 I love seeing code and user interface contributions.
