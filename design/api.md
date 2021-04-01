@@ -25,13 +25,13 @@ Status: **current**.
 ## Objective
 
 Allow a JavaScript-based web interface to list cameras and view recordings.
+Support external analytics.
 
 In the future, this is likely to be expanded:
 
 *   configuration support
 *   commandline tool over a UNIX-domain socket
     (at least for bootstrapping web authentication)
-*   mobile interface
 
 ## Detailed design
 
