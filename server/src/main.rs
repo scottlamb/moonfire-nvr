@@ -155,7 +155,12 @@ fn main() {
         .build();
     h.clone().install().unwrap();
 
-    std::panic::set_hook(Box::new(&panic_hook));
+    let use_panic_hook = ::std::env::var("MOONFIRE_PANIC_HOOK")
+        .map(|s| s != "false" && s != "0")
+        .unwrap_or(true);
+    if use_panic_hook {
+        std::panic::set_hook(Box::new(&panic_hook));
+    }
 
     let r = {
         let _a = h.async_scope();
