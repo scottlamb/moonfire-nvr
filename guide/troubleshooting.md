@@ -11,6 +11,7 @@ need more help.
     * [Camera stream errors](#camera-stream-errors)
 * [Problems](#problems)
     * [Server errors](#server-errors)
+        * [`clock_gettime failed: EPERM: Operation not permitted`](#clock_gettime-failed-eperm-operation-not-permitted)
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
         * [Database or filesystem corruption errors](#database-or-filesystem-corruption-errors)
@@ -212,6 +213,23 @@ W20210309 00:28:55.527 s-courtyard-sub moonfire_nvr::streamer] courtyard-sub: sl
 ## Problems
 
 ### Server errors
+
+#### `clock_gettime failed: EPERM: Operation not permitted`
+
+If commands fail with an error like the following, you're likely running
+Docker with an overly restrictive `seccomp` setup. [This stackoverflow
+answer](https://askubuntu.com/questions/1263284/apt-update-throws-signature-error-in-ubuntu-20-04-container-on-arm/1264921#1264921) describes the
+problem in more detail. The simplest solution is to add
+`--security-opt=seccomp:unconfined` to your Docker commandline.
+If you are using the recommended `/usr/local/bin/nvr` wrapper script,
+add this option to the `common_docker_run_args` section.
+
+```
+$ docker run --rm -it moonfire-nvr:latest
+clock_gettime failed: EPERM: Operation not permitted
+
+This indicates a broken environment. See the troubleshooting guide.
+```
 
 #### `Error: pts not monotonically increasing; got 26615520 then 26539470`
 

@@ -13,20 +13,9 @@ instead want to build Moonfire NVR yourself, see the [Build
 instructions](build.md).
 
 First, install [Docker](https://www.docker.com/) if you haven't already,
-and verify you can run the container.
+and verify `docker run --rm hello-world` works.
 
-```
-$ docker run --rm -it scottlamb/moonfire-nvr:latest
-moonfire-nvr 0.6.2
-security camera network video recorder
-
-USAGE:
-    moonfire-nvr <SUBCOMMAND>
-
-...
-```
-
-Next, you'll need to set up your filesystem and the Monfire NVR user.
+Next, you'll need to set up your filesystem and the Moonfire NVR user.
 
 Moonfire NVR keeps two kinds of state:
 
@@ -56,12 +45,13 @@ time zone.
 sudo sh -c 'cat > /usr/local/bin/nvr' <<'EOF'
 #!/bin/bash -e
 
-tz=America/Los_Angeles
-container_name=moonfire-nvr
-image_name=scottlamb/moonfire-nvr:latest
+tz="America/Los_Angeles"
+container_name="moonfire-nvr"
+image_name="scottlamb/moonfire-nvr:latest"
 common_docker_run_args=(
         --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
         --user="$(id -u moonfire-nvr):$(id -g moonfire-nvr)"
+        --security-opt=seccomp:unconfined
         --env=RUST_BACKTRACE=1
         --env=TZ=":${tz}"
 )
@@ -73,7 +63,7 @@ run)
                 --detach=true \
                 --restart=on-failure \
                 "${common_docker_run_args[@]}" \
-                --publish=8080:8080 \
+                --network=host \
                 --name="${container_name}" \
                 "${image_name}" \
                 run \

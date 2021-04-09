@@ -137,6 +137,15 @@ fn panic_hook(p: &std::panic::PanicInfo) {
 }
 
 fn main() {
+    if let Err(e) = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC) {
+        eprintln!(
+            "clock_gettime failed: {}\n\n\
+                   This indicates a broken environment. See the troubleshooting guide.",
+            e
+        );
+        std::process::exit(1);
+    }
+
     let args = Args::from_args();
     let mut h = mylog::Builder::new()
         .set_format(
