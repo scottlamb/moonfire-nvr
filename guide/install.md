@@ -128,6 +128,12 @@ system will boot successfully even when the hard drive is unavailable (such as
 when your external USB storage is unmounted). This can be helpful when
 recovering from problems.
 
+Create the sample directory.
+
+```
+sudo mkdir /media/nvr/sample
+```
+
 Add a new `--mount` line to your Docker wrapper script `/usr/local/bin/nvr`
 to expose this new volume to the Docker container, directly below the other
 mount lines. It will look similar to this:
