@@ -413,7 +413,10 @@ create table user_session (
 
 create index user_session_uid on user_session (user_id);
 
--- Timeseries with an enum value.
+-- Timeseries with an enum value, eg:
+-- *   camera motion detection results (unknown, still, moving)
+-- *   security system arm status (unknown, disarmed, away, stay)
+-- *   security system zone status (unknown, normal, violated, trouble)
 create table signal (
   id integer primary key,
 
@@ -436,8 +439,7 @@ create table signal (
   unique (source_uuid, type_uuid)
 );
 
--- e.g. "moving/still", "disarmed/away/stay", etc.
--- TODO: just do a protobuf for each type? might be simpler, more flexible.
+-- e.g. "still/moving", "disarmed/away/stay", etc.
 create table signal_type_enum (
   type_uuid blob not null check (length(type_uuid) = 16),
   value integer not null check (value > 0 and value < 16),

@@ -2,9 +2,10 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-/// Upgrades the database schema.
-///
-/// See `guide/schema.md` for more information.
+//! Upgrades the database schema.
+//!
+//! See `guide/schema.md` for more information.
+
 use crate::db;
 use failure::{bail, Error};
 use log::info;

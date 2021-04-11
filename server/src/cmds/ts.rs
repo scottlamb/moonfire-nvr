@@ -10,9 +10,9 @@ pub struct Args {
     /// Timestamp(s) to translate.
     ///
     /// May be either an integer or an RFC-3339-like string:
-    /// YYYY-mm-dd[THH:MM[:SS[:FFFFF]]][{Z,{+,-,}HH:MM}].
+    /// `YYYY-mm-dd[THH:MM[:SS[:FFFFF]]][{Z,{+,-,}HH:MM}]`.
     ///
-    /// Eg: 142913484000000, 2020-04-26, 2020-04-26T12:00:00:00000-07:00.
+    /// Eg: `142913484000000`, `2020-04-26`, `2020-04-26T12:00:00:00000-07:00`.
     #[structopt(required = true)]
     timestamps: Vec<String>,
 }

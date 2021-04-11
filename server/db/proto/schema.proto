@@ -4,13 +4,13 @@
 
 syntax = "proto3";
 
-// Metadata stored in sample file dirs as "<dir>/meta". This is checked
+// Metadata stored in sample file dirs as `<dir>/meta`. This is checked
 // against the metadata stored within the database to detect inconsistencies
 // between the directory and database, such as those described in
-// design/schema.md.
+// `design/schema.md`.
 //
 // As of schema version 4, the overall file format is as follows: a
-// varint-encoded length, followed by a serialized DirMeta message, followed
+// varint-encoded length, followed by a serialized `DirMeta` message, followed
 // by NUL bytes padding to a total length of 512 bytes. This message never
 // exceeds that length.
 //

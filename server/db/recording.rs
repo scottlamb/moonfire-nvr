@@ -2,6 +2,8 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+//! Building and reading recordings via understanding of their sample indexes.
+
 use crate::coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
 use crate::db;
 use failure::{bail, Error};
@@ -17,7 +19,7 @@ pub const MAX_RECORDING_WALL_DURATION: i64 = 5 * 60 * TIME_UNITS_PER_SEC;
 pub use base::time::Duration;
 pub use base::time::Time;
 
-/// Converts from a wall time offset into a recording to a media time offset or vice versa.
+/// Converts from a wall time offset within a recording to a media time offset or vice versa.
 pub fn rescale(from_off_90k: i32, from_duration_90k: i32, to_duration_90k: i32) -> i32 {
     debug_assert!(
         from_off_90k <= from_duration_90k,
@@ -31,7 +33,7 @@ pub fn rescale(from_off_90k: i32, from_duration_90k: i32, to_duration_90k: i32) 
     }
 
     // The intermediate values here may overflow i32, so use an i64 instead. The max wall
-    // time is recording::MAX_RECORDING_WALL_DURATION; the max media duration should be
+    // time is [`MAX_RECORDING_WALL_DURATION`]; the max media duration should be
     // roughly the same (design limit of 500 ppm correction). The final result should fit
     // within i32.
     i32::try_from(
@@ -46,7 +48,7 @@ pub fn rescale(from_off_90k: i32, from_duration_90k: i32, to_duration_90k: i32) 
     .unwrap()
 }
 
-/// An iterator through a sample index.
+/// An iterator through a sample index (as described in `design/recording.md`).
 /// Initially invalid; call `next()` before each read.
 #[derive(Clone, Copy, Debug)]
 pub struct SampleIndexIterator {
@@ -144,6 +146,7 @@ impl SampleIndexIterator {
     }
 }
 
+/// An encoder for a sample index (as described in `design/recording.md`).
 #[derive(Debug)]
 pub struct SampleIndexEncoder {
     prev_duration_90k: i32,
@@ -191,9 +194,10 @@ impl SampleIndexEncoder {
     }
 }
 
-/// A segment represents a view of some or all of a single recording, starting from a key frame.
+/// A segment represents a view of some or all of a single recording.
 /// This struct is not specific to a container format; for `.mp4`s, it's wrapped in a
-/// `mp4::Segment`. Other container/transport formats could be supported in a similar manner.
+/// `moonfire_nvr::mp4::Segment`. Other container/transport formats could be
+/// supported in a similar manner.
 #[derive(Debug)]
 pub struct Segment {
     pub id: db::CompositeId,

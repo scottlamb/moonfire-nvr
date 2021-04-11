@@ -190,7 +190,7 @@ following command:
 $ brew install ffmpeg node
 ```
 
-Next, you need Rust 1.45+ and Cargo. The easiest way to install them is by
+Next, you need Rust 1.48+ and Cargo. The easiest way to install them is by
 following the instructions at [rustup.rs](https://www.rustup.rs/).
 
 Once prerequisites are installed, you can build the server and find it in

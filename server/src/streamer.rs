@@ -27,6 +27,8 @@ where
     pub shutdown: &'b Arc<AtomicBool>,
 }
 
+/// Connects to a given RTSP stream and writes recordings to the database via [`writer::Writer`].
+/// Streamer is meant to be long-lived; it will sleep and retry after each failure.
 pub struct Streamer<'a, C, S>
 where
     C: Clocks + Clone,

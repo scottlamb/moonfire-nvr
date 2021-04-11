@@ -2,6 +2,8 @@
 // Copyright (C) 2018 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+//! Authentication schema: users and sessions/cookies.
+
 use crate::schema::Permissions;
 use base::{bail_t, format_err_t, strutil, ErrorKind, ResultExt};
 use failure::{bail, format_err, Error};

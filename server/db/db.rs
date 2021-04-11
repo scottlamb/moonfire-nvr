@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 //! Database access logic for the Moonfire NVR SQLite schema.
@@ -7,22 +7,22 @@
 //! The SQLite schema includes everything except the actual video samples (see the `dir` module
 //! for management of those). See `schema.sql` for a more detailed description.
 //!
-//! The `Database` struct caches data in RAM, making the assumption that only one process is
+//! The [`Database`] struct caches data in RAM, making the assumption that only one process is
 //! accessing the database at a time. Performance and efficiency notes:
 //!
-//!   * several query operations here feature row callbacks. The callback is invoked with
+//! *   several query operations here feature row callbacks. The callback is invoked with
 //!     the database lock. Thus, the callback shouldn't perform long-running operations.
 //!
-//!   * startup may be slow, as it scans the entire index for the recording table. This seems
+//! *   startup may be slow, as it scans the entire index for the recording table. This seems
 //!     acceptable.
 //!
-//!   * the operations used for web file serving should return results with acceptable latency.
+//! *   the operations used for web file serving should return results with acceptable latency.
 //!
-//!   * however, the database lock may be held for longer than is acceptable for
+//! *   however, the database lock may be held for longer than is acceptable for
 //!     the critical path of recording frames. The caller should preallocate sample file uuids
 //!     and such to avoid database operations in these paths.
 //!
-//!   * adding and removing recordings done during normal operations use a batch interface.
+//! *   adding and removing recordings done during normal operations use a batch interface.
 //!     A list of mutations is built up in-memory and occasionally flushed to reduce SSD write
 //!     cycles.
 
@@ -457,7 +457,8 @@ pub struct Stream {
 
 /// Bounds of a live view segment. Currently this is a single frame of video.
 /// This is used for live stream recordings. The stream id should already be known to the
-/// subscriber.
+/// subscriber. Note this doesn't actually contain the video, just a reference that can be
+/// looked up within the database.
 #[derive(Clone, Debug)]
 pub struct LiveSegment {
     pub recording: i32,
@@ -590,6 +591,9 @@ pub struct Open {
     pub(crate) uuid: Uuid,
 }
 
+/// A combination of a stream id and recording id into a single 64-bit int.
+/// This is used as a primary key in the SQLite `recording` table (see `schema.sql`)
+/// and the sample file's name on disk (see `dir.rs`).
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CompositeId(pub i64);
 
@@ -2285,6 +2289,7 @@ impl<C: Clocks + Clone> Database<C> {
     }
 }
 
+/// Reference to a locked database returned by [Database::lock].
 pub struct DatabaseGuard<'db, C: Clocks> {
     clocks: &'db C,
     db: MutexGuard<'db, LockedDatabase>,

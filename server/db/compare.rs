@@ -2,6 +2,10 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+//! Comparison of actual and expected on-disk schema.
+//! This is used as part of the `moonfire-nvr check` database integrity checking
+//! and for tests of `moonfire-nvr upgrade`.
+
 use failure::Error;
 use prettydiff::diff_slice;
 use rusqlite::params;

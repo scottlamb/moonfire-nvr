@@ -4,7 +4,8 @@
 
 //! Sample file directory management.
 //!
-//! This includes opening files for serving, rotating away old files, and saving new files.
+//! This mostly includes opening a directory and looking for recordings within it.
+//! Updates to the directory happen through [crate::writer].
 
 use crate::coding;
 use crate::db::CompositeId;
@@ -27,22 +28,28 @@ use std::sync::Arc;
 
 /// The fixed length of a directory's `meta` file.
 ///
-/// See DirMeta comments within proto/schema.proto for more explanation.
+/// See `DirMeta` comments within `proto/schema.proto` for more explanation.
 const FIXED_DIR_META_LEN: usize = 512;
 
 /// A sample file directory. Typically one per physical disk drive.
 ///
-/// If the directory is used for writing, the `start_syncer` function should be called to start
-/// a background thread. This thread manages deleting files and writing new files. It synces the
-/// directory and commits these operations to the database in the correct order to maintain the
-/// invariants described in `design/schema.md`.
+/// If the directory is used for writing, [crate::writer::start_syncer] should be
+/// called to start a background thread. This thread manages deleting files and
+/// writing new files. It synces the directory and commits these operations to
+/// the database in the correct order to maintain the invariants described in
+/// `design/schema.md`.
 #[derive(Debug)]
 pub struct SampleFileDir {
-    /// The open file descriptor for the directory. The worker uses it to create files and sync the
-    /// directory. Other threads use it to open sample files for reading during video serving.
+    /// The open file descriptor for the directory. The worker created by
+    /// [crate::writer::start_syncer] uses it to create files and sync the
+    /// directory. Other threads use it to open sample files for reading during
+    /// video serving.
     pub(crate) fd: Fd,
 }
 
+/// The on-disk filename of a recording file within the sample file directory.
+/// This is the [`CompositeId`](crate::db::CompositeId) as 16 hexadigits. It's
+/// null-terminated so it can be passed to system calls without copying.
 pub(crate) struct CompositeIdPath([u8; 17]);
 
 impl CompositeIdPath {
@@ -101,6 +108,7 @@ impl Fd {
         Ok(Fd(fd))
     }
 
+    /// `fsync`s this directory, causing all file metadata to be committed to permanent storage.
     pub(crate) fn sync(&self) -> Result<(), nix::Error> {
         nix::unistd::fsync(self.0)
     }
@@ -110,6 +118,7 @@ impl Fd {
         nix::fcntl::flock(self.0, arg)
     }
 
+    /// Returns information about the filesystem on which this directory lives.
     pub fn statfs(&self) -> Result<nix::sys::statvfs::Statvfs, nix::Error> {
         nix::sys::statvfs::fstatvfs(self)
     }
@@ -147,7 +156,7 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     Ok(meta)
 }
 
-/// Write `dir`'s metadata, clobbering existing data.
+/// Writes `dirfd`'s metadata, clobbering existing data.
 pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Error> {
     let mut data = meta
         .write_length_delimited_to_bytes()
@@ -340,7 +349,7 @@ impl SampleFileDir {
 
 /// Parses a composite id filename.
 ///
-/// These are exactly 16 bytes, lowercase hex.
+/// These are exactly 16 bytes, lowercase hex, as created by [CompositeIdPath].
 pub(crate) fn parse_id(id: &[u8]) -> Result<CompositeId, ()> {
     if id.len() != 16 {
         return Err(());

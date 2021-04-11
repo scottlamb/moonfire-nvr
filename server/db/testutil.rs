@@ -2,6 +2,9 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+//! Utilities for automated testing involving Moonfire NVR's persistence library.
+//! Used for tests of both the `moonfire_db` crate itself and the `moonfire_nvr` crate.
+
 use crate::db;
 use crate::dir;
 use crate::writer;

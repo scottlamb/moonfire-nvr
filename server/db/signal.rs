@@ -2,6 +2,9 @@
 // Copyright (C) 2019 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+//! Schema for "signals": enum-valued timeserieses.
+//! See the `signal` table within `schema.sql` for more information.
+
 use crate::db::FromSqlUuid;
 use crate::recording;
 use crate::{coding, days};

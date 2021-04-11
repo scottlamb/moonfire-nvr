@@ -2,9 +2,7 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-//! Sample file directory management.
-//!
-//! This includes opening files for serving, rotating away old files, and saving new files.
+//! Writing recordings and deleting old ones.
 
 use crate::db::{self, CompositeId};
 use crate::dir;
@@ -23,6 +21,9 @@ use std::thread;
 use std::time::Duration as StdDuration;
 use time::{Duration, Timespec};
 
+/// Trait to allow mocking out [crate::dir::SampleFileDir] in syncer tests.
+/// This is public because it's exposed in the [SyncerChannel] type parameters,
+/// not because it's of direct use outside this module.
 pub trait DirWriter: 'static + Send {
     type File: FileWriter;
 
@@ -31,6 +32,9 @@ pub trait DirWriter: 'static + Send {
     fn unlink_file(&self, id: CompositeId) -> Result<(), nix::Error>;
 }
 
+/// Trait to allow mocking out [std::fs::File] in syncer tests.
+/// This is public because it's exposed in the [SyncerChannel] type parameters,
+/// not because it's of direct use outside this module.
 pub trait FileWriter: 'static {
     /// As in `std::fs::File::sync_all`.
     fn sync_all(&self) -> Result<(), io::Error>;
@@ -62,10 +66,16 @@ impl FileWriter for ::std::fs::File {
     }
 }
 
-/// A command sent to the syncer. These correspond to methods in the `SyncerChannel` struct.
+/// A command sent to a [Syncer].
 enum SyncerCommand<F> {
+    /// Command sent by [SyncerChannel::async_save_recording].
     AsyncSaveRecording(CompositeId, recording::Duration, F),
+
+    /// Notes that the database has been flushed and garbage collection should be attempted.
+    /// [start_syncer] sets up a database callback to send this command.
     DatabaseFlushed,
+
+    /// Command sent by [SyncerChannel::flush].
     Flush(mpsc::SyncSender<()>),
 }
 
@@ -79,7 +89,7 @@ impl<F> ::std::clone::Clone for SyncerChannel<F> {
     }
 }
 
-/// State of the worker thread.
+/// State of the worker thread created by [start_syncer].
 struct Syncer<C: Clocks + Clone, D: DirWriter> {
     dir_id: i32,
     dir: D,
@@ -87,6 +97,7 @@ struct Syncer<C: Clocks + Clone, D: DirWriter> {
     planned_flushes: std::collections::BinaryHeap<PlannedFlush>,
 }
 
+/// A plan to flush at a given instant due to a recently-saved recording's `flush_if_sec` parameter.
 struct PlannedFlush {
     /// Monotonic time at which this flush should happen.
     when: Timespec,
@@ -99,7 +110,7 @@ struct PlannedFlush {
     reason: String,
 
     /// Senders to drop when this time is reached. This is for test instrumentation; see
-    /// `SyncerChannel::flush`.
+    /// [SyncerChannel::flush].
     senders: Vec<mpsc::SyncSender<()>>,
 }
 
@@ -170,14 +181,18 @@ where
     ))
 }
 
+/// A new retention limit for use in [lower_retention].
 pub struct NewLimit {
     pub stream_id: i32,
     pub limit: i64,
 }
 
-/// Deletes recordings if necessary to fit within the given new `retain_bytes` limit.
+/// Immediately deletes recordings if necessary to fit within the given new `retain_bytes` limit.
 /// Note this doesn't change the limit in the database; it only deletes files.
 /// Pass a limit of 0 to delete all recordings associated with a camera.
+///
+/// This is expected to be performed from `moonfire-nvr config` when no syncer is running.
+/// It potentially flushes the database twice (before and after the actual deletion).
 pub fn lower_retention(
     db: Arc<db::Database>,
     dir_id: i32,
@@ -206,7 +221,9 @@ pub fn lower_retention(
     })
 }
 
-/// Deletes recordings to bring a stream's disk usage within bounds.
+/// Enqueues deletion of recordings to bring a stream's disk usage within bounds.
+/// The next flush will mark the recordings as garbage in the SQLite database, and then they can
+/// be deleted from disk.
 fn delete_recordings(
     db: &mut db::LockedDatabase,
     stream_id: i32,
@@ -463,12 +480,10 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         });
     }
 
-    /// Saves the given recording and causes rotation to happen. Called from worker thread.
-    ///
-    /// Note that part of rotation is deferred for the next cycle (saved writing or program startup)
-    /// so that there can be only one dir sync and database transaction per save.
-    /// Internal helper for `save`. This is separated out so that the question-mark operator
-    /// can be used in the many error paths.
+    /// Saves the given recording and prompts rotation. Called from worker thread.
+    /// Note that this doesn't flush immediately; SQLite transactions are batched to lower SSD
+    /// wear. On the next flush, the old recordings will actually be marked as garbage in the
+    /// database, and shortly afterward actually deleted from disk.
     fn save(&mut self, id: CompositeId, wall_duration: recording::Duration, f: D::File) {
         trace!("Processing save for {}", id);
         let stream_id = id.stream();
@@ -583,9 +598,9 @@ enum WriterState<F: FileWriter> {
     Closed(PreviousWriter),
 }
 
-/// State for writing a single recording, used within `Writer`.
+/// State for writing a single recording, used within [Writer].
 ///
-/// Note that the recording created by every `InnerWriter` must be written to the `SyncerChannel`
+/// Note that the recording created by every `InnerWriter` must be written to the [SyncerChannel]
 /// with at least one sample. The sample may have zero duration.
 struct InnerWriter<F: FileWriter> {
     f: F,
@@ -612,6 +627,9 @@ struct InnerWriter<F: FileWriter> {
     unindexed_sample: Option<UnindexedSample>,
 }
 
+/// A sample which has been written to disk but not included in the index yet.
+/// The index includes the sample's duration, which is calculated from the
+/// _following_ sample's pts, so the most recent sample is always unindexed.
 #[derive(Copy, Clone)]
 struct UnindexedSample {
     local_time: recording::Time,
@@ -620,7 +638,7 @@ struct UnindexedSample {
     is_key: bool,
 }
 
-/// State associated with a run's previous recording; used within `Writer`.
+/// State associated with a run's previous recording; used within [Writer].
 #[derive(Copy, Clone)]
 struct PreviousWriter {
     end: recording::Time,
