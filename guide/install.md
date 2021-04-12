@@ -113,7 +113,7 @@ $ sudo install -d -o moonfire-nvr -g moonfire-nvr -m 700 /media/nvr/sample
 In `/etc/fstab`, add a line similar to this:
 
 ```
-/dev/disk/by-uuid/23d550bc-0e38-4825-acac-1cac8a7e091f    /media/nvr   ext4    nofail,noatime,lazytime,data=writeback,journal_async_commit  0       2
+UUID=23d550bc-0e38-4825-acac-1cac8a7e091f    /media/nvr   ext4    nofail,noatime,lazytime,data=writeback,journal_async_commit  0       2
 ```
 
 You'll have to lookup the correct uuid for your disk. One way to do that is
@@ -127,6 +127,13 @@ If you use the `nofail` attribute in `/etc/fstab` as described above, your
 system will boot successfully even when the hard drive is unavailable (such as
 when your external USB storage is unmounted). This can be helpful when
 recovering from problems.
+
+Create the sample directory.
+
+```
+sudo mkdir /media/nvr/sample
+sudo chown -R moonfire-nvr:moonfire-nvr /media/nvr
+```
 
 Add a new `--mount` line to your Docker wrapper script `/usr/local/bin/nvr`
 to expose this new volume to the Docker container, directly below the other
