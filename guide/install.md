@@ -132,7 +132,7 @@ Create the sample directory.
 
 ```
 sudo mkdir /media/nvr/sample
-sudo chmod a+rw -R /media/nvr
+sudo chown -R moonfire-nvr:moonfire-nvr /media/nvr
 ```
 
 Add a new `--mount` line to your Docker wrapper script `/usr/local/bin/nvr`
