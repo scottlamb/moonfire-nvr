@@ -246,7 +246,10 @@ impl State {
         }
 
         // Then include changes up to (but not including) the end time.
-        for (&when, p) in self.points_by_time.range(desired_time.clone()) {
+        // BTreeMap has a strange behavior in which it will panic if end < start, even though
+        // std::ops::Range says "it is empty if start >= end". Make the behavior sane by hand.
+        let t = desired_time.start..std::cmp::max(desired_time.end, desired_time.start);
+        for (&when, p) in self.points_by_time.range(t) {
             let mut it = p.changes();
             while let Some((signal, state)) = it.next().expect("in-mem changes is valid") {
                 f(&ListStateChangesRow {
@@ -964,6 +967,10 @@ mod tests {
         s.list_changes_by_time(
             recording::Time::min_value()..recording::Time::max_value(),
             &mut |r| rows.push(*r),
+        );
+        s.list_changes_by_time(
+            recording::Time::max_value()..recording::Time::min_value(),
+            &mut |_r| panic!("no changes expected"),
         );
         assert_eq!(&rows[..], EXPECTED);
         let mut expected_days = days::Map::new();
