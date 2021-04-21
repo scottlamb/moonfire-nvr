@@ -2,6 +2,7 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use base::time::{Duration, Time};
 use db::auth::SessionHash;
 use failure::{format_err, Error};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
@@ -77,9 +78,9 @@ pub struct CameraConfig<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct Stream<'a> {
     pub retain_bytes: i64,
-    pub min_start_time_90k: Option<i64>,
-    pub max_end_time_90k: Option<i64>,
-    pub total_duration_90k: i64,
+    pub min_start_time_90k: Option<Time>,
+    pub max_end_time_90k: Option<Time>,
+    pub total_duration_90k: Duration,
     pub total_sample_file_bytes: i64,
     pub fs_bytes: i64,
 
@@ -113,10 +114,10 @@ pub struct Signal<'a> {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PostSignalsEndBase {
-    Epoch,
-    Now,
+#[serde(tag = "base", content = "rel90k", rename_all = "camelCase")]
+pub enum PostSignalsTimeBase {
+    Epoch(Time),
+    Now(Duration),
 }
 
 #[derive(Deserialize)]
@@ -137,21 +138,20 @@ pub struct LogoutRequest<'a> {
 pub struct PostSignalsRequest {
     pub signal_ids: Vec<u32>,
     pub states: Vec<u16>,
-    pub start_time_90k: Option<i64>,
-    pub end_base: PostSignalsEndBase,
-    pub rel_end_time_90k: Option<i64>,
+    pub start: PostSignalsTimeBase,
+    pub end: PostSignalsTimeBase,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostSignalsResponse {
-    pub time_90k: i64,
+    pub time_90k: Time,
 }
 
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Signals {
-    pub times_90k: Vec<i64>,
+    pub times_90k: Vec<Time>,
     pub signal_ids: Vec<u32>,
     pub states: Vec<u16>,
 }
@@ -238,9 +238,9 @@ impl<'a> Stream<'a> {
             .ok_or_else(|| format_err!("missing stream {}", id))?;
         Ok(Some(Stream {
             retain_bytes: s.retain_bytes,
-            min_start_time_90k: s.range.as_ref().map(|r| r.start.0),
-            max_end_time_90k: s.range.as_ref().map(|r| r.end.0),
-            total_duration_90k: s.duration.0,
+            min_start_time_90k: s.range.as_ref().map(|r| r.start),
+            max_end_time_90k: s.range.as_ref().map(|r| r.end),
+            total_duration_90k: s.duration,
             total_sample_file_bytes: s.sample_file_bytes,
             fs_bytes: s.fs_bytes,
             days: if include_days { Some(s.days()) } else { None },
@@ -269,9 +269,9 @@ impl<'a> Stream<'a> {
             map.serialize_key(k.as_ref())?;
             let bounds = k.bounds();
             map.serialize_value(&StreamDayValue {
-                start_time_90k: bounds.start.0,
-                end_time_90k: bounds.end.0,
-                total_duration_90k: v.duration.0,
+                start_time_90k: bounds.start,
+                end_time_90k: bounds.end,
+                total_duration_90k: v.duration,
             })?;
         }
         map.end()
@@ -328,8 +328,8 @@ impl<'a> Signal<'a> {
             map.serialize_key(k.as_ref())?;
             let bounds = k.bounds();
             map.serialize_value(&SignalDayValue {
-                start_time_90k: bounds.start.0,
-                end_time_90k: bounds.end.0,
+                start_time_90k: bounds.start,
+                end_time_90k: bounds.end,
                 states: &v.states[..],
             })?;
         }
@@ -371,16 +371,16 @@ impl<'a> SignalTypeState<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StreamDayValue {
-    pub start_time_90k: i64,
-    pub end_time_90k: i64,
-    pub total_duration_90k: i64,
+    pub start_time_90k: Time,
+    pub end_time_90k: Time,
+    pub total_duration_90k: Duration,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SignalDayValue<'a> {
-    pub start_time_90k: i64,
-    pub end_time_90k: i64,
+    pub start_time_90k: Time,
+    pub end_time_90k: Time,
     pub states: &'a [u64],
 }
 

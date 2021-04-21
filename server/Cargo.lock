@@ -1165,6 +1165,8 @@ dependencies = [
  "log",
  "nom",
  "parking_lot",
+ "serde",
+ "serde_json",
  "time",
 ]
 

@@ -9,6 +9,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while_m_n};
 use nom::combinator::{map, map_res, opt};
 use nom::sequence::{preceded, tuple};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops;
 use std::str::FromStr;
@@ -19,7 +20,7 @@ type IResult<'a, I, O> = nom::IResult<I, O, nom::error::VerboseError<&'a str>>;
 pub const TIME_UNITS_PER_SEC: i64 = 90_000;
 
 /// A time specified as 90,000ths of a second since 1970-01-01 00:00:00 UTC.
-#[derive(Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Time(pub i64);
 
 /// Returns a parser for a `len`-digit non-negative number which fits into an i32.
@@ -221,12 +222,19 @@ impl fmt::Display for Time {
 /// A duration specified in 1/90,000ths of a second.
 /// Durations are typically non-negative, but a `moonfire_db::db::CameraDayValue::duration` may be
 /// negative.
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Duration(pub i64);
 
 impl Duration {
     pub fn to_tm_duration(&self) -> time::Duration {
         time::Duration::nanoseconds(self.0 * 100000 / 9)
+    }
+}
+
+impl fmt::Debug for Duration {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Write both the raw and display forms.
+        write!(f, "{} /* {} */", self.0, self)
     }
 }
 

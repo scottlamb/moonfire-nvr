@@ -1182,22 +1182,19 @@ impl Service {
         let r = extract_json_body(&mut req).await?;
         let r: json::PostSignalsRequest =
             serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
-        let mut l = self.db.lock();
         let now = recording::Time::new(self.db.clocks().realtime());
-        let start = r.start_time_90k.map(recording::Time).unwrap_or(now);
-        let end = match r.end_base {
-            json::PostSignalsEndBase::Epoch => {
-                recording::Time(r.rel_end_time_90k.ok_or_else(|| {
-                    bad_req("must specify rel_end_time_90k when end_base is epoch")
-                })?)
-            }
-            json::PostSignalsEndBase::Now => {
-                now + recording::Duration(r.rel_end_time_90k.unwrap_or(0))
-            }
+        let mut l = self.db.lock();
+        let start = match r.start {
+            json::PostSignalsTimeBase::Epoch(t) => t,
+            json::PostSignalsTimeBase::Now(d) => now + d,
+        };
+        let end = match r.end {
+            json::PostSignalsTimeBase::Epoch(t) => t,
+            json::PostSignalsTimeBase::Now(d) => now + d,
         };
         l.update_signals(start..end, &r.signal_ids, &r.states)
             .map_err(from_base_error)?;
-        serve_json(&req, &json::PostSignalsResponse { time_90k: now.0 })
+        serve_json(&req, &json::PostSignalsResponse { time_90k: now })
     }
 
     fn get_signals(&self, req: &Request<hyper::Body>) -> ResponseResult {
@@ -1223,7 +1220,7 @@ impl Service {
         self.db
             .lock()
             .list_changes_by_time(time, &mut |c: &db::signal::ListStateChangesRow| {
-                signals.times_90k.push(c.when.0);
+                signals.times_90k.push(c.when);
                 signals.signal_ids.push(c.signal);
                 signals.states.push(c.state);
             });

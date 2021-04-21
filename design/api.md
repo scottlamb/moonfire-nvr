@@ -658,13 +658,12 @@ make. It should be a dict with these attributes:
 
 *   `signalIds`: a list of signal ids to change. Must be sorted.
 *   `states`: a list (one per `signalIds` entry) of states to set.
-*   `startTime90k`: (optional) The start of the observation in 90 kHz units
-    since 1970-01-01 00:00:00 UTC; commonly taken from an earlier response. If
-    absent, assumed to be now.
-*   `endBase`: if `epoch`, `relEndTime90k` is relative to 1970-01-01 00:00:00
-    UTC. If `now`, epoch is relative to the current time.
-*   `relEndTime90k` (optional): The end of the observation, relative to the
-    specified base. Note this time is allowed to be in the future.
+*   `start`: the starting time of the change, as a dict of the form
+    `{'base': 'epoch', 'rel90k': t}` or `{'base': 'now', 'rel90k': t}`. In
+    the `epoch` form, `rel90k` is 90 kHz units since 1970-01-01 00:00:00 UTC.
+    In the `now` form, `rel90k` is relative to current time and may be
+    negative.
+*   `end`: the ending time of the change, in the same form as `start`.
 
 The response will be an `application/json` body dict with the following
 attributes:
@@ -687,8 +686,8 @@ Request:
 {
   "signalIds": [1],
   "states": [2],
-  "endBase": "now",
-  "relEndTime90k": 5400000
+  "start": {"base": "now", "rel90k": 0},
+  "end": {"base": "now", "rel90k": 5400000}
 }
 ```
 
@@ -711,8 +710,8 @@ Request:
 {
   "signalIds": [1],
   "states": [2],
-  "endBase": "now",
-  "relEndTime90k": 5400000
+  "start": {"base": "epoch", "rel90k": 140067468000000},
+  "end": {"base": "now", "rel90k": 5400000}
 }
 ```
 
@@ -735,8 +734,8 @@ Request:
 {
   "signalIds": [1],
   "states": [2],
-  "endBase": "now",
-  "relEndTime90k": 5400000
+  "start": {"base": "now", "rel90k": 0},
+  "end": {"base": "now", "rel90k": 5400000}
   }
 }
 ```
