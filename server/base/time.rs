@@ -304,6 +304,13 @@ impl ops::Mul<i64> for Duration {
     }
 }
 
+impl std::ops::Neg for Duration {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Duration(-self.0)
+    }
+}
+
 impl ops::Add for Duration {
     type Output = Duration;
     fn add(self, rhs: Duration) -> Duration {
