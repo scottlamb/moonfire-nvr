@@ -289,6 +289,14 @@ impl fmt::Display for Duration {
     }
 }
 
+impl std::convert::TryFrom<std::time::Duration> for Duration {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: std::time::Duration) -> Result<Self, Self::Error> {
+        Ok(Self(i64::try_from(value.as_nanos() * 9 / 100_000)?))
+    }
+}
+
 impl ops::Mul<i64> for Duration {
     type Output = Self;
     fn mul(self, rhs: i64) -> Self::Output {
@@ -318,6 +326,7 @@ impl ops::SubAssign for Duration {
 #[cfg(test)]
 mod tests {
     use super::{Duration, Time, TIME_UNITS_PER_SEC};
+    use std::convert::TryFrom;
 
     #[test]
     fn test_parse_time() {
@@ -372,5 +381,22 @@ mod tests {
         for test in tests {
             assert_eq!(test.0, format!("{}", Duration(test.1 * TIME_UNITS_PER_SEC)));
         }
+    }
+
+    #[test]
+    fn test_duration_from_std_duration() {
+        assert_eq!(
+            Duration::try_from(std::time::Duration::new(1, 11111)),
+            Ok(Duration(90_000))
+        );
+        assert_eq!(
+            Duration::try_from(std::time::Duration::new(1, 11112)),
+            Ok(Duration(90_001))
+        );
+        assert_eq!(
+            Duration::try_from(std::time::Duration::new(60, 0)),
+            Ok(Duration(60 * TIME_UNITS_PER_SEC))
+        );
+        Duration::try_from(std::time::Duration::new(u64::MAX, 0)).unwrap_err();
     }
 }
