@@ -27,9 +27,8 @@ Great example: [this Show & Tell from JasonKleban](https://github.com/scottlamb/
 When you're stuck, look at the [troubleshooting
 guide](guide/troubleshooting.md). If it doesn't answer your question, please
 ask for help! Support requests are welcome on the
-[mailing list](https://groups.google.com/g/moonfire-nvr-users) or in [github
-discussions](https://github.com/scottlamb/moonfire-nvr/discussions). Often
-these discussions help create good bug reports and enhancement requests.
+[issue tracker](https://github.com/scottlamb/moonfire-nvr/issues).
+Often they help create good bug reports and enhancement requests.
 
 ## Offering support
 

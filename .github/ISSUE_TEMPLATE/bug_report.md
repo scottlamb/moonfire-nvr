@@ -1,14 +1,14 @@
 ---
-name: Bug report
+name: Bug report or support request
 about: Create a report to help us improve
 title: ''
-labels: bug
+labels:
 assignees: ''
 
 ---
 
 **Describe the bug**
-A clear and concise description of what the bug is.
+A clear and concise description of the problem.
 
 **To Reproduce**
 Steps to reproduce the behavior:
@@ -20,13 +20,17 @@ Steps to reproduce the behavior:
 **Expected behavior**
 A clear and concise description of what you expected to happen.
 
+**Screenshots**
+If applicable, add screenshots to help explain your problem.
+
 **Server (please complete the following information):**
   - If using Docker: `docker ps` + `docker images`
   - If building from git: `git describe --dirty` + `moonfire-nvr --version`
   - Attach a [log file](https://github.com/scottlamb/moonfire-nvr/blob/master/guide/troubleshooting.md#viewing-moonfire-nvrs-logs). Run with the `RUST_BACKTRACE=1` environment variable set if possible.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Camera (please complete the following information):**
+  - Camera manufacturer and model: [e.g. Reolink RLC-410]
+  - Firmware version: [e.g. `V2.0.0.1215_16091800`]
 
 **Desktop (please complete the following information):**
  - OS: [e.g. iOS]
