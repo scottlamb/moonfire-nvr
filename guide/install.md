@@ -164,7 +164,8 @@ In the user interface,
 2.  add cameras under "Cameras and streams".
 
     *   See the [wiki](https://github.com/scottlamb/moonfire-nvr/wiki) for notes
-        about specific camera models.
+        about specific camera models. The [Configuring cameras](https://github.com/scottlamb/moonfire-nvr/wiki/Configuring-cameras)
+        page mentions a couple tools that can autodetect RTSP URLs.
 
     *   There's a "Test" button to verify your settings directly from the add/edit
         camera dialog.
