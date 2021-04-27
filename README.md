@@ -63,7 +63,7 @@ could use to make this possible:
 *   [Contributing](CONTRIBUTING.md)
 *   [License](LICENSE.txt) —
     [GPL-3.0-or-later](https://spdx.org/licenses/GPL-3.0-or-later.html)
-    with (GPL-3.0-linking-exception)[https://spdx.org/licenses/GPL-3.0-linking-exception.html]
+    with [GPL-3.0-linking-exception](https://spdx.org/licenses/GPL-3.0-linking-exception.html)
     for OpenSSL.
 *   [Change log](CHANGELOG.md) / release notes.
 *   [Guides](guide/)
