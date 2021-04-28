@@ -135,7 +135,7 @@ pub struct VideoSampleEntry {
     pub pasp_v_spacing: u16,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct VideoSampleEntryToInsert {
     pub data: Vec<u8>,
     pub rfc6381_codec: String,
@@ -143,6 +143,20 @@ pub struct VideoSampleEntryToInsert {
     pub height: u16,
     pub pasp_h_spacing: u16,
     pub pasp_v_spacing: u16,
+}
+
+impl std::fmt::Debug for VideoSampleEntryToInsert {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use pretty_hex::PrettyHex;
+        f.debug_struct("VideoSampleEntryToInsert")
+            .field("data", &self.data.hex_dump())
+            .field("rfc6381_codec", &self.rfc6381_codec)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("pasp_h_spacing", &self.pasp_h_spacing)
+            .field("pasp_v_spacing", &self.pasp_v_spacing)
+            .finish()
+    }
 }
 
 /// A row used in `list_recordings_by_time` and `list_recordings_by_id`.
@@ -1708,7 +1722,8 @@ impl LockedDatabase {
             ":pasp_v_spacing": i32::from(entry.pasp_v_spacing),
             ":rfc6381_codec": &entry.rfc6381_codec,
             ":data": &entry.data,
-        })?;
+        })
+        .map_err(|e| Error::from(e).context(format!("Unable to insert {:#?}", &entry)))?;
 
         let id = self.conn.last_insert_rowid() as i32;
         self.video_sample_entries_by_id.insert(
