@@ -1062,9 +1062,9 @@ impl Service {
                 .strftime("%FT%T")
                 .map(|f| f.to_string())
                 .unwrap_or_else(|e| e.to_string()),
-                host.as_ref().map(|h| &*h),
+                host.as_deref(),
                 &authreq.addr,
-                agent.as_ref().map(|a| &*a),
+                agent.as_deref(),
                 self.is_secure(req)
             ),
         ))
@@ -1465,7 +1465,7 @@ mod tests {
 
         /// Produces a `Cookie` header value.
         pub fn header(&self) -> String {
-            self.0.as_ref().map(|s| s.as_str()).unwrap_or("").to_owned()
+            self.0.clone().unwrap()
         }
     }
 

@@ -76,7 +76,7 @@ pub fn run(args: &Args) -> Result<i32, Error> {
     let (sid, _) = l.make_session(
         creation,
         uid,
-        args.domain.as_ref().map(|d| d.as_bytes().to_owned()),
+        args.domain.clone().map(String::into_bytes),
         flags,
         permissions,
     )?;

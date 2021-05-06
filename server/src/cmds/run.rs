@@ -260,7 +260,7 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let syncer = syncers.get(&sample_file_dir_id).unwrap();
             let object_detector = match stream.type_ {
-                db::StreamType::SUB => object_detector.as_ref().map(|a| Arc::clone(a)),
+                db::StreamType::SUB => object_detector.clone(),
                 _ => None,
             };
             let mut streamer = streamer::Streamer::new(
