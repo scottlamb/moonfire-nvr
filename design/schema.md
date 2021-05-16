@@ -18,7 +18,7 @@ administrator-focused documentation.
     * [Verifying invariants](#verifying-invariants)
     * [Recording table](#recording-table)
         * [`video_index`](#video_index)
-    * [<a href="on-demand"></a>On-demand `.mp4` construction](#on-demand-mp4-construction)
+    * [On-demand `.mp4` construction](#on-demand-mp4-construction)
 
 ## Objective
 
