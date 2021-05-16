@@ -229,12 +229,13 @@ duration of recordings.
     at the end of each file. At the bitrates described in "Background", this
     is an insignicant .02% waste for main streams and .5% waste for sub
     streams.
-*   Number of "slices" in .mp4 files. As described [below](#on-demand),
-    `.mp4` files will be constructed on-demand for export. It should be
-    possible to export an hours-long segment without too much overhead. In
-    particular, it must be possible to iterate through all the recordings,
-    assemble the list of slices, and calculate offsets and total size. One
-    minute seems acceptable; though we will watch this as work proceeds.
+*   Number of "slices" in .mp4 files. As described
+    [below](#on-demand-mp4-construction), `.mp4` files will be constructed
+    on-demand for export. It should be possible to export an hours-long segment
+    without too much overhead. In particular, it must be possible to iterate
+    through all the recordings, assemble the list of slices, and calculate
+    offsets and total size. One minute seems acceptable; though we will watch
+    this as work proceeds.
 *   Crashes. On program crash or power loss, ideally it's acceptable to simply
     discard any recordings in progress rather than add a checkpointing scheme.
 *   Granularity of retention. It should be possible to extend retention time
@@ -669,7 +670,7 @@ See also the example below:
 | varint2         |       2000 |      20 |      10 |       5 |     100 |
 | encoded         | `29 d0 0f` | `02 14` | `08 0a` | `02 05` | `01 64` |
 
-### <a href="on-demand"></a>On-demand `.mp4` construction
+### On-demand `.mp4` construction
 
 A major goal of this format is to support on-demand serving in various formats,
 including two types of `.mp4` files:
