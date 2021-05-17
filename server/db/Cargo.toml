@@ -31,7 +31,7 @@ nix = "0.20.0"
 odds = { version = "0.4.0", features = ["std-vec"] }
 parking_lot = { version = "0.11.1", features = [] }
 pretty-hex = "0.2.1"
-prettydiff = "0.4.0"
+prettydiff = { git = "https://github.com/scottlamb/prettydiff", branch = "pr-update-deps" }
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
 ring = "0.16.2"
 rusqlite = "0.25.3"
