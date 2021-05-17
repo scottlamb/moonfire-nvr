@@ -7,7 +7,7 @@ use crate::db;
 use crate::recording;
 use failure::Error;
 use log::warn;
-use rusqlite::params;
+use rusqlite::{named_params, params};
 use std::collections::HashMap;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
@@ -179,32 +179,30 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
             Some((run_id, expected_start)) if expected_start == start_time_90k => run_id,
             _ => composite_id,
         };
-        insert1.execute_named(&[
-            (":composite_id", &composite_id),
-            (":camera_id", &camera_id),
-            (":run_offset", &(composite_id - run_id)),
-            (
-                ":flags",
-                &(if trailing_zero {
+        insert1.execute(named_params! {
+            ":composite_id": &composite_id,
+            ":camera_id": &camera_id,
+            ":run_offset": &(composite_id - run_id),
+            ":flags": &(
+                if trailing_zero {
                     db::RecordingFlags::TrailingZero as i32
                 } else {
                     0
                 }),
-            ),
-            (":sample_file_bytes", &sample_file_bytes),
-            (":start_time_90k", &start_time_90k),
-            (":duration_90k", &duration_90k),
-            (":local_time_delta_90k", &local_time_delta_90k),
-            (":video_samples", &video_samples),
-            (":video_sync_samples", &video_sync_samples),
-            (":video_sample_entry_id", &video_sample_entry_id),
-        ])?;
-        insert2.execute_named(&[
-            (":composite_id", &composite_id),
-            (":sample_file_uuid", &&sample_file_uuid.0.as_bytes()[..]),
-            (":sample_file_sha1", &sample_file_sha1),
-            (":video_index", &video_index),
-        ])?;
+            ":sample_file_bytes": &sample_file_bytes,
+            ":start_time_90k": &start_time_90k,
+            ":duration_90k": &duration_90k,
+            ":local_time_delta_90k": &local_time_delta_90k,
+            ":video_samples": &video_samples,
+            ":video_sync_samples": &video_sync_samples,
+            ":video_sample_entry_id": &video_sample_entry_id,
+        })?;
+        insert2.execute(named_params! {
+            ":composite_id": &composite_id,
+            ":sample_file_uuid": &sample_file_uuid.0.as_bytes()[..],
+            ":sample_file_sha1": &sample_file_sha1,
+            ":video_index": &video_index,
+        })?;
         camera_state.current_run = if trailing_zero {
             None
         } else {
@@ -224,10 +222,10 @@ fn update_camera(
     "#,
     )?;
     for (ref id, ref state) in &camera_state {
-        stmt.execute_named(&[
-            (":id", &id),
-            (":next_recording_id", &state.next_recording_id),
-        ])?;
+        stmt.execute(named_params! {
+            ":id": &id,
+            ":next_recording_id": &state.next_recording_id,
+        })?;
     }
     Ok(())
 }

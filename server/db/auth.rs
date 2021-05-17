@@ -14,7 +14,7 @@ use log::info;
 use parking_lot::Mutex;
 use protobuf::Message;
 use ring::rand::{SecureRandom, SystemRandom};
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{named_params, params, Connection, Transaction};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -374,7 +374,7 @@ impl State {
             let id = row.get(0)?;
             let name: String = row.get(1)?;
             let mut permissions = Permissions::new();
-            permissions.merge_from_bytes(row.get_raw_checked(7)?.as_blob()?)?;
+            permissions.merge_from_bytes(row.get_ref(7)?.as_blob()?)?;
             state.users_by_id.insert(
                 id,
                 User {
@@ -444,16 +444,16 @@ impl State {
                 .permissions
                 .write_to_bytes()
                 .expect("proto3->vec is infallible");
-            stmt.execute_named(&[
-                (":username", &&change.username[..]),
-                (":password_hash", phash),
-                (":password_id", &pid),
-                (":password_failure_count", &pcount),
-                (":flags", &change.flags),
-                (":unix_uid", &change.unix_uid),
-                (":id", &id),
-                (":permissions", &permissions),
-            ])?;
+            stmt.execute(named_params! {
+                ":username": &change.username[..],
+                ":password_hash": phash,
+                ":password_id": &pid,
+                ":password_failure_count": &pcount,
+                ":flags": &change.flags,
+                ":unix_uid": &change.unix_uid,
+                ":id": &id,
+                ":permissions": &permissions,
+            })?;
         }
         let u = e.into_mut();
         u.username = change.username;
@@ -480,13 +480,13 @@ impl State {
             .permissions
             .write_to_bytes()
             .expect("proto3->vec is infallible");
-        stmt.execute_named(&[
-            (":username", &&change.username[..]),
-            (":password_hash", &password_hash),
-            (":flags", &change.flags),
-            (":unix_uid", &change.unix_uid),
-            (":permissions", &permissions),
-        ])?;
+        stmt.execute(named_params! {
+            ":username": &change.username[..],
+            ":password_hash": &password_hash,
+            ":flags": &change.flags,
+            ":unix_uid": &change.unix_uid,
+            ":permissions": &permissions,
+        })?;
         let id = conn.last_insert_rowid() as i32;
         self.users_by_name.insert(change.username.clone(), id);
         let e = self.users_by_id.entry(id);
@@ -647,18 +647,18 @@ impl State {
         let permissions_blob = permissions
             .write_to_bytes()
             .expect("proto3->vec is infallible");
-        stmt.execute_named(&[
-            (":session_id_hash", &&hash.0[..]),
-            (":user_id", &user.id),
-            (":seed", &&seed[..]),
-            (":flags", &flags),
-            (":domain", &domain),
-            (":creation_password_id", &creation_password_id),
-            (":creation_time_sec", &creation.when_sec),
-            (":creation_user_agent", &creation.user_agent),
-            (":creation_peer_addr", &addr),
-            (":permissions", &permissions_blob),
-        ])?;
+        stmt.execute(named_params! {
+            ":session_id_hash": &hash.0[..],
+            ":user_id": &user.id,
+            ":seed": &seed[..],
+            ":flags": &flags,
+            ":domain": &domain,
+            ":creation_password_id": &creation_password_id,
+            ":creation_time_sec": &creation.when_sec,
+            ":creation_user_agent": &creation.user_agent,
+            ":creation_peer_addr": &addr,
+            ":permissions": &permissions_blob,
+        })?;
         let e = match sessions.entry(hash) {
             ::std::collections::hash_map::Entry::Occupied(_) => panic!("duplicate session hash!"),
             ::std::collections::hash_map::Entry::Vacant(e) => e,
@@ -787,11 +787,11 @@ impl State {
                 "flushing user with hash: {}",
                 u.password_hash.as_ref().unwrap()
             );
-            u_stmt.execute_named(&[
-                (":password_failure_count", &u.password_failure_count),
-                (":password_hash", &u.password_hash),
-                (":id", &id),
-            ])?;
+            u_stmt.execute(named_params! {
+                ":password_failure_count": &u.password_failure_count,
+                ":password_hash": &u.password_hash,
+                ":id": &id,
+            })?;
         }
         for (_, s) in &self.sessions {
             if !s.dirty {
@@ -799,12 +799,12 @@ impl State {
             }
             let addr = s.last_use.addr_buf();
             let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
-            s_stmt.execute_named(&[
-                (":last_use_time_sec", &s.last_use.when_sec),
-                (":last_use_user_agent", &s.last_use.user_agent),
-                (":last_use_peer_addr", &addr),
-                (":use_count", &s.use_count),
-            ])?;
+            s_stmt.execute(named_params! {
+                ":last_use_time_sec": &s.last_use.when_sec,
+                ":last_use_user_agent": &s.last_use.user_agent,
+                ":last_use_peer_addr": &addr,
+                ":use_count": &s.use_count,
+            })?;
         }
         Ok(())
     }
@@ -866,7 +866,7 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, base
     let mut permissions = Permissions::new();
     permissions
         .merge_from_bytes(
-            row.get_raw_checked(18)
+            row.get_ref(18)
                 .err_kind(ErrorKind::Internal)?
                 .as_blob()
                 .err_kind(ErrorKind::Internal)?,

@@ -34,7 +34,7 @@ pretty-hex = "0.2.1"
 prettydiff = "0.4.0"
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
 ring = "0.16.2"
-rusqlite = "0.24.1"
+rusqlite = "0.25.3"
 smallvec = "1.0"
 tempdir = "0.3"
 time = "0.1"

@@ -558,7 +558,7 @@ fn init_recordings(
           stream_id = :stream_id
         "#,
     )?;
-    let mut rows = stmt.query_named(named_params! {":stream_id": stream_id})?;
+    let mut rows = stmt.query(named_params! {":stream_id": stream_id})?;
     let mut i = 0;
     while let Some(row) = rows.next()? {
         let start = recording::Time(row.get(0)?);
@@ -697,7 +697,7 @@ impl StreamStateChanger {
                             id = :id
                         "#,
                     )?;
-                    let rows = stmt.execute_named(named_params! {
+                    let rows = stmt.execute(named_params! {
                         ":rtsp_url": &sc.rtsp_url,
                         ":record": sc.record,
                         ":flush_if_sec": sc.flush_if_sec,
@@ -727,7 +727,7 @@ impl StreamStateChanger {
                                         0,                0)
                     "#,
                 )?;
-                stmt.execute_named(named_params! {
+                stmt.execute(named_params! {
                     ":camera_id": camera_id,
                     ":sample_file_dir_id": sc.sample_file_dir_id,
                     ":type": type_.as_str(),
@@ -974,7 +974,7 @@ impl LockedDatabase {
                 }
                 if s.synced_recordings > 0 {
                     new_ranges.entry(stream_id).or_insert(None);
-                    stmt.execute_named(named_params! {
+                    stmt.execute(named_params! {
                         ":stream_id": stream_id,
                         ":cum_recordings": s.cum_recordings + s.synced_recordings as i32,
                         ":cum_media_duration_90k": s.cum_media_duration.0 + new_duration,
@@ -1444,7 +1444,7 @@ impl LockedDatabase {
             RawEntryMut::Vacant(vacant) => {
                 trace!("cache miss for recording {}", id);
                 let mut stmt = self.conn.prepare_cached(GET_RECORDING_PLAYBACK_SQL)?;
-                let mut rows = stmt.query_named(named_params! {":composite_id": id.0})?;
+                let mut rows = stmt.query(named_params! {":composite_id": id.0})?;
                 if let Some(row) = rows.next()? {
                     let video_index: VideoIndex = row.get(0)?;
                     let result = f(&RecordingPlayback {
@@ -1715,7 +1715,7 @@ impl LockedDatabase {
         }
 
         let mut stmt = self.conn.prepare_cached(INSERT_VIDEO_SAMPLE_ENTRY_SQL)?;
-        stmt.execute_named(named_params! {
+        stmt.execute(named_params! {
             ":width": i32::from(entry.width),
             ":height": i32::from(entry.height),
             ":pasp_h_spacing": i32::from(entry.pasp_h_spacing),
@@ -1851,7 +1851,7 @@ impl LockedDatabase {
                                     :password)
                 "#,
             )?;
-            stmt.execute_named(named_params! {
+            stmt.execute(named_params! {
                 ":uuid": uuid_bytes,
                 ":short_name": &camera.short_name,
                 ":description": &camera.description,
@@ -1905,7 +1905,7 @@ impl LockedDatabase {
                     id = :id
                 "#,
             )?;
-            let rows = stmt.execute_named(named_params! {
+            let rows = stmt.execute(named_params! {
                 ":id": camera_id,
                 ":short_name": &camera.short_name,
                 ":description": &camera.description,
@@ -1945,14 +1945,14 @@ impl LockedDatabase {
                 if stream.range.is_some() {
                     bail!("Can't remove camera {}; has recordings.", id);
                 }
-                let rows = stream_stmt.execute_named(named_params! {":id": stream_id})?;
+                let rows = stream_stmt.execute(named_params! {":id": stream_id})?;
                 if rows != 1 {
                     bail!("Stream {} missing from database", id);
                 }
                 streams_to_delete.push(*stream_id);
             }
             let mut cam_stmt = tx.prepare_cached(r"delete from camera where id = :id")?;
-            let rows = cam_stmt.execute_named(named_params! {":id": id})?;
+            let rows = cam_stmt.execute(named_params! {":id": id})?;
             if rows != 1 {
                 bail!("Camera {} missing from database", id);
             }
@@ -1987,7 +1987,7 @@ impl LockedDatabase {
                         c.new_limit
                     );
                 }
-                let rows = stmt.execute_named(named_params! {
+                let rows = stmt.execute(named_params! {
                     ":record": c.new_record,
                     ":retain": c.new_limit,
                     ":id": c.stream_id,

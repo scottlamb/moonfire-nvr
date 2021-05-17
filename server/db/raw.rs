@@ -106,7 +106,7 @@ pub(crate) fn list_recordings_by_time(
     f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_TIME_SQL)?;
-    let rows = stmt.query_named(named_params! {
+    let rows = stmt.query(named_params! {
         ":stream_id": stream_id,
         ":start_time_90k": desired_time.start.0,
         ":end_time_90k": desired_time.end.0,
@@ -122,7 +122,7 @@ pub(crate) fn list_recordings_by_id(
     f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_ID_SQL)?;
-    let rows = stmt.query_named(named_params! {
+    let rows = stmt.query(named_params! {
         ":start": CompositeId::new(stream_id, desired_ids.start).0,
         ":end": CompositeId::new(stream_id, desired_ids.end).0,
     })?;
@@ -190,7 +190,7 @@ pub(crate) fn insert_recording(
             "#,
         )
         .with_context(|e| format!("can't prepare recording insert: {}", e))?;
-    stmt.execute_named(named_params! {
+    stmt.execute(named_params! {
         ":composite_id": id.0,
         ":stream_id": i64::from(id.stream()),
         ":open_id": o.id,
@@ -228,7 +228,7 @@ pub(crate) fn insert_recording(
         0 => None,
         _ => Some(r.local_time_delta.0),
     };
-    stmt.execute_named(named_params! {
+    stmt.execute(named_params! {
         ":composite_id": id.0,
         ":local_time_delta_90k": delta,
         ":sample_file_blake3": blake3,
@@ -243,7 +243,7 @@ pub(crate) fn insert_recording(
             "#,
         )
         .with_context(|e| format!("can't prepare recording_playback insert: {}", e))?;
-    stmt.execute_named(named_params! {
+    stmt.execute(named_params! {
         ":composite_id": id.0,
         ":video_index": &r.video_index,
     })
@@ -298,7 +298,7 @@ pub(crate) fn delete_recordings(
           composite_id < :end
         "#,
     )?;
-    let n = insert.execute_named(named_params! {
+    let n = insert.execute(named_params! {
         ":sample_file_dir_id": sample_file_dir_id,
         ":start": ids.start.0,
         ":end": ids.end.0,
@@ -307,7 +307,7 @@ pub(crate) fn delete_recordings(
         ":start": ids.start.0,
         ":end": ids.end.0,
     };
-    let n_playback = del_playback.execute_named(p)?;
+    let n_playback = del_playback.execute(p)?;
     if n_playback != n {
         bail!(
             "inserted {} garbage rows but deleted {} recording_playback rows!",
@@ -315,7 +315,7 @@ pub(crate) fn delete_recordings(
             n_playback
         );
     }
-    let n_integrity = del_integrity.execute_named(p)?;
+    let n_integrity = del_integrity.execute(p)?;
     if n_integrity > n {
         // fewer is okay; recording_integrity is optional.
         bail!(
@@ -324,7 +324,7 @@ pub(crate) fn delete_recordings(
             n_integrity
         );
     }
-    let n_main = del_main.execute_named(p)?;
+    let n_main = del_main.execute(p)?;
     if n_main != n {
         bail!(
             "inserted {} garbage rows but deleted {} recording rows!",
@@ -367,7 +367,7 @@ pub(crate) fn get_range(
 ) -> Result<Option<Range<recording::Time>>, Error> {
     // The minimum is straightforward, taking advantage of the start_time_90k index.
     let mut stmt = conn.prepare_cached(STREAM_MIN_START_SQL)?;
-    let mut rows = stmt.query_named(named_params! {":stream_id": stream_id})?;
+    let mut rows = stmt.query(named_params! {":stream_id": stream_id})?;
     let min_start = match rows.next()? {
         Some(row) => recording::Time(row.get(0)?),
         None => return Ok(None),
@@ -378,7 +378,7 @@ pub(crate) fn get_range(
     // last MAX_RECORDING_DURATION must be examined in order to take advantage of the
     // start_time_90k index.
     let mut stmt = conn.prepare_cached(STREAM_MAX_START_SQL)?;
-    let mut rows = stmt.query_named(named_params! {":stream_id": stream_id})?;
+    let mut rows = stmt.query(named_params! {":stream_id": stream_id})?;
     let mut maxes_opt = None;
     while let Some(row) = rows.next()? {
         let row_start = recording::Time(row.get(0)?);
@@ -427,7 +427,7 @@ pub(crate) fn list_oldest_recordings(
     f: &mut dyn FnMut(db::ListOldestRecordingsRow) -> bool,
 ) -> Result<(), Error> {
     let mut stmt = conn.prepare_cached(LIST_OLDEST_RECORDINGS_SQL)?;
-    let mut rows = stmt.query_named(named_params! {
+    let mut rows = stmt.query(named_params! {
         ":start": start.0,
         ":end": CompositeId::new(start.stream() + 1, 0).0,
     })?;

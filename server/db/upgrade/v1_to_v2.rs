@@ -8,7 +8,7 @@ use crate::schema::DirMeta;
 use failure::{bail, format_err, Error};
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
-use rusqlite::params;
+use rusqlite::{named_params, params};
 use std::os::unix::io::AsRawFd;
 use uuid::Uuid;
 
@@ -397,14 +397,14 @@ fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
     let mut rows = select.query(params![])?;
     while let Some(row) = rows.next()? {
         let data: Vec<u8> = row.get(4)?;
-        insert.execute_named(&[
-            (":id", &row.get::<_, i32>(0)?),
-            (":sha1", &row.get::<_, Vec<u8>>(1)?),
-            (":width", &row.get::<_, i32>(2)?),
-            (":height", &row.get::<_, i32>(3)?),
-            (":rfc6381_codec", &rfc6381_codec_from_sample_entry(&data)?),
-            (":data", &data),
-        ])?;
+        insert.execute(named_params! {
+            ":id": &row.get::<_, i32>(0)?,
+            ":sha1": &row.get::<_, Vec<u8>>(1)?,
+            ":width": &row.get::<_, i32>(2)?,
+            ":height": &row.get::<_, i32>(3)?,
+            ":rfc6381_codec": &rfc6381_codec_from_sample_entry(&data)?,
+            ":data": &data,
+        })?;
     }
     Ok(())
 }

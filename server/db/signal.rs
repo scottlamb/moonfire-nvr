@@ -722,7 +722,7 @@ impl State {
         while let Some(row) = rows.next()? {
             let time_90k = recording::Time(row.get(0)?);
 
-            let changes = row.get_raw_checked(1)?.as_blob()?;
+            let changes = row.get_ref(1)?.as_blob()?;
             let before = cur.clone();
             let mut it = PointDataIterator::new(changes);
             while let Some((signal, state)) = it.next()? {

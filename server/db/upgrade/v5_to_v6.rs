@@ -102,7 +102,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         let id: i32 = row.get(0)?;
         let width: u16 = row.get::<_, i32>(1)?.try_into()?;
         let height: u16 = row.get::<_, i32>(2)?.try_into()?;
-        let rfc6381_codec: &str = row.get_raw_checked(3)?.as_str()?;
+        let rfc6381_codec: &str = row.get_ref(3)?.as_str()?;
         let mut data: Vec<u8> = row.get(4)?;
         let avcc = parse(&data)?;
         if avcc.num_of_sequence_parameter_sets() != 1 {
@@ -132,7 +132,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             BigEndian::write_u32(&mut data[0..4], u32::try_from(len)?);
         }
 
-        insert.execute_named(named_params! {
+        insert.execute(named_params! {
             ":id": id,
             ":width": width,
             ":height": height,
@@ -253,7 +253,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             cur_stream_id = Some(stream_id);
         }
         insert
-            .execute_named(named_params! {
+            .execute(named_params! {
                 ":composite_id": composite_id,
                 ":open_id": open_id,
                 ":stream_id": stream_id,

@@ -126,7 +126,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     )?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
-        let path = row.get_raw_checked(0)?.as_str()?;
+        let path = row.get_ref(0)?.as_str()?;
         info!("path: {}", path);
         let dir_uuid: FromSqlUuid = row.get(1)?;
         let open_id: Option<u32> = row.get(2)?;
