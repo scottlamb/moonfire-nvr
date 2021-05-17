@@ -45,10 +45,7 @@ pub fn run(args: &Args) -> Result<i32, Error> {
 
     db::upgrade::run(
         &db::upgrade::Args {
-            sample_file_dir: args
-                .sample_file_dir
-                .as_ref()
-                .map(std::path::PathBuf::as_path),
+            sample_file_dir: args.sample_file_dir.as_deref(),
             preset_journal: &args.preset_journal,
             no_vacuum: args.no_vacuum,
         },

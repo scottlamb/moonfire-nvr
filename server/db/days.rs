@@ -152,16 +152,15 @@ pub struct SignalChange {
     new_state: u16,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Map<V: Value>(pub(crate) BTreeMap<Key, V>);
 
 impl<V: Value> Map<V> {
-    pub fn new() -> Self {
-        Self(BTreeMap::new())
-    }
-
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
     pub fn get(&self, k: &Key) -> Option<&V> {
         self.0.get(k)
@@ -296,9 +295,9 @@ impl Map<SignalValue> {
             self.adjust_day(
                 day,
                 SignalChange {
+                    duration,
                     old_state,
                     new_state,
-                    duration,
                 },
             );
 
@@ -338,7 +337,7 @@ mod tests {
     #[test]
     fn test_adjust_stream() {
         testutil::init();
-        let mut m: Map<StreamValue> = Map::new();
+        let mut m: Map<StreamValue> = Map::default();
 
         // Create a day.
         let test_time = Time(130647162600000i64); // 2015-12-31 23:59:00 (Pacific).
@@ -446,7 +445,7 @@ mod tests {
     #[test]
     fn test_adjust_signal() {
         testutil::init();
-        let mut m: Map<SignalValue> = Map::new();
+        let mut m: Map<SignalValue> = Map::default();
 
         let test_time = Time(130646844000000i64); // 2015-12-31 23:00:00 (Pacific).
         let hr = Duration(60 * 60 * TIME_UNITS_PER_SEC);

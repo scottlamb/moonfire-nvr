@@ -10,7 +10,6 @@
 use base::clock;
 use cursive::views;
 use cursive::Cursive;
-use db;
 use failure::Error;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,10 +42,7 @@ pub fn run(args: &Args) -> Result<i32, Error> {
     siv.add_layer(
         views::Dialog::around(
             views::SelectView::<fn(&Arc<db::Database>, &mut Cursive)>::new()
-                .on_submit({
-                    let db = db.clone();
-                    move |siv, item| item(&db, siv)
-                })
+                .on_submit(move |siv, item| item(&db, siv))
                 .item("Cameras and streams".to_string(), cameras::top_dialog)
                 .item("Directories and retention".to_string(), dirs::top_dialog)
                 .item("Users".to_string(), users::top_dialog),

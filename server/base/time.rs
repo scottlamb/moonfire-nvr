@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops;
 use std::str::FromStr;
-use time;
 
 type IResult<'a, I, O> = nom::IResult<I, O, nom::error::VerboseError<&'a str>>;
 
@@ -27,7 +26,7 @@ pub struct Time(pub i64);
 fn fixed_len_num<'a>(len: usize) -> impl FnMut(&'a str) -> IResult<&'a str, i32> {
     map_res(
         take_while_m_n(len, len, |c: char| c.is_ascii_digit()),
-        |input: &str| i32::from_str_radix(input, 10),
+        |input: &str| input.parse::<i32>(),
     )
 }
 
@@ -96,9 +95,8 @@ impl Time {
     /// local time zone.
     pub fn parse(input: &str) -> Result<Self, Error> {
         // First try parsing as 90,000ths of a second since epoch.
-        match i64::from_str(input) {
-            Ok(i) => return Ok(Time(i)),
-            Err(_) => {}
+        if let Ok(i) = i64::from_str(input) {
+            return Ok(Time(i));
         }
 
         // If that failed, parse as a time string or bust.
@@ -113,7 +111,7 @@ impl Time {
                 format_err!("{}", nom::error::convert_error(input, e))
             }
         })?;
-        if remaining != "" {
+        if !remaining.is_empty() {
             bail!("unexpected suffix {:?} following time string", remaining);
         }
         let (tm_hour, tm_min, tm_sec, subsec) = opt_time.unwrap_or((0, 0, 0, 0));
@@ -210,7 +208,7 @@ impl fmt::Display for Time {
         write!(
             f,
             "{}:{:05}{}{:02}:{:02}",
-            tm.strftime("%FT%T").or_else(|_| Err(fmt::Error))?,
+            tm.strftime("%FT%T").map_err(|_| fmt::Error)?,
             self.0 % TIME_UNITS_PER_SEC,
             if tm.tm_utcoff > 0 { '+' } else { '-' },
             zone_minutes / 60,

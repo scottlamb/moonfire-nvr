@@ -77,7 +77,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
                 continue; // assume it was already moved.
             }
-            Err(e)?;
+            return Err(e.into());
         }
     }
 

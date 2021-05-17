@@ -358,7 +358,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
     /// Called from main thread.
     fn initial_rotation(&mut self) -> Result<(), Error> {
         self.do_rotation(|db| {
-            let streams: Vec<i32> = db.streams_by_id().keys().map(|&id| id).collect();
+            let streams: Vec<i32> = db.streams_by_id().keys().copied().collect();
             for &stream_id in &streams {
                 delete_recordings(db, stream_id, 0)?;
             }
@@ -379,7 +379,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
         let mut garbage: Vec<_> = {
             let l = self.db.lock();
             let d = l.sample_file_dirs_by_id().get(&self.dir_id).unwrap();
-            d.garbage_needs_unlink.iter().map(|id| *id).collect()
+            d.garbage_needs_unlink.iter().copied().collect()
         };
         if !garbage.is_empty() {
             // Try to delete files; retain ones in `garbage` that don't exist.
@@ -422,7 +422,9 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
                 let now = self.db.clocks().monotonic();
 
                 // Calculate the timeout to use, mapping negative durations to 0.
-                let timeout = (t - now).to_std().unwrap_or(StdDuration::new(0, 0));
+                let timeout = (t - now)
+                    .to_std()
+                    .unwrap_or_else(|_| StdDuration::new(0, 0));
                 match self.db.clocks().recv_timeout(&cmds, timeout) {
                     Err(mpsc::RecvTimeoutError::Disconnected) => return false, // cmd senders gone.
                     Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -456,7 +458,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         let mut garbage: Vec<_> = {
             let l = self.db.lock();
             let d = l.sample_file_dirs_by_id().get(&self.dir_id).unwrap();
-            d.garbage_needs_unlink.iter().map(|id| *id).collect()
+            d.garbage_needs_unlink.iter().copied().collect()
         };
         if garbage.is_empty() {
             return;
@@ -691,7 +693,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
         self.state = WriterState::Open(InnerWriter {
             f,
             r,
-            e: recording::SampleIndexEncoder::new(),
+            e: recording::SampleIndexEncoder::default(),
             id,
             hasher: blake3::Hasher::new(),
             local_start: recording::Time(i64::max_value()),
@@ -878,7 +880,7 @@ impl<F: FileWriter> InnerWriter<F> {
             let mut l = self.r.lock();
             l.flags = flags;
             l.local_time_delta = self.local_start - l.start;
-            l.sample_file_blake3 = Some(blake3.as_bytes().clone());
+            l.sample_file_blake3 = Some(*blake3.as_bytes());
             wall_duration = recording::Duration(i64::from(l.wall_duration_90k));
             run_offset = l.run_offset;
             end = l.start + wall_duration;

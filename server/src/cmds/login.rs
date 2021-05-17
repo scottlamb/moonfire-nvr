@@ -56,7 +56,7 @@ pub struct Args {
 pub fn run(args: &Args) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
-    let db = std::sync::Arc::new(db::Database::new(clocks.clone(), conn, true).unwrap());
+    let db = std::sync::Arc::new(db::Database::new(clocks, conn, true).unwrap());
     let mut l = db.lock();
     let u = l
         .get_user(&args.username)
@@ -72,7 +72,6 @@ pub fn run(args: &Args) -> Result<i32, Error> {
         flags |= *f as i32;
     }
     let uid = u.id;
-    drop(u);
     let (sid, _) = l.make_session(
         creation,
         uid,

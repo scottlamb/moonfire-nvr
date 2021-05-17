@@ -99,7 +99,7 @@ struct CameraState {
 }
 
 fn has_trailing_zero(video_index: &[u8]) -> Result<bool, Error> {
-    let mut it = recording::SampleIndexIterator::new();
+    let mut it = recording::SampleIndexIterator::default();
     while it.next(video_index)? {}
     Ok(it.duration_90k == 0)
 }

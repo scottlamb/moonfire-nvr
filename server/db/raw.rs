@@ -13,7 +13,7 @@ use std::ops::Range;
 use uuid::Uuid;
 
 // Note: the magic number "27000000" below is recording::MAX_RECORDING_DURATION.
-const LIST_RECORDINGS_BY_TIME_SQL: &'static str = r#"
+const LIST_RECORDINGS_BY_TIME_SQL: &str = r#"
     select
         recording.composite_id,
         recording.run_offset,
@@ -37,7 +37,7 @@ const LIST_RECORDINGS_BY_TIME_SQL: &'static str = r#"
         recording.start_time_90k
 "#;
 
-const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
+const LIST_RECORDINGS_BY_ID_SQL: &str = r#"
     select
         recording.composite_id,
         recording.run_offset,
@@ -61,7 +61,7 @@ const LIST_RECORDINGS_BY_ID_SQL: &'static str = r#"
         recording.composite_id
 "#;
 
-const STREAM_MIN_START_SQL: &'static str = r#"
+const STREAM_MIN_START_SQL: &str = r#"
     select
       start_time_90k
     from
@@ -71,7 +71,7 @@ const STREAM_MIN_START_SQL: &'static str = r#"
     order by start_time_90k limit 1
 "#;
 
-const STREAM_MAX_START_SQL: &'static str = r#"
+const STREAM_MAX_START_SQL: &str = r#"
     select
       start_time_90k,
       wall_duration_90k
@@ -82,7 +82,7 @@ const STREAM_MAX_START_SQL: &'static str = r#"
     order by start_time_90k desc;
 "#;
 
-const LIST_OLDEST_RECORDINGS_SQL: &'static str = r#"
+const LIST_OLDEST_RECORDINGS_SQL: &str = r#"
     select
       composite_id,
       start_time_90k,

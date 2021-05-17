@@ -279,7 +279,7 @@ fn lower_retention(
     db: &Arc<db::Database>,
     zero_limits: BTreeMap<i32, Vec<writer::NewLimit>>,
 ) -> Result<(), Error> {
-    let dirs_to_open: Vec<_> = zero_limits.keys().map(|id| *id).collect();
+    let dirs_to_open: Vec<_> = zero_limits.keys().copied().collect();
     db.lock().open_sample_file_dirs(&dirs_to_open[..])?;
     for (&dir_id, l) in &zero_limits {
         writer::lower_retention(db.clone(), dir_id, &l)?;
@@ -358,7 +358,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
             .child(
                 "sample file dir",
                 views::SelectView::<Option<i32>>::new()
-                    .with_all(dirs.iter().map(|d| d.clone()))
+                    .with_all(dirs.iter().cloned())
                     .popup()
                     .with_name(format!("{}_sample_file_dir", type_.as_str())),
             )

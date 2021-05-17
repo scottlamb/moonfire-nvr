@@ -6,7 +6,6 @@ use db::dir;
 use failure::{Error, Fail};
 use log::info;
 use nix::fcntl::FlockArg;
-use rusqlite;
 use std::path::Path;
 
 pub mod check;

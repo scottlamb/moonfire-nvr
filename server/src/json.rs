@@ -208,7 +208,7 @@ impl<'a> Camera<'a> {
     {
         let mut map = serializer.serialize_map(Some(streams.len()))?;
         for (i, s) in streams.iter().enumerate() {
-            if let &Some(ref s) = s {
+            if let Some(ref s) = *s {
                 map.serialize_key(
                     db::StreamType::from_index(i)
                         .expect("invalid stream type index")
@@ -397,10 +397,9 @@ impl<'a> TopLevel<'a> {
         let (db, include_days, include_config) = *cameras;
         let cs = db.cameras_by_id();
         let mut seq = serializer.serialize_seq(Some(cs.len()))?;
-        for (_, c) in cs {
+        for c in cs.values() {
             seq.serialize_element(
-                &Camera::wrap(c, db, include_days, include_config)
-                    .map_err(|e| S::Error::custom(e))?,
+                &Camera::wrap(c, db, include_days, include_config).map_err(S::Error::custom)?,
             )?;
         }
         seq.end()
@@ -417,7 +416,7 @@ impl<'a> TopLevel<'a> {
         let (db, include_days) = *signals;
         let ss = db.signals_by_id();
         let mut seq = serializer.serialize_seq(Some(ss.len()))?;
-        for (_, s) in ss {
+        for s in ss.values() {
             seq.serialize_element(&Signal::wrap(s, db, include_days))?;
         }
         seq.end()

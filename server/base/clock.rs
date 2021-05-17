@@ -5,7 +5,6 @@
 //! Clock interface and implementations for testability.
 
 use failure::Error;
-use libc;
 use log::warn;
 use parking_lot::Mutex;
 use std::mem;
@@ -136,7 +135,7 @@ struct SimulatedClocksInner {
 impl SimulatedClocks {
     pub fn new(boot: Timespec) -> Self {
         SimulatedClocks(Arc::new(SimulatedClocksInner {
-            boot: boot,
+            boot,
             uptime: Mutex::new(Duration::seconds(0)),
         }))
     }
@@ -163,7 +162,7 @@ impl Clocks for SimulatedClocks {
         timeout: StdDuration,
     ) -> Result<T, mpsc::RecvTimeoutError> {
         let r = rcv.recv_timeout(StdDuration::new(0, 0));
-        if let Err(_) = r {
+        if r.is_err() {
             self.sleep(Duration::from_std(timeout).unwrap());
         }
         r

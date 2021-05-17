@@ -408,10 +408,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
             .child(views::DummyView {}.fixed_width(20))
             .child(views::TextView::new(encode_size(model.borrow().fs_capacity)).fixed_width(25)),
     );
-    let mut change_button = views::Button::new("Change", {
-        let model = model.clone();
-        move |siv| press_change(&model, siv)
-    });
+    let mut change_button = views::Button::new("Change", move |siv| press_change(&model, siv));
     change_button.set_enabled(!over);
     let mut buttons = views::LinearLayout::horizontal().child(views::DummyView.full_width());
     buttons.add_child(change_button.with_name("change"));

@@ -10,13 +10,10 @@ use crate::dir;
 use crate::writer;
 use base::clock::Clocks;
 use fnv::FnvHashMap;
-use mylog;
-use rusqlite;
 use std::env;
 use std::sync::Arc;
 use std::thread;
 use tempfile::TempDir;
-use time;
 use uuid::Uuid;
 
 static INIT: parking_lot::Once = parking_lot::Once::new();
@@ -42,7 +39,7 @@ pub const TEST_VIDEO_SAMPLE_ENTRY_DATA: &[u8] =
 pub fn init() {
     INIT.call_once(|| {
         let h = mylog::Builder::new()
-            .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or("info".to_owned()))
+            .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or_else(|_| "info".to_owned()))
             .build();
         h.install().unwrap();
         env::set_var("TZ", "America/Los_Angeles");
@@ -80,7 +77,7 @@ impl<C: Clocks + Clone> TestDb<C> {
         let dir;
         {
             let mut l = db.lock();
-            sample_file_dir_id = l.add_sample_file_dir(path.to_owned()).unwrap();
+            sample_file_dir_id = l.add_sample_file_dir(path).unwrap();
             assert_eq!(
                 TEST_CAMERA_ID,
                 l.add_camera(db::CameraChange {
@@ -116,7 +113,7 @@ impl<C: Clocks + Clone> TestDb<C> {
                 .unwrap();
         }
         let mut dirs_by_stream_id = FnvHashMap::default();
-        dirs_by_stream_id.insert(TEST_STREAM_ID, dir.clone());
+        dirs_by_stream_id.insert(TEST_STREAM_ID, dir);
         let (syncer_channel, syncer_join) =
             writer::start_syncer(db.clone(), sample_file_dir_id).unwrap();
         TestDb {

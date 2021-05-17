@@ -50,7 +50,7 @@ pub fn rescale(from_off_90k: i32, from_duration_90k: i32, to_duration_90k: i32) 
 
 /// An iterator through a sample index (as described in `design/recording.md`).
 /// Initially invalid; call `next()` before each read.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct SampleIndexIterator {
     /// The index byte position of the next sample to read (low 31 bits) and if the current
     /// same is a key frame (high bit).
@@ -74,17 +74,6 @@ pub struct SampleIndexIterator {
 }
 
 impl SampleIndexIterator {
-    pub fn new() -> SampleIndexIterator {
-        SampleIndexIterator {
-            i_and_is_key: 0,
-            pos: 0,
-            start_90k: 0,
-            duration_90k: 0,
-            bytes: 0,
-            bytes_other: 0,
-        }
-    }
-
     pub fn next(&mut self, data: &[u8]) -> Result<bool, Error> {
         self.pos += self.bytes;
         self.start_90k += self.duration_90k;
@@ -147,7 +136,7 @@ impl SampleIndexIterator {
 }
 
 /// An encoder for a sample index (as described in `design/recording.md`).
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SampleIndexEncoder {
     prev_duration_90k: i32,
     prev_bytes_key: i32,
@@ -155,14 +144,6 @@ pub struct SampleIndexEncoder {
 }
 
 impl SampleIndexEncoder {
-    pub fn new() -> Self {
-        SampleIndexEncoder {
-            prev_duration_90k: 0,
-            prev_bytes_key: 0,
-            prev_bytes_nonkey: 0,
-        }
-    }
-
     pub fn add_sample(
         &mut self,
         duration_90k: i32,
@@ -205,7 +186,7 @@ pub struct Segment {
 
     /// An iterator positioned at the beginning of the segment, or `None`. Most segments are
     /// positioned at the beginning of the recording, so this is an optional box to shrink a long
-    /// of segments. `None` is equivalent to `SampleIndexIterator::new()`.
+    /// of segments. `None` is equivalent to `SampleIndexIterator::default()`.
     begin: Option<Box<SampleIndexIterator>>,
     pub file_end: i32,
 
@@ -246,6 +227,7 @@ impl Segment {
                     << 31),
         };
 
+        #[allow(clippy::suspicious_operation_groupings)]
         if desired_media_range_90k.start > desired_media_range_90k.end
             || desired_media_range_90k.end > recording.media_duration_90k
         {
@@ -275,9 +257,9 @@ impl Segment {
             recording
         );
         db.with_recording_playback(self_.id, &mut |playback| {
-            let mut begin = Box::new(SampleIndexIterator::new());
-            let data = &(&playback).video_index;
-            let mut it = SampleIndexIterator::new();
+            let mut begin = Box::new(SampleIndexIterator::default());
+            let data = &playback.video_index;
+            let mut it = SampleIndexIterator::default();
             if !it.next(data)? {
                 bail!("no index");
             }
@@ -352,11 +334,11 @@ impl Segment {
             self.frames,
             self.actual_start_90k()
         );
-        let data = &(&playback).video_index;
+        let data = &playback.video_index;
         let mut it = match self.begin {
             Some(ref b) => **b,
             None => {
-                let mut it = SampleIndexIterator::new();
+                let mut it = SampleIndexIterator::default();
                 if !it.next(data)? {
                     bail!("recording {} has no frames", self.id);
                 }
@@ -434,7 +416,7 @@ mod tests {
     fn test_encode_example() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
-        let mut e = SampleIndexEncoder::new();
+        let mut e = SampleIndexEncoder::default();
         e.add_sample(10, 1000, true, &mut r);
         e.add_sample(9, 10, false, &mut r);
         e.add_sample(11, 15, false, &mut r);
@@ -468,11 +450,11 @@ mod tests {
             Sample { duration_90k:  0, bytes:  1000, is_key: false, },
         ];
         let mut r = db::RecordingToInsert::default();
-        let mut e = SampleIndexEncoder::new();
+        let mut e = SampleIndexEncoder::default();
         for sample in &samples {
             e.add_sample(sample.duration_90k, sample.bytes, sample.is_key, &mut r);
         }
-        let mut it = SampleIndexIterator::new();
+        let mut it = SampleIndexIterator::default();
         for sample in &samples {
             assert!(it.next(&r.video_index).unwrap());
             assert_eq!(
@@ -519,7 +501,7 @@ mod tests {
             },
         ];
         for test in &tests {
-            let mut it = SampleIndexIterator::new();
+            let mut it = SampleIndexIterator::default();
             assert_eq!(it.next(test.encoded).unwrap_err().to_string(), test.err);
         }
     }
@@ -546,7 +528,7 @@ mod tests {
     fn test_segment_clipping_with_all_sync() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = SampleIndexEncoder::new();
+        let mut encoder = SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
@@ -568,7 +550,7 @@ mod tests {
     fn test_segment_clipping_with_half_sync() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = SampleIndexEncoder::new();
+        let mut encoder = SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
@@ -586,7 +568,7 @@ mod tests {
     fn test_segment_clipping_with_trailing_zero() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = SampleIndexEncoder::new();
+        let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(1, 2, true, &mut r);
         encoder.add_sample(0, 3, true, &mut r);
@@ -601,7 +583,7 @@ mod tests {
     fn test_segment_zero_desired_duration() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = SampleIndexEncoder::new();
+        let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         let db = TestDb::new(RealClocks {});
         let row = db.insert_recording_from_encoder(r);
@@ -615,7 +597,7 @@ mod tests {
     fn test_segment_fast_path() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = SampleIndexEncoder::new();
+        let mut encoder = SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
@@ -634,7 +616,7 @@ mod tests {
     fn test_segment_fast_path_with_trailing_zero() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = SampleIndexEncoder::new();
+        let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(1, 2, true, &mut r);
         encoder.add_sample(0, 3, true, &mut r);
@@ -659,7 +641,7 @@ mod bench {
         let data = include_bytes!("testdata/video_sample_index.bin");
         b.bytes = data.len() as u64;
         b.iter(|| {
-            let mut it = SampleIndexIterator::new();
+            let mut it = SampleIndexIterator::default();
             while it.next(data).unwrap() {}
             assert_eq!(30104460, it.pos);
             assert_eq!(5399985, it.start_90k);

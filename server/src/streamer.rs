@@ -11,7 +11,6 @@ use log::{debug, info, trace, warn};
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use time;
 use url::Url;
 
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
@@ -359,7 +358,7 @@ mod tests {
 
     fn get_frames(db: &db::LockedDatabase, id: CompositeId) -> Vec<Frame> {
         db.with_recording_playback(id, &mut |rec| {
-            let mut it = recording::SampleIndexIterator::new();
+            let mut it = recording::SampleIndexIterator::default();
             let mut frames = Vec::new();
             while it.next(&rec.video_index).unwrap() {
                 frames.push(Frame {

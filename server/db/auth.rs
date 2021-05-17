@@ -9,7 +9,6 @@ use base::{bail_t, format_err_t, strutil, ErrorKind, ResultExt};
 use failure::{bail, format_err, Error};
 use fnv::FnvHashMap;
 use lazy_static::lazy_static;
-use libpasta;
 use log::info;
 use parking_lot::Mutex;
 use protobuf::Message;
@@ -239,12 +238,8 @@ impl Session {
 pub struct RawSessionId([u8; 48]);
 
 impl RawSessionId {
-    pub fn new() -> Self {
-        RawSessionId([0u8; 48])
-    }
-
     pub fn decode_base64(input: &[u8]) -> Result<Self, Error> {
-        let mut s = RawSessionId::new();
+        let mut s = RawSessionId([0u8; 48]);
         let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut s.0[..])?;
         if l != 48 {
             bail!("session id must be 48 bytes");
@@ -625,7 +620,7 @@ impl State {
         sessions: &'s mut FnvHashMap<SessionHash, Session>,
         permissions: Permissions,
     ) -> Result<(RawSessionId, &'s Session), Error> {
-        let mut session_id = RawSessionId::new();
+        let mut session_id = RawSessionId([0u8; 48]);
         rand.fill(&mut session_id.0).unwrap();
         let mut seed = [0u8; 32];
         rand.fill(&mut seed).unwrap();
@@ -793,7 +788,7 @@ impl State {
                 ":id": &id,
             })?;
         }
-        for (_, s) in &self.sessions {
+        for s in self.sessions.values() {
             if !s.dirty {
                 continue;
             }
@@ -813,10 +808,10 @@ impl State {
     ///
     /// See notes there.
     pub fn post_flush(&mut self) {
-        for (_, u) in &mut self.users_by_id {
+        for u in self.users_by_id.values_mut() {
             u.dirty = false;
         }
-        for (_, s) in &mut self.sessions {
+        for s in self.sessions.values_mut() {
             s.dirty = false;
         }
     }

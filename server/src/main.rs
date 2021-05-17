@@ -160,7 +160,7 @@ fn main() {
                 .and_then(|s| mylog::ColorMode::from_str(&s))
                 .unwrap_or(mylog::ColorMode::Auto),
         )
-        .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or("info".to_owned()))
+        .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or_else(|_| "info".to_owned()))
         .build();
     h.clone().install().unwrap();
 

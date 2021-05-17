@@ -22,8 +22,7 @@ mod v3_to_v4;
 mod v4_to_v5;
 mod v5_to_v6;
 
-const UPGRADE_NOTES: &'static str =
-    concat!("upgraded using moonfire-db ", env!("CARGO_PKG_VERSION"));
+const UPGRADE_NOTES: &str = concat!("upgraded using moonfire-db ", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug)]
 pub struct Args<'a> {

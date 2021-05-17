@@ -40,13 +40,13 @@ impl From<&'static str> for Chunk {
 
 impl From<String> for Chunk {
     fn from(r: String) -> Self {
-        Chunk(ARefss::new(r.into_bytes()).map(|v| &v[..]))
+        Chunk(ARefss::new(r.into_bytes()))
     }
 }
 
 impl From<Vec<u8>> for Chunk {
     fn from(r: Vec<u8>) -> Self {
-        Chunk(ARefss::new(r).map(|v| &v[..]))
+        Chunk(ARefss::new(r))
     }
 }
 

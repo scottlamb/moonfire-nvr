@@ -167,7 +167,7 @@ impl<'a> PointDataIterator<'a> {
         Ok(Some((signal, state as u16)))
     }
 
-    fn to_map(mut self) -> Result<BTreeMap<u32, u16>, Error> {
+    fn into_map(mut self) -> Result<BTreeMap<u32, u16>, Error> {
         let mut out = BTreeMap::new();
         while let Some((signal, state)) = self.next()? {
             out.insert(signal, state);
@@ -291,7 +291,7 @@ impl State {
     fn gc(&mut self) {
         let max = match self.max_signal_changes {
             None => return,
-            Some(m) if m < 0 => 0 as usize,
+            Some(m) if m < 0 => 0_usize,
             Some(m) if m > (isize::max_value() as i64) => return,
             Some(m) => m as usize,
         };
@@ -311,7 +311,7 @@ impl State {
             .points_by_time
             .keys()
             .take(to_remove)
-            .map(|t| *t)
+            .copied()
             .collect();
 
         for t in &remove {
@@ -406,7 +406,7 @@ impl State {
         if let Some((&t, ref mut p)) = self.points_by_time.range_mut(..=when.end).next_back() {
             if t == when.end {
                 // Already have a point at end. Adjust it. prev starts unchanged...
-                prev = p.prev().to_map().expect("in-mem prev is valid");
+                prev = p.prev().into_map().expect("in-mem prev is valid");
 
                 // ...and then prev and changes are altered to reflect the desired update.
                 State::update_signals_end_maps(
@@ -505,8 +505,8 @@ impl State {
         if let Some((&t, ref mut p)) = self.points_by_time.range_mut(..=start).next_back() {
             if t == start {
                 // Reuse existing point at start.
-                prev = p.prev().to_map().expect("in-mem prev is valid");
-                let mut changes = p.changes().to_map().expect("in-mem changes is valid");
+                prev = p.prev().into_map().expect("in-mem prev is valid");
+                let mut changes = p.changes().into_map().expect("in-mem changes is valid");
                 let mut dirty = false;
                 for (&signal, &state) in signals.iter().zip(states) {
                     match changes.entry(signal) {
@@ -570,7 +570,7 @@ impl State {
         let after_start = recording::Time(when.start.0 + 1);
         let mut prev_t = when.start;
         for (&t, ref mut p) in self.points_by_time.range_mut(after_start..when.end) {
-            let mut prev = p.prev().to_map().expect("in-mem prev is valid");
+            let mut prev = p.prev().into_map().expect("in-mem prev is valid");
 
             // Update prev to reflect desired update; likewise each signal's days index.
             for (&signal, &state) in signals.iter().zip(states) {
@@ -691,7 +691,7 @@ impl State {
                     type_: type_.0,
                     short_name: row.get(3)?,
                     cameras: Vec::new(),
-                    days: days::Map::new(),
+                    days: days::Map::default(),
                 },
             );
         }
@@ -837,7 +837,7 @@ impl State {
     fn debug_assert_point_invariants(&self) {
         let mut expected_prev = BTreeMap::new();
         for (t, p) in self.points_by_time.iter() {
-            let cur = p.prev().to_map().expect("in-mem prev is valid");
+            let cur = p.prev().into_map().expect("in-mem prev is valid");
             assert_eq!(&expected_prev, &cur, "time {} prev mismatch", t);
             p.changes().update_map(&mut expected_prev);
         }
@@ -973,7 +973,7 @@ mod tests {
             &mut |_r| panic!("no changes expected"),
         );
         assert_eq!(&rows[..], EXPECTED);
-        let mut expected_days = days::Map::new();
+        let mut expected_days = days::Map::default();
         expected_days.0.insert(
             days::Key(*b"2019-04-26"),
             days::SignalValue {

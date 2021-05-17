@@ -479,7 +479,7 @@ impl Service {
             std::time::Duration::new(30, 0),
         ));
         let mut combo = futures::stream::select(
-            sub_rx.map(|s| Either::Left(s)),
+            sub_rx.map(Either::Left),
             keepalive.map(|_| Either::Right(())),
         );
 
@@ -644,10 +644,10 @@ impl Service {
         req: Request<::hyper::Body>,
     ) -> Result<Response<Body>, std::convert::Infallible> {
         let p = Path::decode(req.uri().path());
-        let always_allow_unauthenticated = match p {
-            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static => true,
-            _ => false,
-        };
+        let always_allow_unauthenticated = matches!(
+            p,
+            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static
+        );
         debug!("request on: {}: {:?}", req.uri(), p);
         let caller = match self.authenticate(&req, always_allow_unauthenticated) {
             Ok(c) => c,
@@ -673,10 +673,8 @@ impl Service {
             }
         }
 
-        if camera_configs {
-            if !caller.permissions.read_camera_configs {
-                bail_t!(PermissionDenied, "read_camera_configs required");
-            }
+        if camera_configs && !caller.permissions.read_camera_configs {
+            bail_t!(PermissionDenied, "read_camera_configs required");
         }
 
         let db = self.db.lock();
@@ -954,7 +952,7 @@ impl Service {
                 sec: start.unix_seconds(),
                 nsec: 0,
             });
-            let stream_abbrev = if stream_type == db::StreamType::MAIN {
+            let stream_abbrev = if stream_type == db::StreamType::Main {
                 "main"
             } else {
                 "sub"
@@ -1247,11 +1245,7 @@ impl Service {
         if let Some(sid) = extract_sid(req) {
             let authreq = self.authreq(req);
 
-            match self
-                .db
-                .lock()
-                .authenticate_session(authreq.clone(), &sid.hash())
-            {
+            match self.db.lock().authenticate_session(authreq, &sid.hash()) {
                 Ok((s, u)) => {
                     return Ok(Caller {
                         permissions: s.permissions.clone(),
@@ -1319,7 +1313,7 @@ struct StaticFileRequest<'a> {
 
 impl<'a> StaticFileRequest<'a> {
     fn parse(path: &'a str) -> Option<Self> {
-        if !path.starts_with("/") || path == "/index.html" {
+        if !path.starts_with('/') || path == "/index.html" {
             return None;
         }
 
@@ -1492,11 +1486,11 @@ mod tests {
         assert_eq!(Path::decode("/api/cameras/asdf/"), Path::NotFound);
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/recordings"),
-            Path::StreamRecordings(cam_uuid, db::StreamType::MAIN)
+            Path::StreamRecordings(cam_uuid, db::StreamType::Main)
         );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/sub/recordings"),
-            Path::StreamRecordings(cam_uuid, db::StreamType::SUB)
+            Path::StreamRecordings(cam_uuid, db::StreamType::Sub)
         );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/junk/recordings"),
@@ -1504,23 +1498,23 @@ mod tests {
         );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.mp4"),
-            Path::StreamViewMp4(cam_uuid, db::StreamType::MAIN, false)
+            Path::StreamViewMp4(cam_uuid, db::StreamType::Main, false)
         );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.mp4.txt"),
-            Path::StreamViewMp4(cam_uuid, db::StreamType::MAIN, true)
+            Path::StreamViewMp4(cam_uuid, db::StreamType::Main, true)
         );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.m4s"),
-            Path::StreamViewMp4Segment(cam_uuid, db::StreamType::MAIN, false)
+            Path::StreamViewMp4Segment(cam_uuid, db::StreamType::Main, false)
         );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/view.m4s.txt"),
-            Path::StreamViewMp4Segment(cam_uuid, db::StreamType::MAIN, true)
+            Path::StreamViewMp4Segment(cam_uuid, db::StreamType::Main, true)
         );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/live.m4s"),
-            Path::StreamLiveMp4Segments(cam_uuid, db::StreamType::MAIN)
+            Path::StreamLiveMp4Segments(cam_uuid, db::StreamType::Main)
         );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/junk"),

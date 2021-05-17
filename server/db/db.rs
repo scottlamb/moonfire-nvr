@@ -64,7 +64,7 @@ pub const EXPECTED_VERSION: i32 = 6;
 /// Make it one less than a power of two so that the data structure's size is efficient.
 const VIDEO_INDEX_CACHE_LEN: usize = 1023;
 
-const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
+const GET_RECORDING_PLAYBACK_SQL: &str = r#"
     select
       video_index
     from
@@ -73,14 +73,14 @@ const GET_RECORDING_PLAYBACK_SQL: &'static str = r#"
       composite_id = :composite_id
 "#;
 
-const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &'static str = r#"
+const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &str = r#"
     insert into video_sample_entry (width,  height,  pasp_h_spacing,  pasp_v_spacing,
                                     rfc6381_codec, data)
                             values (:width, :height, :pasp_h_spacing, :pasp_v_spacing,
                                     :rfc6381_codec, :data)
 "#;
 
-const UPDATE_STREAM_COUNTERS_SQL: &'static str = r#"
+const UPDATE_STREAM_COUNTERS_SQL: &str = r#"
     update stream
     set cum_recordings = :cum_recordings,
         cum_media_duration_90k = :cum_media_duration_90k,
@@ -231,6 +231,7 @@ pub struct RecordingPlayback<'a> {
 }
 
 /// Bitmask in the `flags` field in the `recordings` table; see `schema.sql`.
+#[repr(u32)]
 pub enum RecordingFlags {
     TrailingZero = 1,
 
@@ -356,37 +357,37 @@ pub struct Camera {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StreamType {
-    MAIN,
-    SUB,
+    Main,
+    Sub,
 }
 
 impl StreamType {
     pub fn from_index(i: usize) -> Option<Self> {
         match i {
-            0 => Some(StreamType::MAIN),
-            1 => Some(StreamType::SUB),
+            0 => Some(StreamType::Main),
+            1 => Some(StreamType::Sub),
             _ => None,
         }
     }
 
     pub fn index(self) -> usize {
         match self {
-            StreamType::MAIN => 0,
-            StreamType::SUB => 1,
+            StreamType::Main => 0,
+            StreamType::Sub => 1,
         }
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
-            StreamType::MAIN => "main",
-            StreamType::SUB => "sub",
+            StreamType::Main => "main",
+            StreamType::Sub => "sub",
         }
     }
 
     pub fn parse(type_: &str) -> Option<Self> {
         match type_ {
-            "main" => Some(StreamType::MAIN),
-            "sub" => Some(StreamType::SUB),
+            "main" => Some(StreamType::Main),
+            "sub" => Some(StreamType::Sub),
             _ => None,
         }
     }
@@ -398,7 +399,7 @@ impl ::std::fmt::Display for StreamType {
     }
 }
 
-pub const ALL_STREAM_TYPES: [StreamType; 2] = [StreamType::MAIN, StreamType::SUB];
+pub const ALL_STREAM_TYPES: [StreamType; 2] = [StreamType::Main, StreamType::Sub];
 
 pub struct Stream {
     pub id: i32,
@@ -708,7 +709,7 @@ impl StreamStateChanger {
                         bail!("missing stream {}", sid);
                     }
                     sids[i] = Some(sid);
-                    let sc = mem::replace(*sc, StreamChange::default());
+                    let sc = mem::take(*sc);
                     streams.push((sid, Some((camera_id, type_, sc))));
                 }
             } else {
@@ -737,7 +738,7 @@ impl StreamStateChanger {
                 })?;
                 let id = tx.last_insert_rowid() as i32;
                 sids[i] = Some(id);
-                let sc = mem::replace(*sc, StreamChange::default());
+                let sc = mem::take(*sc);
                 streams.push((id, Some((camera_id, type_, sc))));
             }
         }
@@ -768,7 +769,7 @@ impl StreamStateChanger {
                         bytes_to_add: 0,
                         fs_bytes_to_add: 0,
                         duration: recording::Duration(0),
-                        committed_days: days::Map::new(),
+                        committed_days: days::Map::default(),
                         record: sc.record,
                         cum_recordings: 0,
                         cum_media_duration: recording::Duration(0),
@@ -929,7 +930,7 @@ impl LockedDatabase {
     /// longer connected). This doesn't work when the system is shutting down and nothing more is
     /// sent, though.
     pub fn clear_watches(&mut self) {
-        for (_, s) in &mut self.streams_by_id {
+        for s in self.streams_by_id.values_mut() {
             s.on_live_segment.clear();
         }
     }
@@ -1229,14 +1230,11 @@ impl LockedDatabase {
 
     /// Gets a given camera by uuid.
     pub fn get_camera(&self, uuid: Uuid) -> Option<&Camera> {
-        match self.cameras_by_uuid.get(&uuid) {
-            Some(id) => Some(
-                self.cameras_by_id
-                    .get(id)
-                    .expect("uuid->id requires id->cam"),
-            ),
-            None => None,
-        }
+        self.cameras_by_uuid.get(&uuid).map(|id| {
+            self.cameras_by_id
+                .get(id)
+                .expect("uuid->id requires id->cam")
+        })
     }
 
     /// Lists the specified recordings, passing them to a supplied function. Given that the
@@ -1439,7 +1437,7 @@ impl LockedDatabase {
                 trace!("cache hit for recording {}", id);
                 occupied.to_back();
                 let video_index = occupied.get();
-                return f(&RecordingPlayback { video_index });
+                f(&RecordingPlayback { video_index })
             }
             RawEntryMut::Vacant(vacant) => {
                 trace!("cache miss for recording {}", id);
@@ -1602,7 +1600,7 @@ impl LockedDatabase {
             self.cameras_by_id.insert(
                 id,
                 Camera {
-                    id: id,
+                    id,
                     uuid: uuid.0,
                     short_name: row.get(2)?,
                     description: row.get(3)?,
@@ -1671,7 +1669,7 @@ impl LockedDatabase {
                     bytes_to_add: 0,
                     fs_bytes_to_add: 0,
                     duration: recording::Duration(0),
-                    committed_days: days::Map::new(),
+                    committed_days: days::Map::default(),
                     cum_recordings: row.get(7)?,
                     cum_media_duration: recording::Duration(row.get(8)?),
                     cum_runs: row.get(9)?,
@@ -1781,7 +1779,7 @@ impl LockedDatabase {
                 garbage_needs_unlink: FnvHashSet::default(),
                 garbage_unlinked: Vec::new(),
             }),
-            Entry::Occupied(_) => Err(format_err!("duplicate sample file dir id {}", id))?,
+            Entry::Occupied(_) => bail!("duplicate sample file dir id {}", id),
         };
         d.last_complete_open = Some(*o);
         mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
@@ -2155,22 +2153,21 @@ pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Er
             that predates schema versioning, see guide/schema.md."
         )
     })?;
-    if ver < EXPECTED_VERSION {
-        bail!(
+    match ver.cmp(&EXPECTED_VERSION) {
+        std::cmp::Ordering::Less => bail!(
             "Database schema version {} is too old (expected {}); \
             see upgrade instructions in guide/upgrade.md.",
             ver,
             EXPECTED_VERSION
-        );
-    } else if ver > EXPECTED_VERSION {
-        bail!(
+        ),
+        std::cmp::Ordering::Equal => Ok(()),
+        std::cmp::Ordering::Greater => bail!(
             "Database schema version {} is too new (expected {}); \
             must use a newer binary to match.",
             ver,
             EXPECTED_VERSION
-        );
+        ),
     }
-    Ok(())
 }
 
 /// The recording database. Abstracts away SQLite queries. Also maintains in-memory state

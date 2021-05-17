@@ -5,7 +5,6 @@
 use crate::h264;
 use cstr::cstr;
 use failure::{bail, Error};
-use ffmpeg;
 use lazy_static::lazy_static;
 use log::{debug, warn};
 use std::convert::TryFrom;
@@ -34,7 +33,7 @@ pub trait Opener<S: Stream>: Sync {
 pub trait Stream {
     fn get_video_codecpar(&self) -> ffmpeg::avcodec::InputCodecParameters<'_>;
     fn get_extra_data(&self) -> Result<h264::ExtraData, Error>;
-    fn get_next<'p>(&'p mut self) -> Result<ffmpeg::avcodec::Packet<'p>, ffmpeg::Error>;
+    fn get_next(&mut self) -> Result<ffmpeg::avcodec::Packet, ffmpeg::Error>;
 }
 
 pub struct Ffmpeg {}
@@ -166,7 +165,7 @@ impl Stream for FfmpegStream {
         )
     }
 
-    fn get_next<'i>(&'i mut self) -> Result<ffmpeg::avcodec::Packet<'i>, ffmpeg::Error> {
+    fn get_next(&mut self) -> Result<ffmpeg::avcodec::Packet, ffmpeg::Error> {
         loop {
             let p = self.input.read_frame()?;
             if p.stream_index() == self.video_i {

@@ -27,7 +27,7 @@ pub fn encode_size(mut raw: i64) -> String {
             raw &= (1i64 << n) - 1;
         }
     }
-    if raw > 0 || encoded.len() == 0 {
+    if raw > 0 || encoded.is_empty() {
         write!(&mut encoded, "{}", raw).unwrap();
     } else {
         encoded.pop(); // remove trailing space.
@@ -39,7 +39,7 @@ fn decode_sizepart(input: &str) -> IResult<&str, i64> {
     map(
         tuple((
             map_res(take_while1(|c: char| c.is_ascii_digit()), |input: &str| {
-                i64::from_str_radix(input, 10)
+                input.parse::<i64>()
             }),
             opt(alt((
                 nom::combinator::value(1 << 40, tag("T")),

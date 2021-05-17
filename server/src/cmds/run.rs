@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use structopt::StructOpt;
-use tokio;
 use tokio::signal::unix::{signal, SignalKind};
 
 #[derive(StructOpt)]
@@ -76,20 +75,20 @@ pub struct Args {
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
 // They seem to be correct for Linux and macOS at least.
-const LOCALTIME_PATH: &'static str = "/etc/localtime";
-const TIMEZONE_PATH: &'static str = "/etc/timezone";
-const ZONEINFO_PATHS: [&'static str; 2] = [
+const LOCALTIME_PATH: &str = "/etc/localtime";
+const TIMEZONE_PATH: &str = "/etc/timezone";
+const ZONEINFO_PATHS: [&str; 2] = [
     "/usr/share/zoneinfo/",       // Linux, macOS < High Sierra
     "/var/db/timezone/zoneinfo/", // macOS High Sierra
 ];
 
-fn trim_zoneinfo(p: &str) -> &str {
+fn trim_zoneinfo(path: &str) -> &str {
     for zp in &ZONEINFO_PATHS {
-        if p.starts_with(zp) {
-            return &p[zp.len()..];
+        if let Some(p) = path.strip_prefix(zp) {
+            return p;
         }
     }
-    return p;
+    path
 }
 
 /// Attempt to resolve the timezone of the server.
@@ -145,7 +144,7 @@ fn resolve_zone() -> Result<String, Error> {
 
     // If `TIMEZONE_PATH` is a file, use its contents as the zone name.
     match ::std::fs::read_to_string(TIMEZONE_PATH) {
-        Ok(z) => return Ok(z),
+        Ok(z) => Ok(z),
         Err(e) => {
             bail!(
                 "Unable to resolve timezone from TZ env, {}, or {}. Last error: {}",
@@ -174,7 +173,7 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
             super::OpenMode::ReadWrite
         },
     )?;
-    let db = Arc::new(db::Database::new(clocks.clone(), conn, !args.read_only).unwrap());
+    let db = Arc::new(db::Database::new(clocks, conn, !args.read_only).unwrap());
     info!("Database is loaded.");
 
     let object_detector = match args.object_detection {
@@ -260,7 +259,7 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let syncer = syncers.get(&sample_file_dir_id).unwrap();
             let object_detector = match stream.type_ {
-                db::StreamType::SUB => object_detector.clone(),
+                db::StreamType::Sub => object_detector.clone(),
                 _ => None,
             };
             let mut streamer = streamer::Streamer::new(

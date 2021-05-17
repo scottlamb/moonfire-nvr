@@ -232,7 +232,7 @@ struct Stream {
 type Dir = FnvHashMap<i32, Stream>;
 
 fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
-    let mut it = recording::SampleIndexIterator::new();
+    let mut it = recording::SampleIndexIterator::default();
     let mut media_duration = 0;
     let mut video_samples = 0;
     let mut video_sync_samples = 0;

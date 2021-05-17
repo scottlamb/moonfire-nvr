@@ -63,12 +63,9 @@ use db::dir;
 use db::recording::{self, rescale, TIME_UNITS_PER_SEC};
 use futures::stream;
 use futures::Stream;
-use http;
 use http::header::HeaderValue;
-use http_serve;
 use hyper::body::Buf;
 use log::{debug, error, trace, warn};
-use memmap;
 use parking_lot::Once;
 use reffers::ARefss;
 use smallvec::SmallVec;
@@ -88,7 +85,7 @@ use std::time::SystemTime;
 const FORMAT_VERSION: [u8; 1] = [0x08];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
-const NORMAL_FTYP_BOX: &'static [u8] = &[
+const NORMAL_FTYP_BOX: &[u8] = &[
     0x00, 0x00, 0x00, 0x20, // length = 32, sizeof(NORMAL_FTYP_BOX)
     b'f', b't', b'y', b'p', // type
     b'i', b's', b'o', b'm', // major_brand
@@ -105,7 +102,7 @@ const NORMAL_FTYP_BOX: &'static [u8] = &[
 /// (8.8.7.1) cannot be set where a file is marked with [the avc1 brand]."
 /// Note that Safari insists there be a compatible brand set in this list. The
 /// major brand is not enough.
-const INIT_SEGMENT_FTYP_BOX: &'static [u8] = &[
+const INIT_SEGMENT_FTYP_BOX: &[u8] = &[
     0x00, 0x00, 0x00, 0x14, // length = 20, sizeof(INIT_SEGMENT_FTYP_BOX)
     b'f', b't', b'y', b'p', // type
     b'i', b's', b'o', b'5', // major_brand
@@ -114,7 +111,7 @@ const INIT_SEGMENT_FTYP_BOX: &'static [u8] = &[
 ];
 
 /// An `hdlr` (ISO/IEC 14496-12 section 8.4.3 `HandlerBox`) box suitable for video.
-const VIDEO_HDLR_BOX: &'static [u8] = &[
+const VIDEO_HDLR_BOX: &[u8] = &[
     0x00, 0x00, 0x00, 0x21, // length == sizeof(kHdlrBox)
     b'h', b'd', b'l', b'r', // type == hdlr, ISO/IEC 14496-12 section 8.4.3.
     0x00, 0x00, 0x00, 0x00, // version + flags
@@ -127,7 +124,7 @@ const VIDEO_HDLR_BOX: &'static [u8] = &[
 ];
 
 /// An `hdlr` (ISO/IEC 14496-12 section 8.4.3 `HandlerBox`) box suitable for subtitles.
-const SUBTITLE_HDLR_BOX: &'static [u8] = &[
+const SUBTITLE_HDLR_BOX: &[u8] = &[
     0x00, 0x00, 0x00, 0x21, // length == sizeof(kHdlrBox)
     b'h', b'd', b'l', b'r', // type == hdlr, ISO/IEC 14496-12 section 8.4.3.
     0x00, 0x00, 0x00, 0x00, // version + flags
@@ -141,7 +138,7 @@ const SUBTITLE_HDLR_BOX: &'static [u8] = &[
 
 /// Part of an `mvhd` (`MovieHeaderBox` version 0, ISO/IEC 14496-12 section 8.2.2), used from
 /// `append_mvhd`.
-const MVHD_JUNK: &'static [u8] = &[
+const MVHD_JUNK: &[u8] = &[
     0x00, 0x01, 0x00, 0x00, // rate
     0x01, 0x00, // volume
     0x00, 0x00, // reserved
@@ -166,7 +163,7 @@ const MVHD_JUNK: &'static [u8] = &[
 
 /// Part of a `tkhd` (`TrackHeaderBox` version 0, ISO/IEC 14496-12 section 8.3.2), used from
 /// `append_video_tkhd` and `append_subtitle_tkhd`.
-const TKHD_JUNK: &'static [u8] = &[
+const TKHD_JUNK: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, // reserved
     0x00, 0x00, 0x00, 0x00, // reserved
     0x00, 0x00, 0x00, 0x00, // layer + alternate_group
@@ -184,7 +181,7 @@ const TKHD_JUNK: &'static [u8] = &[
 
 /// Part of a `minf` (`MediaInformationBox`, ISO/IEC 14496-12 section 8.4.4), used from
 /// `append_video_minf`.
-const VIDEO_MINF_JUNK: &'static [u8] = &[
+const VIDEO_MINF_JUNK: &[u8] = &[
     b'm', b'i', b'n', b'f', // type = minf, ISO/IEC 14496-12 section 8.4.4.
     // A vmhd box; the "graphicsmode" and "opcolor" values don't have any
     // meaningful use.
@@ -208,7 +205,7 @@ const VIDEO_MINF_JUNK: &'static [u8] = &[
 
 /// Part of a `minf` (`MediaInformationBox`, ISO/IEC 14496-12 section 8.4.4), used from
 /// `append_subtitle_minf`.
-const SUBTITLE_MINF_JUNK: &'static [u8] = &[
+const SUBTITLE_MINF_JUNK: &[u8] = &[
     b'm', b'i', b'n', b'f', // type = minf, ISO/IEC 14496-12 section 8.4.4.
     // A nmhd box.
     0x00, 0x00, 0x00, 0x0c, // length == sizeof(kNmhdBox)
@@ -230,7 +227,7 @@ const SUBTITLE_MINF_JUNK: &'static [u8] = &[
 /// Part of a `stbl` (`SampleTableBox`, ISO/IEC 14496 section 8.5.1) used from
 /// `append_subtitle_stbl`.
 #[rustfmt::skip]
-const SUBTITLE_STBL_JUNK: &'static [u8] = &[
+const SUBTITLE_STBL_JUNK: &[u8] = &[
     b's', b't', b'b', b'l', // type = stbl, ISO/IEC 14496-12 section 8.5.1.
     // A stsd box.
     0x00, 0x00, 0x00, 0x54, // length
@@ -270,7 +267,7 @@ const SUBTITLE_STBL_JUNK: &'static [u8] = &[
 
 /// Pointers to each static bytestrings.
 /// The order here must match the `StaticBytestring` enum.
-const STATIC_BYTESTRINGS: [&'static [u8]; 9] = [
+const STATIC_BYTESTRINGS: [&[u8]; 9] = [
     NORMAL_FTYP_BOX,
     INIT_SEGMENT_FTYP_BOX,
     VIDEO_HDLR_BOX,
@@ -301,7 +298,7 @@ enum StaticBytestring {
 /// The template fed into strtime for a timestamp subtitle. This must produce fixed-length output
 /// (see `SUBTITLE_LENGTH`) to allow quick calculation of the total size of the subtitles for
 /// a given time range.
-const SUBTITLE_TEMPLATE: &'static str = "%Y-%m-%d %H:%M:%S %z";
+const SUBTITLE_TEMPLATE: &str = "%Y-%m-%d %H:%M:%S %z";
 
 /// The length of the output of `SUBTITLE_TEMPLATE`.
 const SUBTITLE_LENGTH: usize = 25; // "2015-07-02 17:10:00 -0700".len();
@@ -419,7 +416,7 @@ impl Segment {
         });
         let index: &'a _ = unsafe { &*self.index.get() };
         match *index {
-            Ok(ref b) => return Ok(f(&b[..], self.lens())),
+            Ok(ref b) => Ok(f(&b[..], self.lens())),
             Err(()) => bail_t!(Unknown, "Unable to build index; see previous error."),
         }
     }
@@ -562,6 +559,7 @@ impl Segment {
 
                         if is_key {
                             // first_sample_flags. See trex (8.8.3.1).
+                            #[allow(clippy::identity_op)]
                             v.write_u32::<BigEndian>(
                                 // As defined by the Independent and Disposable Samples Box
                                 // (sdp, 8.6.4).
@@ -571,8 +569,7 @@ impl Segment {
                             (2 << 20) | // sample_has_redundancy: no redundant coding
                             // As defined by the sample padding bits (padb, 8.7.6).
                             (0 << 17) | // no padding
-                            (0 << 16) | // sample_is_non_sync_sample=0
-                            0,
+                            (0 << 16), // sample_is_non_sync_sample=0
                             )?; // TODO: sample_degradation_priority
                         }
                         RunInfo {
@@ -767,7 +764,7 @@ impl slices::Slice for Slice {
     type Chunk = Chunk;
 
     fn end(&self) -> u64 {
-        return self.0 & 0xFF_FF_FF_FF_FF;
+        self.0 & 0xFF_FF_FF_FF_FF
     }
     fn get_range(
         &self,
@@ -809,7 +806,7 @@ impl slices::Slice for Slice {
             SliceType::Truns => self.wrap_truns(f, range.clone(), len as usize),
         };
         Box::new(stream::once(futures::future::ready(
-            res.map_err(|e| wrap_error(e)).and_then(move |c| {
+            res.map_err(wrap_error).and_then(move |c| {
                 if c.remaining() != (range.end - range.start) as usize {
                     return Err(wrap_error(format_err_t!(
                         Internal,
@@ -884,7 +881,7 @@ impl FileBuilder {
                 buf: Vec::new(),
                 unflushed_buf_pos: 0,
             },
-            type_: type_,
+            type_,
             include_timestamp_subtitle_track: false,
             content_disposition: None,
             prev_media_duration_and_cur_runs: None,
@@ -1822,7 +1819,7 @@ impl FileInner {
         Ok(ARefss::new(mmap).map(|m| m.deref()).into())
     }
 
-    fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, l: u64) -> Result<Chunk, Error> {
+    fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, len: u64) -> Result<Chunk, Error> {
         let s = &self.segments[i];
         let md = &s.rel_media_range_90k;
         let wd = s.wall(md.start)..s.wall(md.end);
@@ -1831,8 +1828,8 @@ impl FileInner {
         let end_sec = (s.recording_start
             + recording::Duration(i64::from(wd.end) + TIME_UNITS_PER_SEC - 1))
         .unix_seconds();
-        let l = usize::try_from(l).unwrap();
-        let mut v = Vec::with_capacity(l);
+        let len = usize::try_from(len).unwrap();
+        let mut v = Vec::with_capacity(len);
         // TODO(slamb): is this right?!? might have an off-by-one here.
         for ts in start_sec..end_sec {
             v.write_u16::<BigEndian>(SUBTITLE_LENGTH as u16)
@@ -1847,7 +1844,7 @@ impl FileInner {
             )
             .expect("Vec write shouldn't fail");
         }
-        assert_eq!(l, v.len());
+        assert_eq!(len, v.len());
         Ok(ARefss::new(v)
             .map(|v| &v[r.start as usize..r.end as usize])
             .into())
@@ -2471,7 +2468,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = recording::SampleIndexEncoder::new();
+        let mut encoder = recording::SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
@@ -2531,7 +2528,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = recording::SampleIndexEncoder::new();
+        let mut encoder = recording::SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
@@ -2617,13 +2614,13 @@ mod tests {
         let db = TestDb::new(RealClocks {});
         let mut encoders = Vec::new();
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = recording::SampleIndexEncoder::new();
+        let mut encoder = recording::SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(2, 2, false, &mut r);
         encoder.add_sample(3, 3, true, &mut r);
         encoders.push(r);
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = recording::SampleIndexEncoder::new();
+        let mut encoder = recording::SampleIndexEncoder::default();
         encoder.add_sample(4, 4, true, &mut r);
         encoder.add_sample(5, 5, false, &mut r);
         encoders.push(r);
@@ -2656,12 +2653,12 @@ mod tests {
         let db = TestDb::new(RealClocks {});
         let mut encoders = Vec::new();
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = recording::SampleIndexEncoder::new();
+        let mut encoder = recording::SampleIndexEncoder::default();
         encoder.add_sample(2, 1, true, &mut r);
         encoder.add_sample(3, 2, false, &mut r);
         encoders.push(r);
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = recording::SampleIndexEncoder::new();
+        let mut encoder = recording::SampleIndexEncoder::default();
         encoder.add_sample(0, 3, true, &mut r);
         encoders.push(r);
 
@@ -2708,7 +2705,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = recording::SampleIndexEncoder::new();
+        let mut encoder = recording::SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;
@@ -2762,7 +2759,7 @@ mod tests {
         testutil::init();
         let db = TestDb::new(RealClocks {});
         let mut r = db::RecordingToInsert::default();
-        let mut encoder = recording::SampleIndexEncoder::new();
+        let mut encoder = recording::SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
             let bytes = 3 * i;

@@ -129,6 +129,7 @@ where
         ctx: &S::Ctx,
         range: Range<u64>,
     ) -> Box<dyn Stream<Item = Result<S::Chunk, BoxedError>> + Sync + Send> {
+        #[allow(clippy::suspicious_operation_groupings)]
         if range.start > range.end || range.end > self.len {
             return Box::new(stream::once(futures::future::err(wrap_error(
                 format_err_t!(
