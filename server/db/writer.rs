@@ -1045,7 +1045,7 @@ mod tests {
     struct Harness {
         db: Arc<db::Database<SimulatedClocks>>,
         dir_id: i32,
-        _tmpdir: ::tempdir::TempDir,
+        _tmpdir: ::tempfile::TempDir,
         dir: MockDir,
         channel: super::SyncerChannel<MockFile>,
         syncer: super::Syncer<SimulatedClocks, MockDir>,

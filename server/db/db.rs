@@ -2506,7 +2506,10 @@ mod tests {
         testutil::init();
         let conn = setup_conn();
         let db = Database::new(clock::RealClocks {}, conn, true).unwrap();
-        let tmpdir = tempdir::TempDir::new("moonfire-nvr-test").unwrap();
+        let tmpdir = tempfile::Builder::new()
+            .prefix("moonfire-nvr-test")
+            .tempdir()
+            .unwrap();
         let path = tmpdir.path().to_str().unwrap().to_owned();
         let sample_file_dir_id = { db.lock() }.add_sample_file_dir(path).unwrap();
         let mut c = CameraChange {

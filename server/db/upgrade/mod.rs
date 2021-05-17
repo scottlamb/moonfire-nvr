@@ -199,7 +199,9 @@ mod tests {
     #[test]
     fn upgrade_and_compare() -> Result<(), Error> {
         testutil::init();
-        let tmpdir = tempdir::TempDir::new("moonfire-nvr-test")?;
+        let tmpdir = tempfile::Builder::new()
+            .prefix("moonfire-nvr-test")
+            .tempdir()?;
         //let path = tmpdir.path().to_str().ok_or_else(|| format_err!("invalid UTF-8"))?.to_owned();
         let mut upgraded = new_conn()?;
         upgraded.execute_batch(include_str!("v0.sql"))?;

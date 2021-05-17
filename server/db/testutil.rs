@@ -15,7 +15,7 @@ use rusqlite;
 use std::env;
 use std::sync::Arc;
 use std::thread;
-use tempdir::TempDir;
+use tempfile::TempDir;
 use time;
 use uuid::Uuid;
 
@@ -67,7 +67,10 @@ impl<C: Clocks + Clone> TestDb<C> {
     }
 
     pub(crate) fn new_with_flush_if_sec(clocks: C, flush_if_sec: i64) -> Self {
-        let tmpdir = TempDir::new("moonfire-nvr-test").unwrap();
+        let tmpdir = tempfile::Builder::new()
+            .prefix("moonfire-nvr-test")
+            .tempdir()
+            .unwrap();
 
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
