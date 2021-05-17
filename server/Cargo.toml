@@ -30,7 +30,7 @@ cstr = "0.2.5"
 cursive = "0.16.3"
 db = { package = "moonfire-db", path = "db" }
 failure = "0.1.1"
-ffmpeg = { package = "moonfire-ffmpeg", git = "https://github.com/scottlamb/moonfire-ffmpeg" }
+ffmpeg = { package = "moonfire-ffmpeg", version = "0.0.1" }
 futures = "0.3"
 fnv = "1.0"
 h264-reader = { git = "https://github.com/dholroyd/h264-reader" }
@@ -44,7 +44,7 @@ memchr = "2.0.2"
 memmap = "0.7"
 moonfire-tflite = { git = "https://github.com/scottlamb/moonfire-tflite", features = ["edgetpu"], optional = true }
 mylog = { git = "https://github.com/scottlamb/mylog" }
-nix = "0.19.0"
+nix = "0.20.0"
 nom = "6.0.0"
 parking_lot = { version = "0.11.1", features = [] }
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
@@ -59,7 +59,7 @@ sync_wrapper = "0.1.0"
 time = "0.1"
 tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "signal", "time"] }
 tokio-stream = "0.1.5"
-tokio-tungstenite = "0.13.0"
+tokio-tungstenite = "0.14.0"
 url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 
