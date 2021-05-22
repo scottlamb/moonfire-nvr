@@ -30,11 +30,15 @@ const NAL_UNIT_PIC_PARAMETER_SET: u8 = 8;
 const NAL_UNIT_TYPE_MASK: u8 = 0x1F; // bottom 5 bits of first byte of unit.
 
 // For certain common sub stream anamorphic resolutions, add a pixel aspect ratio box.
-const PIXEL_ASPECT_RATIOS: [((u16, u16), (u16, u16)); 4] = [
+// Assume the camera is 16x9. These are just the standard wide mode; default_pixel_aspect_ratio
+// tries the transpose also.
+const PIXEL_ASPECT_RATIOS: [((u16, u16), (u16, u16)); 6] = [
     ((320, 240), (4, 3)),
     ((352, 240), (40, 33)),
+    ((640, 352), (44, 45)),
     ((640, 480), (4, 3)),
     ((704, 480), (40, 33)),
+    ((720, 480), (32, 27)),
 ];
 
 /// Get the pixel aspect ratio to use if none is specified.
@@ -47,13 +51,19 @@ const PIXEL_ASPECT_RATIOS: [((u16, u16), (u16, u16)); 4] = [
 /// Note that at least in the case of .mp4 muxing, we don't need to fix up the underlying SPS.
 /// SPS; PixelAspectRatioBox's definition says that it overrides the H.264-level declaration.
 fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
-    let dims = (width, height);
-    for r in &PIXEL_ASPECT_RATIOS {
-        if r.0 == dims {
-            return r.1;
-        }
+    if width >= height {
+        PIXEL_ASPECT_RATIOS
+            .iter()
+            .find(|r| r.0 == (width, height))
+            .map(|r| r.1)
+            .unwrap_or((1, 1))
+    } else {
+        PIXEL_ASPECT_RATIOS
+            .iter()
+            .find(|r| r.0 == (height, width))
+            .map(|r| (r.1 .1, r.1 .0))
+            .unwrap_or((1, 1))
     }
-    (1, 1)
 }
 
 /// Decodes a H.264 Annex B byte stream into NAL units. Calls `f` for each NAL unit in the byte
@@ -434,5 +444,19 @@ mod tests {
         let mut out = Vec::new();
         super::transform_sample_data(&INPUT, &mut out).unwrap();
         assert_eq!(&out[..], &EXPECTED_OUTPUT[..]);
+    }
+
+    #[test]
+    fn pixel_aspect_ratios() {
+        use super::default_pixel_aspect_ratio;
+        use num_rational::Ratio;
+        for &((w, h), _) in &super::PIXEL_ASPECT_RATIOS {
+            let (h_spacing, v_spacing) = default_pixel_aspect_ratio(w, h);
+            assert_eq!(Ratio::new(w * h_spacing, h * v_spacing), Ratio::new(16, 9));
+
+            // 90 or 270 degree rotation.
+            let (h_spacing, v_spacing) = default_pixel_aspect_ratio(h, w);
+            assert_eq!(Ratio::new(h * h_spacing, w * v_spacing), Ratio::new(9, 16));
+        }
     }
 }
