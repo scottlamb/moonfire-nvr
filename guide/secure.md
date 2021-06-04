@@ -157,7 +157,7 @@ period in which the address is incorrect.)
 I recommend using the [Let's Encrypt](https://letsencrypt.org/) Certificate
 Authority to obtain a TLS certificate that will be automatically trusted by
 your browser. See [How to secure Nginx with Let's Encrypt on Ubuntu
-18.04](https://www.digitalocean.com/community/tutorials/how-to-secure-nginx-with-let-s-encrypt-on-ubuntu-16-04).
+20.04](https://www.digitalocean.com/community/tutorials/how-to-secure-nginx-with-let-s-encrypt-on-ubuntu-20-04).
 
 ## 6. Reconfigure Moonfire NVR
 
