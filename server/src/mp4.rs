@@ -1799,19 +1799,22 @@ impl FileInner {
     ///
     ///    * If the backing file is truncated, the program will crash with `SIGBUS`. This shouldn't
     ///      happen because nothing should be touching Moonfire NVR's files but itself.
-    fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> Box<dyn Stream<Item = Result<Chunk, BoxedError>> + Send + Sync> {
+    fn get_video_sample_data(
+        &self,
+        i: usize,
+        r: Range<u64>,
+    ) -> Box<dyn Stream<Item = Result<Chunk, BoxedError>> + Send + Sync> {
         let s = &self.segments[i];
         let sr = s.s.sample_file_range();
         let f = match self.dirs_by_stream_id.get(&s.s.id.stream()) {
-            None => return Box::new(stream::iter(std::iter::once(Err(
-                wrap_error(format_err_t!(NotFound, "{}: stream not found", s.s.id))
-            )))),
+            None => {
+                return Box::new(stream::iter(std::iter::once(Err(wrap_error(
+                    format_err_t!(NotFound, "{}: stream not found", s.s.id),
+                )))))
+            }
             Some(d) => d.open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start - r.start)),
         };
-        Box::new(f
-            .map_ok(Chunk::from)
-            .map_err(wrap_error)
-        )
+        Box::new(f.map_ok(Chunk::from).map_err(wrap_error))
     }
 
     fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, len: u64) -> Result<Chunk, Error> {

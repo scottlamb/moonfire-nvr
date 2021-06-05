@@ -314,10 +314,7 @@ impl SampleFileDir {
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
         let fd = Arc::new(Fd::open(path, create)?);
         let reader = reader::Reader::spawn(path, fd.clone());
-        Ok(Arc::new(SampleFileDir {
-            fd,
-            reader,
-        }))
+        Ok(Arc::new(SampleFileDir { fd, reader }))
     }
 
     /// Opens the given sample file for reading.
