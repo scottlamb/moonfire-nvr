@@ -1127,16 +1127,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b16bd47d9e329435e309c58469fe0791c2d0d1ba96ec0954152a5ae2b04387dc"
 
 [[package]]
-name = "memmap"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6585fd95e7bb50d6cc31e20d4cf9afb4e2ba16c5846fc76793f11218da9c475b"
-dependencies = [
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1199,6 +1189,7 @@ dependencies = [
  "cstr",
  "failure",
  "fnv",
+ "futures",
  "h264-reader",
  "hashlink",
  "itertools",
@@ -1220,6 +1211,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "time",
+ "tokio",
  "uuid",
 ]
 
@@ -1257,7 +1249,6 @@ dependencies = [
  "libc",
  "log",
  "memchr",
- "memmap",
  "moonfire-base",
  "moonfire-db",
  "moonfire-ffmpeg",

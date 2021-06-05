@@ -1,6 +1,6 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
-// SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
+// SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 //! `.mp4` virtual file serving.
 //!
@@ -61,7 +61,7 @@ use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use bytes::BytesMut;
 use db::dir;
 use db::recording::{self, rescale, TIME_UNITS_PER_SEC};
-use futures::stream;
+use futures::stream::{self, TryStreamExt};
 use futures::Stream;
 use http::header::HeaderValue;
 use hyper::body::Buf;
@@ -801,7 +801,7 @@ impl slices::Slice for Slice {
             SliceType::Stsz => self.wrap_index(f, range.clone(), len, &Segment::stsz),
             SliceType::Stss => self.wrap_index(f, range.clone(), len, &Segment::stss),
             SliceType::Co64 => f.0.get_co64(range.clone(), len),
-            SliceType::VideoSampleData => f.0.get_video_sample_data(p, range.clone()),
+            SliceType::VideoSampleData => return f.0.get_video_sample_data(p, range.clone()),
             SliceType::SubtitleSampleData => f.0.get_subtitle_sample_data(p, range.clone(), len),
             SliceType::Truns => self.wrap_truns(f, range.clone(), len as usize),
         };
@@ -1799,24 +1799,19 @@ impl FileInner {
     ///
     ///    * If the backing file is truncated, the program will crash with `SIGBUS`. This shouldn't
     ///      happen because nothing should be touching Moonfire NVR's files but itself.
-    fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> Result<Chunk, Error> {
+    fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> Box<dyn Stream<Item = Result<Chunk, BoxedError>> + Send + Sync> {
         let s = &self.segments[i];
-        let f = self
-            .dirs_by_stream_id
-            .get(&s.s.id.stream())
-            .ok_or_else(|| format_err_t!(NotFound, "{}: stream not found", s.s.id))?
-            .open_file(s.s.id)
-            .err_kind(ErrorKind::Unknown)?;
-        let start = s.s.sample_file_range().start + r.start;
-        let mmap = Box::new(unsafe {
-            memmap::MmapOptions::new()
-                .offset(start)
-                .len((r.end - r.start) as usize)
-                .map(&f)
-                .err_kind(ErrorKind::Internal)?
-        });
-        use core::ops::Deref;
-        Ok(ARefss::new(mmap).map(|m| m.deref()).into())
+        let sr = s.s.sample_file_range();
+        let f = match self.dirs_by_stream_id.get(&s.s.id.stream()) {
+            None => return Box::new(stream::iter(std::iter::once(Err(
+                wrap_error(format_err_t!(NotFound, "{}: stream not found", s.s.id))
+            )))),
+            Some(d) => d.open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start - r.start)),
+        };
+        Box::new(f
+            .map_ok(Chunk::from)
+            .map_err(wrap_error)
+        )
     }
 
     fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, len: u64) -> Result<Chunk, Error> {

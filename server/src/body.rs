@@ -1,8 +1,18 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
-// SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
+// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-//! Tools for implementing a `http_serve::Entity` body composed from many "slices".
+//! HTTP body implementation using `ARefss<'static, [u8]>` chunks.
+//!
+//! Moonfire NVR uses this custom chunk type rather than [bytes::Bytes]. This
+//! is mostly for historical reasons: we used to use `mmap`-backed chunks.
+//! The custom chunk type also helps minimize reference-counting in `mp4::File`
+//! as described [here](https://github.com/tokio-rs/bytes/issues/359#issuecomment-640812016),
+//! although this is a pretty small optimization.
+//!
+//! Some day I expect [bytes::Bytes] will expose its vtable (see link above),
+//! allowing us to minimize reference-counting while using the standard
+//! [hyper::Body].
 
 use base::Error;
 use futures::{stream, Stream};

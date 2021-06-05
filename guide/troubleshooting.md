@@ -85,12 +85,17 @@ Moonfire NVR names a few important thread types as follows:
 
 *   `main`: during `moonfire-nvr run`, the main thread does initial setup then
     just waits for the other threads. In other subcommands, it does everything.
-*   `s-CAMERA-TYPE`: there is one of these threads for every recorded stream
-    (up to two per camera, where `TYPE` is `main` or `sub`). These threads read
-    frames from the cameras via RTSP and write them to disk.
-*   `sync-PATH`: there is one of these threads for every sample file directory.
-    These threads call `fsync` to commit sample files to disk, delete old sample
-    files, and flush the database.
+*   `s-CAMERA-TYPE` (one per stream, where `TYPE` is `main` or `sub`):
+    These threads read frames from the cameras via RTSP and write them to disk.
+*   `sync-PATH` (one per sample file directory): These threads call `fsync` to
+*   commit sample files to disk, delete old sample files, and flush the
+    database.
+*   `r-PATH` (one per sample file directory): These threads read sample files
+    from disk for serving `.mp4` files.
+*   `tokio-runtime-worker` (one per core): these threads handle HTTP requests.
+*   `logger`: this thread writes the log buffer to `stderr`. Logging is
+    asynchronous; other threads don't wait for log messages to be written
+    unless the log buffer is full.
 
 You can use the following command to teach [`lnav`](http://lnav.org/) Moonfire
 NVR's log format:

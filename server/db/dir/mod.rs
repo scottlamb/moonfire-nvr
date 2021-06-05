@@ -1,11 +1,13 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
-// SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
+// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 //! Sample file directory management.
 //!
 //! This mostly includes opening a directory and looking for recordings within it.
 //! Updates to the directory happen through [crate::writer].
+
+mod reader;
 
 use crate::coding;
 use crate::db::CompositeId;
@@ -23,6 +25,7 @@ use protobuf::Message;
 use std::ffi::CStr;
 use std::fs;
 use std::io::{Read, Write};
+use std::ops::Range;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 
@@ -44,7 +47,9 @@ pub struct SampleFileDir {
     /// [crate::writer::start_syncer] uses it to create files and sync the
     /// directory. Other threads use it to open sample files for reading during
     /// video serving.
-    pub(crate) fd: Fd,
+    pub(crate) fd: Arc<Fd>,
+
+    reader: reader::Reader,
 }
 
 /// The on-disk filename of a recording file within the sample file directory.
@@ -307,14 +312,17 @@ impl SampleFileDir {
     }
 
     fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
-        let fd = Fd::open(path, create)?;
-        Ok(Arc::new(SampleFileDir { fd }))
+        let fd = Arc::new(Fd::open(path, create)?);
+        let reader = reader::Reader::spawn(path, fd.clone());
+        Ok(Arc::new(SampleFileDir {
+            fd,
+            reader,
+        }))
     }
 
     /// Opens the given sample file for reading.
-    pub fn open_file(&self, composite_id: CompositeId) -> Result<fs::File, nix::Error> {
-        let p = CompositeIdPath::from(composite_id);
-        crate::fs::openat(self.fd.0, &p, OFlag::O_RDONLY, Mode::empty())
+    pub fn open_file(&self, composite_id: CompositeId, range: Range<u64>) -> reader::FileStream {
+        self.reader.open_file(composite_id, range)
     }
 
     pub fn create_file(&self, composite_id: CompositeId) -> Result<fs::File, nix::Error> {
