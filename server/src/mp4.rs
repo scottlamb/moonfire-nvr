@@ -1812,7 +1812,7 @@ impl FileInner {
                     format_err_t!(NotFound, "{}: stream not found", s.s.id),
                 )))))
             }
-            Some(d) => d.open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start - r.start)),
+            Some(d) => d.open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start)),
         };
         Box::new(f.map_ok(Chunk::from).map_err(wrap_error))
     }
