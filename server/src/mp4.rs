@@ -1111,8 +1111,8 @@ impl FileBuilder {
                 self.body.buf.len()
             );
         }
-        debug!("segments: {:#?}", self.segments);
-        debug!("slices: {:?}", self.body.slices);
+        trace!("segments: {:#?}", self.segments);
+        trace!("slices: {:?}", self.body.slices);
         let last_modified =
             ::std::time::UNIX_EPOCH + ::std::time::Duration::from_secs(max_end as u64);
         let etag = etag.finalize();
@@ -1410,7 +1410,7 @@ impl FileBuilder {
 
         flushed.push(unflushed);
 
-        debug!("Using edit list: {:?}", flushed);
+        trace!("Using edit list: {:?}", flushed);
         write_length!(self, {
             self.body.buf.extend_from_slice(b"edts");
             write_length!(self, {

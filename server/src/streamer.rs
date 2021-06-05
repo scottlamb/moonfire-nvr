@@ -135,10 +135,6 @@ where
             let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
             self.db.lock().insert_video_sample_entry(extra_data.entry)?
         };
-        debug!(
-            "{}: video_sample_entry_id={}",
-            self.short_name, video_sample_entry_id
-        );
         let mut seen_key_frame = false;
 
         // Seconds since epoch at which to next rotate.

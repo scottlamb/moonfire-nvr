@@ -39,7 +39,7 @@ http-serve = { version = "0.3.1", features = ["dir"] }
 hyper = { version = "0.14.2", features = ["http1", "server", "stream", "tcp"] }
 lazy_static = "1.0"
 libc = "0.2"
-log = { version = "0.4", features = ["release_max_level_info"] }
+log = { version = "0.4" }
 memchr = "2.0.2"
 moonfire-tflite = { git = "https://github.com/scottlamb/moonfire-tflite", features = ["edgetpu"], optional = true }
 mylog = { git = "https://github.com/scottlamb/mylog" }
@@ -59,6 +59,7 @@ time = "0.1"
 tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "signal", "time"] }
 tokio-stream = "0.1.5"
 tokio-tungstenite = "0.14.0"
+tracing = { version = "0.1", features = ["log"] }
 url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 

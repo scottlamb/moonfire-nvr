@@ -6,7 +6,7 @@ use crate::h264;
 use cstr::cstr;
 use failure::{bail, Error};
 use lazy_static::lazy_static;
-use log::{debug, warn};
+use log::warn;
 use std::convert::TryFrom;
 use std::ffi::CString;
 use std::result::Result;
@@ -117,7 +117,6 @@ impl Opener<FfmpegStream> for Ffmpeg {
             let s = input.streams();
             for i in 0..s.len() {
                 if s.get(i).codecpar().codec_type().is_video() {
-                    debug!("Video stream index is {}", i);
                     video_i = Some(i);
                     break;
                 }

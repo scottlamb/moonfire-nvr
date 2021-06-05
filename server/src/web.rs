@@ -19,7 +19,7 @@ use http::header::{self, HeaderValue};
 use http::{status::StatusCode, Request, Response};
 use http_serve::dir::FsDir;
 use hyper::body::Bytes;
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use memchr::memchr;
 use nom::bytes::complete::{tag, take_while1};
 use nom::combinator::{all_consuming, map, map_res, opt};
@@ -836,7 +836,7 @@ impl Service {
                                 format!("invalid s parameter: {}", value),
                             )
                         })?;
-                        debug!("stream_view_mp4: appending s={:?}", s);
+                        trace!("stream_view_mp4: appending s={:?}", s);
                         let mut est_segments = usize::try_from(s.ids.end - s.ids.start).unwrap();
                         if let Some(end) = s.end_time {
                             // There should be roughly ceil((end - start) /
@@ -887,10 +887,12 @@ impl Service {
                                 let start = cmp::max(0, s.start_time - cur_off);
                                 let end = cmp::min(wd, end_time - cur_off);
                                 let wr = i32::try_from(start).unwrap()..i32::try_from(end).unwrap();
-                                debug!(
+                                trace!(
                                     "...appending recording {} with wall duration {:?} \
                                        (out of total {})",
-                                    r.id, wr, wd
+                                    r.id,
+                                    wr,
+                                    wd
                                 );
                                 if start_time_for_filename.is_none() {
                                     start_time_for_filename =
@@ -906,7 +908,7 @@ impl Service {
                                         );
                                 builder.append(&db, r, mr, true)?;
                             } else {
-                                debug!("...skipping recording {} wall dur {}", r.id, wd);
+                                trace!("...skipping recording {} wall dur {}", r.id, wd);
                             }
                             cur_off += wd;
                             Ok(())
