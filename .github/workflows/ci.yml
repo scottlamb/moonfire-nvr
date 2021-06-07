@@ -13,7 +13,7 @@ jobs:
       matrix:
         rust:
           - stable
-          - 1.48.0
+          - 1.52
           - nightly
         include:
           - rust: nightly
