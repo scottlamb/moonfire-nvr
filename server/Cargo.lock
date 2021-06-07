@@ -1252,7 +1252,6 @@ dependencies = [
  "moonfire-base",
  "moonfire-db",
  "moonfire-ffmpeg",
- "moonfire-tflite",
  "mylog",
  "nix",
  "nom",
@@ -1276,16 +1275,6 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
-]
-
-[[package]]
-name = "moonfire-tflite"
-version = "0.0.1"
-source = "git+https://github.com/scottlamb/moonfire-tflite#b1d30c09045c02966249676fd716e917761a7de5"
-dependencies = [
- "cc",
- "libc",
- "log",
 ]
 
 [[package]]

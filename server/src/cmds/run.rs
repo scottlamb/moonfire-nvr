@@ -65,12 +65,6 @@ pub struct Args {
     /// --http-addr=127.0.0.1:8080.
     #[structopt(long)]
     trust_forward_hdrs: bool,
-
-    /// Perform object detection on SUB streams.
-    ///
-    /// Note: requires compilation with --feature=analytics.
-    #[structopt(long)]
-    object_detection: bool,
 }
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
@@ -176,11 +170,6 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
     let db = Arc::new(db::Database::new(clocks, conn, !args.read_only).unwrap());
     info!("Database is loaded.");
 
-    let object_detector = match args.object_detection {
-        false => None,
-        true => Some(crate::analytics::ObjectDetector::new()?),
-    };
-
     {
         let mut l = db.lock();
         let dirs_to_open: Vec<_> = l
@@ -258,10 +247,6 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
             };
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let syncer = syncers.get(&sample_file_dir_id).unwrap();
-            let object_detector = match stream.type_ {
-                db::StreamType::Sub => object_detector.clone(),
-                _ => None,
-            };
             let mut streamer = streamer::Streamer::new(
                 &env,
                 syncer.dir.clone(),
@@ -271,7 +256,6 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
                 stream,
                 rotate_offset_sec,
                 streamer::ROTATE_INTERVAL_SEC,
-                object_detector,
             )?;
             info!("Starting streamer for {}", streamer.short_name());
             let name = format!("s-{}", streamer.short_name());
