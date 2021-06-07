@@ -350,8 +350,8 @@ pub struct Camera {
     pub short_name: String,
     pub description: String,
     pub onvif_host: String,
-    pub username: String,
-    pub password: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
     pub streams: [Option<i32>; 2],
 }
 
@@ -500,8 +500,8 @@ pub struct CameraChange {
     pub short_name: String,
     pub description: String,
     pub onvif_host: String,
-    pub username: String,
-    pub password: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
 
     /// `StreamType t` is represented by `streams[t.index()]`. A default StreamChange will
     /// correspond to no stream in the database, provided there are no existing recordings for that
@@ -2361,8 +2361,8 @@ mod tests {
                 camera_id = row.id;
                 assert_eq!(uuid, row.uuid);
                 assert_eq!("test-camera", row.onvif_host);
-                assert_eq!("foo", row.username);
-                assert_eq!("bar", row.password);
+                assert_eq!(Some("foo"), row.username.as_deref());
+                assert_eq!(Some("bar"), row.password.as_deref());
                 //assert_eq!("/main", row.main_rtsp_url);
                 //assert_eq!("/sub", row.sub_rtsp_url);
                 //assert_eq!(42, row.retain_bytes);
@@ -2513,8 +2513,8 @@ mod tests {
             short_name: "testcam".to_owned(),
             description: "".to_owned(),
             onvif_host: "test-camera".to_owned(),
-            username: "foo".to_owned(),
-            password: "bar".to_owned(),
+            username: Some("foo".to_owned()),
+            password: Some("bar".to_owned()),
             streams: [
                 StreamChange {
                     sample_file_dir_id: Some(sample_file_dir_id),

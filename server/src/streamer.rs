@@ -2,11 +2,10 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-use crate::h264;
 use crate::stream;
 use base::clock::{Clocks, TimerGuard};
 use db::{dir, recording, writer, Camera, Database, Stream};
-use failure::{bail, format_err, Error};
+use failure::{bail, Error};
 use log::{debug, info, trace, warn};
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,22 +15,20 @@ use url::Url;
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
 
 /// Common state that can be used by multiple `Streamer` instances.
-pub struct Environment<'a, 'b, C, S>
+pub struct Environment<'a, 'tmp, C>
 where
     C: Clocks + Clone,
-    S: 'a + stream::Stream,
 {
-    pub opener: &'a dyn stream::Opener<S>,
-    pub db: &'b Arc<Database<C>>,
-    pub shutdown: &'b Arc<AtomicBool>,
+    pub opener: &'a dyn stream::Opener,
+    pub db: &'tmp Arc<Database<C>>,
+    pub shutdown: &'tmp Arc<AtomicBool>,
 }
 
 /// Connects to a given RTSP stream and writes recordings to the database via [`writer::Writer`].
 /// Streamer is meant to be long-lived; it will sleep and retry after each failure.
-pub struct Streamer<'a, C, S>
+pub struct Streamer<'a, C>
 where
     C: Clocks + Clone,
-    S: 'a + stream::Stream,
 {
     shutdown: Arc<AtomicBool>,
 
@@ -41,20 +38,20 @@ where
     db: Arc<Database<C>>,
     dir: Arc<dir::SampleFileDir>,
     syncer_channel: writer::SyncerChannel<::std::fs::File>,
-    opener: &'a dyn stream::Opener<S>,
+    opener: &'a dyn stream::Opener,
     stream_id: i32,
     short_name: String,
     url: Url,
-    redacted_url: Url,
+    username: Option<String>,
+    password: Option<String>,
 }
 
-impl<'a, C, S> Streamer<'a, C, S>
+impl<'a, C> Streamer<'a, C>
 where
     C: 'a + Clocks + Clone,
-    S: 'a + stream::Stream,
 {
-    pub fn new<'b>(
-        env: &Environment<'a, 'b, C, S>,
+    pub fn new<'tmp>(
+        env: &Environment<'a, 'tmp, C>,
         dir: Arc<dir::SampleFileDir>,
         syncer_channel: writer::SyncerChannel<::std::fs::File>,
         stream_id: i32,
@@ -63,14 +60,9 @@ where
         rotate_offset_sec: i64,
         rotate_interval_sec: i64,
     ) -> Result<Self, Error> {
-        let mut url = Url::parse(&s.rtsp_url)?;
-        let mut redacted_url = url.clone();
-        if !c.username.is_empty() {
-            url.set_username(&c.username)
-                .map_err(|_| format_err!("can't set username"))?;
-            redacted_url.set_username(&c.username).unwrap();
-            url.set_password(Some(&c.password)).unwrap();
-            redacted_url.set_password(Some("redacted")).unwrap();
+        let url = Url::parse(&s.rtsp_url)?;
+        if !url.username().is_empty() || url.password().is_some() {
+            bail!("RTSP URL shouldn't include credentials");
         }
         Ok(Streamer {
             shutdown: env.shutdown.clone(),
@@ -83,7 +75,8 @@ where
             stream_id,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
             url,
-            redacted_url,
+            username: c.username.clone(),
+            password: c.password.clone(),
         })
     }
 
@@ -91,6 +84,9 @@ where
         &self.short_name
     }
 
+    /// Runs the streamer; blocks.
+    /// Note that when using Retina as the RTSP library, this must be called
+    /// within a tokio runtime context; see [tokio::runtime::Handle].
     pub fn run(&mut self) {
         while !self.shutdown.load(Ordering::SeqCst) {
             if let Err(e) = self.run_once() {
@@ -108,18 +104,18 @@ where
     }
 
     fn run_once(&mut self) -> Result<(), Error> {
-        info!("{}: Opening input: {}", self.short_name, self.redacted_url);
+        info!("{}: Opening input: {}", self.short_name, self.url.as_str());
         let clocks = self.db.clocks();
 
-        let mut stream = {
-            let _t = TimerGuard::new(&clocks, || format!("opening {}", self.redacted_url));
+        let (extra_data, mut stream) = {
+            let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url.as_str()));
             self.opener.open(stream::Source::Rtsp {
-                url: self.url.as_str(),
-                redacted_url: self.redacted_url.as_str(),
+                url: self.url.clone(),
+                username: self.username.clone(),
+                password: self.password.clone(),
             })?
         };
         let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();
-        let extra_data = stream.get_extra_data()?;
         let video_sample_entry_id = {
             let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
             self.db.lock().insert_video_sample_entry(extra_data.entry)?
@@ -128,7 +124,6 @@ where
 
         // Seconds since epoch at which to next rotate.
         let mut rotate: Option<i64> = None;
-        let mut transformed = Vec::new();
         let mut w = writer::Writer::new(
             &self.dir,
             &self.db,
@@ -139,10 +134,9 @@ where
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = {
                 let _t = TimerGuard::new(&clocks, || "getting next packet");
-                stream.get_next()?
+                stream.next()?
             };
-            let pts = pkt.pts().ok_or_else(|| format_err!("packet with no pts"))?;
-            if !seen_key_frame && !pkt.is_key() {
+            if !seen_key_frame && !pkt.is_key {
                 continue;
             } else if !seen_key_frame {
                 debug!("{}: have first key frame", self.short_name);
@@ -151,10 +145,10 @@ where
             let frame_realtime = clocks.monotonic() + realtime_offset;
             let local_time = recording::Time::new(frame_realtime);
             rotate = if let Some(r) = rotate {
-                if frame_realtime.sec > r && pkt.is_key() {
+                if frame_realtime.sec > r && pkt.is_key {
                     trace!("{}: write on normal rotation", self.short_name);
                     let _t = TimerGuard::new(&clocks, || "closing writer");
-                    w.close(Some(pts))?;
+                    w.close(Some(pkt.pts))?;
                     None
                 } else {
                     Some(r)
@@ -186,20 +180,8 @@ where
                     r
                 }
             };
-            let orig_data = match pkt.data() {
-                Some(d) => d,
-                None => bail!("packet has no data"),
-            };
-            let transformed_data = if extra_data.need_transform {
-                h264::transform_sample_data(orig_data, &mut transformed)?;
-                transformed.as_slice()
-            } else {
-                orig_data
-            };
-            let _t = TimerGuard::new(&clocks, || {
-                format!("writing {} bytes", transformed_data.len())
-            });
-            w.write(transformed_data, local_time, pts, pkt.is_key())?;
+            let _t = TimerGuard::new(&clocks, || format!("writing {} bytes", pkt.data.len()));
+            w.write(pkt.data, local_time, pkt.pts, pkt.is_key)?;
             rotate = Some(r);
         }
         if rotate.is_some() {
@@ -225,9 +207,9 @@ mod tests {
     use std::sync::Arc;
     use time;
 
-    struct ProxyingStream<'a> {
-        clocks: &'a clock::SimulatedClocks,
-        inner: stream::FfmpegStream,
+    struct ProxyingStream {
+        clocks: clock::SimulatedClocks,
+        inner: Box<dyn stream::Stream>,
         buffered: time::Duration,
         slept: time::Duration,
         ts_offset: i64,
@@ -235,17 +217,17 @@ mod tests {
         pkts_left: u32,
     }
 
-    impl<'a> ProxyingStream<'a> {
+    impl ProxyingStream {
         fn new(
-            clocks: &'a clock::SimulatedClocks,
+            clocks: clock::SimulatedClocks,
             buffered: time::Duration,
-            inner: stream::FfmpegStream,
+            inner: Box<dyn stream::Stream>,
         ) -> ProxyingStream {
             clocks.sleep(buffered);
             ProxyingStream {
-                clocks: clocks,
-                inner: inner,
-                buffered: buffered,
+                clocks,
+                inner,
+                buffered,
                 slept: time::Duration::seconds(0),
                 ts_offset: 0,
                 ts_offset_pkts_left: 0,
@@ -254,21 +236,22 @@ mod tests {
         }
     }
 
-    impl<'a> Stream for ProxyingStream<'a> {
-        fn get_next(&mut self) -> Result<ffmpeg::avcodec::Packet, ffmpeg::Error> {
+    impl Stream for ProxyingStream {
+        fn next(&mut self) -> Result<stream::VideoFrame, Error> {
             if self.pkts_left == 0 {
-                return Err(ffmpeg::Error::eof());
+                bail!("end of stream");
             }
             self.pkts_left -= 1;
 
-            let mut pkt = self.inner.get_next()?;
+            let mut frame = self.inner.next()?;
 
+            // XXX: comment wrong.
             // Emulate the behavior of real cameras that send some pre-buffered frames immediately
             // on connect. After that, advance clock to the end of this frame.
             // Avoid accumulating conversion error by tracking the total amount to sleep and how
             // much we've already slept, rather than considering each frame in isolation.
             {
-                let goal = pkt.pts().unwrap() + pkt.duration() as i64;
+                let goal = frame.pts + i64::from(frame.duration);
                 let goal = time::Duration::nanoseconds(
                     goal * 1_000_000_000 / recording::TIME_UNITS_PER_SEC,
                 );
@@ -281,39 +264,31 @@ mod tests {
 
             if self.ts_offset_pkts_left > 0 {
                 self.ts_offset_pkts_left -= 1;
-                let old_pts = pkt.pts().unwrap();
-                let old_dts = pkt.dts();
-                pkt.set_pts(Some(old_pts + self.ts_offset));
-                pkt.set_dts(old_dts + self.ts_offset);
+                frame.pts += self.ts_offset;
 
                 // In a real rtsp stream, the duration of a packet is not known until the
                 // next packet. ffmpeg's duration is an unreliable estimate. Set it to something
                 // ridiculous.
-                pkt.set_duration(i32::try_from(3600 * recording::TIME_UNITS_PER_SEC).unwrap());
+                frame.duration = i32::try_from(3600 * recording::TIME_UNITS_PER_SEC).unwrap();
             }
 
-            Ok(pkt)
-        }
-
-        fn get_video_codecpar(&self) -> ffmpeg::avcodec::InputCodecParameters<'_> {
-            self.inner.get_video_codecpar()
-        }
-
-        fn get_extra_data(&self) -> Result<h264::ExtraData, Error> {
-            self.inner.get_extra_data()
+            Ok(frame)
         }
     }
 
-    struct MockOpener<'a> {
-        expected_url: String,
-        streams: Mutex<Vec<ProxyingStream<'a>>>,
+    struct MockOpener {
+        expected_url: url::Url,
+        streams: Mutex<Vec<(h264::ExtraData, Box<dyn stream::Stream>)>>,
         shutdown: Arc<AtomicBool>,
     }
 
-    impl<'a> stream::Opener<ProxyingStream<'a>> for MockOpener<'a> {
-        fn open(&self, src: stream::Source) -> Result<ProxyingStream<'a>, Error> {
+    impl stream::Opener for MockOpener {
+        fn open(
+            &self,
+            src: stream::Source,
+        ) -> Result<(h264::ExtraData, Box<dyn stream::Stream>), Error> {
             match src {
-                stream::Source::Rtsp { url, .. } => assert_eq!(url, &self.expected_url),
+                stream::Source::Rtsp { url, .. } => assert_eq!(&url, &self.expected_url),
                 stream::Source::File(_) => panic!("expected rtsp url"),
             };
             let mut l = self.streams.lock();
@@ -361,16 +336,16 @@ mod tests {
         let clocks = clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0));
         clocks.sleep(time::Duration::seconds(86400)); // to 2015-04-26 00:00:00 UTC
 
-        let stream = stream::FFMPEG
+        let (extra_data, stream) = stream::FFMPEG
             .open(stream::Source::File("src/testdata/clip.mp4"))
             .unwrap();
-        let mut stream = ProxyingStream::new(&clocks, time::Duration::seconds(2), stream);
+        let mut stream = ProxyingStream::new(clocks.clone(), time::Duration::seconds(2), stream);
         stream.ts_offset = 123456; // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::max_value();
         stream.pkts_left = u32::max_value();
         let opener = MockOpener {
-            expected_url: "rtsp://foo:bar@test-camera/main".to_owned(),
-            streams: Mutex::new(vec![stream]),
+            expected_url: url::Url::parse("rtsp://test-camera/main").unwrap(),
+            streams: Mutex::new(vec![(extra_data, Box::new(stream))]),
             shutdown: Arc::new(AtomicBool::new(false)),
         };
         let db = testutil::TestDb::new(clocks.clone());
@@ -439,5 +414,8 @@ mod tests {
         assert_eq!(1, recordings[1].id.recording());
         assert_eq!(recording::Time(128700576719993), recordings[1].start);
         assert_eq!(db::RecordingFlags::TrailingZero as i32, recordings[1].flags);
+
+        drop(env);
+        drop(opener);
     }
 }

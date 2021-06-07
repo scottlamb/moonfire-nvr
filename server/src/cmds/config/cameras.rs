@@ -2,7 +2,7 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-use crate::stream::{self, Opener, Stream};
+use crate::stream::{self, Opener};
 use base::strutil::{decode_size, encode_size};
 use cursive::traits::{Boxable, Finder, Identifiable};
 use cursive::views;
@@ -35,24 +35,30 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
         .get_content()
         .as_str()
         .into();
-    let u = siv
+    let username = match siv
         .find_name::<views::EditView>("username")
         .unwrap()
         .get_content()
         .as_str()
-        .into();
-    let p = siv
+    {
+        "" => None,
+        u => Some(u.to_owned()),
+    };
+    let password = match siv
         .find_name::<views::EditView>("password")
         .unwrap()
         .get_content()
         .as_str()
-        .into();
+    {
+        "" => None,
+        p => Some(p.to_owned()),
+    };
     let mut c = db::CameraChange {
         short_name: sn,
         description: d,
         onvif_host: h,
-        username: u,
-        password: p,
+        username,
+        password,
         streams: Default::default(),
     };
     for &t in &db::ALL_STREAM_TYPES {
@@ -114,12 +120,16 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
     }
 }
 
-fn press_test_inner(url: &Url) -> Result<String, Error> {
-    let stream = stream::FFMPEG.open(stream::Source::Rtsp {
-        url: url.as_str(),
-        redacted_url: url.as_str(), // don't need redaction in config UI.
+fn press_test_inner(
+    url: Url,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<String, Error> {
+    let (extra_data, _stream) = stream::FFMPEG.open(stream::Source::Rtsp {
+        url,
+        username,
+        password,
     })?;
-    let extra_data = stream.get_extra_data()?;
     Ok(format!(
         "{}x{} video stream",
         extra_data.entry.width, extra_data.entry.height
@@ -128,7 +138,7 @@ fn press_test_inner(url: &Url) -> Result<String, Error> {
 
 fn press_test(siv: &mut Cursive, t: db::StreamType) {
     let c = get_change(siv);
-    let mut url = match Url::parse(&c.streams[t.index()].rtsp_url) {
+    let url = match Url::parse(&c.streams[t.index()].rtsp_url) {
         Ok(u) => u,
         Err(e) => {
             siv.add_layer(
@@ -139,11 +149,9 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
             return;
         }
     };
+    let username = c.username;
+    let password = c.password;
 
-    if !c.username.is_empty() {
-        let _ = url.set_username(&c.username);
-        let _ = url.set_password(Some(&c.password));
-    }
     siv.add_layer(
         views::Dialog::text(format!(
             "Testing {} stream at {}. This may take a while \
@@ -159,7 +167,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
     siv.set_fps(5);
     let sink = siv.cb_sink().clone();
     ::std::thread::spawn(move || {
-        let r = press_test_inner(&url);
+        let r = press_test_inner(url.clone(), username, password);
         sink.send(Box::new(move |siv: &mut Cursive| {
             // Polling is no longer necessary.
             siv.set_fps(0);
@@ -442,8 +450,8 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
         for &(view_id, content) in &[
             ("short_name", &*camera.short_name),
             ("onvif_host", &*camera.onvif_host),
-            ("username", &*camera.username),
-            ("password", &*camera.password),
+            ("username", camera.username.as_deref().unwrap_or("")),
+            ("password", camera.password.as_deref().unwrap_or("")),
         ] {
             dialog
                 .call_on_name(view_id, |v: &mut views::EditView| {

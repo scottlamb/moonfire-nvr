@@ -84,8 +84,8 @@ impl<C: Clocks + Clone> TestDb<C> {
                     short_name: "test camera".to_owned(),
                     description: "".to_owned(),
                     onvif_host: "test-camera".to_owned(),
-                    username: "foo".to_owned(),
-                    password: "bar".to_owned(),
+                    username: Some("foo".to_owned()),
+                    password: Some("bar".to_owned()),
                     streams: [
                         db::StreamChange {
                             sample_file_dir_id: Some(sample_file_dir_id),

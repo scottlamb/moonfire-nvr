@@ -70,8 +70,8 @@ pub struct Camera<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct CameraConfig<'a> {
     pub onvif_host: &'a str,
-    pub username: &'a str,
-    pub password: &'a str,
+    pub username: Option<&'a str>,
+    pub password: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -191,8 +191,8 @@ impl<'a> Camera<'a> {
                 false => None,
                 true => Some(CameraConfig {
                     onvif_host: &c.onvif_host,
-                    username: &c.username,
-                    password: &c.password,
+                    username: c.username.as_deref(),
+                    password: c.password.as_deref(),
                 }),
             },
             streams: [

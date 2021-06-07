@@ -84,6 +84,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 
 [[package]]
+name = "async-stream"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "171374e7e3b2504e0e5236e3b59260560f9fe94bfe9ac39ba5e4e929c5590625"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "648ed8c8d2ce5409ccd57453d9d1b214b342a0d69376a6feda1fd6cae3299308"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -323,6 +344,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
+name = "cookie-factory"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "396de984970346b0d9e93d1415082923c679e5ae5c3ee3dcbd104f5610af126b"
+
+[[package]]
 name = "cpufeatures"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -505,6 +532,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3dd60d1080a57a05ab032377049e0591415d2b31afd7028356dbf3cc6dcb066"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "digest_auth"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa30657988b2ced88f68fe490889e739bf98d342916c33ed3100af1d6f1cbc9c"
+dependencies = [
+ "digest",
+ "hex",
+ "md-5",
+ "rand",
+ "sha2",
 ]
 
 [[package]]
@@ -863,6 +903,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hmac"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1121,6 +1167,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ffc5c5338469d4d3ea17d269fa8ea3512ad247247c30bd2df69e68309ed0a08"
 
 [[package]]
+name = "md-5"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5a279bb9607f9f53c22d496eade00d138d1bdcccd07d74650387cf94942a15"
+dependencies = [
+ "block-buffer",
+ "digest",
+ "opaque-debug",
+]
+
+[[package]]
 name = "memchr"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1260,6 +1317,7 @@ dependencies = [
  "protobuf",
  "reffers",
  "reqwest",
+ "retina",
  "ring",
  "rusqlite",
  "serde",
@@ -1813,6 +1871,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "retina"
+version = "0.0.1"
+source = "git+https://github.com/scottlamb/retina?branch=main#1bcc864344cf54fdb691a0e11669a663d3c1d7c9"
+dependencies = [
+ "async-stream",
+ "base64",
+ "bitreader",
+ "bytes",
+ "digest_auth",
+ "failure",
+ "futures",
+ "h264-reader",
+ "hex",
+ "log",
+ "once_cell",
+ "pin-project",
+ "pretty-hex",
+ "rtcp",
+ "rtp-rs",
+ "rtsp-types",
+ "sdp",
+ "smallvec",
+ "time",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
 name = "rfc6381-codec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1846,6 +1933,33 @@ checksum = "ffc936cf8a7ea60c58f030fd36a612a48f440610214dc54bc36431f9ea0c3efb"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "rtcp"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5fb4431b04a948fd91622a75d65a95da3ed2f0be26c902f3d027a23b78fbc96"
+dependencies = [
+ "bytes",
+ "thiserror",
+]
+
+[[package]]
+name = "rtp-rs"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1110d695193d446e901de09921ffbf2d86ae351bbfde9c5b53863ce177e17f5"
+
+[[package]]
+name = "rtsp-types"
+version = "0.0.2"
+source = "git+https://github.com/sdroege/rtsp-types#53bdf9a74175946572eb3509a6343696724123eb"
+dependencies = [
+ "cookie-factory",
+ "nom",
+ "tinyvec",
+ "url",
 ]
 
 [[package]]
@@ -1920,6 +2034,17 @@ dependencies = [
  "pbkdf2",
  "salsa20",
  "sha2",
+]
+
+[[package]]
+name = "sdp"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f14aa4ddf1473d50e1664f5c353017981f43f27ede9136a54f60c4bb56d8b152"
+dependencies = [
+ "rand",
+ "thiserror",
+ "url",
 ]
 
 [[package]]

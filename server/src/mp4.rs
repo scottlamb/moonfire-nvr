@@ -1971,7 +1971,7 @@ impl fmt::Debug for File {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream::{self, Opener, Stream};
+    use crate::stream::{self, Opener};
     use base::clock::RealClocks;
     use byteorder::{BigEndian, ByteOrder};
     use db::recording::{self, TIME_UNITS_PER_SEC};
@@ -2255,13 +2255,12 @@ mod tests {
     }
 
     fn copy_mp4_to_db(db: &TestDb<RealClocks>) {
-        let mut input = stream::FFMPEG
+        let (extra_data, mut input) = stream::FFMPEG
             .open(stream::Source::File("src/testdata/clip.mp4"))
             .unwrap();
 
         // 2015-04-26 00:00:00 UTC.
         const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-        let extra_data = input.get_extra_data().unwrap();
         let video_sample_entry_id = db
             .db
             .lock()
@@ -2286,26 +2285,20 @@ mod tests {
         let mut frame_time = START_TIME;
 
         loop {
-            let pkt = match input.get_next() {
+            let pkt = match input.next() {
                 Ok(p) => p,
-                Err(e) if e.is_eof() => {
+                Err(e) if e.to_string().contains("End of file") => {
                     break;
                 }
                 Err(e) => {
                     panic!("unexpected input error: {}", e);
                 }
             };
-            let pts = pkt.pts().unwrap();
-            frame_time += recording::Duration(pkt.duration() as i64);
+            frame_time += recording::Duration(i64::from(pkt.duration));
             output
-                .write(
-                    pkt.data().expect("packet without data"),
-                    frame_time,
-                    pts,
-                    pkt.is_key(),
-                )
+                .write(pkt.data, frame_time, pkt.pts, pkt.is_key)
                 .unwrap();
-            end_pts = Some(pts + pkt.duration() as i64);
+            end_pts = Some(pkt.pts + i64::from(pkt.duration));
         }
         output.close(end_pts).unwrap();
         db.syncer_channel.flush();
@@ -2373,28 +2366,25 @@ mod tests {
     }
 
     fn compare_mp4s(new_filename: &str, pts_offset: i64, shorten: i64) {
-        let mut orig = stream::FFMPEG
+        let (orig_extra_data, mut orig) = stream::FFMPEG
             .open(stream::Source::File("src/testdata/clip.mp4"))
             .unwrap();
-        let mut new = stream::FFMPEG
+        let (new_extra_data, mut new) = stream::FFMPEG
             .open(stream::Source::File(new_filename))
             .unwrap();
-        assert_eq!(
-            orig.get_extra_data().unwrap(),
-            new.get_extra_data().unwrap()
-        );
+        assert_eq!(orig_extra_data, new_extra_data);
         let mut final_durations = None;
         loop {
-            let orig_pkt = match orig.get_next() {
+            let orig_pkt = match orig.next() {
                 Ok(p) => Some(p),
-                Err(e) if e.is_eof() => None,
+                Err(e) if e.to_string() == "End of file" => None,
                 Err(e) => {
                     panic!("unexpected input error: {}", e);
                 }
             };
-            let new_pkt = match new.get_next() {
+            let new_pkt = match new.next() {
                 Ok(p) => Some(p),
-                Err(e) if e.is_eof() => {
+                Err(e) if e.to_string() == "End of file" => {
                     break;
                 }
                 Err(e) => {
@@ -2406,11 +2396,10 @@ mod tests {
                 (None, None) => break,
                 (o, n) => panic!("orig: {} new: {}", o.is_some(), n.is_some()),
             };
-            assert_eq!(orig_pkt.pts().unwrap(), new_pkt.pts().unwrap() + pts_offset);
-            assert_eq!(orig_pkt.dts(), new_pkt.dts() + pts_offset);
-            assert_eq!(orig_pkt.data(), new_pkt.data());
-            assert_eq!(orig_pkt.is_key(), new_pkt.is_key());
-            final_durations = Some((orig_pkt.duration() as i64, new_pkt.duration() as i64));
+            assert_eq!(orig_pkt.pts, new_pkt.pts + pts_offset);
+            assert_eq!(orig_pkt.data, new_pkt.data);
+            assert_eq!(orig_pkt.is_key, new_pkt.is_key);
+            final_durations = Some((i64::from(orig_pkt.duration), i64::from(new_pkt.duration)));
         }
 
         if let Some((orig_dur, new_dur)) = final_durations {

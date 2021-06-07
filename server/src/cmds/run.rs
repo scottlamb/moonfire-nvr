@@ -2,7 +2,6 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-use crate::stream;
 use crate::streamer;
 use crate::web;
 use base::clock;
@@ -65,6 +64,14 @@ pub struct Args {
     /// --http-addr=127.0.0.1:8080.
     #[structopt(long)]
     trust_forward_hdrs: bool,
+
+    /// RTSP library to use for fetching the cameras' video stream.
+    /// Moonfire NVR is in the process of switching from `ffmpeg` (the current
+    /// default, used since the beginning of the project) to `retina` (a
+    /// pure-Rust RTSP library developed by Moonfire NVR's author). `retina`
+    /// is still experimental.
+    #[structopt(long, default_value = "ffmpeg", parse(try_from_str))]
+    rtsp_library: crate::stream::RtspLibrary,
 }
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
@@ -203,7 +210,7 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
         let streams = l.streams_by_id().len();
         let env = streamer::Environment {
             db: &db,
-            opener: &*stream::FFMPEG,
+            opener: args.rtsp_library.opener(),
             shutdown: &shutdown_streamers,
         };
 
@@ -227,6 +234,7 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
         }
 
         // Then start up streams.
+        let handle = tokio::runtime::Handle::current();
         let l = db.lock();
         for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
             if !stream.record {
@@ -259,10 +267,12 @@ pub async fn run(args: &Args) -> Result<i32, Error> {
             )?;
             info!("Starting streamer for {}", streamer.short_name());
             let name = format!("s-{}", streamer.short_name());
+            let handle = handle.clone();
             streamers.push(
                 thread::Builder::new()
                     .name(name)
                     .spawn(move || {
+                        let _enter = handle.enter();
                         streamer.run();
                     })
                     .expect("can't create thread"),
