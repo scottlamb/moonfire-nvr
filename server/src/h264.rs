@@ -126,30 +126,6 @@ fn parse_annex_b_extra_data(data: &[u8]) -> Result<(&[u8], &[u8]), Error> {
     }
 }
 
-/// Decodes a NAL unit (minus header byte) into its RBSP.
-/// Stolen from h264-reader's src/avcc.rs. This shouldn't last long, see:
-/// <https://github.com/dholroyd/h264-reader/issues/4>.
-fn decode(encoded: &[u8]) -> Vec<u8> {
-    struct NalRead(Vec<u8>);
-    use h264_reader::nal::NalHandler;
-    use h264_reader::Context;
-    impl NalHandler for NalRead {
-        type Ctx = ();
-        fn start(&mut self, _ctx: &mut Context<Self::Ctx>, _header: h264_reader::nal::NalHeader) {}
-
-        fn push(&mut self, _ctx: &mut Context<Self::Ctx>, buf: &[u8]) {
-            self.0.extend_from_slice(buf)
-        }
-
-        fn end(&mut self, _ctx: &mut Context<Self::Ctx>) {}
-    }
-    let mut decode = h264_reader::rbsp::RbspDecoder::new(NalRead(vec![]));
-    let mut ctx = Context::new(());
-    decode.push(&mut ctx, encoded);
-    let read = decode.into_handler();
-    read.0
-}
-
 /// Parsed representation of ffmpeg's "extradata".
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExtraData {
@@ -172,7 +148,7 @@ impl ExtraData {
         if extradata.starts_with(b"\x00\x00\x00\x01") || extradata.starts_with(b"\x00\x00\x01") {
             // ffmpeg supplied "extradata" in Annex B format.
             let (s, p) = parse_annex_b_extra_data(extradata)?;
-            let rbsp = decode(&s[1..]);
+            let rbsp = h264_reader::rbsp::decode_nal(&s[1..]);
             sps_owner = h264_reader::nal::sps::SeqParameterSet::from_bytes(&rbsp)
                 .map_err(|e| format_err!("Bad SPS: {:?}", e))?;
             sps = &sps_owner;

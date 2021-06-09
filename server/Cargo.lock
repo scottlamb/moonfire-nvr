@@ -852,10 +852,12 @@ dependencies = [
 
 [[package]]
 name = "h264-reader"
-version = "0.4.0"
-source = "git+https://github.com/dholroyd/h264-reader#dd2d05d54bec596993be9a0833690b54219f6778"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8d87669bdeca3d51902f1bf1f2c71c8f514a8f3011d9b81e63719b374091da1"
 dependencies = [
  "bitreader",
+ "log",
  "memchr",
  "rfc6381-codec",
 ]
@@ -1101,8 +1103,9 @@ checksum = "18794a8ad5b29321f790b55d93dfba91e125cb1a9edbd4f8e3150acc771c1a5e"
 
 [[package]]
 name = "libpasta"
-version = "0.1.1"
-source = "git+https://github.com/scottlamb/libpasta?branch=pr-deps#6a556b7aa9969f2f3cd33d1abccf4c22f19d5d8d"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cafc9e4bd8d9be7c73e85751c09d8ada2d973473d0af7423ee037bd82efebc2e"
 dependencies = [
  "argon2rs",
  "bcrypt",
@@ -1873,7 +1876,8 @@ dependencies = [
 [[package]]
 name = "retina"
 version = "0.0.1"
-source = "git+https://github.com/scottlamb/retina?branch=main#1bcc864344cf54fdb691a0e11669a663d3c1d7c9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ac613fa999c0d1075a825705e01ab302f7bab09410ed8df5d65a63eb9e922da"
 dependencies = [
  "async-stream",
  "base64",
@@ -1954,7 +1958,8 @@ checksum = "e1110d695193d446e901de09921ffbf2d86ae351bbfde9c5b53863ce177e17f5"
 [[package]]
 name = "rtsp-types"
 version = "0.0.2"
-source = "git+https://github.com/sdroege/rtsp-types#53bdf9a74175946572eb3509a6343696724123eb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90e677628cb208d61181b19f9b0b01efd7fce158bfba1bcb6e57e00fda291d6d"
 dependencies = [
  "cookie-factory",
  "nom",
