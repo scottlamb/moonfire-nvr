@@ -22,7 +22,8 @@ mod web;
 #[derive(StructOpt)]
 #[structopt(
     name = "moonfire-nvr",
-    about = "security camera network video recorder"
+    about = "security camera network video recorder",
+    global_settings(&[clap::AppSettings::ColoredHelp])
 )]
 enum Args {
     /// Checks database integrity (like fsck).

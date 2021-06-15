@@ -24,6 +24,7 @@ base64 = "0.13.0"
 blake3 = "0.3.7"
 bytes = "1"
 byteorder = "1.0"
+clap = { version = "2.33.3", default-features = false, features = ["color", "wrap_help"] }
 cstr = "0.2.5"
 cursive = "0.16.3"
 db = { package = "moonfire-db", path = "db" }
@@ -51,7 +52,7 @@ rusqlite = "0.25.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = "1.0"
-structopt = { version = "0.3.13", features = ["default", "wrap_help"] }
+structopt = { version = "0.3.13", default-features = false }
 sync_wrapper = "0.1.0"
 time = "0.1"
 tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "signal", "time"] }

@@ -330,11 +330,9 @@ dependencies = [
  "ansi_term",
  "atty",
  "bitflags",
- "strsim 0.8.0",
  "term_size",
  "textwrap",
  "unicode-width",
- "vec_map",
 ]
 
 [[package]]
@@ -504,7 +502,7 @@ dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
- "strsim 0.9.3",
+ "strsim",
  "syn",
 ]
 
@@ -1296,6 +1294,7 @@ dependencies = [
  "blake3",
  "byteorder",
  "bytes",
+ "clap",
  "cstr",
  "cursive",
  "failure",
@@ -1630,7 +1629,7 @@ checksum = "bc5c99d529f0d30937f6f4b8a86d988047327bb88d04d2c4afc356de74722131"
 [[package]]
 name = "prettydiff"
 version = "0.5.0"
-source = "git+https://github.com/scottlamb/prettydiff?branch=pr-update-deps#f33bf8871a6282a59be546eb9d3f2584ca3645c4"
+source = "git+https://github.com/scottlamb/prettydiff?branch=pr-update-deps#66d484720e1f3c32dd3cb1806cf489b832ddd9d2"
 dependencies = [
  "ansi_term",
  "prettytable-rs",
@@ -2220,12 +2219,6 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "strsim"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
-
-[[package]]
-name = "strsim"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6446ced80d6c486436db5c078dde11a9f73d42b57fb273121e160b84f63d894c"
@@ -2615,12 +2608,6 @@ name = "vcpkg"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbdbff6266a24120518560b5dc983096efb98462e51d0d68169895b237be3e5d"
-
-[[package]]
-name = "vec_map"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "version_check"
