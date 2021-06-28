@@ -11,6 +11,7 @@ need more help.
     * [Camera stream errors](#camera-stream-errors)
 * [Problems](#problems)
     * [Server errors](#server-errors)
+        * [Problems reading video from cameras](#problems-reading-video-from-cameras)
         * [`clock_gettime failed: EPERM: Operation not permitted`](#clock_gettime-failed-eperm-operation-not-permitted)
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
@@ -85,14 +86,18 @@ Moonfire NVR names a few important thread types as follows:
 
 *   `main`: during `moonfire-nvr run`, the main thread does initial setup then
     just waits for the other threads. In other subcommands, it does everything.
-*   `s-CAMERA-TYPE` (one per stream, where `TYPE` is `main` or `sub`):
-    These threads read frames from the cameras via RTSP and write them to disk.
+*   `s-CAMERA-TYPE` (one per stream, where `TYPE` is `main` or `sub`): these
+    threads write video data to disk. When using `--rtsp-library=ffmpeg`, they
+    also read the video data from the cameras via RTSP.
 *   `sync-PATH` (one per sample file directory): These threads call `fsync` to
 *   commit sample files to disk, delete old sample files, and flush the
     database.
 *   `r-PATH` (one per sample file directory): These threads read sample files
     from disk for serving `.mp4` files.
-*   `tokio-runtime-worker` (one per core): these threads handle HTTP requests.
+*   `tokio-runtime-worker` (one per core, unless overridden with
+    `--worker-threads`): these threads handle HTTP requests.
+    When using `--rtsp-library=retina`, they also read video data from cameras
+    via RTSP.
 *   `logger`: this thread writes the log buffer to `stderr`. Logging is
     asynchronous; other threads don't wait for log messages to be written
     unless the log buffer is full.
@@ -218,6 +223,13 @@ W20210309 00:28:55.527 s-courtyard-sub moonfire_nvr::streamer] courtyard-sub: sl
 ## Problems
 
 ### Server errors
+
+#### Problems reading video from cameras
+
+Moonfire NVR is switching its RTSP handling from ffmpeg to a pure-Rust
+library developed by Moonfire NVR's author. If it doesn't read camera
+data successfully, please try restarting with `--rtsp-library=ffmpeg` to see
+if the problem goes away. Then please file a bug!
 
 #### `clock_gettime failed: EPERM: Operation not permitted`
 

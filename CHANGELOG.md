@@ -6,6 +6,12 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## unreleased
+
+*   Moonfire NVR defaults to a new pure-Rust RTSP library, `retina`. If you
+    hit problems, you can switch back via `--rtsp-library=ffmpeg`. Please report
+    a bug if this helps!
+
 ## `v0.6.3`
 
 *   New user interface! Besides a more modern appearance, it has better

@@ -71,11 +71,10 @@ pub struct Args {
     trust_forward_hdrs: bool,
 
     /// RTSP library to use for fetching the cameras' video stream.
-    /// Moonfire NVR is in the process of switching from `ffmpeg` (the current
-    /// default, used since the beginning of the project) to `retina` (a
-    /// pure-Rust RTSP library developed by Moonfire NVR's author). `retina`
-    /// is still experimental.
-    #[structopt(long, default_value = "ffmpeg", parse(try_from_str))]
+    /// Moonfire NVR is in the process of switching from `ffmpeg` (used since
+    /// the beginning of the project) to `retina` (a pure-Rust RTSP library
+    /// developed by Moonfire NVR's author).
+    #[structopt(long, default_value = "retina", parse(try_from_str))]
     rtsp_library: crate::stream::RtspLibrary,
 }
 
