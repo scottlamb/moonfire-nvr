@@ -29,6 +29,11 @@ pub struct Args {
     )]
     db_dir: PathBuf,
 
+    /// The number of worker threads used by the asynchronous runtime.
+    /// Defaults to the number of cores on the system.
+    #[structopt(long, value_name = "worker_threads")]
+    worker_threads: Option<usize>,
+
     /// Directory holding user interface files (.html, .js, etc).
     #[structopt(
         long,
@@ -163,8 +168,16 @@ struct Syncer {
     join: thread::JoinHandle<()>,
 }
 
-#[tokio::main]
-pub async fn run(args: &Args) -> Result<i32, Error> {
+pub fn run(args: &Args) -> Result<i32, Error> {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+    if let Some(worker_threads) = args.worker_threads {
+        builder.worker_threads(worker_threads);
+    }
+    builder.build().unwrap().block_on(async_run(args))
+}
+
+async fn async_run(args: &Args) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
         &args.db_dir,
