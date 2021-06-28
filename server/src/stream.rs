@@ -13,7 +13,6 @@ use retina::client::{Credentials, Playing, Session};
 use retina::codec::{CodecItem, VideoParameters};
 use std::convert::TryFrom;
 use std::ffi::CString;
-use std::num::NonZeroU32;
 use std::result::Result;
 use url::Url;
 
@@ -407,12 +406,7 @@ impl RetinaOpener {
             })
             .ok_or_else(|| format_err!("couldn't find H.264 video stream"))?;
         session.setup(video_i).await?;
-        let session = session
-            .play(
-                retina::client::PlayPolicy::default()
-                    .enforce_timestamps_with_max_jump_secs(NonZeroU32::new(10).unwrap()),
-            )
-            .await?;
+        let session = session.play(retina::client::PlayPolicy::default()).await?;
         Ok((session, video_params))
     }
 }
