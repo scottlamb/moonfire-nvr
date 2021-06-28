@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use crate::h264;
-use bytes::Buf;
 use cstr::cstr;
 use failure::format_err;
 use failure::{bail, Error};
@@ -386,7 +385,7 @@ impl Opener for RetinaOpener {
         )?;
         let stream = Box::new(RetinaStream {
             frame_rx,
-            data: Vec::new(),
+            frame: None,
         });
         Ok((extra_data, stream))
     }
@@ -420,27 +419,23 @@ impl RetinaOpener {
 
 struct RetinaStream {
     frame_rx: tokio::sync::mpsc::Receiver<Result<retina::codec::VideoFrame, Error>>,
-    data: Vec<u8>,
+    frame: Option<retina::codec::VideoFrame>,
 }
 
 impl Stream for RetinaStream {
     fn next(&mut self) -> Result<VideoFrame, Error> {
-        let mut frame = self
-            .frame_rx
-            .blocking_recv()
-            .ok_or_else(|| format_err!("stream ended"))??;
-        self.data.clear();
-        while frame.has_remaining() {
-            let chunk = frame.chunk();
-            self.data.extend_from_slice(chunk);
-            let len = chunk.len();
-            frame.advance(len);
-        }
+        // TODO: use Option::insert after bumping MSRV to 1.53.
+        self.frame = Some(
+            self.frame_rx
+                .blocking_recv()
+                .ok_or_else(|| format_err!("stream ended"))??,
+        );
+        let frame = self.frame.as_ref().unwrap();
         Ok(VideoFrame {
             pts: frame.timestamp.elapsed(),
             duration: 0,
             is_key: frame.is_random_access_point,
-            data: &self.data,
+            data: &frame.data()[..],
         })
     }
 }
