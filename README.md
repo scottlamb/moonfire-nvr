@@ -35,7 +35,7 @@ There's no support yet for motion detection, no https/TLS support (you'll
 need a proxy server, as described [here](guide/secure.md)), and only a
 console-based (rather than web-based) configuration UI.
 
-Moonfire NVR is currently at version 0.6.3. Until version 1.0, there will be no
+Moonfire NVR is currently at version 0.6.4. Until version 1.0, there will be no
 compatibility guarantees: configuration and storage formats may change from
 version to version. There is an [upgrade procedure](guide/schema.md) but it is
 not for the faint of heart.

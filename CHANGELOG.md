@@ -8,11 +8,15 @@ Each release is tagged in Git and on the Docker repository
 
 ## unreleased
 
-*   Moonfire NVR defaults to a new pure-Rust RTSP library, `retina`. If you
-    hit problems, you can switch back via `--rtsp-library=ffmpeg`. Please report
-    a bug if this helps!
+## `v0.6.4` (2021-06-28)
 
-## `v0.6.3`
+*   Default to a new pure-Rust RTSP library, `retina`. If you hit problems, you
+    can switch back via `--rtsp-library=ffmpeg`. Please report a bug if this
+    helps!
+*   Correct the pixel aspect ratio of 9:16 sub streams (eg a standard 16x9
+    camera rotated 90 degrees) in the same way as 16:9 sub streams.
+
+## `v0.6.3` (2021-03-31)
 
 *   New user interface! Besides a more modern appearance, it has better
     error handling and an experimental live view UI.
@@ -22,7 +26,7 @@ Each release is tagged in Git and on the Docker repository
     not calculated properly there might be unexpected gaps or overlaps in
     playback.
 
-## `v0.6.2`
+## `v0.6.2` (2021-03-12)
 
 *   Fix panics when a stream's PTS has extreme jumps
     ([#113](https://github.com/scottlamb/moonfire-nvr/issues/113))
@@ -32,7 +36,7 @@ Each release is tagged in Git and on the Docker repository
     `moonfire-nvr check --delete-orphan-rows` command from actually deleting
     rows.
 
-## `v0.6.1`
+## `v0.6.1` (2021-02-16)
 
 *   Improve the server's error messages on the console and in logs.
 *   Switch the UI build from the `yarn` package manager to `npm`.
@@ -44,7 +48,7 @@ Each release is tagged in Git and on the Docker repository
 *   Fix mangled favicons
     ([#105](https://github.com/scottlamb/moonfire-nvr/issues/105))
 
-## `v0.6.0`
+## `v0.6.0` (2021-01-22)
 
 This is the first tagged version and first Docker image release. I chose the
 version number 0.6.0 to match the current schema version 6.

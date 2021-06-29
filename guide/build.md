@@ -122,8 +122,7 @@ Releases are currently a bit manual. From a completely clean git work tree,
 2.  update versions:
     *   update `server/Cargo.toml` version by hand; run `cargo test --workspace`
         to update `Cargo.lock`.
-    *   ensure `README.md`, `CHANGELOG.md`, and `guide/install.md` refer to the
-        new version.
+    *   ensure `README.md` and `CHANGELOG.md` refer to the new version.
 3.  run commands:
     ```bash
     VERSION=x.y.z
