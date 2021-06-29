@@ -125,11 +125,14 @@ fn press_test_inner(
     username: Option<String>,
     password: Option<String>,
 ) -> Result<String, Error> {
-    let (extra_data, _stream) = stream::FFMPEG.open(stream::Source::Rtsp {
-        url,
-        username,
-        password,
-    })?;
+    let (extra_data, _stream) = stream::FFMPEG.open(
+        "test stream".to_owned(),
+        stream::Source::Rtsp {
+            url,
+            username,
+            password,
+        },
+    )?;
     Ok(format!(
         "{}x{} video stream",
         extra_data.entry.width, extra_data.entry.height

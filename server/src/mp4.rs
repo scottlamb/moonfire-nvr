@@ -2256,7 +2256,10 @@ mod tests {
 
     fn copy_mp4_to_db(db: &TestDb<RealClocks>) {
         let (extra_data, mut input) = stream::FFMPEG
-            .open(stream::Source::File("src/testdata/clip.mp4"))
+            .open(
+                "test".to_owned(),
+                stream::Source::File("src/testdata/clip.mp4"),
+            )
             .unwrap();
 
         // 2015-04-26 00:00:00 UTC.
@@ -2367,10 +2370,13 @@ mod tests {
 
     fn compare_mp4s(new_filename: &str, pts_offset: i64, shorten: i64) {
         let (orig_extra_data, mut orig) = stream::FFMPEG
-            .open(stream::Source::File("src/testdata/clip.mp4"))
+            .open(
+                "test".to_owned(),
+                stream::Source::File("src/testdata/clip.mp4"),
+            )
             .unwrap();
         let (new_extra_data, mut new) = stream::FFMPEG
-            .open(stream::Source::File(new_filename))
+            .open("test".to_owned(), stream::Source::File(new_filename))
             .unwrap();
         assert_eq!(orig_extra_data, new_extra_data);
         let mut final_durations = None;

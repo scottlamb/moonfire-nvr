@@ -109,11 +109,14 @@ where
 
         let (extra_data, mut stream) = {
             let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url.as_str()));
-            self.opener.open(stream::Source::Rtsp {
-                url: self.url.clone(),
-                username: self.username.clone(),
-                password: self.password.clone(),
-            })?
+            self.opener.open(
+                self.short_name.clone(),
+                stream::Source::Rtsp {
+                    url: self.url.clone(),
+                    username: self.username.clone(),
+                    password: self.password.clone(),
+                },
+            )?
         };
         let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();
         let video_sample_entry_id = {
@@ -285,6 +288,7 @@ mod tests {
     impl stream::Opener for MockOpener {
         fn open(
             &self,
+            _label: String,
             src: stream::Source,
         ) -> Result<(h264::ExtraData, Box<dyn stream::Stream>), Error> {
             match src {
@@ -337,7 +341,10 @@ mod tests {
         clocks.sleep(time::Duration::seconds(86400)); // to 2015-04-26 00:00:00 UTC
 
         let (extra_data, stream) = stream::FFMPEG
-            .open(stream::Source::File("src/testdata/clip.mp4"))
+            .open(
+                "test".to_owned(),
+                stream::Source::File("src/testdata/clip.mp4"),
+            )
             .unwrap();
         let mut stream = ProxyingStream::new(clocks.clone(), time::Duration::seconds(2), stream);
         stream.ts_offset = 123456; // starting pts of the input should be irrelevant

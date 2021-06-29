@@ -75,7 +75,8 @@ pub enum Source {
 }
 
 pub trait Opener: Send + Sync {
-    fn open(&self, src: Source) -> Result<(h264::ExtraData, Box<dyn Stream>), Error>;
+    fn open(&self, label: String, src: Source)
+        -> Result<(h264::ExtraData, Box<dyn Stream>), Error>;
 }
 
 pub struct VideoFrame<'a> {
@@ -105,7 +106,11 @@ impl Ffmpeg {
 }
 
 impl Opener for Ffmpeg {
-    fn open(&self, src: Source) -> Result<(h264::ExtraData, Box<dyn Stream>), Error> {
+    fn open(
+        &self,
+        label: String,
+        src: Source,
+    ) -> Result<(h264::ExtraData, Box<dyn Stream>), Error> {
         use ffmpeg::avformat::InputFormatContext;
         let mut input = match src {
             #[cfg(test)]
@@ -123,8 +128,8 @@ impl Opener for Ffmpeg {
                 )?;
                 if !open_options.empty() {
                     warn!(
-                        "While opening URL {}, some options were not understood: {}",
-                        url, open_options
+                        "{}: While opening URL {}, some options were not understood: {}",
+                        &label, url, open_options
                     );
                 }
                 i
@@ -174,8 +179,8 @@ impl Opener for Ffmpeg {
                 )?;
                 if !open_options.empty() {
                     warn!(
-                        "While opening URL {}, some options were not understood: {}",
-                        url, open_options
+                        "{}: While opening URL {}, some options were not understood: {}",
+                        &label, url, open_options
                     );
                 }
                 i
@@ -271,7 +276,11 @@ pub struct RetinaOpener {}
 pub const RETINA: RetinaOpener = RetinaOpener {};
 
 impl Opener for RetinaOpener {
-    fn open(&self, src: Source) -> Result<(h264::ExtraData, Box<dyn Stream>), Error> {
+    fn open(
+        &self,
+        label: String,
+        src: Source,
+    ) -> Result<(h264::ExtraData, Box<dyn Stream>), Error> {
         let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
         let (frame_tx, frame_rx) = tokio::sync::mpsc::channel(1);
         let handle = tokio::runtime::Handle::current();
@@ -323,7 +332,12 @@ impl Opener for RetinaOpener {
                     Some(Ok(CodecItem::VideoFrame(v))) => {
                         deadline = tokio::time::Instant::now() + RETINA_TIMEOUT;
                         if v.loss > 0 {
-                            log::warn!("lost {} RTP packets @ {:?}", v.loss, v.start_ctx());
+                            log::warn!(
+                                "{}: lost {} RTP packets @ {:?}",
+                                &label,
+                                v.loss,
+                                v.start_ctx()
+                            );
                         }
                         if frame_tx.send(Ok(v)).await.is_err() {
                             return; // other end died.
