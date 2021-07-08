@@ -320,16 +320,24 @@ impl Opener for RetinaOpener {
             // Read following frames.
             let mut deadline = tokio::time::Instant::now() + RETINA_TIMEOUT;
             loop {
-                let item = tokio::time::timeout_at(deadline, session.next())
-                    .await
-                    .unwrap_or_else(|_| Some(Err(format_err!("timeout getting next frame"))));
-                match item {
-                    Some(Err(e)) => {
-                        let _ = frame_tx.send(Err(e)).await;
+                match tokio::time::timeout_at(deadline, session.next()).await {
+                    Err(_) => {
+                        let _ = frame_tx
+                            .send(Err(format_err!("timeout getting next frame")))
+                            .await;
                         return;
                     }
-                    None => break,
-                    Some(Ok(CodecItem::VideoFrame(v))) => {
+                    Ok(Some(Err(e))) => {
+                        let _ = frame_tx.send(Err(e.into())).await;
+                        return;
+                    }
+                    Ok(None) => break,
+                    Ok(Some(Ok(CodecItem::VideoFrame(v)))) => {
+                        if let Some(p) = v.new_parameters {
+                            // TODO: we could start a new recording without dropping the connection.
+                            let _ = frame_tx.send(Err(format_err!("parameter; change: {:?}", p)));
+                            return;
+                        }
                         deadline = tokio::time::Instant::now() + RETINA_TIMEOUT;
                         if v.loss > 0 {
                             log::warn!(
@@ -343,7 +351,7 @@ impl Opener for RetinaOpener {
                             return; // other end died.
                         }
                     }
-                    Some(Ok(_)) => {}
+                    Ok(Some(Ok(_))) => {}
                 }
             }
         });
@@ -369,8 +377,8 @@ impl RetinaOpener {
         creds: Option<Credentials>,
     ) -> Result<
         (
-            Pin<Box<impl futures::Stream<Item = Result<retina::codec::CodecItem, Error>>>>,
-            VideoParameters,
+            Pin<Box<retina::client::Demuxed>>,
+            Box<VideoParameters>,
             retina::codec::VideoFrame,
         ),
         Error,
@@ -381,7 +389,7 @@ impl RetinaOpener {
             .iter()
             .enumerate()
             .find_map(|(i, s)| match s.parameters() {
-                Some(retina::codec::Parameters::Video(v)) => Some((i, v.clone())),
+                Some(retina::codec::Parameters::Video(v)) => Some((i, Box::new(v.clone()))),
                 _ => None,
             })
             .ok_or_else(|| format_err!("couldn't find H.264 video stream"))?;
@@ -391,17 +399,18 @@ impl RetinaOpener {
 
         // First frame.
         let first_frame = loop {
-            if let CodecItem::VideoFrame(mut v) = session
-                .next()
-                .await
-                .unwrap_or_else(|| Err(format_err!("stream closed before first frame")))?
-            {
-                if let Some(v) = v.new_parameters.take() {
-                    video_params = v;
+            match session.next().await {
+                None => bail!("stream closed before first frame"),
+                Some(Err(e)) => return Err(e.into()),
+                Some(Ok(CodecItem::VideoFrame(mut v))) => {
+                    if let Some(v) = v.new_parameters.take() {
+                        video_params = v;
+                    }
+                    if v.is_random_access_point {
+                        break v;
+                    }
                 }
-                if v.is_random_access_point {
-                    break v;
-                }
+                Some(Ok(_)) => {}
             }
         };
         Ok((session, video_params, first_frame))
