@@ -331,7 +331,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
         let mut undeletable = 0;
         for &id in &to_abandon {
             if let Err(e) = dir.unlink_file(id) {
-                if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
+                if e == nix::Error::ENOENT {
                     warn!("dir: abandoned recording {} already deleted!", id);
                 } else {
                     warn!("dir: Unable to unlink abandoned recording {}: {}", id, e);
@@ -386,7 +386,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
             let mut errors = 0;
             for &id in &garbage {
                 if let Err(e) = self.dir.unlink_file(id) {
-                    if e != nix::Error::Sys(nix::errno::Errno::ENOENT) {
+                    if e != nix::Error::ENOENT {
                         warn!("dir: Unable to unlink {}: {}", id, e);
                         errors += 1;
                     }
@@ -467,7 +467,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         for &id in &garbage {
             clock::retry_forever(c, &mut || {
                 if let Err(e) = self.dir.unlink_file(id) {
-                    if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
+                    if e == nix::Error::ENOENT {
                         warn!("dir: recording {} already deleted!", id);
                         return Ok(());
                     }
@@ -1107,9 +1107,6 @@ mod tests {
     fn eio() -> io::Error {
         io::Error::new(io::ErrorKind::Other, "got EIO")
     }
-    fn nix_eio() -> nix::Error {
-        nix::Error::Sys(nix::errno::Errno::EIO)
-    }
 
     #[test]
     fn excessive_pts_jump() {
@@ -1135,7 +1132,7 @@ mod tests {
         );
         h.dir.expect(MockDirAction::Create(
             CompositeId::new(1, 0),
-            Box::new(|_id| Err(nix_eio())),
+            Box::new(|_id| Err(nix::Error::EIO)),
         ));
         let f = MockFile::new();
         h.dir.expect(MockDirAction::Create(
@@ -1316,7 +1313,7 @@ mod tests {
         );
         h.dir.expect(MockDirAction::Create(
             CompositeId::new(1, 0),
-            Box::new(|_id| Err(nix_eio())),
+            Box::new(|_id| Err(nix::Error::EIO)),
         ));
         let f = MockFile::new();
         h.dir.expect(MockDirAction::Create(
@@ -1346,7 +1343,7 @@ mod tests {
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
         w.write(b"1234", recording::Time(1), 0, true).unwrap();
         h.dir
-            .expect(MockDirAction::Sync(Box::new(|| Err(nix_eio()))));
+            .expect(MockDirAction::Sync(Box::new(|| Err(nix::Error::EIO))));
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
         drop(w);
         assert!(h.syncer.iter(&h.syncer_rcv)); // AsyncSave
@@ -1462,7 +1459,7 @@ mod tests {
                     assert_eq!(s.bytes_to_delete, 0);
                     assert_eq!(s.bytes_to_add, 0);
                     assert_eq!(s.sample_file_bytes, 1);
-                    Err(nix_eio()) // force a retry.
+                    Err(nix::Error::EIO) // force a retry.
                 }
             }),
         ));
@@ -1471,7 +1468,7 @@ mod tests {
             Box::new(|_| Ok(())),
         ));
         h.dir
-            .expect(MockDirAction::Sync(Box::new(|| Err(nix_eio()))));
+            .expect(MockDirAction::Sync(Box::new(|| Err(nix::Error::EIO))));
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
 
         drop(w);

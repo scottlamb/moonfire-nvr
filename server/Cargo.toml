@@ -41,7 +41,7 @@ libc = "0.2"
 log = { version = "0.4" }
 memchr = "2.0.2"
 mylog = { git = "https://github.com/scottlamb/mylog" }
-nix = "0.20.0"
+nix = "0.22.0"
 nom = "6.0.0"
 parking_lot = { version = "0.11.1", features = [] }
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
@@ -63,7 +63,7 @@ url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 
 [dev-dependencies]
-num-rational = { version = "0.3.2", default-features = false, features = ["std"] }
+num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
 reqwest = { version = "0.11.0", default-features = false, features = ["json"] }
 tempfile = "3.2.0"
 

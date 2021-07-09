@@ -28,7 +28,7 @@ enum OpenMode {
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
 fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
     let dir = dir::Fd::open(db_dir, mode == OpenMode::Create).map_err(|e| {
-        e.context(if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
+        e.context(if e == nix::Error::ENOENT {
             format!(
                 "db dir {} not found; try running moonfire-nvr init",
                 db_dir.display()

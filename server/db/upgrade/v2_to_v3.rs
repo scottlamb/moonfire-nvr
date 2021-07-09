@@ -74,7 +74,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             Some(d.fd.as_raw_fd()),
             &to_path,
         ) {
-            if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
+            if e == nix::Error::ENOENT {
                 continue; // assume it was already moved.
             }
             return Err(e.into());

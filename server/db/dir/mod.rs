@@ -105,7 +105,7 @@ impl Fd {
     pub fn open<P: ?Sized + NixPath>(path: &P, mkdir: bool) -> Result<Fd, nix::Error> {
         if mkdir {
             match nix::unistd::mkdir(path, nix::sys::stat::Mode::S_IRWXU) {
-                Ok(()) | Err(nix::Error::Sys(nix::errno::Errno::EEXIST)) => {}
+                Ok(()) | Err(nix::Error::EEXIST) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -134,7 +134,7 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     let mut meta = schema::DirMeta::default();
     let mut f = match crate::fs::openat(dir.0, cstr!("meta"), OFlag::O_RDONLY, Mode::empty()) {
         Err(e) => {
-            if e == nix::Error::Sys(nix::errno::Errno::ENOENT) {
+            if e == nix::Error::ENOENT {
                 return Ok(meta);
             }
             return Err(e.into());
