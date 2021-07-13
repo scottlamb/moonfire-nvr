@@ -101,7 +101,15 @@ within it.
 
 ### Dedicated hard drive setup
 
-If a dedicated hard drive is available, set up the mount point:
+If a dedicated hard drive is available, set it up now.
+
+If you haven't yet created the filesystem, consider using
+`mkfs.ext4 -T largefile -m 1`, as described in more detail [on the
+wiki](https://github.com/scottlamb/moonfire-nvr/wiki/System-setup). If you're
+using a USB SATA bridge, this is also a good time to ensure you're not
+using UAS, as described there. UAS has been linked to filesystem corruption.
+
+Set up the mount point:
 
 ```
 $ sudo vim /etc/fstab
@@ -232,6 +240,10 @@ on the same machine, you can access it at
 
 If the system isn't working, see the [Troubleshooting
 guide](troubleshooting.md).
+
+See also the [system setup guide](https://github.com/scottlamb/moonfire-nvr/wiki/System-setup)
+on the wiki, which has additional advice on configuring a Linux system which
+runs Moonfire NVR.
 
 Once the web interface seems to be working, read through [securing Moonfire
 NVR](secure.md).
