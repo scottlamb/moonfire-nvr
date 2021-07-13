@@ -61,7 +61,7 @@ run)
         shift
         exec docker run \
                 --detach=true \
-                --restart=on-failure \
+                --restart=unless-stopped \
                 "${common_docker_run_args[@]}" \
                 --network=host \
                 --name="${container_name}" \
