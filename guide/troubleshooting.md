@@ -409,7 +409,7 @@ here are some things to check:
 
 Some cheap USB SATA adapters don't appear to work reliably in UAS mode under
 Linux. If you see errors like the following, try [disabling
-UAS](https://unix.stackexchange.com/questions/239782/connection-problem-with-usb3-external-storage-on-linux-uas-driver-problem).
+UAS](https://github.com/scottlamb/moonfire-nvr/wiki/System-setup#disable-uas).
 Unfortunately your filesystem is likely to have corruption, so after disabling UAS,
 run a `fsck` and then `moonfire-nvr check` to try recovering.
 
