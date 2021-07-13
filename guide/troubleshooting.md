@@ -16,6 +16,7 @@ need more help.
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
         * [Database or filesystem corruption errors](#database-or-filesystem-corruption-errors)
+        * [Incorrect timestamps](#incorrect-timestamps)
     * [Configuration interface problems](#configuration-interface-problems)
         * [`moonfire-nvr config` displays garbage](#moonfire-nvr-config-displays-garbage)
     * [Browser user interface problems](#browser-user-interface-problems)
@@ -319,6 +320,47 @@ this kind of problem with Moonfire NVR.
 After the system as a whole is verified healthy, run `moonfire-nvr check` while
 Moonfire NVR is stopped to verify integrity of the SQLite database and sample
 file directories.
+
+#### Incorrect timestamps
+
+Moonfire NVR uses the system clock when a run of recordings starts to determine
+the run's initial timestamp. If the system clock is stepped after the run
+starts, Moonfire NVR will keep using timestamps based on the old (usually
+incorrect) setting.
+
+This is most noticeable on the Raspberry Pi or other cheap SBCs which don't
+come with a battery-backed real-time clock (RTC). Instead, they save the
+current time periodically and restore it on bootup. Their clocks often are a
+few hours behind on startup following a power outage. You may notice in
+`journalctl` logs messages similar to the following when the clock is fixed:
+
+```
+Aug 14 21:05:51 moonfire moonfire-nvr[710]: Aug 14 21:05:51.538 INFO reserved 590d892d-b2e8-4e6c-9e1b-c4418d0abd69
+Aug 14 22:37:39 moonfire systemd[1]: Time has been changed
+Aug 14 22:38:48 moonfire moonfire-nvr[710]: Aug 14 22:38:48.965 INFO Committing extra transaction because there's no cached uuid
+```
+
+Note the 1.5-hour gap between messages; this is roughly how much the clock was
+adjusted.
+
+The exact message may differ based on your Linux distribution and message;
+here's another variation:
+
+```
+Jul 13 10:05:52 pi4 systemd-timesyncd[340]: Synchronized to time server for the first time [2600:3c00::e:d0bb]:123 (2.debian.pool.ntp.org).
+```
+
+Here's what you can do:
+
+*   *recover*: restart Moonfire NVR to pick up the new timestamp.
+*   *prevent*: add a RTC module or fresh battery so your clock is correct
+    at boot time. There's a
+    [guide](https://github.com/scottlamb/moonfire-nvr/wiki/System-setup#realtime-clock-on-raspberry-pi)
+    on the wiki.
+
+Currently Moonfire NVR doesn't have any logic to detect this happening or
+mechanism to fix old timestamps after the fact. Ideas and help welcome; see
+[issue #9](https://github.com/scottlamb/moonfire-nvr/issues/9).
 
 ### Configuration interface problems
 
