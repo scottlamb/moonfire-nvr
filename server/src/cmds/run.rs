@@ -1,12 +1,12 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use crate::streamer;
 use crate::web;
 use base::clock;
 use db::{dir, writer};
-use failure::{bail, Error};
+use failure::{bail, Error, ResultExt};
 use fnv::FnvHashMap;
 use futures::future::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
@@ -303,7 +303,8 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
             move |req| Arc::clone(&svc).serve(req)
         }))
     });
-    let server = ::hyper::Server::bind(&args.http_addr)
+    let server = ::hyper::Server::try_bind(&args.http_addr)
+        .with_context(|_| format!("unable to bind --http-addr={}", &args.http_addr))?
         .tcp_nodelay(true)
         .serve(make_svc);
 
