@@ -87,6 +87,8 @@ fn panic_hook(p: &std::panic::PanicInfo) {
     }
     if let Some(s) = p.payload().downcast_ref::<&str>() {
         write!(&mut msg, ": {}", s).unwrap();
+    } else if let Some(s) = p.payload().downcast_ref::<String>() {
+        write!(&mut msg, ": {}", s).unwrap();
     }
     let b = failure::Backtrace::new();
     if b.is_empty() {
