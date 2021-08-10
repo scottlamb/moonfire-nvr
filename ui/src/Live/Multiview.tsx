@@ -2,12 +2,13 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Select from "@material-ui/core/Select";
+import Select, { SelectChangeEvent } from "@material-ui/core/Select";
 import MenuItem from "@material-ui/core/MenuItem";
 import React, { useReducer, useState } from "react";
 import { Camera } from "../types";
-import { makeStyles } from "@material-ui/core/styles";
+import { makeStyles } from "@material-ui/styles";
 import useResizeObserver from "@react-hook/resize-observer";
+import { Theme } from "@material-ui/core/styles";
 
 export interface Layout {
   className: string;
@@ -23,7 +24,7 @@ const LAYOUTS: Layout[] = [
 ];
 const MAX_CAMERAS = 9;
 
-const useStyles = makeStyles((theme) => ({
+const useStyles = makeStyles((theme: Theme) => ({
   root: {
     flex: "1 0 0",
     color: "white",
@@ -98,7 +99,13 @@ export const MultiviewChooser = (props: MultiviewChooserProps) => {
     <Select
       id="layout"
       value={props.layoutIndex}
-      onChange={(e) => props.onChoice(e.target.value)}
+      onChange={(e) =>
+        props.onChoice(
+          typeof e.target.value === "string"
+            ? parseInt(e.target.value)
+            : e.target.value
+        )
+      }
       size="small"
       sx={{
         // Hacky attempt to style for the app menu.
@@ -238,10 +245,16 @@ interface MonoviewProps {
 
 /** A single pane of a Multiview, including its camera chooser. */
 const Monoview = (props: MonoviewProps) => {
+  const handleChange = (event: SelectChangeEvent<number | null>) => {
+    const {
+      target: { value },
+    } = event;
+    props.onSelect(typeof value === "string" ? parseInt(value) : value);
+  };
   const chooser = (
     <Select
       value={props.cameraIndex == null ? undefined : props.cameraIndex}
-      onChange={(e) => props.onSelect(e.target.value ?? null)}
+      onChange={handleChange}
       displayEmpty
       size="small"
       sx={{

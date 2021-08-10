@@ -53,7 +53,13 @@ const DisplaySelector = (props: Props) => {
           id="split90k"
           size="small"
           value={props.split90k}
-          onChange={(e) => props.setSplit90k(e.target.value)}
+          onChange={(e) =>
+            props.setSplit90k(
+              typeof e.target.value === "string"
+                ? parseInt(e.target.value)
+                : e.target.value
+            )
+          }
           displayEmpty
         >
           {DURATIONS.map(([l, d]) => (
@@ -72,10 +78,9 @@ const DisplaySelector = (props: Props) => {
           <Checkbox
             checked={props.trimStartAndEnd}
             size="small"
-            onChange={(_, checked: boolean) =>
-              props.setTrimStartAndEnd(checked)
-            }
+            onChange={(event) => props.setTrimStartAndEnd(event.target.checked)}
             name="trim-start-and-end"
+            color="secondary"
           />
         }
         label="Trim start and end"
@@ -87,8 +92,9 @@ const DisplaySelector = (props: Props) => {
           <Checkbox
             checked={props.timestampTrack}
             size="small"
-            onChange={(_, checked: boolean) => props.setTimestampTrack(checked)}
+            onChange={(event) => props.setTimestampTrack(event.target.checked)}
             name="timestamp-track"
+            color="secondary"
           />
         }
         label="Timestamp track"

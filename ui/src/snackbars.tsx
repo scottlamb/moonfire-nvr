@@ -93,7 +93,8 @@ const ctx = React.createContext<Snackbars | null>(null);
 // and I couldn't figure out a way to do that with hooks.
 export class SnackbarProvider
   extends React.Component<SnackbarProviderProps, State>
-  implements Snackbars {
+  implements Snackbars
+{
   constructor(props: SnackbarProviderProps) {
     super(props);
     this.state = { queue: [] };

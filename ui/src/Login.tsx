@@ -8,7 +8,8 @@ import DialogActions from "@material-ui/core/DialogActions";
 import DialogTitle from "@material-ui/core/DialogTitle";
 import FormControl from "@material-ui/core/FormControl";
 import FormHelperText from "@material-ui/core/FormHelperText";
-import { makeStyles, Theme } from "@material-ui/core/styles";
+import { Theme } from "@material-ui/core/styles";
+import { makeStyles } from "@material-ui/styles";
 import TextField from "@material-ui/core/TextField";
 import LockOutlinedIcon from "@material-ui/icons/LockOutlined";
 import LoadingButton from "@material-ui/lab/LoadingButton";
@@ -62,15 +63,15 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
   const passwordRef = React.useRef<HTMLInputElement>(null);
 
   const [error, setError] = React.useState<string | null>(null);
-  const [pending, setPending] = React.useState<api.LoginRequest | null>(null);
+  const [loading, setLoading] = React.useState<api.LoginRequest | null>(null);
 
   useEffect(() => {
-    if (pending === null) {
+    if (loading === null) {
       return;
     }
     let abort = new AbortController();
     const send = async (signal: AbortSignal) => {
-      let response = await api.login(pending, { signal });
+      let response = await api.login(loading, { signal });
       switch (response.status) {
         case "aborted":
           break;
@@ -83,10 +84,10 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
               key: "login-error",
             });
           }
-          setPending(null);
+          setLoading(null);
           break;
         case "success":
-          setPending(null);
+          setLoading(null);
           onSuccess();
       }
     };
@@ -94,16 +95,16 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
     return () => {
       abort.abort();
     };
-  }, [pending, onSuccess, snackbars]);
+  }, [loading, onSuccess, snackbars]);
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     // Suppress duplicate login attempts when latency is high.
-    if (pending !== null) {
+    if (loading !== null) {
       return;
     }
-    setPending({
+    setLoading({
       username: usernameRef.current!.value,
       password: passwordRef.current!.value,
     });
@@ -154,7 +155,7 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
               type="submit"
               variant="contained"
               color="secondary"
-              pending={pending !== null}
+              loading={loading !== null}
             >
               Log in
             </LoadingButton>

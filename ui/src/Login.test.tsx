@@ -38,8 +38,8 @@ afterEach(() => {
 });
 
 test("success", async () => {
-  const handleClose = jest.fn();
-  const onSuccess = jest.fn();
+  const handleClose = jest.fn().mockName("handleClose");
+  const onSuccess = jest.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
@@ -54,8 +54,8 @@ test("success", async () => {
 // so the delay("infinite") request just sticks around, even though the fetch
 // has been aborted. Maybe https://github.com/mswjs/msw/pull/585 will fix it.
 xtest("close while pending", async () => {
-  const handleClose = jest.fn();
-  const onSuccess = jest.fn();
+  const handleClose = jest.fn().mockName("handleClose");
+  const onSuccess = jest.fn().mockName("handleOpen");
   const { rerender } = renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
@@ -73,8 +73,8 @@ xtest("close while pending", async () => {
 });
 
 test("bad credentials", async () => {
-  const handleClose = jest.fn();
-  const onSuccess = jest.fn();
+  const handleClose = jest.fn().mockName("handleClose");
+  const onSuccess = jest.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
@@ -85,8 +85,8 @@ test("bad credentials", async () => {
 });
 
 test("server error", async () => {
-  const handleClose = jest.fn();
-  const onSuccess = jest.fn();
+  const handleClose = jest.fn().mockName("handleClose");
+  const onSuccess = jest.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
@@ -100,8 +100,8 @@ test("server error", async () => {
 });
 
 test("network error", async () => {
-  const handleClose = jest.fn();
-  const onSuccess = jest.fn();
+  const handleClose = jest.fn().mockName("handleClose");
+  const onSuccess = jest.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import CssBaseline from "@material-ui/core/CssBaseline";
-import { ThemeProvider, createMuiTheme } from "@material-ui/core/styles";
+import { ThemeProvider, createTheme } from "@material-ui/core/styles";
 import StyledEngineProvider from "@material-ui/core/StyledEngineProvider";
 import LocalizationProvider from "@material-ui/lab/LocalizationProvider";
 import "@fontsource/roboto";
@@ -15,7 +15,7 @@ import { SnackbarProvider } from "./snackbars";
 import AdapterDateFns from "@material-ui/lab/AdapterDateFns";
 import "./index.css";
 
-const theme = createMuiTheme({
+const theme = createTheme({
   palette: {
     primary: {
       main: "#000000",

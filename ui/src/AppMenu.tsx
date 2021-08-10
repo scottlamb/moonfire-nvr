@@ -6,7 +6,8 @@ import Button from "@material-ui/core/Button";
 import IconButton from "@material-ui/core/IconButton";
 import Menu from "@material-ui/core/Menu";
 import MenuItem from "@material-ui/core/MenuItem";
-import { createStyles, makeStyles, Theme } from "@material-ui/core/styles";
+import { Theme } from "@material-ui/core/styles";
+import { createStyles, makeStyles } from "@material-ui/styles";
 import Toolbar from "@material-ui/core/Toolbar";
 import Typography from "@material-ui/core/Typography";
 import AccountCircle from "@material-ui/icons/AccountCircle";
@@ -38,10 +39,8 @@ interface Props {
 // https://material-ui.com/components/app-bar/
 function MoonfireMenu(props: Props) {
   const classes = useStyles();
-  const [
-    accountMenuAnchor,
-    setAccountMenuAnchor,
-  ] = React.useState<null | HTMLElement>(null);
+  const [accountMenuAnchor, setAccountMenuAnchor] =
+    React.useState<null | HTMLElement>(null);
 
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAccountMenuAnchor(event.currentTarget);
@@ -94,7 +93,6 @@ function MoonfireMenu(props: Props) {
             </IconButton>
             <Menu
               anchorEl={accountMenuAnchor}
-              getContentAnchorEl={null}
               keepMounted
               anchorOrigin={{
                 vertical: "bottom",

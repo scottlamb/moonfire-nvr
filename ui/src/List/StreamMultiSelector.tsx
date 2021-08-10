@@ -5,7 +5,8 @@
 import Card from "@material-ui/core/Card";
 import { Camera, Stream, StreamType } from "../types";
 import Checkbox from "@material-ui/core/Checkbox";
-import { makeStyles, useTheme } from "@material-ui/core/styles";
+import { useTheme } from "@material-ui/core/styles";
+import { makeStyles } from "@material-ui/styles";
 
 interface Props {
   cameras: Camera[];
@@ -86,14 +87,17 @@ const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
     function checkbox(st: StreamType) {
       const s = c.streams[st];
       if (s === undefined) {
-        return <Checkbox className={classes.check} disabled />;
+        return (
+          <Checkbox className={classes.check} color="secondary" disabled />
+        );
       }
       return (
         <Checkbox
           className={classes.check}
           size="small"
           checked={selected.has(s)}
-          onChange={(_, checked: boolean) => setStream(s, checked)}
+          color="secondary"
+          onChange={(event) => setStream(s, event.target.checked)}
         />
       );
     }

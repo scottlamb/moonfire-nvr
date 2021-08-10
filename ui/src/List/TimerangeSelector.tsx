@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import { Stream } from "../types";
-import StaticDatePicker from "@material-ui/lab/StaticDatePicker";
+import StaticDatePicker, {
+  StaticDatePickerProps,
+} from "@material-ui/lab/StaticDatePicker";
 import React, { useEffect } from "react";
 import { zonedTimeToUtc } from "date-fns-tz";
 import { addDays, addMilliseconds, differenceInMilliseconds } from "date-fns";
@@ -17,6 +19,7 @@ import Radio from "@material-ui/core/Radio";
 import RadioGroup from "@material-ui/core/RadioGroup";
 import TimePicker, { TimePickerProps } from "@material-ui/lab/TimePicker";
 import Collapse from "@material-ui/core/Collapse";
+import Box from "@material-ui/core/Box";
 
 interface Props {
   selectedStreams: Set<Stream>;
@@ -38,6 +41,47 @@ const MyTimePicker = (
     {...props}
   />
 );
+
+const SmallStaticDatePicker = (props: StaticDatePickerProps<Date>) => {
+  // The spacing defined at https://material.io/components/date-pickers#specs
+  // seems plenty big enough (on desktop). Not sure why material-ui wants
+  // to make it bigger but that doesn't work well with our layout.
+  // This adjustment is a fragile hack but seems to work for now.
+  const DATE_SIZE = 32;
+  return (
+    <Box
+      sx={{
+        "@media (pointer: fine)": {
+          "& > div": {
+            minWidth: 256,
+          },
+          "& > div > div, & > div > div > div, & .MuiCalendarPicker-root": {
+            width: 256,
+          },
+          "& .MuiTypography-caption": {
+            width: DATE_SIZE,
+            margin: 0,
+          },
+          "& .PrivatePickersSlideTransition-root": {
+            minHeight: DATE_SIZE * 6,
+          },
+          '& .PrivatePickersSlideTransition-root [role="row"]': {
+            margin: 0,
+          },
+          "& .MuiPickersDay-dayWithMargin": {
+            margin: 0,
+          },
+          "& .MuiPickersDay-root": {
+            width: DATE_SIZE,
+            height: DATE_SIZE,
+          },
+        },
+      }}
+    >
+      <StaticDatePicker {...props} />
+    </Box>
+  );
+};
 
 /**
  * Combines the date-part of <tt>dayMillis</tt> and the time part of
@@ -260,7 +304,7 @@ const TimerangeSelector = ({
     <Card sx={{ padding: theme.spacing(1) }}>
       <div>
         <FormLabel component="legend">From</FormLabel>
-        <StaticDatePicker
+        <SmallStaticDatePicker
           displayStaticWrapperAs="desktop"
           value={startDate}
           shouldDisableDate={shouldDisableDate}
@@ -299,17 +343,17 @@ const TimerangeSelector = ({
         >
           <FormControlLabel
             value="same-day"
-            control={<Radio size="small" />}
+            control={<Radio size="small" color="secondary" />}
             label="Same day"
           />
           <FormControlLabel
             value="other-day"
-            control={<Radio size="small" />}
+            control={<Radio size="small" color="secondary" />}
             label="Other day"
           />
         </RadioGroup>
         <Collapse in={days.endType === "other-day"}>
-          <StaticDatePicker
+          <SmallStaticDatePicker
             displayStaticWrapperAs="desktop"
             value={endDate}
             shouldDisableDate={(d: Date | null) =>

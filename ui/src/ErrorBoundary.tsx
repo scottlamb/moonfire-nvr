@@ -4,12 +4,6 @@
 
 import Avatar from "@material-ui/core/Avatar";
 import Container from "@material-ui/core/Container";
-import {
-  createStyles,
-  Theme,
-  WithStyles,
-  withStyles,
-} from "@material-ui/core/styles";
 import BugReportIcon from "@material-ui/icons/BugReport";
 import React from "react";
 
@@ -17,16 +11,7 @@ interface State {
   error: any;
 }
 
-const styles = (theme: Theme) =>
-  createStyles({
-    avatar: {
-      backgroundColor: theme.palette.secondary.main,
-      float: "left",
-      marginRight: "1em",
-    },
-  });
-
-interface Props extends WithStyles<typeof styles> {
+interface Props {
   children: React.ReactNode;
 }
 
@@ -55,7 +40,7 @@ class MoonfireErrorBoundary extends React.Component<Props, State> {
   }
 
   render() {
-    const { classes, children } = this.props;
+    const { children } = this.props;
 
     if (this.state.error !== null) {
       var error;
@@ -74,7 +59,13 @@ class MoonfireErrorBoundary extends React.Component<Props, State> {
 
       return (
         <Container>
-          <Avatar className={classes.avatar}>
+          <Avatar
+            sx={{
+              float: "left",
+              bgcolor: "secondary.main",
+              marginRight: "1em",
+            }}
+          >
             <BugReportIcon color="primary" />
           </Avatar>
           <h1>Error</h1>
@@ -130,4 +121,4 @@ class MoonfireErrorBoundary extends React.Component<Props, State> {
   }
 }
 
-export default withStyles(styles)(MoonfireErrorBoundary);
+export default MoonfireErrorBoundary;
