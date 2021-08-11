@@ -30,6 +30,12 @@ $ cd moonfire-nvr
 
 ## Docker builds
 
+*Note about ARM:* this build procedure is normally used on x86-64 running
+Docker 20.10. The author has *cross-compiled to* ARM machines but never
+successfully *built on* an ARM machine. In general, the Docker experience on ARM
+appears much less polished. For example, you're likely to hit
+[this `At least one invalid signature was encountered.` error](https://stackoverflow.com/questions/64439278/gpg-invalid-signature-error-while-running-apt-update-inside-arm32v7-ubuntu20-04).
+
 This command should prepare a deployment image for your local machine:
 
 ```
