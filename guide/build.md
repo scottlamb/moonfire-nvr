@@ -25,6 +25,7 @@ bleeding-edge version from the commandline via git:
 
 ```
 $ git clone https://github.com/scottlamb/moonfire-nvr.git
+$ cd moonfire-nvr
 ```
 
 ## Docker builds
