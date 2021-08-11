@@ -47,6 +47,7 @@ const SmallStaticDatePicker = (props: StaticDatePickerProps<Date>) => {
   // seems plenty big enough (on desktop). Not sure why material-ui wants
   // to make it bigger but that doesn't work well with our layout.
   // This adjustment is a fragile hack but seems to work for now.
+  // See: https://github.com/mui-org/material-ui/issues/27700
   const DATE_SIZE = 32;
   return (
     <Box
