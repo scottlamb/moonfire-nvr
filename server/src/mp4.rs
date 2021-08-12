@@ -1930,12 +1930,16 @@ impl http_serve::Entity for File {
             }
         } else if self.0.type_ == Type::InitSegment {
             // FileBuilder::build() should have failed if there were no video_sample_entries.
-            let ent = self.0.video_sample_entries.first().expect("no video_sample_entries");
+            let ent = self
+                .0
+                .video_sample_entries
+                .first()
+                .expect("no video_sample_entries");
             let aspect = ent.aspect();
-            hdrs.insert("X-Aspect",
-                HeaderValue::try_from(
-                    format!("{}:{}", aspect.numer(), aspect.denom())
-                ).expect("no invalid chars in X-Aspect format")
+            hdrs.insert(
+                "X-Aspect",
+                HeaderValue::try_from(format!("{}:{}", aspect.numer(), aspect.denom()))
+                    .expect("no invalid chars in X-Aspect format"),
             );
         }
     }
