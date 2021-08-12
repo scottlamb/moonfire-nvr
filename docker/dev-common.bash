@@ -32,7 +32,6 @@ packages+=(
     curl
     pkgconf
     locales
-    npm
     sudo
     sqlite3
     tzdata
@@ -40,6 +39,10 @@ packages+=(
 )
 time apt-get update
 time apt-get install --assume-yes --no-install-recommends "${packages[@]}"
+
+# Install a more recent nodejs/npm than in the universe repository.
+time curl -sL https://deb.nodesource.com/setup_14.x | bash -
+time apt-get install nodejs
 
 # Create the user. On the dev environment, allow sudo.
 groupadd \
@@ -54,7 +57,6 @@ useradd \
     --create-home \
     moonfire-nvr
 echo 'moonfire-nvr ALL=(ALL) NOPASSWD: ALL' >>/etc/sudoers
-
 
 # Install Rust. Note curl was already installed for yarn above.
 time su moonfire-nvr -lc "

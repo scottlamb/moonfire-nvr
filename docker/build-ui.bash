@@ -14,6 +14,8 @@ exec > >(tee -i /docker-build-debug/build-ui/output) 2>&1
 
 date
 uname -a
+node --version
+npm --version
 time npm ci
 time npm run build
 

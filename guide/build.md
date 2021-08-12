@@ -170,10 +170,11 @@ To build the server, you will need the following C libraries installed:
 *   [`ncursesw`](https://www.gnu.org/software/ncurses/), the UTF-8 version of
     the `ncurses` library.
 
-To build the UI, you'll need [node and npm](https://nodejs.org/en/download/).
+To build the UI, you'll need a [nodejs](https://nodejs.org/en/download/) release
+in "Maintenance LTS" or "Active LTS" status: currently v12 or v14.
 
 On recent Ubuntu or Raspbian Linux, the following command will install
-all non-Rust dependencies:
+most non-Rust dependencies:
 
 ```
 $ sudo apt-get install \
@@ -183,11 +184,16 @@ $ sudo apt-get install \
                libavutil-dev \
                libncurses-dev \
                libsqlite3-dev \
-               npm \
                pkgconf \
                sqlite3 \
                tzdata
 ```
+
+Ubuntu 20.04 (the latest LTS as of this writing) bundles node 10, which has
+reached end-of-life (see [node.js: releases](https://nodejs.org/en/about/releases/)).
+So rather than install the `nodejs` and `npm` packages from the built-in
+repository, see [Installing Node.js via package
+manager](https://nodejs.org/en/download/package-manager/#debian-and-ubuntu-based-linux-distributions).
 
 On macOS with [Homebrew](https://brew.sh/) and Xcode installed, try the
 following command:

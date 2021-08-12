@@ -18,7 +18,7 @@ interface ParseError {
   errorMessage: string;
 }
 
-const ASCII_DECODER = new TextDecoder("ascii");
+const DECODER = new TextDecoder("utf-8");
 const CR = "\r".charCodeAt(0);
 const NL = "\n".charCodeAt(0);
 
@@ -37,7 +37,7 @@ export function parsePart(raw: Uint8Array): ParseResult {
         errorMessage: "header that never ends (no '\\r\\n')!",
       };
     }
-    const line = ASCII_DECODER.decode(raw.slice(pos, cr));
+    const line = DECODER.decode(raw.slice(pos, cr));
     pos = cr + 2;
     if (line.length === 0) {
       break;
