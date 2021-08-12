@@ -8,6 +8,13 @@ Each release is tagged in Git and on the Docker repository
 
 ## unreleased
 
+*   UI: improve video aspect ratio handling. Live streams formerly worked
+    around a Firefox pixel aspect ratio bug by forcing all videos to 16:9, which
+    dramatically distorted 9:16 camera views. Playback didn't have the same
+    workaround, so anamorphic videos looked correct on Chrome but slightly
+    stretched on Firefox. Now both live streams and playback are fully correct
+    on all browsers.
+
 ## `v0.6.4` (2021-06-28)
 
 *   Default to a new pure-Rust RTSP library, `retina`. If you hit problems, you

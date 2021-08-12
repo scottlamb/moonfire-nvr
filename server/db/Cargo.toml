@@ -29,6 +29,7 @@ libpasta = "0.1.2"
 log = "0.4"
 mylog = { git = "https://github.com/scottlamb/mylog" }
 nix = "0.22.0"
+num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
 odds = { version = "0.4.0", features = ["std-vec"] }
 parking_lot = { version = "0.11.1", features = [] }
 pretty-hex = "0.2.1"

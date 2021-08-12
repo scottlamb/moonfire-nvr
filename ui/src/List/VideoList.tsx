@@ -17,7 +17,9 @@ interface Props {
   range90k: [number, number] | null;
   split90k?: number;
   trimStartAndEnd: boolean;
-  setActiveRecording: (recording: [Stream, api.Recording] | null) => void;
+  setActiveRecording: (
+    recording: [Stream, api.Recording, api.VideoSampleEntry] | null
+  ) => void;
   formatTime: (time90k: number) => string;
 }
 
@@ -169,7 +171,7 @@ const VideoList = ({
         <Row
           key={r.startId}
           className="recording"
-          onClick={() => setActiveRecording([stream, r])}
+          onClick={() => setActiveRecording([stream, r, vse])}
           start={formatTime(start)}
           end={formatTime(end)}
           resolution={`${vse.width}x${vse.height}`}

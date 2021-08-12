@@ -333,6 +333,10 @@ the following properties:
     section 12.1.4.3 `PixelAspectRatioBox`. If absent, assumed to be 1.
 *   `pixelVSpacing`: the relative height of a pixel, as in a ISO/IEC 14496-12
     section 12.1.4.3 `PixelAspectRatioBox`. If absent, assumed to be 1.
+*   `aspectWidth`: the width component of the aspect ratio. (The aspect ratio
+    can be computed from the dimensions and pixel spacing; it's included as a
+    convenience.)
+*   `aspectHeight`: the height component of the aspect ratio.
 
 The full initialization segment data for a given video sample entry can be
 retrieved at the URL `/api/init/<id>.mp4`.
@@ -583,6 +587,11 @@ streams simultaneously as well as making other simultaneous HTTP requests.
 Returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
 initialization segment][init-segment]. The MIME type will be `video/mp4`, with
 a `codecs` parameter as specified in [RFC 6381][rfc-6381].
+
+An `X-Aspect` HTTP header will include the aspect ratio as width:height,
+eg `16:9` (most cameras) or `9:16` (rotated 90 degrees).
+This is redundant with the returned `.mp4` but is far easier to parse from
+Javascript.
 
 ### `GET /api/init/<id>.mp4.txt`
 

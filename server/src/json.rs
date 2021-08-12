@@ -496,15 +496,20 @@ pub struct VideoSampleEntry {
     pub height: u16,
     pub pasp_h_spacing: u16,
     pub pasp_v_spacing: u16,
+    pub aspect_width: u32,
+    pub aspect_height: u32,
 }
 
 impl VideoSampleEntry {
     fn from(e: &db::VideoSampleEntry) -> Self {
+        let aspect = e.aspect();
         Self {
             width: e.width,
             height: e.height,
             pasp_h_spacing: e.pasp_h_spacing,
             pasp_v_spacing: e.pasp_v_spacing,
+            aspect_width: *aspect.numer(),
+            aspect_height: *aspect.denom(),
         }
     }
 }

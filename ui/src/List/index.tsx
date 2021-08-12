@@ -18,6 +18,9 @@ import DisplaySelector, { DEFAULT_DURATION } from "./DisplaySelector";
 import StreamMultiSelector from "./StreamMultiSelector";
 import TimerangeSelector from "./TimerangeSelector";
 import VideoList from "./VideoList";
+import { useLayoutEffect } from "react";
+import { fillAspect } from "../aspect";
+import useResizeObserver from "@react-hook/resize-observer";
 
 const useStyles = makeStyles((theme: Theme) => ({
   root: {
@@ -64,12 +67,32 @@ const useStyles = makeStyles((theme: Theme) => ({
     alignItems: "center",
     justifyContent: "center",
     "& video": {
-      objectFit: "contain",
-      maxWidth: "100%",
-      maxHeight: "100%",
+      objectFit: "fill",
     },
   },
 }));
+
+interface FullScreenVideoProps {
+  src: string;
+  aspect: [number, number];
+}
+
+/**
+ * A video sized for the entire document window constrained to aspect ratio.
+ * This is particularly helpful for Firefox (89), which doesn't honor the
+ * pixel aspect ratio specified in .mp4 files. Thus we need to specify it
+ * out-of-band.
+ */
+const FullScreenVideo = ({ src, aspect }: FullScreenVideoProps) => {
+  const ref = React.useRef<HTMLVideoElement>(null);
+  useLayoutEffect(() => {
+    fillAspect(document.body.getBoundingClientRect(), ref, aspect);
+  });
+  useResizeObserver(document.body, (entry: ResizeObserverEntry) => {
+    fillAspect(entry.contentRect, ref, aspect);
+  });
+  return <video ref={ref} controls preload="auto" autoPlay src={src} />;
+};
 
 interface Props {
   timeZoneName: string;
@@ -98,7 +121,7 @@ const Main = ({ cameras, timeZoneName, showSelectors }: Props) => {
   const [timestampTrack, setTimestampTrack] = useState(false);
 
   const [activeRecording, setActiveRecording] = useState<
-    [Stream, api.Recording] | null
+    [Stream, api.Recording, api.VideoSampleEntry] | null
   >(null);
   const formatTime = useMemo(() => {
     return (time90k: number) => {
@@ -160,10 +183,7 @@ const Main = ({ cameras, timeZoneName, showSelectors }: Props) => {
       {videoLists.length > 0 && recordingsTable}
       {activeRecording != null && (
         <Modal open onClose={closeModal} className={classes.videoModal}>
-          <video
-            controls
-            preload="auto"
-            autoPlay
+          <FullScreenVideo
             src={api.recordingUrl(
               activeRecording[0].camera.uuid,
               activeRecording[0].streamType,
@@ -171,6 +191,10 @@ const Main = ({ cameras, timeZoneName, showSelectors }: Props) => {
               timestampTrack,
               trimStartAndEnd ? range90k! : undefined
             )}
+            aspect={[
+              activeRecording[2].aspectWidth,
+              activeRecording[2].aspectHeight,
+            ]}
           />
         </Modal>
       )}

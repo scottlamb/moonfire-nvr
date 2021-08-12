@@ -4,10 +4,9 @@
 
 import Select, { SelectChangeEvent } from "@material-ui/core/Select";
 import MenuItem from "@material-ui/core/MenuItem";
-import React, { useReducer, useState } from "react";
+import React, { useReducer } from "react";
 import { Camera } from "../types";
 import { makeStyles } from "@material-ui/styles";
-import useResizeObserver from "@react-hook/resize-observer";
 import { Theme } from "@material-ui/core/styles";
 
 export interface Layout {
@@ -31,20 +30,12 @@ const useStyles = makeStyles((theme: Theme) => ({
     marginTop: theme.spacing(2),
     overflow: "hidden",
 
+    // TODO: this mid-level div can probably be removed.
     "& .mid": {
-      position: "relative",
-      aspectRatio: "16 / 9",
-      display: "inline-block",
-    },
-
-    // Set the width based on the height.
-    "& .mid.wider": {
-      height: "100%",
-    },
-
-    // Set the height based on the width.
-    "& .mid.taller": {
       width: "100%",
+      height: "100%",
+      position: "relative",
+      display: "inline-block",
     },
   },
   inner: {
@@ -156,53 +147,15 @@ function selectedReducer(old: SelectedCameras, op: SelectOp): SelectedCameras {
  * Presents one or more camera views in one of several layouts.
  *
  * The parent should arrange for the multiview's outer div to be as large
- * as possible. Internally, multiview uses the largest possible aspect
- * ratio-constrained section of it. It uses a ResizeObserver to determine if
- * the outer div is wider or taller than 16x9, and then sets an appropriate CSS
- * class to constrain the width or height respectively. The goal is to have the
- * smoothest resizing by changing the DOM/CSS as little as possible.
+ * as possible.
  */
 const Multiview = (props: MultiviewProps) => {
   const [selected, updateSelected] = useReducer(
     selectedReducer,
     Array(MAX_CAMERAS).fill(null)
   );
-  const [widerOrTaller, setWiderOrTaller] = useState("");
   const outerRef = React.useRef<HTMLDivElement>(null);
-  const midRef = React.useRef<HTMLDivElement>(null);
 
-  // Keep a constant 16x9 aspect ratio. Chrome 89.0.4389.90 supports the
-  // "aspect-ratio" CSS property and seems to behave in a predictable way.
-  // Intuition suggests using that is more performant than extra DOM
-  // manipulations. Firefox 87.0 doesn't support aspect-ratio. Emulating it
-  // with an <img> child doesn't work well either for using a (flex item)
-  // ancestor's (calculated) height to compute
-  // the <img>'s width and then the parent's width. There are some open bugs
-  // that look related, eg:
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=1349738
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=1690423
-  // so when there's no "aspect-ratio", just calculate everything here.
-  const aspectRatioSupported = CSS.supports("aspect-ratio: 16 / 9");
-  useResizeObserver(outerRef, (entry: ResizeObserverEntry) => {
-    const w = entry.contentRect.width;
-    const h = entry.contentRect.height;
-    const hFromW = (w * 9) / 16;
-    if (aspectRatioSupported) {
-      setWiderOrTaller(hFromW > h ? "wider" : "taller");
-      return;
-    }
-    const mid = midRef.current;
-    if (mid === null) {
-      return;
-    }
-    if (hFromW > h) {
-      mid.style.width = `${(h * 16) / 9}px`;
-      mid.style.height = `${h}px`;
-    } else {
-      mid.style.width = `${w}px`;
-      mid.style.height = `${hFromW}px`;
-    }
-  });
   const classes = useStyles();
   const layout = LAYOUTS[props.layoutIndex];
   const monoviews = selected.slice(0, layout.cameras).map((e, i) => {
@@ -227,7 +180,7 @@ const Multiview = (props: MultiviewProps) => {
   });
   return (
     <div className={classes.root} ref={outerRef}>
-      <div className={`mid ${widerOrTaller}`} ref={midRef}>
+      <div className="mid">
         <div className={`${classes.inner} ${layout.className}`}>
           {monoviews}
         </div>

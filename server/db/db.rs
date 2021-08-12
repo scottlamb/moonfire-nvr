@@ -135,6 +135,16 @@ pub struct VideoSampleEntry {
     pub pasp_v_spacing: u16,
 }
 
+impl VideoSampleEntry {
+    /// Returns the aspect ratio as a minimized ratio.
+    pub fn aspect(&self) -> num_rational::Ratio<u32> {
+        num_rational::Ratio::new(
+            u32::from(self.width) * u32::from(self.pasp_h_spacing),
+            u32::from(self.height) * u32::from(self.pasp_v_spacing),
+        )
+    }
+}
+
 #[derive(PartialEq, Eq)]
 pub struct VideoSampleEntryToInsert {
     pub data: Vec<u8>,

@@ -78,15 +78,28 @@ async function myfetch(
   };
 }
 
+export interface InitSegmentResponse {
+  aspect: [number, number];
+  body: ArrayBuffer;
+}
+
 /** Fetches an initialization segment. */
 export async function init(
   videoSampleEntryId: number,
   init: RequestInit
-): Promise<FetchResult<ArrayBuffer>> {
+): Promise<FetchResult<InitSegmentResponse>> {
   const url = `/api/init/${videoSampleEntryId}.mp4`;
   const fetchRes = await myfetch(url, init);
   if (fetchRes.status !== "success") {
     return fetchRes;
+  }
+  const rawAspect = fetchRes.response.headers.get("X-Aspect");
+  const aspect = rawAspect?.split(":").map((x) => parseInt(x, 10));
+  if (aspect === undefined) {
+    return {
+      status: "error",
+      message: `invalid/missing X-Aspect: ${rawAspect}`,
+    };
   }
   let body;
   try {
@@ -98,9 +111,10 @@ export async function init(
       message: `unable to read body: ${e.message}`,
     };
   }
+
   return {
     status: "success",
-    response: body,
+    response: { aspect: aspect as [number, number], body },
   };
 }
 
@@ -256,6 +270,8 @@ export interface VideoSampleEntry {
   height: number;
   pixelHSpacing?: number;
   pixelVSpacing?: number;
+  aspectWidth: number;
+  aspectHeight: number;
 }
 
 export interface RecordingsRequest {

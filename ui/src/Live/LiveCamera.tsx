@@ -9,6 +9,8 @@ import * as api from "../api";
 import Box from "@material-ui/core/Box";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import Alert from "@material-ui/core/Alert";
+import useResizeObserver from "@react-hook/resize-observer";
+import { fillAspect } from "../aspect";
 
 interface LiveCameraProps {
   camera: Camera | null;
@@ -60,10 +62,12 @@ class LiveCameraDriver {
   constructor(
     camera: Camera,
     setPlaybackState: (state: PlaybackState) => void,
+    setAspect: (aspect: [number, number]) => void,
     videoRef: React.RefObject<HTMLVideoElement>
   ) {
     this.camera = camera;
     this.setPlaybackState = setPlaybackState;
+    this.setAspect = setAspect;
     this.videoRef = videoRef;
     this.src.addEventListener("sourceopen", this.onMediaSourceOpen);
   }
@@ -151,7 +155,8 @@ class LiveCameraDriver {
         this.error(`init segment fetch status ${initSegmentResult.status}`);
         return;
       }
-      srcBuf.appendBuffer(initSegmentResult.response);
+      this.setAspect(initSegmentResult.response.aspect);
+      srcBuf.appendBuffer(initSegmentResult.response.body);
       return;
     } else if (this.buf.state === "open") {
       this.tryAppendPart(this.buf);
@@ -267,6 +272,7 @@ class LiveCameraDriver {
 
   camera: Camera;
   setPlaybackState: (state: PlaybackState) => void;
+  setAspect: (aspect: [number, number]) => void;
   videoRef: React.RefObject<HTMLVideoElement>;
 
   src = new MediaSource();
@@ -283,17 +289,24 @@ class LiveCameraDriver {
 /**
  * A live view of a camera.
  *
- * The caller is currently expected to put this into a 16x9 block.
- *
  * Note there's a significant setup cost to creating a LiveCamera, so the parent
  * should use React's <tt>key</tt> attribute to avoid unnecessarily mounting
  * and unmounting a camera.
  *
  */
 const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
+  const [aspect, setAspect] = React.useState<[number, number]>([16, 9]);
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  const boxRef = React.useRef<HTMLElement>(null);
   const [playbackState, setPlaybackState] = React.useState<PlaybackState>({
     state: "normal",
+  });
+
+  React.useLayoutEffect(() => {
+    fillAspect(boxRef.current!.getBoundingClientRect(), videoRef, aspect);
+  }, [boxRef, videoRef, aspect]);
+  useResizeObserver(boxRef, (entry: ResizeObserverEntry) => {
+    fillAspect(entry.contentRect, videoRef, aspect);
   });
 
   // Load the camera driver.
@@ -304,7 +317,12 @@ const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
       setDriver(null);
       return;
     }
-    const d = new LiveCameraDriver(camera, setPlaybackState, videoRef);
+    const d = new LiveCameraDriver(
+      camera,
+      setPlaybackState,
+      setAspect,
+      videoRef
+    );
     setDriver(d);
     return () => {
       // Explictly stop the stream on unmount. There don't seem to be any DOM
@@ -343,10 +361,14 @@ const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
     );
   return (
     <Box
+      ref={boxRef}
       sx={{
         width: "100%",
         height: "100%",
         position: "relative",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         "& video": {
           width: "100%",
           height: "100%",
