@@ -67,7 +67,7 @@ if [[ "${BUILDARCH}" != "${TARGETARCH}" ]]; then
     fi
 
     packages+=(
-        g++-${gcc_target}
+        g++-${gcc_target/_/-}
         libc6-dev-${dpkg_arch}-cross
         pkg-config-${gcc_target}
         qemu-user

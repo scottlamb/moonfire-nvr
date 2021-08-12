@@ -30,17 +30,28 @@ $ cd moonfire-nvr
 
 ## Docker builds
 
-*Note about ARM:* this build procedure is normally used on x86-64 running
-Docker 20.10. The author has *cross-compiled to* ARM machines but never
-successfully *built on* an ARM machine. In general, the Docker experience on ARM
-appears much less polished. For example, you're likely to hit
-[this `At least one invalid signature was encountered.` error](https://stackoverflow.com/questions/64439278/gpg-invalid-signature-error-while-running-apt-update-inside-arm32v7-ubuntu20-04).
-
 This command should prepare a deployment image for your local machine:
 
 ```
 $ docker buildx build --load --tag=moonfire-nvr -f docker/Dockerfile .
 ```
+
+<details>
+  <summary>Common errors</summary>
+
+*   `docker: 'buildx' is not a docker command.`: You shouldn't see this with
+    Docker 20.10. With Docker version 19.03 you'll need to prepend
+    `DOCKER_CLI_EXPERIMENTAL=enabled` to `docker buildx build` commands. If
+    your Docker version is older than 19.03, you'll need to upgrade.
+*   `At least one invalid signature was encountered.`: this is likely
+    due to an error in `libseccomp`, as described [in this askubuntu.com answer](https://askubuntu.com/a/1264921/1365248).
+    Try running in a privileged builder. As described in [`docker buildx build` documentation](https://docs.docker.com/engine/reference/commandline/buildx_build/#allow),
+    run this command once:
+    ```
+    $ docker buildx create --use --name insecure-builder --buildkitd-flags '--allow-insecure-entitlement security.insecure'
+    ```
+    then add `--allow security.insecure` to your `docker buildx build` commandlines.
+</details>
 
 If you want to iterate on code changes, doing a full Docker build from
 scratch every time will be painfully slow. You will likely find it more
@@ -63,13 +74,14 @@ The development image overrides cargo's output directory to
 using a bind filesystem for build products, which can be slow on macOS. It
 also means that if you sometimes compile directly on the host and sometimes
 within Docker, they don't trip over each other's target directories.
-directories.
 
 You can also cross-compile to a different architecture. Adding a
 `--platform=linux/arm64/v8,linux/arm/v7,linux/amd64` argument will compile
-Moonfire NVR for all supported platforms. For the `dev` target, this prepares
-a build which executes on your local architecture and is capable of building
-a binary for your desired target architecture.
+Moonfire NVR for all supported platforms. (Note: this has been used
+successfully for building on x86-64 and compiling to arm but not the
+reverse.) For the `dev` target, this prepares a build which executes on your
+local architecture and is capable of building a binary for your desired target
+architecture.
 
 On the author's macOS machine with Docker desktop 3.0.4, building for
 multiple platforms at once will initially fail with the following error:
