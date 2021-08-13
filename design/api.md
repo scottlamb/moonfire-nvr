@@ -177,6 +177,7 @@ Example response:
           "maxEndTime90k": 130985466591817,
           "totalDuration90k": 96736169725,
           "totalSampleFileBytes": 446774393937,
+          "record": true,
           "days": {
             "2016-05-01": {
               "endTime90k": 131595516000000,

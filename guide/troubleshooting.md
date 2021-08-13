@@ -399,9 +399,6 @@ here are some things to check:
     guide](schema.md) prior to 29 Feb 2020, look at [this
     update](https://github.com/scottlamb/moonfire-nvr/commit/92266612b5c9163eb6096c580ba751280a403648#diff-e8bdd96dda101a25a541a6629675ea46bd6eaf670c6417c76662db5397c50c19)
     to those instructions.
-*   The live view currently only uses the `sub` stream. If you configure only
-    a `main` stream on your cameras, you will see this error consistently.
-    [#119](https://github.com/scottlamb/moonfire-nvr/issues/119)
 
 ### Errors in kernel logs
 

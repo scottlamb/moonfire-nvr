@@ -83,6 +83,7 @@ pub struct Stream<'a> {
     pub total_duration_90k: Duration,
     pub total_sample_file_bytes: i64,
     pub fs_bytes: i64,
+    pub record: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
@@ -243,6 +244,7 @@ impl<'a> Stream<'a> {
             total_duration_90k: s.duration,
             total_sample_file_bytes: s.sample_file_bytes,
             fs_bytes: s.fs_bytes,
+            record: s.record,
             days: if include_days { Some(s.days()) } else { None },
             config: match include_config {
                 false => None,

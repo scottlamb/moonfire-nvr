@@ -31,6 +31,7 @@ export interface Stream {
   totalSampleFileBytes: number;
   fsBytes: number;
   days: Record<string, Day>;
+  record: boolean;
 }
 
 export interface Day {

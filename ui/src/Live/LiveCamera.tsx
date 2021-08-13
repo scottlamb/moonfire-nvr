@@ -80,6 +80,15 @@ class LiveCameraDriver {
     if (this.ws !== undefined) {
       return;
     }
+    const subStream = this.camera.streams.sub;
+    if (subStream === undefined || !subStream.record) {
+      this.error(
+        "Must have sub stream set to record; see " +
+          "https://github.com/scottlamb/moonfire-nvr/issues/119 and " +
+          "https://github.com/scottlamb/moonfire-nvr/issues/120"
+      );
+      return;
+    }
     console.log(`${this.camera.shortName}: starting stream: ${reason}`);
     const loc = window.location;
     const proto = loc.protocol === "https:" ? "wss" : "ws";

@@ -14,7 +14,8 @@ Each release is tagged in Git and on the Docker repository
     workaround, so anamorphic videos looked correct on Chrome but slightly
     stretched on Firefox. Now both live streams and playback are fully correct
     on all browsers.
-*   UI: better error message on browsers where live view is unsupported.
+*   UI: better error messages on live view when browser is unsupported,
+    `sub` stream is unconfigured, or `sub` stream is not set to record.
 *   upgrade to retina v0.1.0, which uses `SET_PARAMETERS` rather than
     `GET_PARAMETERS` as a RTSP keepalive. GW Security cameras would ignored
     the latter, causing Moonfire NVR to drop the connection every minute.
