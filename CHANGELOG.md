@@ -15,6 +15,9 @@ Each release is tagged in Git and on the Docker repository
     stretched on Firefox. Now both live streams and playback are fully correct
     on all browsers.
 *   UI: better error message on browsers where live view is unsupported.
+*   upgrade to retina v0.1.0, which uses `SET_PARAMETERS` rather than
+    `GET_PARAMETERS` as a RTSP keepalive. GW Security cameras would ignored
+    the latter, causing Moonfire NVR to drop the connection every minute.
 
 ## `v0.6.4` (2021-06-28)
 
