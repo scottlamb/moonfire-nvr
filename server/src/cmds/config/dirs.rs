@@ -404,9 +404,12 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
     list.add_child(
         "filesystem",
         views::LinearLayout::horizontal()
-            .child(views::DummyView {}.fixed_width(3))
-            .child(views::DummyView {}.fixed_width(20))
-            .child(views::TextView::new(encode_size(model.borrow().fs_capacity)).fixed_width(25)),
+            .child(views::DummyView {}.fixed_width(RECORD_WIDTH))
+            .child(views::DummyView {}.fixed_width(BYTES_WIDTH))
+            .child(
+                views::TextView::new(encode_size(model.borrow().fs_capacity))
+                    .fixed_width(BYTES_WIDTH),
+            ),
     );
     let mut change_button = views::Button::new("Change", move |siv| press_change(&model, siv));
     change_button.set_enabled(!over);
