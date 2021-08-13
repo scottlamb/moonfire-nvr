@@ -6,7 +6,7 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## unreleased
+## `v0.6.5` (2021-08-13)
 
 *   UI: improve video aspect ratio handling. Live streams formerly worked
     around a Firefox pixel aspect ratio bug by forcing all videos to 16:9, which

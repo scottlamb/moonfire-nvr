@@ -1222,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-db"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "base64",
  "blake3",
@@ -1272,7 +1272,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-nvr"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "base64",
  "blake3",
