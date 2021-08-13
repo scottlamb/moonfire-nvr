@@ -211,7 +211,7 @@ desired DNS name. Now finalize its configuration:
 The author's system does this via the following
 `/etc/nginx/sites-available/nvr.home.slamb.org` file:
 
-```
+```nginx
 upstream moonfire {
     server 127.0.0.1:8080;
 }
@@ -233,9 +233,9 @@ server {
     }
 
     proxy_http_version 1.1;
+    proxy_buffering off;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $connection_upgrade;
-
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header Host $http_host;
