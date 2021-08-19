@@ -383,7 +383,14 @@ impl RetinaOpener {
         ),
         Error,
     > {
-        let mut session = retina::client::Session::describe(url, creds).await?;
+        let mut session = retina::client::Session::describe(
+            url,
+            retina::client::SessionOptions::default()
+                .creds(creds)
+                .user_agent("Moonfire NVR".to_owned())
+                .ignore_spurious_data(true), // TODO: make this configurable.
+        )
+        .await?;
         let (video_i, mut video_params) = session
             .streams()
             .iter()
@@ -394,7 +401,7 @@ impl RetinaOpener {
             })
             .ok_or_else(|| format_err!("couldn't find H.264 video stream"))?;
         session.setup(video_i).await?;
-        let session = session.play(retina::client::PlayPolicy::default()).await?;
+        let session = session.play(retina::client::PlayOptions::default()).await?;
         let mut session = Box::pin(session.demuxed()?);
 
         // First frame.
