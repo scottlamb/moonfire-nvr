@@ -217,7 +217,9 @@ $ brew install ffmpeg node
 ```
 
 Next, you need Rust 1.52+ and Cargo. The easiest way to install them is by
-following the instructions at [rustup.rs](https://www.rustup.rs/).
+following the instructions at [rustup.rs](https://www.rustup.rs/). Avoid
+your Linux distribution's Rust packages, which tend to be too old.
+(At least on Debian-based systems; Arch and Gentoo might be okay.)
 
 Once prerequisites are installed, you can build the server and find it in
 `target/release/moonfire-nvr`:
