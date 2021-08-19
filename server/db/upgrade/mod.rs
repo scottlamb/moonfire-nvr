@@ -90,6 +90,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
 }
 
 pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
+    db::check_sqlite_version()?;
     db::set_integrity_pragmas(conn)?;
     set_journal_mode(&conn, args.preset_journal)?;
     upgrade(args, db::EXPECTED_VERSION, conn)?;

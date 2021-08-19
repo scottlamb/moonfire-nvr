@@ -35,7 +35,7 @@ use crate::schema;
 use crate::signal;
 use base::clock::{self, Clocks};
 use base::strutil::encode_size;
-use failure::{bail, format_err, Error};
+use failure::{bail, format_err, Error, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
 use hashlink::LinkedHashMap;
 use itertools::Itertools;
@@ -2117,13 +2117,27 @@ pub(crate) fn set_integrity_pragmas(conn: &mut rusqlite::Connection) -> Result<(
     Ok(())
 }
 
+pub(crate) fn check_sqlite_version() -> Result<(), Error> {
+    // SQLite version 3.14.0 introduced the "without rowid" syntax used in the schema.
+    // https://www.sqlite.org/vtab.html#worid
+    if rusqlite::version_number() < 3014000 {
+        bail!(
+            "SQLite version {} is too old; need at least 3.14.0",
+            rusqlite::version()
+        );
+    }
+    Ok(())
+}
+
 /// Initializes a database.
 /// Note this doesn't set journal options, so that it can be used on in-memory databases for
 /// test code.
 pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
+    check_sqlite_version()?;
     set_integrity_pragmas(conn)?;
     let tx = conn.transaction()?;
-    tx.execute_batch(include_str!("schema.sql"))?;
+    tx.execute_batch(include_str!("schema.sql"))
+        .context("unable to create database schema")?;
     {
         let uuid = ::uuid::Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
@@ -2221,6 +2235,7 @@ impl<C: Clocks + Clone> Database<C> {
         mut conn: rusqlite::Connection,
         read_write: bool,
     ) -> Result<Database<C>, Error> {
+        check_sqlite_version()?;
         set_integrity_pragmas(&mut conn)?;
         check_schema_version(&conn)?;
 

@@ -11,6 +11,8 @@ Each release is tagged in Git and on the Docker repository
 *   fix [#146](https://github.com/scottlamb/moonfire-nvr/issues/146): "init
     segment fetch error" when browsers have cached data from `v0.6.4` and
     before.
+*   fix [#147](https://github.com/scottlamb/moonfire-nvr/issues/147): confusing
+    `nvr init` failures when using very old versions of SQLite.
 
 ## `v0.6.5` (2021-08-13)
 
