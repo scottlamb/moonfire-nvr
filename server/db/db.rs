@@ -2118,11 +2118,11 @@ pub(crate) fn set_integrity_pragmas(conn: &mut rusqlite::Connection) -> Result<(
 }
 
 pub(crate) fn check_sqlite_version() -> Result<(), Error> {
-    // SQLite version 3.14.0 introduced the "without rowid" syntax used in the schema.
-    // https://www.sqlite.org/vtab.html#worid
-    if rusqlite::version_number() < 3014000 {
+    // SQLite version 3.8.2 introduced the "without rowid" syntax used in the schema.
+    // https://www.sqlite.org/withoutrowid.html
+    if rusqlite::version_number() < 3008002 {
         bail!(
-            "SQLite version {} is too old; need at least 3.14.0",
+            "SQLite version {} is too old; need at least 3.8.2",
             rusqlite::version()
         );
     }

@@ -177,7 +177,7 @@ To build the server, you will need the following C libraries installed:
     timeouts for RTSP. For reliable reconnections on error, it's strongly
     recommended to use ffmpeg library versions >= 55.1.101.
 
-*   [SQLite3](https://www.sqlite.org/), at least version 3.14.0.
+*   [SQLite3](https://www.sqlite.org/), at least version 3.8.2.
     (You can skip this if you compile with `--features=bundled` and
     don't mind the `moonfire-nvr sql` command not working.)
 
