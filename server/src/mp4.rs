@@ -80,9 +80,9 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 /// This value should be incremented any time a change is made to this file that causes different
-/// bytes to be output for a particular set of `FileBuilder` options. Incrementing this value will
-/// cause the etag to change as well.
-const FORMAT_VERSION: [u8; 1] = [0x08];
+/// bytes or headers to be output for a particular set of `FileBuilder` options. Incrementing this
+/// value will cause the etag to change as well.
+const FORMAT_VERSION: [u8; 1] = [0x09];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
 const NORMAL_FTYP_BOX: &[u8] = &[
@@ -2016,13 +2016,23 @@ mod tests {
             .unwrap();
     }
 
-    /// Returns the Blake3 digest of the given `Entity`.
+    /// Returns the Blake3 digest of the given `Entity`'s headers and body.
     async fn digest<E: http_serve::Entity>(e: &E) -> blake3::Hash
     where
         E::Error: ::std::fmt::Debug,
     {
+        let mut hasher = blake3::Hasher::new();
+        let mut headers = http::header::HeaderMap::new();
+        e.add_headers(&mut headers);
+        for (name, value) in &headers {
+            hasher.update(name.as_str().as_bytes());
+            hasher.update(&b": "[..]);
+            hasher.update(value.as_bytes());
+            hasher.update(&b"\r\n"[..]);
+        }
+        hasher.update(&b"\r\n"[..]);
         Pin::from(e.get_range(0..e.len()))
-            .try_fold(blake3::Hasher::new(), |mut hasher, mut chunk| {
+            .try_fold(hasher, |mut hasher, mut chunk| {
                 while chunk.has_remaining() {
                     let c = chunk.chunk();
                     hasher.update(c);
@@ -2813,11 +2823,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "383800da9066123b65399bd2f54d8459fc4d583b4ef44552bf13b57800240b39",
+            "64f23b856692702b13d1811cd02dc83395b3d501dead7fd16f175eb26b4d8eee",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"51c10e6bb75e6f629612bba60b7372a4cec2ae7a0a5c65df0d07d8e9c6ad6624\"";
+            "\"791114c469130970608dd999b0ecf5861d077ec33fad2f0b040996e4aae4e30f\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2842,11 +2852,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "6bc801bc277e19b584ef2af2feea9538c56be9862cad9d2f12960435af91cfad",
+            "f9e4ed946187b2dd22ef049c4c1869d0f6c4f377ef08f8f53570850b61a06701",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"b1a0cc34e87412030f34a18f113e002bb18326a8b3d1479bec3ce7a1d8f10a87\"";
+            "\"85703b9abadd4292e119f2f7b0d6a16e99acf8b3ba98fcb6498e60ac5cb0b0b7\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2871,11 +2881,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "9914fc56ba35cd0e0e7ec1a6fcf4a3b5047db3fc52e69404bd347f2704dfb344",
+            "f913d46d0119a03291e85459455b9a75a84cc9a1a5e3b88ca7e93eb718d73190",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"8e9f94d89d48b254d087847571eeda1ee0888e2da6c38d6a38725f6c4eec6e07\"";
+            "\"3d2031124fb995bf2fc4930e7affdcd51add396e062cfab97e1001224c5ee42c\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2901,11 +2911,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "a0b7915ef19cf3dec74f13a348ef672d3c7506b5facc18663666fc8d6509ccba",
+            "64cc763fa2533118bc6bf0b01249f02524ae87e0c97815079447b235722c1e2d",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"1fc6135c7b167a66449302716cc32817d4b1af522ab137327b454ea78b7c45de\"";
+            "\"aa9bb2f63787a7d21227981135326c948db3e0b3dae5d0d39c77df69d0baf504\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2930,11 +2940,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "9524e5eab0cf7c2ba4698384cb7bab3a58186f824fd8388cecfa272bccba84f0",
+            "6886b36ae6df9ce538f6db7ebd6159e68c2936b9d43307f7728fe75e0b62cad2",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &'static str =
-            "\"ef9172439648679a4b4ff9cdeb1ea923f0dc55a02e0a85717d5831f007702330\"";
+            "\"0a6accaa7b583c94209eba58b00b39a804a5c4a8c99043e58e72fed7acd8dfc6\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()

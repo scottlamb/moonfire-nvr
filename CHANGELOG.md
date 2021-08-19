@@ -6,6 +6,12 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## unreleased
+
+*   fix [#146](https://github.com/scottlamb/moonfire-nvr/issues/146): "init
+    segment fetch error" when browsers have cached data from `v0.6.4` and
+    before.
+
 ## `v0.6.5` (2021-08-13)
 
 *   UI: improve video aspect ratio handling. Live streams formerly worked
