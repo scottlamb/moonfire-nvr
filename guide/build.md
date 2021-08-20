@@ -228,14 +228,16 @@ Once prerequisites are installed, you can build the server and find it in
 $ cd server
 $ cargo test
 $ cargo build --release
+$ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
 ```
 
-You can build the UI via `npm` and find it in the `ui/dist` directory:
+You can build the UI via `npm` and find it in the `ui/build` directory:
 
 ```
 $ cd ui
 $ npm install
 $ npm run build
+$ sudo rsync -Pav --delete ui/build/ /usr/local/lib/moonfire-nvr/ui
 ```
 
 ### Running interactively straight from the working copy
@@ -244,8 +246,8 @@ The author finds it convenient for local development to set up symlinks so that
 the binaries in the working copy will run via just `nvr`:
 
 ```
-$ sudo mkdir /usr/local/moonfire-nvr
-$ sudo ln -s `pwd`/ui-dist /usr/local/moonfire-nvr/ui
+$ sudo mkdir /usr/local/lib/moonfire-nvr
+$ sudo ln -s `pwd`/ui/build /usr/local/lib/moonfire-nvr/ui
 $ sudo mkdir /var/lib/moonfire-nvr
 $ sudo chown $USER:$USER /var/lib/moonfire-nvr
 $ ln -s `pwd`/target/release/moonfire-nvr $HOME/bin/moonfire-nvr 
