@@ -237,7 +237,8 @@ You can build the UI via `npm` and find it in the `ui/build` directory:
 $ cd ui
 $ npm install
 $ npm run build
-$ sudo rsync -Pav --delete ui/build/ /usr/local/lib/moonfire-nvr/ui
+$ sudo mkdir /usr/local/lib/moonfire-nvr
+$ sudo rsync --recursive --delete --chmod=D755,F644 ui/build/ /usr/local/lib/moonfire-nvr/ui
 ```
 
 ### Running interactively straight from the working copy
