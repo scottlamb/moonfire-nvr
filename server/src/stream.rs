@@ -296,7 +296,11 @@ impl Opener for RetinaOpener {
         let creds = match (username, password) {
             (None, None) => None,
             (Some(username), Some(password)) => Some(Credentials { username, password }),
-            _ => bail!("expected username and password together"),
+            (Some(username), None) => Some(Credentials {
+                username,
+                password: String::new(),
+            }),
+            _ => bail!("must supply username when supplying password"),
         };
 
         // TODO: connection timeout.
