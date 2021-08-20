@@ -916,9 +916,9 @@ dependencies = [
 
 [[package]]
 name = "http-serve"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0741b8d9d8a13119ba18ab3e57aeae3626654b0964761f8132cc9619b27d72a"
+checksum = "253e214b792b5f3dd7a610b5405218cf7ce3648ec47c3d301160b6736210b3cd"
 dependencies = [
  "bytes",
  "flate2",
