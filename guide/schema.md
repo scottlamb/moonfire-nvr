@@ -64,14 +64,14 @@ Next ensure Moonfire NVR is not running and does not automatically restart if
 the system is rebooted during the upgrade. If you followed the Docker
 instructions, you can do this as follows:
 
-```
-$ nvr stop
+```console
+$ sudo nvr stop
 ```
 
 Then back up your SQLite database. If you are using the default path, you can
 do so as follows:
 
-```
+```console
 $ sudo -u moonfire-nvr cp /var/lib/moonfire-nvr/db/db{,.pre-upgrade}
 ```
 
@@ -91,9 +91,9 @@ manual for write-ahead logging](https://www.sqlite.org/wal.html):
 
 Run the upgrade procedure using the new software binary.
 
-```
-$ nvr pull     # updates the docker image to the latest binary
-$ nvr upgrade  # runs the upgrade
+```console
+$ sudo nvr pull     # updates the docker image to the latest binary
+$ sudo nvr upgrade  # runs the upgrade
 ```
 
 As a rule of thumb, on a Raspberry Pi 4 with a 1 GiB database, an upgrade might
@@ -102,9 +102,9 @@ take about four minutes for each schema version and for the final vacuum.
 Next, you can run the system in read-only mode, although you'll find this only
 works in the "insecure" setup. (Authorization requires writing the database.)
 
-```
-$ nvr rm
-$ nvr run --read-only
+```console
+$ sudo nvr rm
+$ sudo nvr run --read-only
 ```
 
 Go to the web interface and ensure the system is operating correctly. If
@@ -115,10 +115,10 @@ more complicated.
 
 Once you're satisfied, restart the system in read-write mode:
 
-```
-$ nvr stop
-$ nvr rm
-$ nvr run
+```console
+$ sudo nvr stop
+$ sudo nvr rm
+$ sudo nvr run
 ```
 
 Hopefully your system is functioning correctly. If not, there are two options

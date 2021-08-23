@@ -190,10 +190,10 @@ effectively allowing them to lie about the client's IP and protocol.
 To make this take effect, you'll need to stop the running Docker container,
 delete it, and create/run a new one:
 
-```
-$ nvr stop
-$ nvr rm
-$ nvr run
+```console
+$ sudo nvr stop
+$ sudo nvr rm
+$ sudo nvr run
 ```
 
 ## 7. Configure the webserver

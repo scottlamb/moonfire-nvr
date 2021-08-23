@@ -23,7 +23,7 @@ See the [github page](https://github.com/scottlamb/moonfire-nvr) (in case
 you're not reading this text there already). You can download the
 bleeding-edge version from the commandline via git:
 
-```
+```console
 $ git clone https://github.com/scottlamb/moonfire-nvr.git
 $ cd moonfire-nvr
 ```
@@ -32,8 +32,8 @@ $ cd moonfire-nvr
 
 This command should prepare a deployment image for your local machine:
 
-```
-$ docker buildx build --load --tag=moonfire-nvr -f docker/Dockerfile .
+```console
+$ sudo docker buildx build --load --tag=moonfire-nvr -f docker/Dockerfile .
 ```
 
 <details>
@@ -47,8 +47,8 @@ $ docker buildx build --load --tag=moonfire-nvr -f docker/Dockerfile .
     due to an error in `libseccomp`, as described [in this askubuntu.com answer](https://askubuntu.com/a/1264921/1365248).
     Try running in a privileged builder. As described in [`docker buildx build` documentation](https://docs.docker.com/engine/reference/commandline/buildx_build/#allow),
     run this command once:
-    ```
-    $ docker buildx create --use --name insecure-builder --buildkitd-flags '--allow-insecure-entitlement security.insecure'
+    ```console
+    $ sudo docker buildx create --use --name insecure-builder --buildkitd-flags '--allow-insecure-entitlement security.insecure'
     ```
     then add `--allow security.insecure` to your `docker buildx build` commandlines.
 </details>
@@ -59,11 +59,11 @@ helpful to use the `dev` target. This is a self-contained developer environment
 which you can use from its shell via `docker run` or via something like
 Visual Studio Code's Docker plugin.
 
-```
-$ docker buildx build \
+```console
+$ sudo docker buildx build \
         --load --tag=moonfire-dev --target=dev -f docker/Dockerfile .
 ...
-$ docker run \
+$ sudo docker run \
         --rm --interactive=true --tty \
         --mount=type=bind,source=$(pwd),destination=/var/lib/moonfire-nvr/src \
         moonfire-dev
@@ -86,8 +86,8 @@ architecture.
 On the author's macOS machine with Docker desktop 3.0.4, building for
 multiple platforms at once will initially fail with the following error:
 
-```
-$ docker buildx build ... --platform=linux/arm64/v8,linux/arm/v7,linux/amd64
+```console
+$ sudo docker buildx build ... --platform=linux/arm64/v8,linux/arm/v7,linux/amd64
 [+] Building 0.0s (0/0)
 error: multiple platforms feature is currently not supported for docker driver. Please switch to a different driver (eg. "docker buildx create --use")
 ```
@@ -107,8 +107,8 @@ caveats:
     suggests a workaround of building all three then using caching to quickly
     load the one of immediate interest:
     ```
-    $ docker buildx build --platform=linux/arm64/v8,linux/arm/v7,linux/amd64 ...
-    $ docker buildx build --load --platform=arm64/v8 ...
+    $ sudo docker buildx build --platform=linux/arm64/v8,linux/arm/v7,linux/amd64 ...
+    $ sudo docker buildx build --load --platform=arm64/v8 ...
     ```
 
 On Linux hosts (as opposed to when using Docker Desktop on macOS/Windows),
@@ -190,7 +190,7 @@ in "Maintenance LTS" or "Active LTS" status: currently v12 or v14.
 On recent Ubuntu or Raspbian Linux, the following command will install
 most non-Rust dependencies:
 
-```
+```console
 $ sudo apt-get install \
                build-essential \
                libavcodec-dev \
@@ -212,7 +212,7 @@ manager](https://nodejs.org/en/download/package-manager/#debian-and-ubuntu-based
 On macOS with [Homebrew](https://brew.sh/) and Xcode installed, try the
 following command:
 
-```
+```console
 $ brew install ffmpeg node
 ```
 
@@ -224,7 +224,7 @@ your Linux distribution's Rust packages, which tend to be too old.
 Once prerequisites are installed, you can build the server and find it in
 `target/release/moonfire-nvr`:
 
-```
+```console
 $ cd server
 $ cargo test
 $ cargo build --release
@@ -233,7 +233,7 @@ $ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
 
 You can build the UI via `npm` and find it in the `ui/build` directory:
 
-```
+```console
 $ cd ui
 $ npm install
 $ npm run build
@@ -246,7 +246,7 @@ $ sudo rsync --recursive --delete --chmod=D755,F644 ui/build/ /usr/local/lib/moo
 The author finds it convenient for local development to set up symlinks so that
 the binaries in the working copy will run via just `nvr`:
 
-```
+```console
 $ sudo mkdir /usr/local/lib/moonfire-nvr
 $ sudo ln -s `pwd`/ui/build /usr/local/lib/moonfire-nvr/ui
 $ sudo mkdir /var/lib/moonfire-nvr
@@ -308,7 +308,7 @@ Internet](secure.md).
 
 Some handy commands:
 
-```
+```console
 $ sudo systemctl daemon-reload                                  # reload configuration files
 $ sudo systemctl start moonfire-nvr                             # start the service now
 $ sudo systemctl stop moonfire-nvr                              # stop the service now (but don't wait for it finish stopping)

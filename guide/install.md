@@ -13,7 +13,16 @@ instead want to build Moonfire NVR yourself, see the [Build
 instructions](build.md).
 
 First, install [Docker](https://www.docker.com/) if you haven't already,
-and verify `docker run --rm hello-world` works.
+and verify `sudo docker run --rm hello-world` works.
+
+<details>
+  <summary><tt>sudo</tt> or not?</summary>
+
+If you prefer to save typing by not prefixing all `docker` and `nvr` commands
+with `sudo`, see [Docker docs: Manage Docker as a non-root
+user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
+Note `docker` access is equivalent to root access security-wise.
+</details>
 
 Next, you'll need to set up your filesystem and the Moonfire NVR user.
 
@@ -30,7 +39,7 @@ Moonfire NVR keeps two kinds of state:
 
 On most Linux systems, you can create the user as follows:
 
-```
+```console
 $ sudo useradd --user-group --create-home --home /var/lib/moonfire-nvr moonfire-nvr
 ```
 
@@ -41,19 +50,44 @@ and managing a long-lived Docker container for its web interface.
 As you set up this script, adjust the `tz` variable as appropriate for your
 time zone.
 
+Use your favorite editor to create `/usr/local/bin/nvr`, starting from the
+configuration below:
+
+```console
+$ sudo nano /usr/local/bin/nvr
+(see below for contents)
+$ sudo chmod a+rx /usr/local/bin/nvr
 ```
-sudo sh -c 'cat > /usr/local/bin/nvr' <<'EOF'
+
+`/usr/local/bin/nvr`:
+```bash
 #!/bin/bash -e
 
+# Set your timezone here.
 tz="America/Los_Angeles"
-container_name="moonfire-nvr"
+
+# or eg "scottlamb/moonfire-nvr:v0.6.5" to specify a particular version.
 image_name="scottlamb/moonfire-nvr:latest"
+container_name="moonfire-nvr"
 common_docker_run_args=(
         --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
+
+        # Add additional mount lines here for each sample file directory
+        # outside of /var/lib/moonfire-nvr, eg:
+        # --mount=type=bind,source=/media/nvr/sample,destination=/media/nvr/sample
+
         --user="$(id -u moonfire-nvr):$(id -g moonfire-nvr)"
+
+        # This avoids errors with broken seccomp on Raspberry Pi OS.
         --security-opt=seccomp:unconfined
+
+        # docker's default log driver won't rotate logs properly, and will throw
+        # away logs when you destroy and recreate the container. Using journald
+        # solves these problems.
+        # https://docs.docker.com/config/containers/logging/configure/
         --log-driver=journald
         --log-opt="tag=moonfire-nvr"
+
         --env=RUST_BACKTRACE=1
         --env=TZ=":${tz}"
 )
@@ -65,11 +99,20 @@ run)
                 --detach=true \
                 --restart=unless-stopped \
                 "${common_docker_run_args[@]}" \
+
+                # This is the simplest way of configuring networking, although
+                # you can use eg --publish=8080:8080 if you prefer.
                 --network=host \
+
                 --name="${container_name}" \
                 "${image_name}" \
                 run \
+
+                # Add any additional `moonfire-nvr run` arguments here, eg
+                # "--rtsp-library=ffmpeg" if the default "--rtsp-library=retina"
+                # isn't working.
                 --allow-unauthenticated-permissions='view_video: true' \
+
                 "$@"
         ;;
 start|stop|logs|rm)
@@ -88,14 +131,12 @@ pull)
                 "$@"
         ;;
 esac
-EOF
-sudo chmod a+rx /usr/local/bin/nvr
 ```
 
 then try it out by initializing the database:
 
-```
-$ nvr init
+```console
+$ sudo nvr init
 ```
 
 This will create a directory `/var/lib/moonfire-nvr/db` with a SQLite3 database
@@ -113,7 +154,7 @@ using UAS, as described there. UAS has been linked to filesystem corruption.
 
 Set up the mount point:
 
-```
+```console
 $ sudo vim /etc/fstab
 $ sudo mkdir /media/nvr
 $ sudo mount /media/nvr
@@ -126,12 +167,7 @@ In `/etc/fstab`, add a line similar to this:
 UUID=23d550bc-0e38-4825-acac-1cac8a7e091f    /media/nvr   ext4    nofail,noatime,lazytime,data=writeback,journal_async_commit  0       2
 ```
 
-You'll have to lookup the correct uuid for your disk. One way to do that is
-via the following command:
-
-```
-$ ls -l /dev/disk/by-uuid
-```
+You can look up the correct uuid for your disk via `blkid`.
 
 If you use the `nofail` attribute in `/etc/fstab` as described above, your
 system will boot successfully even when the hard drive is unavailable (such as
@@ -140,18 +176,14 @@ recovering from problems.
 
 Create the sample directory.
 
-```
-sudo mkdir /media/nvr/sample
-sudo chown -R moonfire-nvr:moonfire-nvr /media/nvr
+```console
+$ sudo mkdir /media/nvr/sample
+$ sudo chown -R moonfire-nvr:moonfire-nvr /media/nvr
 ```
 
 Add a new `--mount` line to your Docker wrapper script `/usr/local/bin/nvr`
-to expose this new volume to the Docker container, directly below the other
-mount lines. It will look similar to this:
-
-```
-        --mount=type=bind,source=/media/nvr/sample,destination=/media/nvr/sample
-```
+to expose this new volume to the Docker container, right where a comment
+mentions "Additional mount lines".
 
 ### Completing configuration through the UI
 
@@ -159,9 +191,18 @@ Once your system is set up, it's time to initialize an empty database
 and add the cameras and sample directories. You can do this
 by using the `moonfire-nvr` binary's text-based configuration tool.
 
+```console
+$ sudo nvr config 2>debug-log
 ```
-$ nvr config 2>debug-log
-```
+
+<details>
+  <summary>Did it just return?</summary>
+
+If `nvr config` returns you to the console prompt right away, look in the
+`debug-log` file for why. One common reason is that you have Moonfire NVR
+running; you'll need to shut it down first. Try `nvr stop` before `nvr config`
+and `nvr start` afterward.
+</details>
 
 In the user interface,
 
@@ -229,12 +270,12 @@ system](secure.md) first.
 This command will start a detached Docker container for the web interface.
 It will automatically restart when your system does.
 
-```
-$ nvr run
+```console
+$ sudo nvr run
 ```
 
 You can temporarily disable the service via `nvr stop` and restart it later via
-`nvr start`.
+`nvr start`. You'll need to do this before and after using `nvr config`.
 
 The HTTP interface is accessible on port 8080; if your web browser is running
 on the same machine, you can access it at

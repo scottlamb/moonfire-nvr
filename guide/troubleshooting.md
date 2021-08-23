@@ -106,13 +106,13 @@ Moonfire NVR names a few important thread types as follows:
 You can use the following command to teach [`lnav`](http://lnav.org/) Moonfire
 NVR's log format:
 
-```
+```console
 $ lnav -i misc/moonfire_log.json
 ```
 
 `lnav` versions prior to 0.9.0 print a (harmless) warning message on startup:
 
-```
+```console
 $ lnav -i git/moonfire-nvr/misc/moonfire_log.json
 warning:git/moonfire-nvr/misc/moonfire_log.json:line 2
 warning:  unexpected path --
@@ -151,7 +151,7 @@ This log message is packed with debugging information:
     file `/media/14tb/sample/00000003001c1ba6`. On-disk files are named by
     a fixed eight hexadecimal digits for the stream id and eight hexadecimal
     digits for the recording id. You can convert with `printf`:
-    ```
+    ```console
     $ printf '%08x%08x\n' 3 1842086
     00000003001c1ba6
     ```
@@ -242,8 +242,8 @@ problem in more detail. The simplest solution is to add
 If you are using the recommended `/usr/local/bin/nvr` wrapper script,
 add this option to the `common_docker_run_args` section.
 
-```
-$ docker run --rm -it moonfire-nvr:latest
+```console
+$ sudo docker run --rm -it moonfire-nvr:latest
 clock_gettime failed: EPERM: Operation not permitted
 
 This indicates a broken environment. See the troubleshooting guide.
@@ -273,7 +273,7 @@ clean up the excess files. Moonfire NVR will start working again immediately.
 If Moonfire NVR's own files are too large, follow this procedure:
 
 1.  Shut it down via `SIGKILL`:
-    ```
+    ```console
     $ sudo killall -KILL moonfire-nvr
     ```
     (Be sure to use `-KILL`. It won't shut down properly on `SIGTERM` or `SIGINT`
