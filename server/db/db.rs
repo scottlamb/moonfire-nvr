@@ -2544,13 +2544,13 @@ mod tests {
             streams: [
                 StreamChange {
                     sample_file_dir_id: Some(sample_file_dir_id),
-                    rtsp_url: "rtsp://test-camera/main".to_owned(),
+                    rtsp_url: Some(Url::parse("rtsp://test-camera/main").unwrap()),
                     record: false,
                     flush_if_sec: 1,
                 },
                 StreamChange {
                     sample_file_dir_id: Some(sample_file_dir_id),
-                    rtsp_url: "rtsp://test-camera/sub".to_owned(),
+                    rtsp_url: Some(Url::parse("rtsp://test-camera/sub").unwrap()),
                     record: true,
                     flush_if_sec: 1,
                 },
