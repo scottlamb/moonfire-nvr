@@ -54,6 +54,7 @@ use std::str;
 use std::string::String;
 use std::sync::Arc;
 use std::vec::Vec;
+use url::Url;
 use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
@@ -499,7 +500,7 @@ pub struct LiveSegment {
 #[derive(Clone, Debug, Default)]
 pub struct StreamChange {
     pub sample_file_dir_id: Option<i32>,
-    pub rtsp_url: String,
+    pub rtsp_url: Option<Url>,
     pub record: bool,
     pub flush_if_sec: i64,
 }
@@ -681,7 +682,7 @@ impl StreamStateChanger {
                     }
                 }
                 if !have_data
-                    && sc.rtsp_url.is_empty()
+                    && sc.rtsp_url.is_none()
                     && sc.sample_file_dir_id.is_none()
                     && !sc.record
                 {
@@ -709,7 +710,7 @@ impl StreamStateChanger {
                         "#,
                     )?;
                     let rows = stmt.execute(named_params! {
-                        ":rtsp_url": &sc.rtsp_url,
+                        ":rtsp_url": &sc.rtsp_url.as_ref().map(Url::as_str),
                         ":record": sc.record,
                         ":flush_if_sec": sc.flush_if_sec,
                         ":sample_file_dir_id": sc.sample_file_dir_id,
@@ -723,7 +724,7 @@ impl StreamStateChanger {
                     streams.push((sid, Some((camera_id, type_, sc))));
                 }
             } else {
-                if sc.rtsp_url.is_empty() && sc.sample_file_dir_id.is_none() && !sc.record {
+                if sc.rtsp_url.is_none() && sc.sample_file_dir_id.is_none() && !sc.record {
                     // Do nothing; there is no record and we want to keep it that way.
                     continue;
                 }
@@ -742,7 +743,7 @@ impl StreamStateChanger {
                     ":camera_id": camera_id,
                     ":sample_file_dir_id": sc.sample_file_dir_id,
                     ":type": type_.as_str(),
-                    ":rtsp_url": &sc.rtsp_url,
+                    ":rtsp_url": &sc.rtsp_url.as_ref().map(Url::as_str),
                     ":record": sc.record,
                     ":flush_if_sec": sc.flush_if_sec,
                 })?;
@@ -767,7 +768,7 @@ impl StreamStateChanger {
                         type_,
                         camera_id,
                         sample_file_dir_id: sc.sample_file_dir_id,
-                        rtsp_url: mem::replace(&mut sc.rtsp_url, String::new()),
+                        rtsp_url: sc.rtsp_url.take().map(String::from).unwrap_or_default(),
                         retain_bytes: 0,
                         flush_if_sec: sc.flush_if_sec,
                         range: None,
@@ -790,10 +791,10 @@ impl StreamStateChanger {
                     });
                 }
                 (Entry::Vacant(_), None) => {}
-                (Entry::Occupied(e), Some((_, _, sc))) => {
+                (Entry::Occupied(e), Some((_, _, mut sc))) => {
                     let e = e.into_mut();
                     e.sample_file_dir_id = sc.sample_file_dir_id;
-                    e.rtsp_url = sc.rtsp_url;
+                    e.rtsp_url = sc.rtsp_url.take().map(String::from).unwrap_or_default();
                     e.record = sc.record;
                     e.flush_if_sec = sc.flush_if_sec;
                 }

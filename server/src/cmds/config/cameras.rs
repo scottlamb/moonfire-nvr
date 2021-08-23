@@ -5,17 +5,17 @@
 use crate::stream::{self, Opener};
 use base::strutil::{decode_size, encode_size};
 use cursive::traits::{Boxable, Finder, Identifiable};
-use cursive::views;
+use cursive::views::{self, ViewRef};
 use cursive::Cursive;
 use db::writer;
-use failure::Error;
+use failure::{bail, Error, ResultExt};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use url::Url;
 
 /// Builds a `CameraChange` from an active `edit_camera_dialog`.
-fn get_change(siv: &mut Cursive) -> db::CameraChange {
+fn get_change(siv: &mut Cursive) -> Result<db::CameraChange, Error> {
     // Note: these find_name calls are separate statements, which seems to be important:
     // https://github.com/gyscos/Cursive/issues/144
     let sn = siv
@@ -62,49 +62,75 @@ fn get_change(siv: &mut Cursive) -> db::CameraChange {
         streams: Default::default(),
     };
     for &t in &db::ALL_STREAM_TYPES {
-        let u = siv
-            .find_name::<views::EditView>(&format!("{}_rtsp_url", t.as_str()))
-            .unwrap()
-            .get_content()
-            .as_str()
-            .into();
-        let r = siv
+        let rtsp_url = parse_url(
+            siv.find_name::<views::EditView>(&format!("{}_rtsp_url", t.as_str()))
+                .unwrap()
+                .get_content()
+                .as_str(),
+        )?;
+        let record = siv
             .find_name::<views::Checkbox>(&format!("{}_record", t.as_str()))
             .unwrap()
             .is_checked();
-        let f = i64::from_str(
+        let flush_if_sec = i64::from_str(
             siv.find_name::<views::EditView>(&format!("{}_flush_if_sec", t.as_str()))
                 .unwrap()
                 .get_content()
                 .as_str(),
         )
         .unwrap_or(0);
-        let d = *siv
+        let sample_file_dir_id = *siv
             .find_name::<views::SelectView<Option<i32>>>(&format!("{}_sample_file_dir", t.as_str()))
             .unwrap()
             .selection()
             .unwrap();
         c.streams[t.index()] = db::StreamChange {
-            rtsp_url: u,
-            sample_file_dir_id: d,
-            record: r,
-            flush_if_sec: f,
+            rtsp_url,
+            sample_file_dir_id,
+            record,
+            flush_if_sec,
         };
     }
-    c
+    Ok(c)
+}
+
+/// Attempts to parse a URL field into a sort-of-validated URL.
+fn parse_url(raw: &str) -> Result<Option<Url>, Error> {
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let url = url::Url::parse(&raw).with_context(|_| format!("can't parse {:?} as URL", &raw))?;
+    if url.scheme() != "rtsp" {
+        bail!("Expected URL scheme rtsp:// in URL {}", &url);
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        bail!(
+            "Unexpected credentials in URL {}; use the username and password fields instead",
+            &url
+        );
+    }
+    Ok(Some(url))
 }
 
 fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
-    let change = get_change(siv);
-
-    let result = {
+    let result = (|| {
+        let change = get_change(siv)?;
+        for (i, stream) in change.streams.iter().enumerate() {
+            if stream.record && (stream.rtsp_url.is_none() || stream.sample_file_dir_id.is_none()) {
+                let type_ = db::StreamType::from_index(i).unwrap();
+                bail!(
+                    "Can't record {} stream without RTSP URL and sample file directory",
+                    type_.as_str()
+                );
+            }
+        }
         let mut l = db.lock();
         if let Some(id) = id {
             l.update_camera(id, change)
         } else {
             l.add_camera(change).map(|_| ())
         }
-    };
+    })();
     if let Err(e) = result {
         siv.add_layer(
             views::Dialog::text(format!("Unable to add camera: {}", e))
@@ -140,18 +166,21 @@ fn press_test_inner(
 }
 
 fn press_test(siv: &mut Cursive, t: db::StreamType) {
-    let c = get_change(siv);
-    let url = match Url::parse(&c.streams[t.index()].rtsp_url) {
+    let mut c = match get_change(siv) {
         Ok(u) => u,
         Err(e) => {
             siv.add_layer(
-                views::Dialog::text(format!("Unparseable URL: {}", e))
+                views::Dialog::text(format!("{}", e))
                     .title("Stream test failed")
                     .dismiss_button("Back"),
             );
             return;
         }
     };
+    let url = c.streams[t.index()]
+        .rtsp_url
+        .take()
+        .expect("test button only enabled when URL set");
     let username = c.username;
     let password = c.password;
 
@@ -317,6 +346,11 @@ fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32) {
     }
 }
 
+fn edit_url(content: &str, mut test_button: ViewRef<views::Button>) {
+    let enable_test = matches!(parse_url(content), Ok(Some(_)));
+    test_button.set_enabled(enable_test);
+}
+
 /// Adds or updates a camera.
 /// (The former if `item` is None; the latter otherwise.)
 fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i32>) {
@@ -358,13 +392,21 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                 views::LinearLayout::horizontal()
                     .child(
                         views::EditView::new()
+                            .on_edit(move |siv, content, _pos| {
+                                let test_button = siv
+                                    .find_name::<views::Button>(&format!("{}_test", type_.as_str()))
+                                    .unwrap();
+                                edit_url(content, test_button)
+                            })
                             .with_name(format!("{}_rtsp_url", type_.as_str()))
                             .full_width(),
                     )
                     .child(views::DummyView)
-                    .child(views::Button::new("Test", move |siv| {
-                        press_test(siv, type_)
-                    })),
+                    .child(
+                        views::Button::new("Test", move |siv| press_test(siv, type_))
+                            .disabled()
+                            .with_name(format!("{}_test", type_.as_str())),
+                    ),
             )
             .child(
                 "sample file dir",
@@ -431,6 +473,10 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                     &format!("{}_rtsp_url", t.as_str()),
                     |v: &mut views::EditView| v.set_content(s.rtsp_url.to_owned()),
                 );
+                let test_button = dialog
+                    .find_name::<views::Button>(&format!("{}_test", t.as_str()))
+                    .unwrap();
+                edit_url(&s.rtsp_url, test_button);
                 dialog.call_on_name(
                     &format!("{}_usage_cap", t.as_str()),
                     |v: &mut views::TextView| v.set_content(u),

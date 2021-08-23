@@ -89,7 +89,7 @@ impl<C: Clocks + Clone> TestDb<C> {
                     streams: [
                         db::StreamChange {
                             sample_file_dir_id: Some(sample_file_dir_id),
-                            rtsp_url: "rtsp://test-camera/main".to_owned(),
+                            rtsp_url: Some(url::Url::parse("rtsp://test-camera/main").unwrap()),
                             record: true,
                             flush_if_sec,
                         },
