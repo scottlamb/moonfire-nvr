@@ -152,7 +152,7 @@ wiki](https://github.com/scottlamb/moonfire-nvr/wiki/System-setup). If you're
 using a USB SATA bridge, this is also a good time to ensure you're not
 using UAS, as described there. UAS has been linked to filesystem corruption.
 
-Set up the mount point:
+Set up the mount point and sample file directory:
 
 ```console
 $ sudo vim /etc/fstab
@@ -196,7 +196,7 @@ $ sudo nvr config 2>debug-log
 ```
 
 <details>
-  <summary>Did it just return?</summary>
+  <summary>Did it return without doing anything?</summary>
 
 If `nvr config` returns you to the console prompt right away, look in the
 `debug-log` file for why. One common reason is that you have Moonfire NVR
@@ -207,6 +207,9 @@ and `nvr start` afterward.
 In the user interface,
 
 1.  add your sample file dir(s) under "Directories and retention".
+    (Many streams can share a directory. It's recommended to have just one
+    directory per hard drive.)
+
     If you used a dedicated hard drive, use the directory you precreated
     (eg `/media/nvr/sample`). Otherwise, try
     `/var/lib/moonfire-nvr/sample`. Moonfire NVR will create the directory as
@@ -240,8 +243,8 @@ In the user interface,
 
 3.  Assign disk space to your cameras back in "Directories and retention".
     Leave a little slack between the total limit and the filesystem capacity,
-    even if you store nothing else on the disk. 1 GiB per camera should be
-    plenty. This is needed for a few reasons:
+    even if you store nothing else on the disk. 1 GiB of slack per camera should
+    be plenty. This is needed for a few reasons:
 
     *   Up to `max(120, flush_if_sec)` seconds of video can be written before
         being counted toward the usage because the recording doesn't count until
