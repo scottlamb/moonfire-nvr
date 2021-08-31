@@ -217,7 +217,7 @@ In the latter case, you'll likely see a `getting next packet took PT...S!`
 message as described above.
 
 ```
-W20210309 00:28:55.527 s-courtyard-sub moonfire_nvr::streamer] courtyard-sub: sleeping for Duration { secs: 1, nanos: 0 } after error: End of file
+W20210309 00:28:55.527 s-courtyard-sub moonfire_nvr::streamer] courtyard-sub: sleeping for PT1S after error: End of file
 (set environment variable RUST_BACKTRACE=1 to see backtraces)
 ```
 
@@ -264,7 +264,7 @@ If Moonfire NVR runs out of disk space on a sample file directory, recording
 will be stuck and you'll see log messages like the following:
 
 ```
-W20210401 11:21:07.365 s-driveway-main moonfire_base::clock] sleeping for Duration { secs: 1, nanos: 0 } after error: No space left on device (os error 28)
+W20210401 11:21:07.365 s-driveway-main moonfire_base::clock] sleeping for PT1S after error: No space left on device (os error 28)
 ```
 
 If something else used more disk space on the filesystem than planned, just

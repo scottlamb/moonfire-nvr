@@ -44,7 +44,7 @@ where
         };
         let sleep_time = Duration::seconds(1);
         warn!(
-            "sleeping for {:?} after error: {}",
+            "sleeping for {} after error: {}",
             sleep_time,
             crate::error::prettify_failure(&e)
         );

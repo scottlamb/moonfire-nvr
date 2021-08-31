@@ -95,7 +95,7 @@ where
             if let Err(e) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
                 warn!(
-                    "{}: sleeping for {:?} after error: {}",
+                    "{}: sleeping for {} after error: {}",
                     self.short_name,
                     sleep_time,
                     base::prettify_failure(&e)

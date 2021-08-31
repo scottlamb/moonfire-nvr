@@ -358,7 +358,7 @@ impl Opener for RetinaOpener {
                         deadline = tokio::time::Instant::now() + RETINA_TIMEOUT;
                         if v.loss > 0 {
                             log::warn!(
-                                "{}: lost {} RTP packets @ {:?}",
+                                "{}: lost {} RTP packets @ {}",
                                 &label,
                                 v.loss,
                                 v.start_ctx()
