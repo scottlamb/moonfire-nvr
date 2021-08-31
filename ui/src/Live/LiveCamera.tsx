@@ -160,9 +160,15 @@ class LiveCameraDriver {
         videoSampleEntryId: part.videoSampleEntryId,
       };
       let initSegmentResult = await api.init(part.videoSampleEntryId, {});
-      if (initSegmentResult.status !== "success") {
-        this.error(`init segment fetch status ${initSegmentResult.status}`);
-        return;
+      switch (initSegmentResult.status) {
+        case "error":
+          this.error(`init segment fetch error: ${initSegmentResult.message}`);
+          return;
+        case "aborted":
+          this.error(`init segment fetch aborted`);
+          return;
+        case "success":
+          break;
       }
       this.setAspect(initSegmentResult.response.aspect);
       srcBuf.appendBuffer(initSegmentResult.response.body);
