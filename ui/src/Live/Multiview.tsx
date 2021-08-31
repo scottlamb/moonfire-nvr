@@ -164,8 +164,8 @@ const Multiview = (props: MultiviewProps) => {
     // WebSocket connections and buffers.
     //
     // When no camera is selected, use the index within selected. (Actually,
-    // its negation, to disambiguate between the two cases.)
-    const key = e ?? -i;
+    // -1 minus the index, to disambiguate between the two cases.)
+    const key = e ?? -1 - i;
     return (
       <Monoview
         key={key}
