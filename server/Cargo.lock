@@ -1871,9 +1871,9 @@ dependencies = [
 
 [[package]]
 name = "retina"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "954bff9dec477d485c8fba6433f120b570e8fac582e2ea19d7c0c900a36c38e4"
+checksum = "446070f3caf291e982d240c7f921837f6da0cbffbc26f1d785b0a8d214f2cadd"
 dependencies = [
  "base64",
  "bitreader",
@@ -1886,6 +1886,7 @@ dependencies = [
  "once_cell",
  "pin-project",
  "pretty-hex",
+ "rand",
  "rtp-rs",
  "rtsp-types",
  "sdp",

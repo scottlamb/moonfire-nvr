@@ -20,6 +20,7 @@ where
     C: Clocks + Clone,
 {
     pub opener: &'a dyn stream::Opener,
+    pub transport: retina::client::Transport,
     pub db: &'tmp Arc<Database<C>>,
     pub shutdown: &'tmp Arc<AtomicBool>,
 }
@@ -39,6 +40,7 @@ where
     dir: Arc<dir::SampleFileDir>,
     syncer_channel: writer::SyncerChannel<::std::fs::File>,
     opener: &'a dyn stream::Opener,
+    transport: retina::client::Transport,
     stream_id: i32,
     short_name: String,
     url: Url,
@@ -72,6 +74,7 @@ where
             dir,
             syncer_channel,
             opener: env.opener,
+            transport: env.transport,
             stream_id,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
             url,
@@ -115,6 +118,7 @@ where
                     url: self.url.clone(),
                     username: self.username.clone(),
                     password: self.password.clone(),
+                    transport: self.transport,
                 },
             )?
         };
@@ -360,6 +364,7 @@ mod tests {
             opener: &opener,
             db: &db.db,
             shutdown: &opener.shutdown,
+            transport: retina::client::Transport::Tcp,
         };
         let mut stream;
         {

@@ -13,8 +13,8 @@ Each release is tagged in Git and on the Docker repository
     before.
 *   fix [#147](https://github.com/scottlamb/moonfire-nvr/issues/147): confusing
     `nvr init` failures when using very old versions of SQLite.
-*   improve compatibility with Reolink cameras when using the default
-    `--rtsp-library=retina`.
+*   support `--rtsp-transport=udp`, which improves compatibility with Reolink
+    cameras.
 
 ## `v0.6.5` (2021-08-13)
 

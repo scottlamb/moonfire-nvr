@@ -76,6 +76,9 @@ pub struct Args {
     /// developed by Moonfire NVR's author).
     #[structopt(long, default_value = "retina", parse(try_from_str))]
     rtsp_library: crate::stream::RtspLibrary,
+
+    #[structopt(long, default_value)]
+    rtsp_transport: retina::client::Transport,
 }
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
@@ -223,6 +226,7 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
         let env = streamer::Environment {
             db: &db,
             opener: args.rtsp_library.opener(),
+            transport: args.rtsp_transport,
             shutdown: &shutdown_streamers,
         };
 

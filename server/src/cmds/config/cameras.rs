@@ -157,6 +157,7 @@ fn press_test_inner(
             url,
             username,
             password,
+            transport: retina::client::Transport::Tcp,
         },
     )?;
     Ok(format!(

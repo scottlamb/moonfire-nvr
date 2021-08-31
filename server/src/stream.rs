@@ -9,7 +9,7 @@ use failure::{bail, Error};
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use log::warn;
-use retina::client::Credentials;
+use retina::client::{Credentials, Transport};
 use retina::codec::{CodecItem, VideoParameters};
 use std::convert::TryFrom;
 use std::ffi::CString;
@@ -61,6 +61,7 @@ pub enum Source<'a> {
         url: Url,
         username: Option<String>,
         password: Option<String>,
+        transport: Transport,
     },
 }
 
@@ -71,6 +72,7 @@ pub enum Source {
         url: Url,
         username: Option<String>,
         password: Option<String>,
+        transport: Transport,
     },
 }
 
@@ -138,10 +140,17 @@ impl Opener for Ffmpeg {
                 url,
                 username,
                 password,
+                transport,
             } => {
                 let mut open_options = ffmpeg::avutil::Dictionary::new();
                 open_options
-                    .set(cstr!("rtsp_transport"), cstr!("tcp"))
+                    .set(
+                        cstr!("rtsp_transport"),
+                        match transport {
+                            Transport::Tcp => cstr!("tcp"),
+                            Transport::Udp => cstr!("udp"),
+                        },
+                    )
                     .unwrap();
                 open_options
                     .set(cstr!("user-agent"), cstr!("moonfire-nvr"))
@@ -284,28 +293,32 @@ impl Opener for RetinaOpener {
         let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
         let (frame_tx, frame_rx) = tokio::sync::mpsc::channel(1);
         let handle = tokio::runtime::Handle::current();
-        let (url, username, password) = match src {
+        let (url, options) = match src {
             #[cfg(test)]
             Source::File(_) => bail!("Retina doesn't support .mp4 files"),
             Source::Rtsp {
                 url,
                 username,
                 password,
-            } => (url, username, password),
-        };
-        let creds = match (username, password) {
-            (None, None) => None,
-            (Some(username), Some(password)) => Some(Credentials { username, password }),
-            (Some(username), None) => Some(Credentials {
-                username,
-                password: String::new(),
-            }),
-            _ => bail!("must supply username when supplying password"),
+                transport,
+            } => (
+                url,
+                retina::client::SessionOptions::default()
+                    .creds(match (username, password) {
+                        (None, None) => None,
+                        (Some(username), password) => Some(Credentials {
+                            username,
+                            password: password.unwrap_or_default(),
+                        }),
+                        _ => bail!("must supply username when supplying password"),
+                    })
+                    .transport(transport)
+                    .user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION"))),
+            ),
         };
 
-        // TODO: connection timeout.
         handle.spawn(async move {
-            let r = tokio::time::timeout(RETINA_TIMEOUT, RetinaOpener::play(url, creds)).await;
+            let r = tokio::time::timeout(RETINA_TIMEOUT, RetinaOpener::play(url, options)).await;
             let (mut session, video_params, first_frame) =
                 match r.unwrap_or_else(|_| Err(format_err!("timeout opening stream"))) {
                     Err(e) => {
@@ -378,7 +391,7 @@ impl RetinaOpener {
     /// Plays to first frame. No timeout; that's the caller's responsibility.
     async fn play(
         url: Url,
-        creds: Option<Credentials>,
+        options: retina::client::SessionOptions,
     ) -> Result<
         (
             Pin<Box<retina::client::Demuxed>>,
@@ -387,14 +400,7 @@ impl RetinaOpener {
         ),
         Error,
     > {
-        let mut session = retina::client::Session::describe(
-            url,
-            retina::client::SessionOptions::default()
-                .creds(creds)
-                .user_agent("Moonfire NVR".to_owned())
-                .ignore_spurious_data(true), // TODO: make this configurable.
-        )
-        .await?;
+        let mut session = retina::client::Session::describe(url, options).await?;
         let (video_i, mut video_params) = session
             .streams()
             .iter()
