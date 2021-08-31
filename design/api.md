@@ -87,6 +87,9 @@ The `application/json` response will have a dict as follows:
     to divide recordings into days as described further below.
 *   `cameras`: a list of cameras. Each is a dict as follows:
     *   `uuid`: in text format
+    *   `id`: an integer. The client doesn't ever need to send the id
+        back in API requests, but camera ids are helpful to know when debugging
+        by reading logs or directly examining the filesystem/database.
     *   `shortName`: a short name (typically one or two words)
     *   `description`: a longer description (typically a phrase or paragraph)
     *   `config`: (only included if request parameter `cameraConfigs` is true)
@@ -96,6 +99,10 @@ The `application/json` response will have a dict as follows:
         *   `onvif_host`
     *   `streams`: a dict of stream type ("main" or "sub") to a dictionary
         describing the stream:
+        *   `id`: an integer. The client doesn't ever need to send the id
+            back in API requests, but stream ids are helpful to know when
+            debugging by reading logs or directly examining the
+            filesystem/database.
         *   `retainBytes`: the configured total number of bytes of completed
             recordings to retain.
         *   `minStartTime90k`: the start time of the earliest recording for

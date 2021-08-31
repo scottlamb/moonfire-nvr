@@ -56,6 +56,7 @@ impl Session {
 #[serde(rename_all = "camelCase")]
 pub struct Camera<'a> {
     pub uuid: Uuid,
+    pub id: i32,
     pub short_name: &'a str,
     pub description: &'a str,
 
@@ -77,6 +78,7 @@ pub struct CameraConfig<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stream<'a> {
+    pub id: i32,
     pub retain_bytes: i64,
     pub min_start_time_90k: Option<Time>,
     pub max_end_time_90k: Option<Time>,
@@ -186,6 +188,7 @@ impl<'a> Camera<'a> {
     ) -> Result<Self, Error> {
         Ok(Camera {
             uuid: c.uuid,
+            id: c.id,
             short_name: &c.short_name,
             description: &c.description,
             config: match include_config {
@@ -238,6 +241,7 @@ impl<'a> Stream<'a> {
             .get(&id)
             .ok_or_else(|| format_err!("missing stream {}", id))?;
         Ok(Some(Stream {
+            id: s.id,
             retain_bytes: s.retain_bytes,
             min_start_time_90k: s.range.as_ref().map(|r| r.start),
             max_end_time_90k: s.range.as_ref().map(|r| r.end),
