@@ -15,7 +15,7 @@ path = "lib.rs"
 [dependencies]
 base = { package = "moonfire-base", path = "../base" }
 base64 = "0.13.0"
-blake3 = "0.3.7"
+blake3 = "1.0.0"
 byteorder = "1.0"
 cstr = "0.2.5"
 failure = "0.1.1"

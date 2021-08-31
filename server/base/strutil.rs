@@ -53,9 +53,11 @@ fn decode_sizepart(input: &str) -> IResult<&str, i64> {
 }
 
 fn decode_size_internal(input: &str) -> IResult<&str, i64> {
-    nom::multi::fold_many1(delimited(space0, decode_sizepart, space0), 0, |sum, i| {
-        sum + i
-    })(input)
+    nom::multi::fold_many1(
+        delimited(space0, decode_sizepart, space0),
+        || 0,
+        |sum, i| sum + i,
+    )(input)
 }
 
 /// Decodes a human-readable size as output by encode_size.
