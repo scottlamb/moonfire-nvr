@@ -21,6 +21,7 @@ mod v2_to_v3;
 mod v3_to_v4;
 mod v4_to_v5;
 mod v5_to_v6;
+mod v6_to_v7;
 
 const UPGRADE_NOTES: &str = concat!("upgraded using moonfire-db ", env!("CARGO_PKG_VERSION"));
 
@@ -53,6 +54,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
         v3_to_v4::run,
         v4_to_v5::run,
         v5_to_v6::run,
+        v6_to_v7::run,
     ];
 
     {
@@ -272,7 +274,8 @@ mod tests {
             (3, Some(include_str!("v3.sql"))),
             (4, None), // transitional; don't compare schemas.
             (5, Some(include_str!("v5.sql"))),
-            (6, Some(include_str!("../schema.sql"))),
+            (6, Some(include_str!("v6.sql"))),
+            (7, Some(include_str!("../schema.sql"))),
         ] {
             upgrade(
                 &Args {

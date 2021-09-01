@@ -58,7 +58,7 @@ use url::Url;
 use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
-pub const EXPECTED_VERSION: i32 = 6;
+pub const EXPECTED_VERSION: i32 = 7;
 
 /// Length of the video index cache.
 /// The actual data structure is one bigger than this because we insert before we remove.
@@ -2487,12 +2487,12 @@ mod tests {
     fn test_version_too_old() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (5, 0, '');")
+        c.execute_batch("delete from version; insert into version values (6, 0, '');")
             .unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(
             e.to_string()
-                .starts_with("Database schema version 5 is too old (expected 6)"),
+                .starts_with("Database schema version 6 is too old (expected 7)"),
             "got: {:?}",
             e
         );
@@ -2502,12 +2502,12 @@ mod tests {
     fn test_version_too_new() {
         testutil::init();
         let c = setup_conn();
-        c.execute_batch("delete from version; insert into version values (7, 0, '');")
+        c.execute_batch("delete from version; insert into version values (8, 0, '');")
             .unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(
             e.to_string()
-                .starts_with("Database schema version 7 is too new (expected 6)"),
+                .starts_with("Database schema version 8 is too new (expected 7)"),
             "got: {:?}",
             e
         );
