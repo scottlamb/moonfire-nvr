@@ -5,6 +5,7 @@
 /// Upgrades a version 6 schema to a version 7 schema.
 use failure::Error;
 
-pub fn run(_args: &super::Args, _tx: &rusqlite::Transaction) -> Result<(), Error> {
+pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
+    tx.execute_batch("alter table user add preferences text")?;
     Ok(())
 }

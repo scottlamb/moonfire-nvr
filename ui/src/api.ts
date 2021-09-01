@@ -145,6 +145,12 @@ async function json<T>(
 export interface ToplevelResponse {
   timeZoneName: string;
   cameras: Camera[];
+  user: ToplevelUser | undefined;
+}
+
+export interface ToplevelUser {
+  name: string;
+  id: number;
   session: Session | undefined;
 }
 

@@ -16,6 +16,7 @@ use fnv::FnvHashMap;
 use futures::stream::StreamExt;
 use futures::{future::Either, sink::SinkExt};
 use http::header::{self, HeaderValue};
+use http::method::Method;
 use http::{status::StatusCode, Request, Response};
 use http_serve::dir::FsDir;
 use hyper::body::Bytes;
@@ -68,86 +69,79 @@ enum Path {
     Login,                                            // "/api/login"
     Logout,                                           // "/api/logout"
     Static,                                           // (anything that doesn't start with "/api/")
+    User(i32),                                        // "/api/users/<id>"
     NotFound,
 }
 
 impl Path {
     fn decode(path: &str) -> Self {
-        if !path.starts_with("/api/") {
-            return Path::Static;
-        }
-        let path = &path["/api".len()..];
-        if path == "/" {
-            return Path::TopLevel;
-        }
+        let path = match path.strip_prefix("/api/") {
+            Some(p) => p,
+            None => return Path::Static,
+        };
         match path {
-            "/login" => return Path::Login,
-            "/logout" => return Path::Logout,
-            "/request" => return Path::Request,
-            "/signals" => return Path::Signals,
+            "" => return Path::TopLevel,
+            "login" => return Path::Login,
+            "logout" => return Path::Logout,
+            "request" => return Path::Request,
+            "signals" => return Path::Signals,
             _ => {}
         };
-        if path.starts_with("/init/") {
-            let (debug, path) = if path.ends_with(".txt") {
-                (true, &path[0..path.len() - 4])
-            } else {
-                (false, path)
+        if let Some(path) = path.strip_prefix("init/") {
+            let (debug, path) = match path.strip_suffix(".txt") {
+                Some(p) => (true, p),
+                None => (false, path),
             };
-            if !path.ends_with(".mp4") {
-                return Path::NotFound;
-            }
-            let id_start = "/init/".len();
-            let id_end = path.len() - ".mp4".len();
-            if let Ok(id) = i32::from_str(&path[id_start..id_end]) {
+            let path = match path.strip_suffix(".mp4") {
+                Some(p) => p,
+                None => return Path::NotFound,
+            };
+            if let Ok(id) = i32::from_str(&path) {
                 return Path::InitSegment(id, debug);
             }
             return Path::NotFound;
-        }
-        if !path.starts_with("/cameras/") {
-            return Path::NotFound;
-        }
-        let path = &path["/cameras/".len()..];
-        let slash = match path.find('/') {
-            None => {
-                return Path::NotFound;
+        } else if let Some(path) = path.strip_prefix("cameras/") {
+            let (uuid, path) = match path.split_once('/') {
+                Some(pair) => pair,
+                None => return Path::NotFound,
+            };
+
+            // TODO(slamb): require uuid to be in canonical format.
+            let uuid = match Uuid::parse_str(uuid) {
+                Ok(u) => u,
+                Err(_) => return Path::NotFound,
+            };
+
+            if path.is_empty() {
+                return Path::Camera(uuid);
             }
-            Some(s) => s,
-        };
-        let uuid = &path[0..slash];
-        let path = &path[slash + 1..];
 
-        // TODO(slamb): require uuid to be in canonical format.
-        let uuid = match Uuid::parse_str(uuid) {
-            Ok(u) => u,
-            Err(_) => return Path::NotFound,
-        };
-
-        if path.is_empty() {
-            return Path::Camera(uuid);
-        }
-
-        let slash = match path.find('/') {
-            None => {
-                return Path::NotFound;
+            let (type_, path) = match path.split_once('/') {
+                Some(pair) => pair,
+                None => return Path::NotFound,
+            };
+            let type_ = match db::StreamType::parse(type_) {
+                None => {
+                    return Path::NotFound;
+                }
+                Some(t) => t,
+            };
+            match path {
+                "recordings" => Path::StreamRecordings(uuid, type_),
+                "view.mp4" => Path::StreamViewMp4(uuid, type_, false),
+                "view.mp4.txt" => Path::StreamViewMp4(uuid, type_, true),
+                "view.m4s" => Path::StreamViewMp4Segment(uuid, type_, false),
+                "view.m4s.txt" => Path::StreamViewMp4Segment(uuid, type_, true),
+                "live.m4s" => Path::StreamLiveMp4Segments(uuid, type_),
+                _ => Path::NotFound,
             }
-            Some(s) => s,
-        };
-        let (type_, path) = path.split_at(slash);
-
-        let type_ = match db::StreamType::parse(type_) {
-            None => {
-                return Path::NotFound;
+        } else if let Some(path) = path.strip_prefix("users/") {
+            if let Ok(id) = i32::from_str(path) {
+                return Path::User(id);
             }
-            Some(t) => t,
-        };
-        match path {
-            "/recordings" => Path::StreamRecordings(uuid, type_),
-            "/view.mp4" => Path::StreamViewMp4(uuid, type_, false),
-            "/view.mp4.txt" => Path::StreamViewMp4(uuid, type_, true),
-            "/view.m4s" => Path::StreamViewMp4Segment(uuid, type_, false),
-            "/view.m4s.txt" => Path::StreamViewMp4Segment(uuid, type_, true),
-            "/live.m4s" => Path::StreamLiveMp4Segments(uuid, type_),
-            _ => Path::NotFound,
+            Path::NotFound
+        } else {
+            Path::NotFound
         }
     }
 }
@@ -253,7 +247,7 @@ impl FromStr for Segments {
 
 struct Caller {
     permissions: db::Permissions,
-    session: Option<json::Session>,
+    user: Option<json::ToplevelUser>,
 }
 
 type ResponseResult = Result<Response<Body>, HttpError>;
@@ -302,7 +296,7 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
 /// deserialization. Keeping the bytes allows the caller to use a `Deserialize`
 /// that borrows from the bytes.
 async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, HttpError> {
-    if *req.method() != http::method::Method::POST {
+    if *req.method() != Method::POST {
         return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
     }
     let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
@@ -560,7 +554,6 @@ impl Service {
     }
 
     async fn signals(&self, req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
-        use http::method::Method;
         match *req.method() {
             Method::POST => self.post_signals(req, caller).await,
             Method::GET | Method::HEAD => self.get_signals(&req),
@@ -614,6 +607,10 @@ impl Service {
                 self.signals(req, caller).await?,
             ),
             Path::Static => (CacheControl::None, self.static_file(req).await?),
+            Path::User(id) => (
+                CacheControl::PrivateDynamic,
+                self.user(req, caller, id).await?,
+            ),
         };
         match cache {
             CacheControl::PrivateStatic => {
@@ -683,7 +680,7 @@ impl Service {
             &json::TopLevel {
                 time_zone_name: &self.time_zone_name,
                 cameras: (&db, days, camera_configs),
-                session: caller.session,
+                user: caller.user,
                 signals: (&db, days),
                 signal_types: &db,
             },
@@ -1019,6 +1016,39 @@ impl Service {
         Ok(http_serve::serve(e, &req))
     }
 
+    async fn user(&self, req: Request<hyper::Body>, caller: Caller, id: i32) -> ResponseResult {
+        if caller.user.map(|u| u.id) != Some(id) {
+            bail_t!(Unauthenticated, "must be authenticated as supplied user");
+        }
+        match *req.method() {
+            Method::POST => self.post_user(req, id).await,
+            _ => Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into()),
+        }
+    }
+
+    async fn post_user(&self, mut req: Request<hyper::Body>, id: i32) -> ResponseResult {
+        let r = extract_json_body(&mut req).await?;
+        let r: json::PostUser = serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        let mut db = self.db.lock();
+        let user = db
+            .users_by_id()
+            .get(&id)
+            .ok_or_else(|| format_err_t!(Internal, "can't find currently authenticated user"))?;
+        if let Some(precondition) = r.precondition {
+            if matches!(precondition.preferences, Some(p) if p != user.preferences) {
+                bail_t!(FailedPrecondition, "preferences mismatch");
+            }
+        }
+        if let Some(update) = r.update {
+            let mut change = user.change();
+            if let Some(preferences) = update.preferences {
+                change.set_preferences(preferences);
+            }
+            db.apply_user_change(change).map_err(internal_server_err)?;
+        }
+        Ok(plain_response(StatusCode::NO_CONTENT, &b""[..]))
+    }
+
     fn authreq(&self, req: &Request<::hyper::Body>) -> auth::Request {
         auth::Request {
             when_sec: Some(self.db.clocks().realtime().sec),
@@ -1251,9 +1281,11 @@ impl Service {
                 Ok((s, u)) => {
                     return Ok(Caller {
                         permissions: s.permissions.clone(),
-                        session: Some(json::Session {
-                            username: u.username.clone(),
-                            csrf: s.csrf(),
+                        user: Some(json::ToplevelUser {
+                            id: s.user_id,
+                            name: u.username.clone(),
+                            preferences: u.preferences.clone(),
+                            session: Some(json::Session { csrf: s.csrf() }),
                         }),
                     })
                 }
@@ -1270,14 +1302,14 @@ impl Service {
         if let Some(s) = self.allow_unauthenticated_permissions.as_ref() {
             return Ok(Caller {
                 permissions: s.clone(),
-                session: None,
+                user: None,
             });
         }
 
         if unauth_path {
             return Ok(Caller {
                 permissions: db::Permissions::default(),
-                session: None,
+                user: None,
             });
         }
 
@@ -1526,6 +1558,8 @@ mod tests {
         assert_eq!(Path::decode("/api/logout"), Path::Logout);
         assert_eq!(Path::decode("/api/signals"), Path::Signals);
         assert_eq!(Path::decode("/api/junk"), Path::NotFound);
+        assert_eq!(Path::decode("/api/users/42"), Path::User(42));
+        assert_eq!(Path::decode("/api/users/asdf"), Path::NotFound);
     }
 
     #[test]
@@ -1693,6 +1727,8 @@ mod tests {
             .await
             .unwrap();
         let csrf = toplevel
+            .get("user")
+            .unwrap()
             .get("session")
             .unwrap()
             .get("csrf")

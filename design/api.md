@@ -21,6 +21,7 @@ Status: **current**.
         * [Request 1](#request-1)
         * [Request 2](#request-2)
         * [Request 3](#request-3)
+* [`POST /api/users/<id>`](#post-apiusersid)
 
 ## Objective
 
@@ -42,7 +43,7 @@ All requests for JSON data should be sent with the header
 
 ### `POST /api/login`
 
-The request should have an `application/json` body containing a dict with
+The request should have an `application/json` body containing a JSON object with
 `username` and `password` keys.
 
 On successful authentication, the server will return an HTTP 204 (no content)
@@ -81,11 +82,11 @@ Example request URI (with added whitespace between parameters):
      &cameraConfigs=true
 ```
 
-The `application/json` response will have a dict as follows:
+The `application/json` response will have a JSON object as follows:
 
 *   `timeZoneName`: the name of the IANA time zone the server is using
     to divide recordings into days as described further below.
-*   `cameras`: a list of cameras. Each is a dict as follows:
+*   `cameras`: a list of cameras. Each is a JSON object as follows:
     *   `uuid`: in text format
     *   `id`: an integer. The client doesn't ever need to send the id
         back in API requests, but camera ids are helpful to know when debugging
@@ -93,12 +94,12 @@ The `application/json` response will have a dict as follows:
     *   `shortName`: a short name (typically one or two words)
     *   `description`: a longer description (typically a phrase or paragraph)
     *   `config`: (only included if request parameter `cameraConfigs` is true)
-        a dictionary describing the configuration of the camera:
+        a JSON object describing the configuration of the camera:
         *   `username`
         *   `password`
         *   `onvif_host`
-    *   `streams`: a dict of stream type ("main" or "sub") to a dictionary
-        describing the stream:
+    *   `streams`: a JSON object of stream type ("main" or "sub") to a JSON
+        object describing the stream:
         *   `id`: an integer. The client doesn't ever need to send the id
             back in API requests, but stream ids are helpful to know when
             debugging by reading logs or directly examining the
@@ -119,7 +120,7 @@ The `application/json` response will have a dict as follows:
             because it also includes the wasted portion of the final
             filesystem block allocated to each file.
         *   `days`: (only included if request parameter `days` is true)
-            dictionary representing calendar days (in the server's time zone)
+            JSON object representing calendar days (in the server's time zone)
             with non-zero total duration of recordings for that day. Currently
             this includes uncommitted and growing recordings. This is likely
             to change in a future release for
@@ -136,10 +137,10 @@ The `application/json` response will have a dict as follows:
                 might be 23 hours or 25 hours during spring forward or fall
                 back, respectively.
         *   `config`: (only included if request parameter `cameraConfigs` is
-            true) a dictionary describing the configuration of the stream:
+            true) a JSON object describing the configuration of the stream:
             *   `rtsp_url`
-*   `signals`: a list of all *signals* known to the server. Each is a dictionary
-    with the following properties:
+*   `signals`: a list of all *signals* known to the server. Each is a JSON
+    object with the following properties:
     *   `id`: an integer identifier.
     *   `shortName`: a unique, human-readable description of the signal
     *   `cameras`: a map of associated cameras' UUIDs to the type of association:
@@ -158,9 +159,14 @@ The `application/json` response will have a dict as follows:
             as in the [HTML specification](https://html.spec.whatwg.org/#colours).
         *   `motion`: if present and true, directly associated cameras will be
             considered to have motion when this signal is in this state.
-*   `session`: if logged in, a dict with the following properties:
-    *   `username`
-    *   `csrf`: a cross-site request forgery token for use in `POST` requests.
+*   `user`: if authenticated, a JSON object:
+    *   `name`: a human-readable name
+    *   `id`: an integer
+    *   `preferences`: a JSON object
+    *   `session`: an object, present only if authenticated via session cookie.
+        (In the future, it will be possible to instead authenticate via uid over
+        a Unix domain socket.)
+        *   `csrf`: a cross-site request forgery token for use in `POST` requests.
 
 Example response:
 
@@ -239,9 +245,12 @@ Example response:
       }
     }
   ],
-  "session": {
-    "username": "slamb",
-    "csrf": "2DivvlnKUQ9JD4ao6YACBJm8XK4bFmOc"
+  "user": {
+    "id": 1,
+    "name": "slamb",
+    "session": {
+      "csrf": "2DivvlnKUQ9JD4ao6YACBJm8XK4bFmOc"
+    }
   }
 }
 ```
@@ -671,18 +680,18 @@ analytics client starts up and analyzes all video segments recorded since it
 last ran. These will specify beginning and end times.
 
 The request should have an `application/json` body describing the change to
-make. It should be a dict with these attributes:
+make. It should be a JSON object with these attributes:
 
 *   `signalIds`: a list of signal ids to change. Must be sorted.
 *   `states`: a list (one per `signalIds` entry) of states to set.
-*   `start`: the starting time of the change, as a dict of the form
+*   `start`: the starting time of the change, as a JSON object of the form
     `{'base': 'epoch', 'rel90k': t}` or `{'base': 'now', 'rel90k': t}`. In
     the `epoch` form, `rel90k` is 90 kHz units since 1970-01-01 00:00:00 UTC.
     In the `now` form, `rel90k` is relative to current time and may be
     negative.
 *   `end`: the ending time of the change, in the same form as `start`.
 
-The response will be an `application/json` body dict with the following
+The response will be an `application/json` body JSON object with the following
 attributes:
 
 *   `time90k`: the current time. When the request's `startTime90k` is absent
@@ -764,6 +773,22 @@ Response:
   "time90k": 140067471150000
 }
 ```
+
+## `POST /api/users/<id>`
+
+Currently this request only allows updating the preferences for the
+currently-authenticated user. This is likely to change.
+
+Expects a JSON object:
+
+*   `update`: sets the provided fields
+*   `precondition`: forces the request to fail with HTTP status 412
+    (Precondition failed) if the provided fields don't have the given value.
+
+Currently both objects support a single field, `preferences`, which should be
+a JSON dictionary.
+
+Returns HTTP status 204 (No Content) on success.
 
 [media-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-media-segments
 [init-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-init-segments

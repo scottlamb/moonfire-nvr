@@ -341,7 +341,11 @@ create table user (
 
   -- Permissions available for newly created tokens or when authenticating via
   -- unix_uid above. A serialized "Permissions" protobuf.
-  permissions blob not null default X''
+  permissions blob not null default X'',
+
+  -- Preferences controlled by the user. A JSON object, or null to represent
+  -- the empty object. Can be returned and modified through the API.
+  preferences text
 );
 
 -- A single session, whether for browser or robot use.

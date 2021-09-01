@@ -10,7 +10,6 @@
 export type StreamType = "main" | "sub";
 
 export interface Session {
-  username: string;
   csrf: string;
 }
 

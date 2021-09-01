@@ -97,9 +97,11 @@ function App() {
         case "success":
           setError(null);
           setLoginState(
-            resp.response.session === undefined ? "not-logged-in" : "logged-in"
+            resp.response.user?.session === undefined
+              ? "not-logged-in"
+              : "logged-in"
           );
-          setSession(resp.response.session || null);
+          setSession(resp.response.user?.session || null);
           setCameras(resp.response.cameras);
           setTimeZoneName(resp.response.timeZoneName);
       }

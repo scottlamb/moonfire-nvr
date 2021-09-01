@@ -21,7 +21,7 @@ pub struct TopLevel<'a> {
     pub cameras: (&'a db::LockedDatabase, bool, bool),
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub session: Option<Session>,
+    pub user: Option<ToplevelUser>,
 
     #[serde(serialize_with = "TopLevel::serialize_signals")]
     pub signals: (&'a db::LockedDatabase, bool),
@@ -33,8 +33,6 @@ pub struct TopLevel<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
-    pub username: String,
-
     #[serde(serialize_with = "Session::serialize_csrf")]
     pub csrf: SessionHash,
 }
@@ -518,4 +516,26 @@ impl VideoSampleEntry {
             aspect_height: *aspect.denom(),
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToplevelUser {
+    pub name: String,
+    pub id: i32,
+    pub preferences: db::auth::UserPreferences,
+    pub session: Option<Session>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostUser {
+    pub update: Option<UserSubset>,
+    pub precondition: Option<UserSubset>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSubset {
+    pub preferences: Option<db::auth::UserPreferences>,
 }
