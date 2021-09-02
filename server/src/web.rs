@@ -1042,7 +1042,7 @@ impl Service {
         if let Some(update) = r.update {
             let mut change = user.change();
             if let Some(preferences) = update.preferences {
-                change.set_preferences(preferences);
+                change.preferences = preferences;
             }
             db.apply_user_change(change).map_err(internal_server_err)?;
         }
