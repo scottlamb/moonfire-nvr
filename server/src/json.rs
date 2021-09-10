@@ -56,10 +56,9 @@ pub struct Camera<'a> {
     pub uuid: Uuid,
     pub id: i32,
     pub short_name: &'a str,
-    pub description: &'a str,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<CameraConfig<'a>>,
+    pub config: Option<&'a db::json::CameraConfig>,
 
     #[serde(serialize_with = "Camera::serialize_streams")]
     pub streams: [Option<Stream<'a>>; 2],
@@ -90,13 +89,7 @@ pub struct Stream<'a> {
     pub days: Option<db::days::Map<db::days::StreamValue>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<StreamConfig<'a>>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StreamConfig<'a> {
-    pub rtsp_url: &'a str,
+    pub config: Option<&'a db::json::StreamConfig>,
 }
 
 #[derive(Serialize)]
@@ -188,14 +181,9 @@ impl<'a> Camera<'a> {
             uuid: c.uuid,
             id: c.id,
             short_name: &c.short_name,
-            description: &c.description,
             config: match include_config {
                 false => None,
-                true => Some(CameraConfig {
-                    onvif_host: &c.onvif_host,
-                    username: c.username.as_deref(),
-                    password: c.password.as_deref(),
-                }),
+                true => Some(&c.config),
             },
             streams: [
                 Stream::wrap(db, c.streams[0], include_days, include_config)?,
@@ -240,19 +228,17 @@ impl<'a> Stream<'a> {
             .ok_or_else(|| format_err!("missing stream {}", id))?;
         Ok(Some(Stream {
             id: s.id,
-            retain_bytes: s.retain_bytes,
+            retain_bytes: s.config.retain_bytes,
             min_start_time_90k: s.range.as_ref().map(|r| r.start),
             max_end_time_90k: s.range.as_ref().map(|r| r.end),
             total_duration_90k: s.duration,
             total_sample_file_bytes: s.sample_file_bytes,
             fs_bytes: s.fs_bytes,
-            record: s.record,
+            record: s.config.mode == db::json::STREAM_MODE_RECORD,
             days: if include_days { Some(s.days()) } else { None },
             config: match include_config {
                 false => None,
-                true => Some(StreamConfig {
-                    rtsp_url: &s.rtsp_url,
-                }),
+                true => Some(&s.config),
             },
         }))
     }

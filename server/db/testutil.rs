@@ -63,7 +63,7 @@ impl<C: Clocks + Clone> TestDb<C> {
         Self::new_with_flush_if_sec(clocks, 0)
     }
 
-    pub(crate) fn new_with_flush_if_sec(clocks: C, flush_if_sec: i64) -> Self {
+    pub(crate) fn new_with_flush_if_sec(clocks: C, flush_if_sec: u32) -> Self {
         let tmpdir = tempfile::Builder::new()
             .prefix("moonfire-nvr-test")
             .tempdir()
@@ -82,17 +82,22 @@ impl<C: Clocks + Clone> TestDb<C> {
                 TEST_CAMERA_ID,
                 l.add_camera(db::CameraChange {
                     short_name: "test camera".to_owned(),
-                    description: "".to_owned(),
-                    onvif_host: "test-camera".to_owned(),
-                    username: Some("foo".to_owned()),
-                    password: Some("bar".to_owned()),
+                    config: crate::json::CameraConfig::default(),
+                    //description: "".to_owned(),
+                    //onvif_host: "test-camera".to_owned(),
+                    //username: Some("foo".to_owned()),
+                    //password: Some("bar".to_owned()),
                     streams: [
                         db::StreamChange {
                             sample_file_dir_id: Some(sample_file_dir_id),
-                            rtsp_url: Some(url::Url::parse("rtsp://test-camera/main").unwrap()),
-                            record: true,
-                            flush_if_sec,
+                            config: crate::json::StreamConfig {
+                                url: Some(url::Url::parse("rtsp://test-camera/main").unwrap()),
+                                mode: crate::json::STREAM_MODE_RECORD.to_owned(),
+                                flush_if_sec,
+                                ..Default::default()
+                            },
                         },
+                        Default::default(),
                         Default::default(),
                     ],
                 })

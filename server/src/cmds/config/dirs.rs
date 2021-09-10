@@ -315,12 +315,12 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
                     Stream {
                         label: format!("{}: {}: {}", id, c.short_name, s.type_.as_str()),
                         used: s.fs_bytes,
-                        record: s.record,
-                        retain: Some(s.retain_bytes),
+                        record: s.config.mode == db::json::STREAM_MODE_RECORD,
+                        retain: Some(s.config.retain_bytes),
                     },
                 );
                 total_used += s.fs_bytes;
-                total_retain += s.retain_bytes;
+                total_retain += s.config.retain_bytes;
             }
             if streams.is_empty() {
                 return delete_dir_dialog(db, siv, dir_id);

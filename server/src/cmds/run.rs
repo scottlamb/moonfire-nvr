@@ -232,12 +232,20 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
 
         // Get the directories that need syncers.
         for stream in l.streams_by_id().values() {
-            if let (Some(id), true) = (stream.sample_file_dir_id, stream.record) {
+            if stream.config.mode != db::json::STREAM_MODE_RECORD {
+                continue;
+            }
+            if let Some(id) = stream.sample_file_dir_id {
                 dirs.entry(id).or_insert_with(|| {
                     let d = l.sample_file_dirs_by_id().get(&id).unwrap();
                     info!("Starting syncer for path {}", d.path);
                     d.get().unwrap()
                 });
+            } else {
+                warn!(
+                    "Stream {} set to record but has no sample file dir id",
+                    stream.id
+                );
             }
         }
 
@@ -253,7 +261,7 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
         let handle = tokio::runtime::Handle::current();
         let l = db.lock();
         for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
-            if !stream.record {
+            if stream.config.mode != db::json::STREAM_MODE_RECORD {
                 continue;
             }
             let camera = l.cameras_by_id().get(&stream.camera_id).unwrap();

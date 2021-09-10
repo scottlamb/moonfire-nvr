@@ -4,104 +4,117 @@
 
 use crate::stream::{self, Opener};
 use base::strutil::{decode_size, encode_size};
-use cursive::traits::{Boxable, Finder, Identifiable};
+use cursive::traits::{Boxable, Finder, Identifiable, Scrollable};
 use cursive::views::{self, ViewRef};
 use cursive::Cursive;
 use db::writer;
-use failure::{bail, Error, ResultExt};
+use failure::{bail, format_err, Error, ResultExt};
 use std::collections::BTreeMap;
-use std::str::FromStr;
 use std::sync::Arc;
 use url::Url;
 
-/// Builds a `CameraChange` from an active `edit_camera_dialog`.
-fn get_change(siv: &mut Cursive) -> Result<db::CameraChange, Error> {
+struct Camera {
+    short_name: String,
+    description: String,
+    onvif_base_url: String,
+    username: String,
+    password: String,
+    streams: [Stream; db::NUM_STREAM_TYPES],
+}
+
+#[derive(Default)]
+struct Stream {
+    url: String,
+    record: bool,
+    flush_if_sec: String,
+    sample_file_dir_id: Option<i32>,
+}
+
+/// Builds a `Camera` from an active `edit_camera_dialog`. No validation.
+fn get_camera(siv: &mut Cursive) -> Camera {
     // Note: these find_name calls are separate statements, which seems to be important:
     // https://github.com/gyscos/Cursive/issues/144
-    let sn = siv
+    let short_name = siv
         .find_name::<views::EditView>("short_name")
         .unwrap()
         .get_content()
         .as_str()
         .into();
-    let d = siv
+    let description = siv
         .find_name::<views::TextArea>("description")
         .unwrap()
         .get_content()
         .into();
-    let h = siv
-        .find_name::<views::EditView>("onvif_host")
+    let onvif_base_url: String = siv
+        .find_name::<views::EditView>("onvif_base_url")
         .unwrap()
         .get_content()
         .as_str()
         .into();
-    let username = match siv
+    let username = siv
         .find_name::<views::EditView>("username")
         .unwrap()
         .get_content()
         .as_str()
-    {
-        "" => None,
-        u => Some(u.to_owned()),
-    };
-    let password = match siv
+        .to_owned();
+    let password = siv
         .find_name::<views::EditView>("password")
         .unwrap()
         .get_content()
         .as_str()
-    {
-        "" => None,
-        p => Some(p.to_owned()),
-    };
-    let mut c = db::CameraChange {
-        short_name: sn,
-        description: d,
-        onvif_host: h,
+        .to_owned();
+    let mut camera = Camera {
+        short_name,
+        description,
+        onvif_base_url,
         username,
         password,
         streams: Default::default(),
     };
     for &t in &db::ALL_STREAM_TYPES {
-        let rtsp_url = parse_url(
-            siv.find_name::<views::EditView>(&format!("{}_rtsp_url", t.as_str()))
-                .unwrap()
-                .get_content()
-                .as_str(),
-        )?;
+        let url = siv
+            .find_name::<views::EditView>(&format!("{}_url", t.as_str()))
+            .unwrap()
+            .get_content()
+            .as_str()
+            .to_owned();
         let record = siv
             .find_name::<views::Checkbox>(&format!("{}_record", t.as_str()))
             .unwrap()
             .is_checked();
-        let flush_if_sec = i64::from_str(
-            siv.find_name::<views::EditView>(&format!("{}_flush_if_sec", t.as_str()))
-                .unwrap()
-                .get_content()
-                .as_str(),
-        )
-        .unwrap_or(0);
+        let flush_if_sec = siv
+            .find_name::<views::EditView>(&format!("{}_flush_if_sec", t.as_str()))
+            .unwrap()
+            .get_content()
+            .as_str()
+            .to_owned();
         let sample_file_dir_id = *siv
             .find_name::<views::SelectView<Option<i32>>>(&format!("{}_sample_file_dir", t.as_str()))
             .unwrap()
             .selection()
             .unwrap();
-        c.streams[t.index()] = db::StreamChange {
-            rtsp_url,
-            sample_file_dir_id,
+        camera.streams[t.index()] = Stream {
+            url,
             record,
             flush_if_sec,
+            sample_file_dir_id,
         };
     }
-    Ok(c)
+    camera
 }
 
 /// Attempts to parse a URL field into a sort-of-validated URL.
-fn parse_url(raw: &str) -> Result<Option<Url>, Error> {
+fn parse_url(raw: &str, allowed_schemes: &'static [&'static str]) -> Result<Option<Url>, Error> {
     if raw.is_empty() {
         return Ok(None);
     }
     let url = url::Url::parse(&raw).with_context(|_| format!("can't parse {:?} as URL", &raw))?;
-    if url.scheme() != "rtsp" {
-        bail!("Expected URL scheme rtsp:// in URL {}", &url);
+    if allowed_schemes
+        .iter()
+        .find(|scheme| **scheme == url.scheme())
+        .is_none()
+    {
+        bail!("Unexpected scheme in URL {}", &url);
     }
     if !url.username().is_empty() || url.password().is_some() {
         bail!(
@@ -114,17 +127,46 @@ fn parse_url(raw: &str) -> Result<Option<Url>, Error> {
 
 fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
     let result = (|| {
-        let change = get_change(siv)?;
-        for (i, stream) in change.streams.iter().enumerate() {
-            if stream.record && (stream.rtsp_url.is_none() || stream.sample_file_dir_id.is_none()) {
-                let type_ = db::StreamType::from_index(i).unwrap();
+        let mut l = db.lock();
+        let mut change = if let Some(id) = id {
+            l.null_camera_change(id)?
+        } else {
+            db::CameraChange::default()
+        };
+        let camera = get_camera(siv);
+        change.short_name = camera.short_name;
+        change.config.description = camera.description;
+        change.config.onvif_base_url = parse_url(&camera.onvif_base_url, &["http", "https"])?;
+        change.config.username = camera.username;
+        change.config.password = camera.password;
+        for (i, stream) in camera.streams.iter().enumerate() {
+            let type_ = db::StreamType::from_index(i).unwrap();
+            if stream.record && (stream.url.is_empty() || stream.sample_file_dir_id.is_none()) {
                 bail!(
                     "Can't record {} stream without RTSP URL and sample file directory",
                     type_.as_str()
                 );
             }
+            let stream_change = &mut change.streams[i];
+            stream_change.config.mode = (if stream.record {
+                db::json::STREAM_MODE_RECORD
+            } else {
+                ""
+            })
+            .to_owned();
+            stream_change.config.url = parse_url(&stream.url, &["rtsp"])?;
+            stream_change.sample_file_dir_id = stream.sample_file_dir_id;
+            stream_change.config.flush_if_sec = if stream.flush_if_sec.is_empty() {
+                0
+            } else {
+                stream.flush_if_sec.parse().map_err(|_| {
+                    format_err!(
+                        "flush_if_sec for {} must be a non-negative integer",
+                        type_.as_str()
+                    )
+                })?
+            };
         }
-        let mut l = db.lock();
         if let Some(id) = id {
             l.update_camera(id, change)
         } else {
@@ -146,17 +188,14 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
     }
 }
 
-fn press_test_inner(
-    url: Url,
-    username: Option<String>,
-    password: Option<String>,
-) -> Result<String, Error> {
+fn press_test_inner(url: Url, username: String, password: String) -> Result<String, Error> {
+    let pass_creds = !username.is_empty();
     let (extra_data, _stream) = stream::FFMPEG.open(
         "test stream".to_owned(),
         stream::Source::Rtsp {
             url,
-            username,
-            password,
+            username: if pass_creds { Some(username) } else { None },
+            password: if pass_creds { Some(password) } else { None },
             transport: retina::client::Transport::Tcp,
         },
     )?;
@@ -167,21 +206,15 @@ fn press_test_inner(
 }
 
 fn press_test(siv: &mut Cursive, t: db::StreamType) {
-    let mut c = match get_change(siv) {
-        Ok(u) => u,
-        Err(e) => {
-            siv.add_layer(
-                views::Dialog::text(format!("{}", e))
-                    .title("Stream test failed")
-                    .dismiss_button("Back"),
-            );
-            return;
-        }
+    let c = get_camera(siv);
+    let url = &c.streams[t.index()].url;
+    let url = match parse_url(url, &["rtsp"]) {
+        Ok(Some(u)) => u,
+        _ => panic!(
+            "test button should only be enabled with valid URL, not {:?}",
+            url
+        ),
     };
-    let url = c.streams[t.index()]
-        .rtsp_url
-        .take()
-        .expect("test button only enabled when URL set");
     let username = c.username;
     let password = c.password;
 
@@ -190,7 +223,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
             "Testing {} stream at {}. This may take a while \
             on timeout or if you have a long key frame interval",
             t.as_str(),
-            &url
+            url.as_str()
         ))
         .title("Testing"),
     );
@@ -348,7 +381,7 @@ fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32) {
 }
 
 fn edit_url(content: &str, mut test_button: ViewRef<views::Button>) {
-    let enable_test = matches!(parse_url(content), Ok(Some(_)));
+    let enable_test = matches!(parse_url(content, &["rtsp"]), Ok(Some(_)));
     test_button.set_enabled(enable_test);
 }
 
@@ -365,7 +398,10 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
         )
         .child("uuid", views::TextView::new("<new>").with_name("uuid"))
         .child("short name", views::EditView::new().with_name("short_name"))
-        .child("onvif_host", views::EditView::new().with_name("onvif_host"))
+        .child(
+            "onvif_base_url",
+            views::EditView::new().with_name("onvif_base_url"),
+        )
         .child("username", views::EditView::new().with_name("username"))
         .child("password", views::EditView::new().with_name("password"))
         .min_height(6);
@@ -399,7 +435,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                                     .unwrap();
                                 edit_url(content, test_button)
                             })
-                            .with_name(format!("{}_rtsp_url", type_.as_str()))
+                            .with_name(format!("{}_url", type_.as_str()))
                             .full_width(),
                     )
                     .child(views::DummyView)
@@ -434,7 +470,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
         layout.add_child(list);
     }
 
-    let mut dialog = views::Dialog::around(layout);
+    let mut dialog = views::Dialog::around(layout.scrollable());
     let dialog = if let Some(camera_id) = *item {
         let l = db.lock();
         let camera = l.cameras_by_id().get(&camera_id).expect("missing camera");
@@ -460,35 +496,41 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                     }
                 }
                 bytes += s.sample_file_bytes;
-                let u = if s.retain_bytes == 0 {
+                let u = if s.config.retain_bytes == 0 {
                     "0 / 0 (0.0%)".to_owned()
                 } else {
                     format!(
                         "{} / {} ({:.1}%)",
                         s.fs_bytes,
-                        s.retain_bytes,
-                        100. * s.fs_bytes as f32 / s.retain_bytes as f32
+                        s.config.retain_bytes,
+                        100. * s.fs_bytes as f32 / s.config.retain_bytes as f32
                     )
                 };
-                dialog.call_on_name(
-                    &format!("{}_rtsp_url", t.as_str()),
-                    |v: &mut views::EditView| v.set_content(s.rtsp_url.to_owned()),
-                );
+                dialog.call_on_name(&format!("{}_url", t.as_str()), |v: &mut views::EditView| {
+                    if let Some(url) = s.config.url.as_ref() {
+                        v.set_content(url.as_str().to_owned());
+                    }
+                });
                 let test_button = dialog
                     .find_name::<views::Button>(&format!("{}_test", t.as_str()))
                     .unwrap();
-                edit_url(&s.rtsp_url, test_button);
+                edit_url(
+                    &s.config.url.as_ref().map(Url::as_str).unwrap_or(""),
+                    test_button,
+                );
                 dialog.call_on_name(
                     &format!("{}_usage_cap", t.as_str()),
                     |v: &mut views::TextView| v.set_content(u),
                 );
                 dialog.call_on_name(
                     &format!("{}_record", t.as_str()),
-                    |v: &mut views::Checkbox| v.set_checked(s.record),
+                    |v: &mut views::Checkbox| {
+                        v.set_checked(s.config.mode == db::json::STREAM_MODE_RECORD)
+                    },
                 );
                 dialog.call_on_name(
                     &format!("{}_flush_if_sec", t.as_str()),
-                    |v: &mut views::EditView| v.set_content(s.flush_if_sec.to_string()),
+                    |v: &mut views::EditView| v.set_content(s.config.flush_if_sec.to_string()),
                 );
             }
             dialog.call_on_name(
@@ -499,9 +541,17 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
         let name = camera.short_name.clone();
         for &(view_id, content) in &[
             ("short_name", &*camera.short_name),
-            ("onvif_host", &*camera.onvif_host),
-            ("username", camera.username.as_deref().unwrap_or("")),
-            ("password", camera.password.as_deref().unwrap_or("")),
+            (
+                "onvif_base_url",
+                &camera
+                    .config
+                    .onvif_base_url
+                    .as_ref()
+                    .map(Url::as_str)
+                    .unwrap_or(""),
+            ),
+            ("username", &camera.config.username),
+            ("password", &camera.config.password),
         ] {
             dialog
                 .call_on_name(view_id, |v: &mut views::EditView| {
@@ -511,7 +561,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
         }
         dialog
             .call_on_name("description", |v: &mut views::TextArea| {
-                v.set_content(camera.description.to_string())
+                v.set_content(camera.config.description.clone())
             })
             .expect("missing TextArea");
         dialog

@@ -5,7 +5,7 @@
 use crate::stream;
 use base::clock::{Clocks, TimerGuard};
 use db::{dir, recording, writer, Camera, Database, Stream};
-use failure::{bail, Error};
+use failure::{bail, format_err, Error};
 use log::{debug, info, trace, warn};
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -44,8 +44,8 @@ where
     stream_id: i32,
     short_name: String,
     url: Url,
-    username: Option<String>,
-    password: Option<String>,
+    username: String,
+    password: String,
 }
 
 impl<'a, C> Streamer<'a, C>
@@ -62,7 +62,11 @@ where
         rotate_offset_sec: i64,
         rotate_interval_sec: i64,
     ) -> Result<Self, Error> {
-        let url = Url::parse(&s.rtsp_url)?;
+        let url = s
+            .config
+            .url
+            .as_ref()
+            .ok_or_else(|| format_err!("Stream has no RTSP URL"))?;
         if !url.username().is_empty() || url.password().is_some() {
             bail!("RTSP URL shouldn't include credentials");
         }
@@ -77,9 +81,9 @@ where
             transport: env.transport,
             stream_id,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
-            url,
-            username: c.username.clone(),
-            password: c.password.clone(),
+            url: url.clone(),
+            username: c.config.username.clone(),
+            password: c.config.password.clone(),
         })
     }
 
@@ -116,8 +120,16 @@ where
                 self.short_name.clone(),
                 stream::Source::Rtsp {
                     url: self.url.clone(),
-                    username: self.username.clone(),
-                    password: self.password.clone(),
+                    username: if self.username.is_empty() {
+                        None
+                    } else {
+                        Some(self.username.clone())
+                    },
+                    password: if self.password.is_empty() {
+                        None
+                    } else {
+                        Some(self.password.clone())
+                    },
                     transport: self.transport,
                 },
             )?

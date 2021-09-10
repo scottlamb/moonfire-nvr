@@ -210,7 +210,7 @@ pub fn lower_retention(
                     .ok_or_else(|| format_err!("no such stream {}", l.stream_id))?;
                 fs_bytes_before =
                     stream.fs_bytes + stream.fs_bytes_to_add - stream.fs_bytes_to_delete;
-                extra = stream.retain_bytes - l.limit;
+                extra = stream.config.retain_bytes - l.limit;
             }
             if l.limit >= fs_bytes_before {
                 continue;
@@ -235,14 +235,14 @@ fn delete_recordings(
             Some(s) => s,
         };
         stream.fs_bytes + stream.fs_bytes_to_add - stream.fs_bytes_to_delete + extra_bytes_needed
-            - stream.retain_bytes
+            - stream.config.retain_bytes
     };
     let mut fs_bytes_to_delete = 0;
     if fs_bytes_needed <= 0 {
         debug!(
             "{}: have remaining quota of {}",
             stream_id,
-            base::strutil::encode_size(-fs_bytes_needed)
+            base::strutil::encode_size(fs_bytes_needed)
         );
         return Ok(());
     }
@@ -500,12 +500,13 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         let c = db.cameras_by_id().get(&s.camera_id).unwrap();
 
         // Schedule a flush.
-        let how_soon = Duration::seconds(s.flush_if_sec) - wall_duration.to_tm_duration();
+        let how_soon =
+            Duration::seconds(i64::from(s.config.flush_if_sec)) - wall_duration.to_tm_duration();
         let now = self.db.clocks().monotonic();
         let when = now + how_soon;
         let reason = format!(
             "{} sec after start of {} {}-{} recording {}",
-            s.flush_if_sec,
+            s.config.flush_if_sec,
             wall_duration,
             c.short_name,
             s.type_.as_str(),
@@ -1054,7 +1055,7 @@ mod tests {
         syncer_rcv: mpsc::Receiver<super::SyncerCommand<MockFile>>,
     }
 
-    fn new_harness(flush_if_sec: i64) -> Harness {
+    fn new_harness(flush_if_sec: u32) -> Harness {
         let clocks = SimulatedClocks::new(::time::Timespec::new(0, 0));
         let tdb = testutil::TestDb::new_with_flush_if_sec(clocks, flush_if_sec);
         let dir_id = *tdb

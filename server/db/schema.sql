@@ -70,54 +70,18 @@ create table camera (
   -- A short name of the camera, used in log messages.
   short_name text not null,
 
-  -- A short description of the camera.
-  description text,
-
-  -- The host part of the http:// URL when accessing ONVIF, optionally
-  -- including ":<port>". Eg with ONVIF host "192.168.1.110:85", the full URL
-  -- of the devie management service will be
-  -- "http://192.168.1.110:85/device_service".
-  onvif_host text,
-
-  -- The username to use when accessing the camera.
-  -- If empty, no username or password will be supplied.
-  username text,
-
-  -- The password to use when accessing the camera.
-  password text
+  -- A serialized json.CameraConfig
+  config text not null
 );
 
 create table stream (
   id integer primary key,
   camera_id integer not null references camera (id),
   sample_file_dir_id integer references sample_file_dir (id),
-  type text not null check (type in ('main', 'sub')),
+  type text not null check (type in ('main', 'sub', 'ext')),
 
-  -- If record is true, the stream should start recording when moonfire
-  -- starts. If false, no new recordings will be made, but old recordings
-  -- will not be deleted.
-  record integer not null check (record in (1, 0)),
-
-  -- The rtsp:// URL to use for this stream, excluding username and password.
-  -- (Those are taken from the camera row's respective fields.)
-  rtsp_url text not null,
-
-  -- The number of bytes of video to retain, excluding the currently-recording
-  -- file. Older files will be deleted as necessary to stay within this limit.
-  retain_bytes integer not null check (retain_bytes >= 0),
-
-  -- Flush the database when the first instant of completed recording is this
-  -- many seconds old. A value of 0 means that every completed recording will
-  -- cause an immediate flush. Higher values may allow flushes to be combined,
-  -- reducing SSD write cycles. For example, if all streams have a flush_if_sec
-  -- >= x sec, there will be:
-  --
-  -- * at most one flush per x sec in total
-  -- * at most x sec of completed but unflushed recordings per stream.
-  -- * at most x completed but unflushed recordings per stream, in the worst
-  --   case where a recording instantly fails, waits the 1-second retry delay,
-  --   then fails again, forever.
-  flush_if_sec integer not null,
+  -- A serialized json.StreamConfig
+  config text not null,
 
   -- The total number of recordings ever created on this stream, including
   -- deleted ones. This is used for assigning the next recording id.

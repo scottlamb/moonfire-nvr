@@ -21,6 +21,7 @@ pub mod days;
 pub mod db;
 pub mod dir;
 mod fs;
+pub mod json;
 mod proto {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 }
