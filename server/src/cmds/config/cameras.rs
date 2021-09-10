@@ -158,6 +158,7 @@ fn press_test_inner(
             username,
             password,
             transport: retina::client::Transport::Tcp,
+            session_group: Default::default(),
         },
     )?;
     Ok(format!(

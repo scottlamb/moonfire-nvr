@@ -16,8 +16,13 @@ Each release is tagged in Git and on the Docker repository
 *   fix [#157](https://github.com/scottlamb/moonfire-nvr/issues/157): broken
     live view when using multi-view and selecting the first listed camera
     then selecting another camera for the upper left grid square.
-*   support `--rtsp-transport=udp`, which improves compatibility with Reolink
-    cameras.
+*   support `--rtsp-transport=udp`, which may work better with cameras that
+    use old versions of the live555 library, including many Reolink models.
+*   send RTSP `TEARDOWN` requests on UDP or with old live555 versions; wait out
+    stale sessions before reconnecting to the same camera. This may improve
+    reliability with old live555 versions when using TCP also.
+*   improve compatibility with cameras that send non-compliant SDP, including
+    models from Geovision and Anpviz.
 
 ## `v0.6.5` (2021-08-13)
 

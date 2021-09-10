@@ -42,6 +42,7 @@ where
     opener: &'a dyn stream::Opener,
     transport: retina::client::Transport,
     stream_id: i32,
+    session_group: Arc<retina::client::SessionGroup>,
     short_name: String,
     url: Url,
     username: Option<String>,
@@ -59,6 +60,7 @@ where
         stream_id: i32,
         c: &Camera,
         s: &Stream,
+        session_group: Arc<retina::client::SessionGroup>,
         rotate_offset_sec: i64,
         rotate_interval_sec: i64,
     ) -> Result<Self, Error> {
@@ -76,6 +78,7 @@ where
             opener: env.opener,
             transport: env.transport,
             stream_id,
+            session_group,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
             url,
             username: c.username.clone(),
@@ -110,6 +113,28 @@ where
         info!("{}: Opening input: {}", self.short_name, self.url.as_str());
         let clocks = self.db.clocks();
 
+        let mut waited = false;
+        loop {
+            let status = self.session_group.stale_sessions();
+            if let Some(max_expires) = status.max_expires {
+                if let Some(d) = max_expires.checked_duration_since(tokio::time::Instant::now()) {
+                    log::info!(
+                        "{}: Waiting {:?} for {} stale sessions to expire",
+                        &self.short_name,
+                        d,
+                        status.num_sessions
+                    );
+                    std::thread::sleep(d);
+                    waited = true;
+                }
+            } else {
+                if waited {
+                    log::info!("{}: Done waiting", &self.short_name);
+                }
+                break;
+            }
+        }
+
         let (extra_data, mut stream) = {
             let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url.as_str()));
             self.opener.open(
@@ -119,6 +144,7 @@ where
                     username: self.username.clone(),
                     password: self.password.clone(),
                     transport: self.transport,
+                    session_group: self.session_group.clone(),
                 },
             )?
         };
@@ -383,6 +409,7 @@ mod tests {
                 testutil::TEST_STREAM_ID,
                 camera,
                 s,
+                Arc::new(retina::client::SessionGroup::default()),
                 0,
                 3,
             )

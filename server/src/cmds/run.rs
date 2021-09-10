@@ -10,6 +10,7 @@ use failure::{bail, Error, ResultExt};
 use fnv::FnvHashMap;
 use futures::future::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
+use log::error;
 use log::{info, warn};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -216,6 +217,8 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
     // Start a streamer for each stream.
     let shutdown_streamers = Arc::new(AtomicBool::new(false));
     let mut streamers = Vec::new();
+    let mut session_groups_by_camera: FnvHashMap<i32, Arc<retina::client::SessionGroup>> =
+        FnvHashMap::default();
     let syncers = if !args.read_only {
         let l = db.lock();
         let mut dirs = FnvHashMap::with_capacity_and_hasher(
@@ -271,6 +274,10 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
             };
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let syncer = syncers.get(&sample_file_dir_id).unwrap();
+            let session_group = session_groups_by_camera
+                .entry(camera.id)
+                .or_default()
+                .clone();
             let mut streamer = streamer::Streamer::new(
                 &env,
                 syncer.dir.clone(),
@@ -278,6 +285,7 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
                 *id,
                 camera,
                 stream,
+                session_group,
                 rotate_offset_sec,
                 streamer::ROTATE_INTERVAL_SEC,
             )?;
@@ -344,6 +352,14 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
 
     info!("Waiting for HTTP requests to finish.");
     server_handle.await??;
+
+    info!("Waiting for TEARDOWN requests to complete.");
+    for g in session_groups_by_camera.values() {
+        if let Err(e) = g.await_teardown().await {
+            error!("{}", e);
+        }
+    }
+
     info!("Exiting.");
     Ok(0)
 }

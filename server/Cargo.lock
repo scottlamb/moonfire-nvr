@@ -1868,9 +1868,9 @@ dependencies = [
 
 [[package]]
 name = "retina"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446070f3caf291e982d240c7f921837f6da0cbffbc26f1d785b0a8d214f2cadd"
+checksum = "819b5befff8af9b03e21256d577d101754527eb981dcd2804cb8725ce1dca978"
 dependencies = [
  "base64",
  "bitreader",
@@ -1886,7 +1886,7 @@ dependencies = [
  "rand",
  "rtp-rs",
  "rtsp-types",
- "sdp",
+ "sdp-types",
  "smallvec",
  "thiserror",
  "time",
@@ -2024,14 +2024,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "sdp"
-version = "0.1.5"
+name = "sdp-types"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db73ce8329b973830407fb1ba0e51bc32716392281f7757a92f372a1420bb8ec"
+checksum = "ae499f6886cff026ebd8355c8f67a1881cd15f23ce89de4aab13588cf52142dd"
 dependencies = [
- "rand",
- "thiserror",
- "url",
+ "bstr",
+ "fallible-iterator",
 ]
 
 [[package]]
@@ -2364,9 +2363,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92036be488bb6594459f2e03b60e42df6f937fe6ca5c5ffdcb539c6b84dc40f5"
+checksum = "b4efe6fc2395938c8155973d7be49fe8d03a843726e285e100a8a383cc0154ce"
 dependencies = [
  "autocfg",
  "bytes",
