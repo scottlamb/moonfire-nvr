@@ -13,6 +13,14 @@ successfully, a following *open* may assign the same id to a new recording.
 The open id disambiguates this and should be used whenever referring to a
 recording that may be unflushed.
 
+*ppm:* Part Per Million.  Crystal Clock accuracy is defined in terms of ppm or 
+parts per million and it gives a convenient way of comparing accuracies 
+of different crystal specifications. "A typical crystal has an error of 
+100ppm (ish) this translates as 100/1e6 or (1e-4)...So the total error on a day 
+is 86400 x 1e-4= 8.64 seconds per day. In a month you would loose 
+30x8.64 = 259 seconds or 4.32 minutes per month." 
+Source: https://www.best-microcontroller-projects.com/ppm.html
+
 *recording:* the video from a (typically 1-minute) portion of an RTSP session.
 RTSP sessions are divided into recordings as a detail of the
 storage schema. See [schema.md](schema.md) for details. This concept is exposed
