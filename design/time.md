@@ -111,7 +111,7 @@ information:
     use SNTP clients which simply step time periodically and provide no
     interface to determine if the clock is currently synchronized. This
     document's author owns several cameras with clocks that run roughly 20
-    ppm fast (2 seconds per day) and are adjusted via steps.
+    *ppm* fast (2 seconds per day) and are adjusted via steps.
 *   the RTP timestamps from each of a camera's streams. As described in
     [RFC 3550 section 5.1](https://tools.ietf.org/html/rfc3550#section-5.1),
     these are monotonically increasing with an unspecified reference point.
@@ -158,7 +158,7 @@ relying on the camera's clock for the *media duration* of frames and
 recordings. In the first recording in a *run*, it will use these durations
 and the NVR's wall clock time to establish the start time of the run. In
 subsequent recordings of the run, it will calculate a *wall duration* which
-is up to 500 ppm different from the media duration to gently correct the
+is up to 500 *ppm* different from the media duration to gently correct the
 camera's clock toward the NVR's clock, trusting the latter to be more
 accurate.
 
@@ -207,17 +207,17 @@ a *wall duration* of recordings which more closely matches the NVR's clock.
 It is calculated as follows:
 
 *   For the first recording in a run: the wall duration is the media duration.
-    At the design limit of 500 ppm camera frequency error and an upper
+    At the design limit of 500 *ppm* camera frequency error and an upper
     bound of two minutes duration for the initial recording, this causes
     a maximum of 60 milliseconds of error.
 *   For subsequent recordings, the wall duration is the media duration
-    adjusted by up to 500 ppm to reduce differences between the "local start
+    adjusted by up to 500 *ppm* to reduce differences between the "local start
     time" and the start time, as follows:
     ```
     limit = media_duration / 2000
     wall_duration = media_duration + clamp(local_start - start, -limit, +limit)
     ```
-    Note that for a 1-minute recording, 500 ppm is 0.3 ms, or 27 90kHz units.
+    Note that for a 1-minute recording, 500 *ppm* is 0.3 ms, or 27 90kHz units.
 
 Each recording's local start time is also stored in the database as a delta to
 the recording's start time. These stored values aren't used for normal system
@@ -342,7 +342,7 @@ second would still be ambiguous.
 
 Moonfire NVR could make no code changes and ask the system administrator to
 use smeared time. This is the simplest option. On a leap smear system, there
-are no time jumps. The ~11.6 ppm frequency error and the maximum introduced
+are no time jumps. The ~11.6 *ppm* frequency error and the maximum introduced
 absolute error of 0.5 sec can be considered acceptable.
 
 Alternatively, Moonfire NVR could assume a specific leap smear policy (such as
