@@ -238,6 +238,7 @@ $ cd ui
 $ npm install
 $ npm run build
 $ sudo mkdir /usr/local/lib/moonfire-nvr
+$ cd ..
 $ sudo rsync --recursive --delete --chmod=D755,F644 ui/build/ /usr/local/lib/moonfire-nvr/ui
 ```
 
