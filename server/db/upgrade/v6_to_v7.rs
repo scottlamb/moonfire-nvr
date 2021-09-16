@@ -178,6 +178,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           video_samples integer not null check (video_samples > 0),
           video_sync_samples integer not null check (video_sync_samples > 0),
           video_sample_entry_id integer references video_sample_entry (id),
+          end_reason text
           check (composite_id >> 32 = stream_id)
         );
         create index recording_cover on recording (
@@ -193,7 +194,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           run_offset,
           flags
         );
-        insert into recording select * from old_recording;
+        insert into recording select *, null from old_recording;
         alter table recording_integrity rename to old_recording_integrity;
         create table recording_integrity (
           composite_id integer primary key references recording (composite_id),

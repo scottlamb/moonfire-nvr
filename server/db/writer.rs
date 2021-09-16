@@ -780,10 +780,10 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
     /// Cleanly closes the writer, using a supplied pts of the next sample for the last sample's
     /// duration (if known). If `close` is not called, the `Drop` trait impl will close the trait,
     /// swallowing errors and using a zero duration for the last sample.
-    pub fn close(&mut self, next_pts: Option<i64>) -> Result<(), Error> {
+    pub fn close(&mut self, next_pts: Option<i64>, reason: Option<String>) -> Result<(), Error> {
         self.state = match mem::replace(&mut self.state, WriterState::Unopened) {
             WriterState::Open(w) => {
-                let prev = w.close(self.channel, next_pts, self.db, self.stream_id)?;
+                let prev = w.close(self.channel, next_pts, self.db, self.stream_id, reason)?;
                 WriterState::Closed(prev)
             }
             s => s,
@@ -855,6 +855,7 @@ impl<F: FileWriter> InnerWriter<F> {
         next_pts: Option<i64>,
         db: &db::Database<C>,
         stream_id: i32,
+        reason: Option<String>,
     ) -> Result<PreviousWriter, Error> {
         let unindexed = self
             .unindexed_sample
@@ -882,6 +883,7 @@ impl<F: FileWriter> InnerWriter<F> {
             l.flags = flags;
             l.local_time_delta = self.local_start - l.start;
             l.sample_file_blake3 = Some(*blake3.as_bytes());
+            l.end_reason = reason;
             wall_duration = recording::Duration(i64::from(l.wall_duration_90k));
             run_offset = l.run_offset;
             end = l.start + wall_duration;
@@ -902,7 +904,13 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Drop for Writer<'a, C, D> {
             // Swallow any error. The caller should only drop the Writer without calling close()
             // if there's already been an error. The caller should report that. No point in
             // complaining again.
-            let _ = w.close(self.channel, None, self.db, self.stream_id);
+            let _ = w.close(
+                self.channel,
+                None,
+                self.db,
+                self.stream_id,
+                Some("drop".to_owned()),
+            );
         }
     }
 }
@@ -1209,7 +1217,7 @@ mod tests {
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
         w.write(b"123", recording::Time(2), 0, true).unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
-        w.close(Some(1)).unwrap();
+        w.close(Some(1), None).unwrap();
         assert!(h.syncer.iter(&h.syncer_rcv)); // AsyncSave
         assert_eq!(h.syncer.planned_flushes.len(), 1);
         assert!(h.syncer.iter(&h.syncer_rcv)); // planned flush
@@ -1418,7 +1426,7 @@ mod tests {
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
         w.write(b"123", recording::Time(2), 0, true).unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
-        w.close(Some(1)).unwrap();
+        w.close(Some(1), None).unwrap();
 
         assert!(h.syncer.iter(&h.syncer_rcv)); // AsyncSave
         assert_eq!(h.syncer.planned_flushes.len(), 1);

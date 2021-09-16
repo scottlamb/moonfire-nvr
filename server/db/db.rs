@@ -272,6 +272,7 @@ pub struct RecordingToInsert {
     pub video_sample_entry_id: i32,
     pub video_index: Vec<u8>,
     pub sample_file_blake3: Option<[u8; 32]>,
+    pub end_reason: Option<String>,
 }
 
 impl RecordingToInsert {
@@ -2658,6 +2659,7 @@ mod tests {
             video_sample_entry_id: vse_id,
             video_index: [0u8; 100].to_vec(),
             sample_file_blake3: None,
+            end_reason: None,
         };
         let id = {
             let mut db = db.lock();

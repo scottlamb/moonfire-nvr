@@ -182,11 +182,13 @@ pub(crate) fn insert_recording(
             insert into recording (composite_id, stream_id, open_id, run_offset, flags,
                                sample_file_bytes, start_time_90k, prev_media_duration_90k,
                                prev_runs, wall_duration_90k, media_duration_delta_90k,
-                               video_samples, video_sync_samples, video_sample_entry_id)
+                               video_samples, video_sync_samples, video_sample_entry_id,
+                               end_reason)
                        values (:composite_id, :stream_id, :open_id, :run_offset, :flags,
                                :sample_file_bytes, :start_time_90k, :prev_media_duration_90k,
                                :prev_runs, :wall_duration_90k, :media_duration_delta_90k,
-                               :video_samples, :video_sync_samples, :video_sample_entry_id)
+                               :video_samples, :video_sync_samples, :video_sample_entry_id,
+                               :end_reason)
             "#,
         )
         .with_context(|e| format!("can't prepare recording insert: {}", e))?;
@@ -205,6 +207,7 @@ pub(crate) fn insert_recording(
         ":video_samples": r.video_samples,
         ":video_sync_samples": r.video_sync_samples,
         ":video_sample_entry_id": r.video_sample_entry_id,
+        ":end_reason": r.end_reason.as_deref(),
     })
     .with_context(|e| {
         format!(

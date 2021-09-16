@@ -2326,7 +2326,7 @@ mod tests {
                 .unwrap();
             end_pts = Some(pkt.pts + i64::from(pkt.duration));
         }
-        output.close(end_pts).unwrap();
+        output.close(end_pts, None).unwrap();
         db.syncer_channel.flush();
     }
 

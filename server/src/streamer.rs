@@ -153,7 +153,14 @@ where
         while !self.shutdown.load(Ordering::SeqCst) {
             let pkt = {
                 let _t = TimerGuard::new(&clocks, || "getting next packet");
-                stream.next()?
+                stream.next()
+            };
+            let pkt = match pkt {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = w.close(None, Some(e.to_string()));
+                    return Err(e);
+                }
             };
             if !seen_key_frame && !pkt.is_key {
                 continue;
@@ -167,7 +174,7 @@ where
                 if frame_realtime.sec > r && pkt.is_key {
                     trace!("{}: write on normal rotation", self.short_name);
                     let _t = TimerGuard::new(&clocks, || "closing writer");
-                    w.close(Some(pkt.pts))?;
+                    w.close(Some(pkt.pts), None)?;
                     None
                 } else {
                     Some(r)
@@ -205,7 +212,7 @@ where
         }
         if rotate.is_some() {
             let _t = TimerGuard::new(&clocks, || "closing writer");
-            w.close(None)?;
+            w.close(None, Some("NVR shutdown".to_owned()))?;
         }
         Ok(())
     }

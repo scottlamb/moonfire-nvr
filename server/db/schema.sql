@@ -164,6 +164,10 @@ create table recording (
   video_sync_samples integer not null check (video_sync_samples > 0),
   video_sample_entry_id integer references video_sample_entry (id),
 
+  -- The reason this run ended. Absent if there are more recordings in this
+  -- run or if this recording predates schema version 7.
+  end_reason text
+
   check (composite_id >> 32 = stream_id)
 );
 
