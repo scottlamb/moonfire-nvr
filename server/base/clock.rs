@@ -18,7 +18,10 @@ pub trait Clocks: Send + Sync + 'static {
     /// Gets the current time from `CLOCK_REALTIME`.
     fn realtime(&self) -> Timespec;
 
-    /// Gets the current time from `CLOCK_MONOTONIC`.
+    /// Gets the current time from a monotonic clock.
+    ///
+    /// On Linux, this uses `CLOCK_BOOTTIME`, which includes suspended time.
+    /// On other systems, it uses `CLOCK_MONOTONIC`.
     fn monotonic(&self) -> Timespec;
 
     /// Causes the current thread to sleep for the specified time.
@@ -70,6 +73,13 @@ impl Clocks for RealClocks {
     fn realtime(&self) -> Timespec {
         self.get(libc::CLOCK_REALTIME)
     }
+
+    #[cfg(target_os = "linux")]
+    fn monotonic(&self) -> Timespec {
+        self.get(libc::CLOCK_BOOTTIME)
+    }
+
+    #[cfg(not(target_os = "linux"))]
     fn monotonic(&self) -> Timespec {
         self.get(libc::CLOCK_MONOTONIC)
     }
