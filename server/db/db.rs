@@ -334,7 +334,7 @@ impl SampleFileDir {
     }
 
     /// Returns expected existing metadata when opening this directory.
-    fn meta(&self, db_uuid: &Uuid) -> schema::DirMeta {
+    fn expected_meta(&self, db_uuid: &Uuid) -> schema::DirMeta {
         let mut meta = schema::DirMeta::default();
         meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
         meta.dir_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
@@ -1182,20 +1182,20 @@ impl LockedDatabase {
             if dir.dir.is_some() {
                 continue;
             }
-            let mut meta = dir.meta(&self.uuid);
+            let mut expected_meta = dir.expected_meta(&self.uuid);
             if let Some(o) = self.open.as_ref() {
-                let open = meta.in_progress_open.set_default();
+                let open = expected_meta.in_progress_open.set_default();
                 open.id = o.id;
                 open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
             }
-            let d = dir::SampleFileDir::open(&dir.path, &meta)
+            let d = dir::SampleFileDir::open(&dir.path, &expected_meta)
                 .map_err(|e| e.context(format!("Failed to open dir {}", dir.path)))?;
             if self.open.is_none() {
                 // read-only mode; it's already fully opened.
                 dir.dir = Some(d);
             } else {
                 // read-write mode; there are more steps to do.
-                e.insert((meta, d));
+                e.insert((expected_meta, d));
             }
         }
 
@@ -1221,8 +1221,7 @@ impl LockedDatabase {
 
         for (id, (mut meta, d)) in in_progress.drain() {
             let dir = self.sample_file_dirs_by_id.get_mut(&id).unwrap();
-            meta.last_complete_open.clear();
-            mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
+            meta.last_complete_open = meta.in_progress_open.take().into();
             d.write_meta(&meta)?;
             dir.dir = Some(d);
         }
@@ -1786,14 +1785,13 @@ impl LockedDatabase {
                 path,
                 uuid,
                 dir: Some(dir),
-                last_complete_open: None,
+                last_complete_open: Some(*o),
                 garbage_needs_unlink: FnvHashSet::default(),
                 garbage_unlinked: Vec::new(),
             }),
             Entry::Occupied(_) => bail!("duplicate sample file dir id {}", id),
         };
-        d.last_complete_open = Some(*o);
-        mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
+        meta.last_complete_open = meta.in_progress_open.take().into();
         d.dir.as_ref().unwrap().write_meta(&meta)?;
         Ok(id)
     }
@@ -1815,7 +1813,7 @@ impl LockedDatabase {
             );
         }
         let dir = match d.get_mut().dir.take() {
-            None => dir::SampleFileDir::open(&d.get().path, &d.get().meta(&self.uuid))?,
+            None => dir::SampleFileDir::open(&d.get().path, &d.get().expected_meta(&self.uuid))?,
             Some(arc) => match Arc::strong_count(&arc) {
                 1 => {
                     d.get_mut().dir = Some(arc); // put it back.
@@ -1830,7 +1828,7 @@ impl LockedDatabase {
                 &d.get().path
             );
         }
-        let mut meta = d.get().meta(&self.uuid);
+        let mut meta = d.get().expected_meta(&self.uuid);
         meta.in_progress_open = meta.last_complete_open.take().into();
         dir.write_meta(&meta)?;
         if self

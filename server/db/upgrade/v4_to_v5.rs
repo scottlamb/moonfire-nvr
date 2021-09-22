@@ -37,11 +37,12 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
     dir_meta
         .merge_from(&mut s)
         .map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
-    if !dir::SampleFileDir::consistent(&db_meta, &dir_meta) {
+    if let Err(e) = dir::SampleFileDir::check_consistent(&db_meta, &dir_meta) {
         bail!(
-            "Inconsistent db_meta={:?} dir_meta={:?}",
+            "Inconsistent db_meta={:?} dir_meta={:?}: {}",
             &db_meta,
-            &dir_meta
+            &dir_meta,
+            e
         );
     }
     let mut f = crate::fs::openat(
