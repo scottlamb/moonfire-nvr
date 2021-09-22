@@ -130,7 +130,7 @@ fn copy_streams(tx: &rusqlite::Transaction) -> Result<(), Error> {
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     tx.execute_batch(
         r#"
-    
+        alter table open add boot_uuid check (length(boot_uuid) = 16);
         alter table user add preferences text;
         alter table camera rename to old_camera;
         alter table stream rename to old_stream;

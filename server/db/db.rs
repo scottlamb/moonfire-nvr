@@ -39,6 +39,7 @@ use failure::{bail, format_err, Error, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
 use hashlink::LinkedHashMap;
 use itertools::Itertools;
+use log::warn;
 use log::{error, info, trace};
 use parking_lot::{Mutex, MutexGuard};
 use rusqlite::{named_params, params};
@@ -109,6 +110,12 @@ impl rusqlite::types::FromSql for FromSqlUuid {
         let uuid = Uuid::from_slice(value.as_blob()?)
             .map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(e)))?;
         Ok(FromSqlUuid(uuid))
+    }
+}
+
+impl rusqlite::types::ToSql for FromSqlUuid {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.0.as_bytes()[..].into())
     }
 }
 
@@ -2151,6 +2158,16 @@ pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Er
     )?))
 }
 
+/// Returns the UUID associated with the current system boot, if available.
+fn get_boot_uuid() -> Result<Option<Uuid>, Error> {
+    if cfg!(target_os = "linux") {
+        let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")?;
+        Ok(Some(Uuid::parse_str(boot_id.trim_end())?))
+    } else {
+        Ok(None) // don't complain about lack of platform support; just return None.
+    }
+}
+
 /// Checks that the schema version in the given database is as expected.
 pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Error> {
     let ver = get_schema_version(conn)?.ok_or_else(|| {
@@ -2229,15 +2246,19 @@ impl<C: Clocks + Clone> Database<C> {
         let open_monotonic = recording::Time::new(clocks.monotonic());
         let open = if read_write {
             let real = recording::Time::new(clocks.realtime());
-            let mut stmt =
-                conn.prepare(" insert into open (uuid, start_time_90k) values (?, ?)")?;
-            let uuid = Uuid::new_v4();
-            let uuid_bytes = &uuid.as_bytes()[..];
-            stmt.execute(params![uuid_bytes, real.0])?;
-            Some(Open {
-                id: conn.last_insert_rowid() as u32,
-                uuid,
-            })
+            let mut stmt = conn
+                .prepare(" insert into open (uuid, start_time_90k, boot_uuid) values (?, ?, ?)")?;
+            let open_uuid = FromSqlUuid(Uuid::new_v4());
+            let boot_uuid = match get_boot_uuid() {
+                Err(e) => {
+                    warn!("Unable to get boot uuid: {}", e);
+                    None
+                }
+                Ok(id) => id.map(FromSqlUuid),
+            };
+            stmt.execute(params![open_uuid, real.0, boot_uuid])?;
+            let id = conn.last_insert_rowid() as u32;
+            Some(Open { id, uuid })
         } else {
             None
         };

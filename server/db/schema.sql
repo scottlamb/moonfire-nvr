@@ -50,7 +50,9 @@ create table open (
 
   -- How long the database was open. This is end_time_90k - start_time_90k if
   -- there were no time steps or leap seconds during this time.
-  duration_90k integer
+  duration_90k integer,
+
+  boot_uuid check (length(boot_uuid) = 16)
 );
 
 create table sample_file_dir (
