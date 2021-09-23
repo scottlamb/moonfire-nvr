@@ -2277,7 +2277,7 @@ mod tests {
         }
     }
 
-    fn copy_mp4_to_db(db: &TestDb<RealClocks>) {
+    fn copy_mp4_to_db(db: &mut TestDb<RealClocks>) {
         let (extra_data, mut input) = stream::FFMPEG
             .open(
                 "test".to_owned(),
@@ -2322,7 +2322,13 @@ mod tests {
             };
             frame_time += recording::Duration(i64::from(pkt.duration));
             output
-                .write(pkt.data, frame_time, pkt.pts, pkt.is_key)
+                .write(
+                    &mut db.shutdown_rx,
+                    pkt.data,
+                    frame_time,
+                    pkt.pts,
+                    pkt.is_key,
+                )
                 .unwrap();
             end_pts = Some(pkt.pts + i64::from(pkt.duration));
         }
@@ -2811,8 +2817,8 @@ mod tests {
     #[tokio::test]
     async fn test_round_trip() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&db);
+        let mut db = TestDb::new(RealClocks {});
+        copy_mp4_to_db(&mut db);
         let mp4 = create_mp4_from_db(&db, 0, 0, false);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
@@ -2840,8 +2846,8 @@ mod tests {
     #[tokio::test]
     async fn test_round_trip_with_subtitles() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&db);
+        let mut db = TestDb::new(RealClocks {});
+        copy_mp4_to_db(&mut db);
         let mp4 = create_mp4_from_db(&db, 0, 0, true);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
@@ -2869,8 +2875,8 @@ mod tests {
     #[tokio::test]
     async fn test_round_trip_with_edit_list() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&db);
+        let mut db = TestDb::new(RealClocks {});
+        copy_mp4_to_db(&mut db);
         let mp4 = create_mp4_from_db(&db, 1, 0, false);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
@@ -2898,8 +2904,8 @@ mod tests {
     #[tokio::test]
     async fn test_round_trip_with_edit_list_and_subtitles() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&db);
+        let mut db = TestDb::new(RealClocks {});
+        copy_mp4_to_db(&mut db);
         let off = 2 * TIME_UNITS_PER_SEC;
         let mp4 = create_mp4_from_db(&db, i32::try_from(off).unwrap(), 0, true);
         traverse(mp4.clone()).await;
@@ -2928,8 +2934,8 @@ mod tests {
     #[tokio::test]
     async fn test_round_trip_with_shorten() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&db);
+        let mut db = TestDb::new(RealClocks {});
+        copy_mp4_to_db(&mut db);
         let mp4 = create_mp4_from_db(&db, 0, 1, false);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;

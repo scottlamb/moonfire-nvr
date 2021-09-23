@@ -1196,6 +1196,7 @@ name = "moonfire-base"
 version = "0.0.1"
 dependencies = [
  "failure",
+ "futures",
  "lazy_static",
  "libc",
  "log",
@@ -1203,6 +1204,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
+ "slab",
  "time",
 ]
 

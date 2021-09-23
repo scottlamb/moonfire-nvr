@@ -13,6 +13,8 @@ use std::thread;
 use std::time::Duration as StdDuration;
 use time::{Duration, Timespec};
 
+use crate::shutdown::ShutdownError;
+
 /// Abstract interface to the system clocks. This is for testability.
 pub trait Clocks: Send + Sync + 'static {
     /// Gets the current time from `CLOCK_REALTIME`.
@@ -35,16 +37,21 @@ pub trait Clocks: Send + Sync + 'static {
     ) -> Result<T, mpsc::RecvTimeoutError>;
 }
 
-pub fn retry_forever<C, T, E>(clocks: &C, f: &mut dyn FnMut() -> Result<T, E>) -> T
+pub fn retry<C, T, E>(
+    clocks: &C,
+    shutdown_rx: &crate::shutdown::Receiver,
+    f: &mut dyn FnMut() -> Result<T, E>,
+) -> Result<T, ShutdownError>
 where
     C: Clocks,
     E: Into<Error>,
 {
     loop {
         let e = match f() {
-            Ok(t) => return t,
+            Ok(t) => return Ok(t),
             Err(e) => e.into(),
         };
+        shutdown_rx.check()?;
         let sleep_time = Duration::seconds(1);
         warn!(
             "sleeping for {} after error: {}",

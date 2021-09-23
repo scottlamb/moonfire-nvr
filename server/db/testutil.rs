@@ -51,6 +51,8 @@ pub fn init() {
 pub struct TestDb<C: Clocks + Clone> {
     pub db: Arc<db::Database<C>>,
     pub dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
+    pub shutdown_tx: base::shutdown::Sender,
+    pub shutdown_rx: base::shutdown::Receiver,
     pub syncer_channel: writer::SyncerChannel<::std::fs::File>,
     pub syncer_join: thread::JoinHandle<()>,
     pub tmpdir: TempDir,
@@ -114,11 +116,14 @@ impl<C: Clocks + Clone> TestDb<C> {
         }
         let mut dirs_by_stream_id = FnvHashMap::default();
         dirs_by_stream_id.insert(TEST_STREAM_ID, dir);
+        let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
         let (syncer_channel, syncer_join) =
-            writer::start_syncer(db.clone(), sample_file_dir_id).unwrap();
+            writer::start_syncer(db.clone(), shutdown_rx.clone(), sample_file_dir_id).unwrap();
         TestDb {
             db,
             dirs_by_stream_id: Arc::new(dirs_by_stream_id),
+            shutdown_tx,
+            shutdown_rx,
             syncer_channel,
             syncer_join,
             tmpdir,

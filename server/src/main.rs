@@ -59,16 +59,16 @@ enum Args {
 }
 
 impl Args {
-    fn run(&self) -> Result<i32, failure::Error> {
+    fn run(self) -> Result<i32, failure::Error> {
         match self {
-            Args::Check(ref a) => cmds::check::run(a),
-            Args::Config(ref a) => cmds::config::run(a),
-            Args::Init(ref a) => cmds::init::run(a),
-            Args::Login(ref a) => cmds::login::run(a),
-            Args::Run(ref a) => cmds::run::run(a),
-            Args::Sql(ref a) => cmds::sql::run(a),
-            Args::Ts(ref a) => cmds::ts::run(a),
-            Args::Upgrade(ref a) => cmds::upgrade::run(a),
+            Args::Check(a) => cmds::check::run(a),
+            Args::Config(a) => cmds::config::run(a),
+            Args::Init(a) => cmds::init::run(a),
+            Args::Login(a) => cmds::login::run(a),
+            Args::Run(a) => cmds::run::run(a),
+            Args::Sql(a) => cmds::sql::run(a),
+            Args::Ts(a) => cmds::ts::run(a),
+            Args::Upgrade(a) => cmds::upgrade::run(a),
         }
     }
 }

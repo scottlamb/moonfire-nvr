@@ -8,7 +8,6 @@ use db::{dir, recording, writer, Camera, Database, Stream};
 use failure::{bail, Error};
 use log::{debug, info, trace, warn};
 use std::result::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use url::Url;
 
@@ -22,7 +21,7 @@ where
     pub opener: &'a dyn stream::Opener,
     pub transport: retina::client::Transport,
     pub db: &'tmp Arc<Database<C>>,
-    pub shutdown: &'tmp Arc<AtomicBool>,
+    pub shutdown_rx: &'tmp base::shutdown::Receiver,
 }
 
 /// Connects to a given RTSP stream and writes recordings to the database via [`writer::Writer`].
@@ -31,7 +30,7 @@ pub struct Streamer<'a, C>
 where
     C: Clocks + Clone,
 {
-    shutdown: Arc<AtomicBool>,
+    shutdown_rx: base::shutdown::Receiver,
 
     // State below is only used by the thread in Run.
     rotate_offset_sec: i64,
@@ -69,7 +68,7 @@ where
             bail!("RTSP URL shouldn't include credentials");
         }
         Ok(Streamer {
-            shutdown: env.shutdown.clone(),
+            shutdown_rx: env.shutdown_rx.clone(),
             rotate_offset_sec,
             rotate_interval_sec,
             db: env.db.clone(),
@@ -94,7 +93,7 @@ where
     /// Note that when using Retina as the RTSP library, this must be called
     /// within a tokio runtime context; see [tokio::runtime::Handle].
     pub fn run(&mut self) {
-        while !self.shutdown.load(Ordering::SeqCst) {
+        while self.shutdown_rx.check().is_ok() {
             if let Err(e) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
                 warn!(
@@ -124,7 +123,7 @@ where
                         d,
                         status.num_sessions
                     );
-                    std::thread::sleep(d);
+                    self.shutdown_rx.wait_for(d)?;
                     waited = true;
                 }
             } else {
@@ -164,7 +163,7 @@ where
             self.stream_id,
             video_sample_entry_id,
         );
-        while !self.shutdown.load(Ordering::SeqCst) {
+        while self.shutdown_rx.check().is_ok() {
             let pkt = {
                 let _t = TimerGuard::new(&clocks, || "getting next packet");
                 stream.next()?
@@ -214,7 +213,13 @@ where
                 }
             };
             let _t = TimerGuard::new(&clocks, || format!("writing {} bytes", pkt.data.len()));
-            w.write(pkt.data, local_time, pkt.pts, pkt.is_key)?;
+            w.write(
+                &mut self.shutdown_rx,
+                pkt.data,
+                local_time,
+                pkt.pts,
+                pkt.is_key,
+            )?;
             rotate = Some(r);
         }
         if rotate.is_some() {
@@ -236,7 +241,6 @@ mod tests {
     use parking_lot::Mutex;
     use std::cmp;
     use std::convert::TryFrom;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use time;
 
@@ -312,7 +316,7 @@ mod tests {
     struct MockOpener {
         expected_url: url::Url,
         streams: Mutex<Vec<(h264::ExtraData, Box<dyn stream::Stream>)>>,
-        shutdown: Arc<AtomicBool>,
+        shutdown_tx: Mutex<Option<base::shutdown::Sender>>,
     }
 
     impl stream::Opener for MockOpener {
@@ -333,7 +337,7 @@ mod tests {
                 }
                 None => {
                     trace!("MockOpener shutting down");
-                    self.shutdown.store(true, Ordering::SeqCst);
+                    self.shutdown_tx.lock().take();
                     bail!("done")
                 }
             }
@@ -380,16 +384,17 @@ mod tests {
         stream.ts_offset = 123456; // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::max_value();
         stream.pkts_left = u32::max_value();
+        let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
         let opener = MockOpener {
             expected_url: url::Url::parse("rtsp://test-camera/main").unwrap(),
             streams: Mutex::new(vec![(extra_data, Box::new(stream))]),
-            shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown_tx: Mutex::new(Some(shutdown_tx)),
         };
         let db = testutil::TestDb::new(clocks.clone());
         let env = super::Environment {
             opener: &opener,
             db: &db.db,
-            shutdown: &opener.shutdown,
+            shutdown_rx: &shutdown_rx,
             transport: retina::client::Transport::Tcp,
         };
         let mut stream;
