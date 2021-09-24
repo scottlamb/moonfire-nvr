@@ -6,7 +6,7 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## unreleased
+## `v0.6.6` (2021-09-23)
 
 *   fix [#146](https://github.com/scottlamb/moonfire-nvr/issues/146): "init
     segment fetch error" when browsers have cached data from `v0.6.4` and

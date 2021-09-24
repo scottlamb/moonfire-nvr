@@ -1,6 +1,6 @@
 [package]
 name = "moonfire-db"
-version = "0.6.5"
+version = "0.6.6"
 authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
 edition = "2018"
