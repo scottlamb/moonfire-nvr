@@ -24,7 +24,7 @@ Each release is tagged in Git and on the Docker repository
 *   improve compatibility with cameras that send non-compliant SDP, including
     models from Geovision and Anpviz.
 *   fix [#117](https://github.com/scottlamb/moonfire-nvr/issues/117): honor
-*   shut down requests when out of disk space, instead of retrying forever.
+    shutdown requests when out of disk space, instead of retrying forever.
 *   shut down immediately on a second `SIGINT` or `SIGTERM`. The normal
     "graceful" shutdown will still be slow in some cases, eg when waiting for a
     RTSP UDP session to time out after a `TEARDOWN` failure. This allows the
