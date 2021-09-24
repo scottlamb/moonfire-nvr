@@ -149,9 +149,9 @@ fn resolve_zone() -> Result<String, Error> {
         }
     };
 
-    // If `TIMEZONE_PATH` is a file, use its contents as the zone name.
+    // If `TIMEZONE_PATH` is a file, use its contents as the zone name, trimming whitespace.
     match ::std::fs::read_to_string(TIMEZONE_PATH) {
-        Ok(z) => Ok(z),
+        Ok(z) => Ok(z.trim().to_owned()),
         Err(e) => {
             bail!(
                 "Unable to resolve timezone from TZ env, {}, or {}. Last error: {}",
