@@ -16,12 +16,12 @@
  * flexibility (yet).
  */
 
-import IconButton from "@material-ui/core/IconButton";
+import IconButton from "@mui/material/IconButton";
 import Snackbar, {
   SnackbarCloseReason,
   SnackbarProps,
-} from "@material-ui/core/Snackbar";
-import CloseIcon from "@material-ui/icons/Close";
+} from "@mui/material/Snackbar";
+import CloseIcon from "@mui/icons-material/Close";
 import React, { useContext } from "react";
 
 interface SnackbarProviderProps {

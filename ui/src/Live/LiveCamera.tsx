@@ -6,9 +6,9 @@ import React, { SyntheticEvent } from "react";
 import { Camera } from "../types";
 import { Part, parsePart } from "./parser";
 import * as api from "../api";
-import Box from "@material-ui/core/Box";
-import CircularProgress from "@material-ui/core/CircularProgress";
-import Alert from "@material-ui/core/Alert";
+import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
+import Alert from "@mui/material/Alert";
 import useResizeObserver from "@react-hook/resize-observer";
 import { fillAspect } from "../aspect";
 

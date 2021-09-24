@@ -2,12 +2,12 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Select, { SelectChangeEvent } from "@material-ui/core/Select";
-import MenuItem from "@material-ui/core/MenuItem";
+import Select, { SelectChangeEvent } from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
 import React, { useReducer } from "react";
 import { Camera } from "../types";
-import { makeStyles } from "@material-ui/styles";
-import { Theme } from "@material-ui/core/styles";
+import { makeStyles } from "@mui/styles";
+import { Theme } from "@mui/material/styles";
 
 export interface Layout {
   className: string;

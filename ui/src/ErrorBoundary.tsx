@@ -2,9 +2,9 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Avatar from "@material-ui/core/Avatar";
-import Container from "@material-ui/core/Container";
-import BugReportIcon from "@material-ui/icons/BugReport";
+import Avatar from "@mui/material/Avatar";
+import Container from "@mui/material/Container";
+import BugReportIcon from "@mui/icons-material/BugReport";
 import React from "react";
 
 interface State {
