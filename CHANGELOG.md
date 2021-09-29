@@ -9,6 +9,10 @@ Each release is tagged in Git and on the Docker repository
 ## unreleased
 
 *   trim whitespace when detecting time zone by reading `/etc/timezone`.
+*   upgrade to Retina 0.33, with better `TEARDOWN` handling
+    (see [scottlamb/retina#34](https://github.com/scottlamb/retina/34)).
+    This means faster recovery after an error when using UDP or when the
+    camera's firmware is based on an old live555 release.
 
 ## `v0.6.6` (2021-09-23)
 

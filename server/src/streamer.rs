@@ -116,19 +116,22 @@ where
         loop {
             let status = self.session_group.stale_sessions();
             if let Some(max_expires) = status.max_expires {
-                if let Some(d) = max_expires.checked_duration_since(tokio::time::Instant::now()) {
-                    log::info!(
-                        "{}: Waiting {:?} for {} stale sessions to expire",
-                        &self.short_name,
-                        d,
-                        status.num_sessions
-                    );
-                    self.shutdown_rx.wait_for(d)?;
-                    waited = true;
-                }
+                log::info!(
+                    "{}: waiting up to {:?} for TEARDOWN or expiration of {} stale sessions",
+                    &self.short_name,
+                    max_expires.saturating_duration_since(tokio::time::Instant::now()),
+                    status.num_sessions
+                );
+                tokio::runtime::Handle::current().block_on(async {
+                    tokio::select! {
+                        _ = self.session_group.await_stale_sessions(&status) => Ok(()),
+                        _ = self.shutdown_rx.as_future() => Err(base::shutdown::ShutdownError),
+                    }
+                })?;
+                waited = true;
             } else {
                 if waited {
-                    log::info!("{}: Done waiting", &self.short_name);
+                    log::info!("{}: done waiting; no more stale sessions", &self.short_name);
                 }
                 break;
             }
