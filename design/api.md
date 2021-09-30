@@ -141,6 +141,7 @@ The `application/json` response will have a dict as follows:
 *   `signals`: a list of all *signals* known to the server. Each is a dictionary
     with the following properties:
     *   `id`: an integer identifier.
+    *   `source`: a UUID representing the signal source (could be a camera UUID)
     *   `shortName`: a unique, human-readable description of the signal
     *   `cameras`: a map of associated cameras' UUIDs to the type of association:
         `direct` or `indirect`. See `db/schema.sql` for more description.
@@ -511,6 +512,7 @@ to one or more frames of video. The first message is guaranteed to start with a
 "key" (IDR) frame; others may not. The message will contain HTTP headers
 followed by by a `.mp4` media segment. The following headers will be included:
 
+*   `X-Video-Sample-Entry-Id`: An id to use when fetching an initialization segment.
 *   `X-Recording-Id`: the open id, a period, and the recording id of the
     recording these frames belong to.
 *   `X-Recording-Start`: the timestamp (in Moonfire NVR's usual 90,000ths
@@ -594,7 +596,8 @@ streams simultaneously as well as making other simultaneous HTTP requests.
 
 Returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
 initialization segment][init-segment]. The MIME type will be `video/mp4`, with
-a `codecs` parameter as specified in [RFC 6381][rfc-6381].
+a `codecs` parameter as specified in [RFC 6381][rfc-6381]. The `<id>` should be a value
+previously extracted from the `X-Video-Sample-Entry-Id` header returned in a `.../live.m4s` response.
 
 An `X-Aspect` HTTP header will include the aspect ratio as width:height,
 eg `16:9` (most cameras) or `9:16` (rotated 90 degrees).
