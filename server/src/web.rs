@@ -1336,15 +1336,16 @@ impl<'a> StaticFileRequest<'a> {
         };
         let ext = &path[last_dot + 1..];
         let mime = match ext {
+            "css" => "text/css",
             "html" => "text/html",
             "ico" => "image/x-icon",
             "js" | "map" => "text/javascript",
             "json" => "application/json",
             "png" => "image/png",
-            "webmanifest" => "application/manifest+json",
+            "svg" => "image/svg+xml",
             "txt" => "text/plain",
+            "webmanifest" => "application/manifest+json",
             "woff2" => "font/woff2",
-            "css" => "text/css",
             _ => return None,
         };
 
