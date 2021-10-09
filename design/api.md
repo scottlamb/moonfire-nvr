@@ -430,7 +430,7 @@ Example request URI to retrieve recording id 1, skipping its first 26
 90,000ths of a second:
 
 ```
-    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1.26
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1.26-
 ```
 
 Note carefully the distinction between *wall duration* and *media duration*.
