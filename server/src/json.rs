@@ -493,6 +493,9 @@ pub struct Recording {
 
     #[serde(skip_serializing_if = "Not::not")]
     pub growing: bool,
+
+    #[serde(skip_serializing_if = "Not::not")]
+    pub has_trailing_zero: bool,
 }
 
 #[derive(Debug, Serialize)]

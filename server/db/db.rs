@@ -208,6 +208,7 @@ pub struct ListAggregatedRecordingsRow {
     pub open_id: u32,
     pub first_uncommitted: Option<i32>,
     pub growing: bool,
+    pub has_trailing_zero: bool,
 }
 
 impl ListAggregatedRecordingsRow {
@@ -231,6 +232,7 @@ impl ListAggregatedRecordingsRow {
                 None
             },
             growing,
+            has_trailing_zero: (row.flags & RecordingFlags::TrailingZero as i32) != 0,
         }
     }
 }
@@ -1352,6 +1354,7 @@ impl LockedDatabase {
             let run_start_id = recording_id - row.run_offset;
             let uncommitted = (row.flags & RecordingFlags::Uncommitted as i32) != 0;
             let growing = (row.flags & RecordingFlags::Growing as i32) != 0;
+            let has_trailing_zero = (row.flags & RecordingFlags::TrailingZero as i32) != 0;
             use std::collections::btree_map::Entry;
             match aggs.entry(run_start_id) {
                 Entry::Occupied(mut e) => {
@@ -1396,6 +1399,7 @@ impl LockedDatabase {
                             a.first_uncommitted = a.first_uncommitted.or(Some(recording_id));
                         }
                         a.growing = growing;
+                        a.has_trailing_zero = has_trailing_zero;
                     }
                 }
                 Entry::Vacant(e) => {
