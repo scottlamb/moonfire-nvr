@@ -332,6 +332,13 @@ arbitrary order. Each recording object has the following properties:
 *   `videoSamples`: the number of samples (aka frames) of video in this
     recording.
 *   `sampleFileBytes`: the number of bytes of video in this recording.
+*   `hasTrailingZero`: the final frame of the final recording id described by
+    this row (`endId` if present, otherwise `startId`) has a duration of 0.
+    A frame's duration is calculated by subtracting its timestamp from the
+    following frame's timestamp. When a run ends, there's no following frame
+    and Moonfire NVR fills in a duration of 0. When using `/view.mp4`, it's
+    not possible to append additional segments after such frames, as noted
+    below.
 
 Under the property `videoSampleEntries`, an object mapping ids to objects with
 the following properties:
@@ -456,8 +463,9 @@ Bugs and limitations:
 *   The final recording in every "run" ends with a frame that has duration 0.
     It's not possible to append additional segments after such a frame;
     the server will return an error like `Invalid argument: unable to append
-    recording 2/16672 after recording 2/16671 with trailing zero`.
-    (See [#178](https://github.com/scottlamb/moonfire-nvr/issues/178).)
+    recording 2/16672 after recording 2/16671 with trailing zero`. See also
+    `hasTrailingZero` above, and
+    [#178](https://github.com/scottlamb/moonfire-nvr/issues/178).
 
 ### `GET /api/cameras/<uuid>/<stream>/view.mp4.txt`
 
