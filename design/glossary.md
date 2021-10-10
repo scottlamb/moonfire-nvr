@@ -1,5 +1,14 @@
 # Moonfire NVR Glossary
 
+*GOP:* Group of Pictures, as
+[described](https://en.wikipedia.org/wiki/Group_of_pictures) on wikipedia.
+Each GOP starts with an "IDR" or "key" frame which can be decoded by itself.
+Commonly all other frames in the GOP are encoded in terms of the frames before,
+so decoding frame 5 requires decoding frame 1, 2, 3, and 4. Many security
+cameras produce a new IDR frame (thus start a new GOP) at a fixed interval of
+1 or 2 seconds. Some cameras that use "smart encoding" or "H.264+" may produce
+GOPs that vary in length, up to several seconds.
+
 *media duration:* the total duration of the actual samples in a recording. These
 durations are based on the camera's clock. Camera clocks can be quite
 inaccurate, so this may not match the *wall duration*. See [time.md](time.md)
