@@ -66,7 +66,7 @@ $ sudo chmod a+rx /usr/local/bin/nvr
 # Set your timezone here.
 tz="America/Los_Angeles"
 
-# or eg "scottlamb/moonfire-nvr:v0.6.6" to specify a particular version.
+# or eg "scottlamb/moonfire-nvr:v0.6.7" to specify a particular version.
 image_name="scottlamb/moonfire-nvr:latest"
 container_name="moonfire-nvr"
 common_docker_run_args=(

@@ -6,13 +6,17 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## unreleased
+## `v0.6.7` (2021-10-20)
 
 *   trim whitespace when detecting time zone by reading `/etc/timezone`.
-*   upgrade to Retina 0.33, with better `TEARDOWN` handling
-    (see [scottlamb/retina#34](https://github.com/scottlamb/retina/34)).
+*   (Retina 0.3.2) better `TEARDOWN` handling with the default
+    `--rtsp-library=retina` (see
+    [scottlamb/retina#34](https://github.com/scottlamb/retina/34)).
     This means faster recovery after an error when using UDP or when the
     camera's firmware is based on an old live555 release.
+*   (Retina 0.3.3) better authentication support with the default
+    `--rtsp-library=retina` (see
+    [scottlamb/retina#25](https://github.com/scottlamb/retina/25)).
 
 ## `v0.6.6` (2021-09-23)
 

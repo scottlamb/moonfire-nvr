@@ -502,19 +502,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "digest_auth"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa30657988b2ced88f68fe490889e739bf98d342916c33ed3100af1d6f1cbc9c"
-dependencies = [
- "digest",
- "hex",
- "md-5",
- "rand",
- "sha2",
-]
-
-[[package]]
 name = "dirs"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -893,6 +880,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-auth"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "805afa6c41edf02ff4643e6672810974a83c2d866be06e0c377e1789084f6a7e"
+dependencies = [
+ "base64",
+ "digest",
+ "hex",
+ "md-5",
+ "memchr",
+ "rand",
+ "sha2",
+]
+
+[[package]]
 name = "http-body"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1210,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-db"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "base64",
  "blake3",
@@ -1261,7 +1263,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-nvr"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "base64",
  "blake3",
@@ -1870,17 +1872,17 @@ dependencies = [
 
 [[package]]
 name = "retina"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9d52cea718605a7425537d1859af58d3b1ea669b5572faf481eb6fe7310da17"
+checksum = "99806071cb433bda0abe688798940f64ea8412482c4049e27b924e4d78675c9a"
 dependencies = [
  "base64",
  "bitreader",
  "bytes",
- "digest_auth",
  "futures",
  "h264-reader",
  "hex",
+ "http-auth",
  "log",
  "once_cell",
  "pin-project",
