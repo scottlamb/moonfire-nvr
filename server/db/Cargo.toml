@@ -36,7 +36,7 @@ pretty-hex = "0.2.1"
 prettydiff = { git = "https://github.com/scottlamb/prettydiff", branch = "pr-update-deps" }
 protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
 ring = "0.16.2"
-rusqlite = "0.25.3"
+rusqlite = "0.26.1"
 smallvec = "1.0"
 tempfile = "3.2.0"
 time = "0.1"
