@@ -142,6 +142,7 @@ The `application/json` response will have a JSON object as follows:
 *   `signals`: a list of all *signals* known to the server. Each is a JSON
     object with the following properties:
     *   `id`: an integer identifier.
+    *   `source`: a UUID representing the signal source (could be a camera UUID)
     *   `shortName`: a unique, human-readable description of the signal
     *   `cameras`: a map of associated cameras' UUIDs to the type of association:
         `direct` or `indirect`. See `db/schema.sql` for more description.
@@ -340,6 +341,13 @@ arbitrary order. Each recording object has the following properties:
 *   `videoSamples`: the number of samples (aka frames) of video in this
     recording.
 *   `sampleFileBytes`: the number of bytes of video in this recording.
+*   `hasTrailingZero`: the final frame of the final recording id described by
+    this row (`endId` if present, otherwise `startId`) has a duration of 0.
+    A frame's duration is calculated by subtracting its timestamp from the
+    following frame's timestamp. When a run ends, there's no following frame
+    and Moonfire NVR fills in a duration of 0. When using `/view.mp4`, it's
+    not possible to append additional segments after such frames, as noted
+    below.
 
 Under the property `videoSampleEntries`, an object mapping ids to objects with
 the following properties:
@@ -438,7 +446,7 @@ Example request URI to retrieve recording id 1, skipping its first 26
 90,000ths of a second:
 
 ```
-    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1.26
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1.26-
 ```
 
 Note carefully the distinction between *wall duration* and *media duration*.
@@ -446,8 +454,27 @@ It's normal for `/view.mp4` to return a media presentation with a length
 slightly different from the *wall duration* of the backing recording or
 portion that was requested.
 
-TODO: error behavior on missing segment. It should be a 404, likely with an
-`application/json` body describing what portion if any (still) exists.
+Bugs and limitations:
+
+*   If the `s=` parameter references a recording id that doesn't exist when the
+    server starts processing the `/view.mp4` request, the server will return a
+    `404` with a text error message. This commonly happens when the oldest
+    recording was deleted between the `/recordings` request and the `/view.mp4`
+    request. The server probably should return a structured JSON document
+    describing exactly which recordings have been deleted. For now, the client
+    will have to retry from `/recordings` and again race against deletion.
+*   If a recording is deleted after the server starts processing `/view.mp4`
+    but before the request advances to the recording's byte position, the server
+    will abruptly drop the HTTP connection. The client must then retry to see
+    a proper 404 error. It'd be better if the server would prevent recordings
+    from being deleted while there are `/view.mp4` requests in progress which
+    reference them.
+*   The final recording in every "run" ends with a frame that has duration 0.
+    It's not possible to append additional segments after such a frame;
+    the server will return a 400 error like `Invalid argument: unable to append
+    recording 2/16672 after recording 2/16671 with trailing zero`. See also
+    `hasTrailingZero` above, and
+    [#178](https://github.com/scottlamb/moonfire-nvr/issues/178).
 
 ### `GET /api/cameras/<uuid>/<stream>/view.mp4.txt`
 
@@ -485,11 +512,11 @@ Expected query parameters:
 *   `s` (one or more): as with the `.mp4` URL.
 
 It's recommended that each `.m4s` retrieval be for at most one Moonfire NVR
-recording segment. The fundamental reason is that the Media Source Extension
-API appears structured for adding a complete segment at a time. Large media
-segments thus impose significant latency on seeking. Additionally, because of
-this fundamental reason Moonfire NVR makes no effort to make multiple-segment
-`.m4s` requests practical:
+recording. The fundamental reason is that the Media Source Extension API appears
+structured for adding a complete segment at a time. Large media segments thus
+impose significant latency on seeking. Additionally, because of this fundamental
+reason Moonfire NVR makes no effort to make multiple-segment `.m4s` requests
+practical:
 
 *   There is currently a hard limit of 4 GiB of data because the `.m4s` uses a
     single `moof` followed by a single `mdat`; the former references the
@@ -520,6 +547,7 @@ to one or more frames of video. The first message is guaranteed to start with a
 "key" (IDR) frame; others may not. The message will contain HTTP headers
 followed by by a `.mp4` media segment. The following headers will be included:
 
+*   `X-Video-Sample-Entry-Id`: An id to use when fetching an initialization segment.
 *   `X-Recording-Id`: the open id, a period, and the recording id of the
     recording these frames belong to.
 *   `X-Recording-Start`: the timestamp (in Moonfire NVR's usual 90,000ths
@@ -603,7 +631,8 @@ streams simultaneously as well as making other simultaneous HTTP requests.
 
 Returns a `.mp4` suitable for use as a [HTML5 Media Source Extensions
 initialization segment][init-segment]. The MIME type will be `video/mp4`, with
-a `codecs` parameter as specified in [RFC 6381][rfc-6381].
+a `codecs` parameter as specified in [RFC 6381][rfc-6381]. The `<id>` should be a value
+previously extracted from the `X-Video-Sample-Entry-Id` header returned in a `.../live.m4s` response.
 
 An `X-Aspect` HTTP header will include the aspect ratio as width:height,
 eg `16:9` (most cameras) or `9:16` (rotated 90 degrees).

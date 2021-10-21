@@ -2,7 +2,7 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Container from "@material-ui/core/Container";
+import Container from "@mui/material/Container";
 import React, { useEffect, useReducer, useState } from "react";
 import * as api from "./api";
 import MoonfireMenu from "./AppMenu";
@@ -10,17 +10,17 @@ import Login from "./Login";
 import { useSnackbars } from "./snackbars";
 import { Camera, Session } from "./types";
 import ListActivity from "./List";
-import AppBar from "@material-ui/core/AppBar";
+import AppBar from "@mui/material/AppBar";
 import LiveActivity, { MultiviewChooser } from "./Live";
-import Drawer from "@material-ui/core/Drawer";
-import List from "@material-ui/core/List";
-import ListItem from "@material-ui/core/ListItem";
-import ListItemText from "@material-ui/core/ListItemText";
-import ListIcon from "@material-ui/icons/List";
-import Videocam from "@material-ui/icons/Videocam";
-import ListItemIcon from "@material-ui/core/ListItemIcon";
-import FilterList from "@material-ui/icons/FilterList";
-import IconButton from "@material-ui/core/IconButton";
+import Drawer from "@mui/material/Drawer";
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import ListItemText from "@mui/material/ListItemText";
+import ListIcon from "@mui/icons-material/List";
+import Videocam from "@mui/icons-material/Videocam";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import FilterList from "@mui/icons-material/FilterList";
+import IconButton from "@mui/material/IconButton";
 
 export type LoginState =
   | "unknown"

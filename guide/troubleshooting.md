@@ -272,13 +272,10 @@ clean up the excess files. Moonfire NVR will start working again immediately.
 
 If Moonfire NVR's own files are too large, follow this procedure:
 
-1.  Shut it down via `SIGKILL`:
+1.  Shut it down.
     ```console
-    $ sudo killall -KILL moonfire-nvr
+    $ sudo killall moonfire-nvr
     ```
-    (Be sure to use `-KILL`. It won't shut down properly on `SIGTERM` or `SIGINT`
-    when out of disk space due to [issue
-    #117](https://github.com/scottlamb/moonfire-nvr/issues/117).)
 2.  Reconfigure it use less disk space. See [Completing configuration through
     the UI](install.md#completing-configuration-through-the-ui) in the
     installation guide. Pay attention to the note about slack space.

@@ -15,6 +15,7 @@ use std::convert::TryFrom;
 use std::ffi::CString;
 use std::pin::Pin;
 use std::result::Result;
+use std::sync::Arc;
 use url::Url;
 
 static START_FFMPEG: parking_lot::Once = parking_lot::Once::new();
@@ -62,6 +63,7 @@ pub enum Source<'a> {
         username: Option<String>,
         password: Option<String>,
         transport: Transport,
+        session_group: Arc<retina::client::SessionGroup>,
     },
 }
 
@@ -73,6 +75,7 @@ pub enum Source {
         username: Option<String>,
         password: Option<String>,
         transport: Transport,
+        session_group: Arc<retina::client::SessionGroup>,
     },
 }
 
@@ -141,6 +144,7 @@ impl Opener for Ffmpeg {
                 username,
                 password,
                 transport,
+                ..
             } => {
                 let mut open_options = ffmpeg::avutil::Dictionary::new();
                 open_options
@@ -301,6 +305,7 @@ impl Opener for RetinaOpener {
                 username,
                 password,
                 transport,
+                session_group,
             } => (
                 url,
                 retina::client::SessionOptions::default()
@@ -313,6 +318,7 @@ impl Opener for RetinaOpener {
                         _ => bail!("must supply username when supplying password"),
                     })
                     .transport(transport)
+                    .session_group(session_group)
                     .user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION"))),
             ),
         };

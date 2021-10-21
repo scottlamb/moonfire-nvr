@@ -6,7 +6,8 @@
 
 use crate::db::{self, CompositeId, FromSqlUuid};
 use crate::recording;
-use failure::{bail, Error, ResultExt};
+use base::{ErrorKind, ResultExt as _};
+use failure::{bail, Error, ResultExt as _};
 use fnv::FnvHashSet;
 use rusqlite::{named_params, params};
 use std::ops::Range;
@@ -103,14 +104,18 @@ pub(crate) fn list_recordings_by_time(
     conn: &rusqlite::Connection,
     stream_id: i32,
     desired_time: Range<recording::Time>,
-    f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>,
-) -> Result<(), Error> {
-    let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_TIME_SQL)?;
-    let rows = stmt.query(named_params! {
-        ":stream_id": stream_id,
-        ":start_time_90k": desired_time.start.0,
-        ":end_time_90k": desired_time.end.0,
-    })?;
+    f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), base::Error>,
+) -> Result<(), base::Error> {
+    let mut stmt = conn
+        .prepare_cached(LIST_RECORDINGS_BY_TIME_SQL)
+        .err_kind(ErrorKind::Internal)?;
+    let rows = stmt
+        .query(named_params! {
+            ":stream_id": stream_id,
+            ":start_time_90k": desired_time.start.0,
+            ":end_time_90k": desired_time.end.0,
+        })
+        .err_kind(ErrorKind::Internal)?;
     list_recordings_inner(rows, false, f)
 }
 
@@ -119,39 +124,46 @@ pub(crate) fn list_recordings_by_id(
     conn: &rusqlite::Connection,
     stream_id: i32,
     desired_ids: Range<i32>,
-    f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>,
-) -> Result<(), Error> {
-    let mut stmt = conn.prepare_cached(LIST_RECORDINGS_BY_ID_SQL)?;
-    let rows = stmt.query(named_params! {
-        ":start": CompositeId::new(stream_id, desired_ids.start).0,
-        ":end": CompositeId::new(stream_id, desired_ids.end).0,
-    })?;
+    f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), base::Error>,
+) -> Result<(), base::Error> {
+    let mut stmt = conn
+        .prepare_cached(LIST_RECORDINGS_BY_ID_SQL)
+        .err_kind(ErrorKind::Internal)?;
+    let rows = stmt
+        .query(named_params! {
+            ":start": CompositeId::new(stream_id, desired_ids.start).0,
+            ":end": CompositeId::new(stream_id, desired_ids.end).0,
+        })
+        .err_kind(ErrorKind::Internal)?;
     list_recordings_inner(rows, true, f)
 }
 
 fn list_recordings_inner(
     mut rows: rusqlite::Rows,
     include_prev: bool,
-    f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), Error>,
-) -> Result<(), Error> {
-    while let Some(row) = rows.next()? {
-        let wall_duration_90k = row.get(4)?;
-        let media_duration_delta_90k: i32 = row.get(5)?;
+    f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), base::Error>,
+) -> Result<(), base::Error> {
+    while let Some(row) = rows.next().err_kind(ErrorKind::Internal)? {
+        let wall_duration_90k = row.get(4).err_kind(ErrorKind::Internal)?;
+        let media_duration_delta_90k: i32 = row.get(5).err_kind(ErrorKind::Internal)?;
         f(db::ListRecordingsRow {
-            id: CompositeId(row.get(0)?),
-            run_offset: row.get(1)?,
-            flags: row.get(2)?,
-            start: recording::Time(row.get(3)?),
+            id: CompositeId(row.get(0).err_kind(ErrorKind::Internal)?),
+            run_offset: row.get(1).err_kind(ErrorKind::Internal)?,
+            flags: row.get(2).err_kind(ErrorKind::Internal)?,
+            start: recording::Time(row.get(3).err_kind(ErrorKind::Internal)?),
             wall_duration_90k,
             media_duration_90k: wall_duration_90k + media_duration_delta_90k,
-            sample_file_bytes: row.get(6)?,
-            video_samples: row.get(7)?,
-            video_sync_samples: row.get(8)?,
-            video_sample_entry_id: row.get(9)?,
-            open_id: row.get(10)?,
+            sample_file_bytes: row.get(6).err_kind(ErrorKind::Internal)?,
+            video_samples: row.get(7).err_kind(ErrorKind::Internal)?,
+            video_sync_samples: row.get(8).err_kind(ErrorKind::Internal)?,
+            video_sample_entry_id: row.get(9).err_kind(ErrorKind::Internal)?,
+            open_id: row.get(10).err_kind(ErrorKind::Internal)?,
             prev_media_duration_and_runs: match include_prev {
                 false => None,
-                true => Some((recording::Duration(row.get(11)?), row.get(12)?)),
+                true => Some((
+                    recording::Duration(row.get(11).err_kind(ErrorKind::Internal)?),
+                    row.get(12).err_kind(ErrorKind::Internal)?,
+                )),
             },
         })?;
     }

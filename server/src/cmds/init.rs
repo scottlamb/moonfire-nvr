@@ -19,7 +19,7 @@ pub struct Args {
     db_dir: PathBuf,
 }
 
-pub fn run(args: &Args) -> Result<i32, Error> {
+pub fn run(args: Args) -> Result<i32, Error> {
     let (_db_dir, mut conn) = super::open_conn(&args.db_dir, super::OpenMode::Create)?;
 
     // Check if the database has already been initialized.

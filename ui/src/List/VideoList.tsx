@@ -6,11 +6,11 @@ import React from "react";
 import * as api from "../api";
 import { useSnackbars } from "../snackbars";
 import { Stream } from "../types";
-import TableBody from "@material-ui/core/TableBody";
-import TableCell from "@material-ui/core/TableCell";
-import TableRow, { TableRowProps } from "@material-ui/core/TableRow";
-import Skeleton from "@material-ui/core/Skeleton";
-import Alert from "@material-ui/core/Alert";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableRow, { TableRowProps } from "@mui/material/TableRow";
+import Skeleton from "@mui/material/Skeleton";
+import Alert from "@mui/material/Alert";
 
 interface Props {
   stream: Stream;

@@ -1,5 +1,14 @@
 # Moonfire NVR Glossary
 
+*GOP:* Group of Pictures, as
+[described](https://en.wikipedia.org/wiki/Group_of_pictures) on wikipedia.
+Each GOP starts with an "IDR" or "key" frame which can be decoded by itself.
+Commonly all other frames in the GOP are encoded in terms of the frames before,
+so decoding frame 5 requires decoding frame 1, 2, 3, and 4. Many security
+cameras produce a new IDR frame (thus start a new GOP) at a fixed interval of
+1 or 2 seconds. Some cameras that use "smart encoding" or "H.264+" may produce
+GOPs that vary in length, up to several seconds.
+
 *media duration:* the total duration of the actual samples in a recording. These
 durations are based on the camera's clock. Camera clocks can be quite
 inaccurate, so this may not match the *wall duration*. See [time.md](time.md)
@@ -12,6 +21,14 @@ database transaction or reservation. Thus if a recording is never flushed
 successfully, a following *open* may assign the same id to a new recording.
 The open id disambiguates this and should be used whenever referring to a
 recording that may be unflushed.
+
+*ppm:* Part Per Million.  Crystal Clock accuracy is defined in terms of ppm or 
+parts per million and it gives a convenient way of comparing accuracies 
+of different crystal specifications. "A typical crystal has an error of 
+100ppm (ish) this translates as 100/1e6 or (1e-4)...So the total error on a day 
+is 86400 x 1e-4= 8.64 seconds per day. In a month you would loose 
+30x8.64 = 259 seconds or 4.32 minutes per month." 
+Source: https://www.best-microcontroller-projects.com/ppm.html
 
 *recording:* the video from a (typically 1-minute) portion of an RTSP session.
 RTSP sessions are divided into recordings as a detail of the

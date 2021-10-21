@@ -46,7 +46,7 @@ pub struct Args {
     trash_corrupt_rows: bool,
 }
 
-pub fn run(args: &Args) -> Result<i32, Error> {
+pub fn run(args: Args) -> Result<i32, Error> {
     let (_db_dir, mut conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     check::run(
         &mut conn,

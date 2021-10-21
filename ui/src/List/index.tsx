@@ -2,13 +2,13 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Box from "@material-ui/core/Box";
-import Modal from "@material-ui/core/Modal";
-import Paper from "@material-ui/core/Paper";
-import { Theme } from "@material-ui/core/styles";
-import { makeStyles } from "@material-ui/styles";
-import Table from "@material-ui/core/Table";
-import TableContainer from "@material-ui/core/TableContainer";
+import Box from "@mui/material/Box";
+import Modal from "@mui/material/Modal";
+import Paper from "@mui/material/Paper";
+import { Theme } from "@mui/material/styles";
+import { makeStyles } from "@mui/styles";
+import Table from "@mui/material/Table";
+import TableContainer from "@mui/material/TableContainer";
 import utcToZonedTime from "date-fns-tz/utcToZonedTime";
 import format from "date-fns/format";
 import React, { useMemo, useState } from "react";

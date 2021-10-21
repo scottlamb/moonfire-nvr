@@ -11,7 +11,7 @@ use core::borrow::Borrow;
 use core::str::FromStr;
 use db::dir::SampleFileDir;
 use db::{auth, recording};
-use failure::{bail, format_err, Error};
+use failure::{format_err, Error};
 use fnv::FnvHashMap;
 use futures::stream::StreamExt;
 use futures::{future::Either, sink::SinkExt};
@@ -762,6 +762,7 @@ impl Service {
                 video_samples: row.video_samples,
                 video_sample_entry_id: row.video_sample_entry_id,
                 growing: row.growing,
+                has_trailing_zero: row.has_trailing_zero,
             });
             if !out
                 .video_sample_entries
@@ -856,7 +857,8 @@ impl Service {
 
                             if let Some(o) = s.open_id {
                                 if r.open_id != o {
-                                    bail!(
+                                    bail_t!(
+                                        NotFound,
                                         "recording {} has open id {}, requested {}",
                                         r.id,
                                         r.open_id,
@@ -868,9 +870,14 @@ impl Service {
                             // Check for missing recordings.
                             match prev {
                                 None if recording_id == s.ids.start => {}
-                                None => bail!("no such recording {}/{}", stream_id, s.ids.start),
+                                None => bail_t!(
+                                    NotFound,
+                                    "no such recording {}/{}",
+                                    stream_id,
+                                    s.ids.start
+                                ),
                                 Some(id) if r.id.recording() != id + 1 => {
-                                    bail!("no such recording {}/{}", stream_id, id + 1);
+                                    bail_t!(NotFound, "no such recording {}/{}", stream_id, id + 1);
                                 }
                                 _ => {}
                             };
@@ -909,8 +916,7 @@ impl Service {
                             }
                             cur_off += wd;
                             Ok(())
-                        })
-                        .map_err(internal_server_err)?;
+                        })?;
 
                         // Check for missing recordings.
                         match prev {
@@ -1368,15 +1374,16 @@ impl<'a> StaticFileRequest<'a> {
         };
         let ext = &path[last_dot + 1..];
         let mime = match ext {
+            "css" => "text/css",
             "html" => "text/html",
             "ico" => "image/x-icon",
             "js" | "map" => "text/javascript",
             "json" => "application/json",
             "png" => "image/png",
-            "webmanifest" => "application/manifest+json",
+            "svg" => "image/svg+xml",
             "txt" => "text/plain",
+            "webmanifest" => "application/manifest+json",
             "woff2" => "font/woff2",
-            "css" => "text/css",
             _ => return None,
         };
 

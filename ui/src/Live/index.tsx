@@ -2,8 +2,8 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Container from "@material-ui/core/Container";
-import ErrorIcon from "@material-ui/icons/Error";
+import Container from "@mui/material/Container";
+import ErrorIcon from "@mui/icons-material/Error";
 import { Camera } from "../types";
 import LiveCamera from "./LiveCamera";
 import Multiview from "./Multiview";

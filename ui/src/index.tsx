@@ -2,17 +2,17 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import CssBaseline from "@material-ui/core/CssBaseline";
-import { ThemeProvider, createTheme } from "@material-ui/core/styles";
-import StyledEngineProvider from "@material-ui/core/StyledEngineProvider";
-import LocalizationProvider from "@material-ui/lab/LocalizationProvider";
+import CssBaseline from "@mui/material/CssBaseline";
+import { ThemeProvider, createTheme } from "@mui/material/styles";
+import StyledEngineProvider from "@mui/material/StyledEngineProvider";
+import LocalizationProvider from "@mui/lab/LocalizationProvider";
 import "@fontsource/roboto";
 import React from "react";
 import ReactDOM from "react-dom";
 import App from "./App";
 import ErrorBoundary from "./ErrorBoundary";
 import { SnackbarProvider } from "./snackbars";
-import AdapterDateFns from "@material-ui/lab/AdapterDateFns";
+import AdapterDateFns from "@mui/lab/AdapterDateFns";
 import "./index.css";
 
 const theme = createTheme({

@@ -33,6 +33,7 @@ use crate::raw;
 use crate::recording;
 use crate::schema;
 use crate::signal;
+use base::bail_t;
 use base::clock::{self, Clocks};
 use base::strutil::encode_size;
 use failure::{bail, format_err, Error, ResultExt};
@@ -214,6 +215,7 @@ pub struct ListAggregatedRecordingsRow {
     pub open_id: u32,
     pub first_uncommitted: Option<i32>,
     pub growing: bool,
+    pub has_trailing_zero: bool,
 }
 
 impl ListAggregatedRecordingsRow {
@@ -237,6 +239,7 @@ impl ListAggregatedRecordingsRow {
                 None
             },
             growing,
+            has_trailing_zero: (row.flags & RecordingFlags::TrailingZero as i32) != 0,
         }
     }
 }
@@ -341,7 +344,7 @@ impl SampleFileDir {
     }
 
     /// Returns expected existing metadata when opening this directory.
-    fn meta(&self, db_uuid: &Uuid) -> schema::DirMeta {
+    fn expected_meta(&self, db_uuid: &Uuid) -> schema::DirMeta {
         let mut meta = schema::DirMeta::default();
         meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
         meta.dir_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
@@ -1172,20 +1175,20 @@ impl LockedDatabase {
             if dir.dir.is_some() {
                 continue;
             }
-            let mut meta = dir.meta(&self.uuid);
+            let mut expected_meta = dir.expected_meta(&self.uuid);
             if let Some(o) = self.open.as_ref() {
-                let open = meta.in_progress_open.set_default();
+                let open = expected_meta.in_progress_open.set_default();
                 open.id = o.id;
                 open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
             }
-            let d = dir::SampleFileDir::open(&dir.path, &meta)
+            let d = dir::SampleFileDir::open(&dir.path, &expected_meta)
                 .map_err(|e| e.context(format!("Failed to open dir {}", dir.path)))?;
             if self.open.is_none() {
                 // read-only mode; it's already fully opened.
                 dir.dir = Some(d);
             } else {
                 // read-write mode; there are more steps to do.
-                e.insert((meta, d));
+                e.insert((expected_meta, d));
             }
         }
 
@@ -1211,8 +1214,7 @@ impl LockedDatabase {
 
         for (id, (mut meta, d)) in in_progress.drain() {
             let dir = self.sample_file_dirs_by_id.get_mut(&id).unwrap();
-            meta.last_complete_open.clear();
-            mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
+            meta.last_complete_open = meta.in_progress_open.take().into();
             d.write_meta(&meta)?;
             dir.dir = Some(d);
         }
@@ -1247,10 +1249,10 @@ impl LockedDatabase {
         &self,
         stream_id: i32,
         desired_time: Range<recording::Time>,
-        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), base::Error>,
+    ) -> Result<(), base::Error> {
         let s = match self.streams_by_id.get(&stream_id) {
-            None => bail!("no such stream {}", stream_id),
+            None => bail_t!(NotFound, "no such stream {}", stream_id),
             Some(s) => s,
         };
         raw::list_recordings_by_time(&self.conn, stream_id, desired_time.clone(), f)?;
@@ -1280,10 +1282,10 @@ impl LockedDatabase {
         &self,
         stream_id: i32,
         desired_ids: Range<i32>,
-        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), base::Error>,
+    ) -> Result<(), base::Error> {
         let s = match self.streams_by_id.get(&stream_id) {
-            None => bail!("no such stream {}", stream_id),
+            None => bail_t!(NotFound, "no such stream {}", stream_id),
             Some(s) => s,
         };
         if desired_ids.start < s.cum_recordings {
@@ -1321,8 +1323,8 @@ impl LockedDatabase {
         stream_id: i32,
         desired_time: Range<recording::Time>,
         forced_split: recording::Duration,
-        f: &mut dyn FnMut(&ListAggregatedRecordingsRow) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        f: &mut dyn FnMut(&ListAggregatedRecordingsRow) -> Result<(), base::Error>,
+    ) -> Result<(), base::Error> {
         // Iterate, maintaining a map from a recording_id to the aggregated row for the latest
         // batch of recordings from the run starting at that id. Runs can be split into multiple
         // batches for a few reasons:
@@ -1343,6 +1345,7 @@ impl LockedDatabase {
             let run_start_id = recording_id - row.run_offset;
             let uncommitted = (row.flags & RecordingFlags::Uncommitted as i32) != 0;
             let growing = (row.flags & RecordingFlags::Growing as i32) != 0;
+            let has_trailing_zero = (row.flags & RecordingFlags::TrailingZero as i32) != 0;
             use std::collections::btree_map::Entry;
             match aggs.entry(run_start_id) {
                 Entry::Occupied(mut e) => {
@@ -1359,7 +1362,8 @@ impl LockedDatabase {
                     } else {
                         // append.
                         if a.time.end != row.start {
-                            bail!(
+                            bail_t!(
+                                Internal,
                                 "stream {} recording {} ends at {} but {} starts at {}",
                                 stream_id,
                                 a.ids.end - 1,
@@ -1369,7 +1373,8 @@ impl LockedDatabase {
                             );
                         }
                         if a.open_id != row.open_id {
-                            bail!(
+                            bail_t!(
+                                Internal,
                                 "stream {} recording {} has open id {} but {} has {}",
                                 stream_id,
                                 a.ids.end - 1,
@@ -1387,6 +1392,7 @@ impl LockedDatabase {
                             a.first_uncommitted = a.first_uncommitted.or(Some(recording_id));
                         }
                         a.growing = growing;
+                        a.has_trailing_zero = has_trailing_zero;
                     }
                 }
                 Entry::Vacant(e) => {
@@ -1763,14 +1769,13 @@ impl LockedDatabase {
                 path,
                 uuid,
                 dir: Some(dir),
-                last_complete_open: None,
+                last_complete_open: Some(*o),
                 garbage_needs_unlink: FnvHashSet::default(),
                 garbage_unlinked: Vec::new(),
             }),
             Entry::Occupied(_) => bail!("duplicate sample file dir id {}", id),
         };
-        d.last_complete_open = Some(*o);
-        mem::swap(&mut meta.last_complete_open, &mut meta.in_progress_open);
+        meta.last_complete_open = meta.in_progress_open.take().into();
         d.dir.as_ref().unwrap().write_meta(&meta)?;
         Ok(id)
     }
@@ -1792,7 +1797,7 @@ impl LockedDatabase {
             );
         }
         let dir = match d.get_mut().dir.take() {
-            None => dir::SampleFileDir::open(&d.get().path, &d.get().meta(&self.uuid))?,
+            None => dir::SampleFileDir::open(&d.get().path, &d.get().expected_meta(&self.uuid))?,
             Some(arc) => match Arc::strong_count(&arc) {
                 1 => {
                     d.get_mut().dir = Some(arc); // put it back.
@@ -1807,7 +1812,7 @@ impl LockedDatabase {
                 &d.get().path
             );
         }
-        let mut meta = d.get().meta(&self.uuid);
+        let mut meta = d.get().expected_meta(&self.uuid);
         meta.in_progress_open = meta.last_complete_open.take().into();
         dir.write_meta(&meta)?;
         if self

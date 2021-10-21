@@ -5,21 +5,21 @@
 import { Stream } from "../types";
 import StaticDatePicker, {
   StaticDatePickerProps,
-} from "@material-ui/lab/StaticDatePicker";
+} from "@mui/lab/StaticDatePicker";
 import React, { useEffect } from "react";
 import { zonedTimeToUtc } from "date-fns-tz";
 import { addDays, addMilliseconds, differenceInMilliseconds } from "date-fns";
 import startOfDay from "date-fns/startOfDay";
-import Card from "@material-ui/core/Card";
-import { useTheme } from "@material-ui/core/styles";
-import TextField from "@material-ui/core/TextField";
-import FormControlLabel from "@material-ui/core/FormControlLabel";
-import FormLabel from "@material-ui/core/FormLabel";
-import Radio from "@material-ui/core/Radio";
-import RadioGroup from "@material-ui/core/RadioGroup";
-import TimePicker, { TimePickerProps } from "@material-ui/lab/TimePicker";
-import Collapse from "@material-ui/core/Collapse";
-import Box from "@material-ui/core/Box";
+import Card from "@mui/material/Card";
+import { useTheme } from "@mui/material/styles";
+import TextField from "@mui/material/TextField";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import FormLabel from "@mui/material/FormLabel";
+import Radio from "@mui/material/Radio";
+import RadioGroup from "@mui/material/RadioGroup";
+import TimePicker, { TimePickerProps } from "@mui/lab/TimePicker";
+import Collapse from "@mui/material/Collapse";
+import Box from "@mui/material/Box";
 
 interface Props {
   selectedStreams: Set<Stream>;

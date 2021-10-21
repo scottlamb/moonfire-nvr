@@ -53,7 +53,7 @@ pub struct Args {
     username: String,
 }
 
-pub fn run(args: &Args) -> Result<i32, Error> {
+pub fn run(args: Args) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     let db = std::sync::Arc::new(db::Database::new(clocks, conn, true).unwrap());

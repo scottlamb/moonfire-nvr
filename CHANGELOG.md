@@ -6,7 +6,19 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## unreleased
+## `v0.6.7` (2021-10-20)
+
+*   trim whitespace when detecting time zone by reading `/etc/timezone`.
+*   (Retina 0.3.2) better `TEARDOWN` handling with the default
+    `--rtsp-library=retina` (see
+    [scottlamb/retina#34](https://github.com/scottlamb/retina/34)).
+    This means faster recovery after an error when using UDP or when the
+    camera's firmware is based on an old live555 release.
+*   (Retina 0.3.3) better authentication support with the default
+    `--rtsp-library=retina` (see
+    [scottlamb/retina#25](https://github.com/scottlamb/retina/25)).
+
+## `v0.6.6` (2021-09-23)
 
 *   fix [#146](https://github.com/scottlamb/moonfire-nvr/issues/146): "init
     segment fetch error" when browsers have cached data from `v0.6.4` and
@@ -16,8 +28,20 @@ Each release is tagged in Git and on the Docker repository
 *   fix [#157](https://github.com/scottlamb/moonfire-nvr/issues/157): broken
     live view when using multi-view and selecting the first listed camera
     then selecting another camera for the upper left grid square.
-*   support `--rtsp-transport=udp`, which improves compatibility with Reolink
-    cameras.
+*   support `--rtsp-transport=udp`, which may work better with cameras that
+    use old versions of the live555 library, including many Reolink models.
+*   send RTSP `TEARDOWN` requests on UDP or with old live555 versions; wait out
+    stale sessions before reconnecting to the same camera. This may improve
+    reliability with old live555 versions when using TCP also.
+*   improve compatibility with cameras that send non-compliant SDP, including
+    models from Geovision and Anpviz.
+*   fix [#117](https://github.com/scottlamb/moonfire-nvr/issues/117): honor
+    shutdown requests when out of disk space, instead of retrying forever.
+*   shut down immediately on a second `SIGINT` or `SIGTERM`. The normal
+    "graceful" shutdown will still be slow in some cases, eg when waiting for a
+    RTSP UDP session to time out after a `TEARDOWN` failure. This allows the
+    impatient to get fast results with ctrl-C when running interactively, rather
+    than having to use `SIGKILL` from another terminal.
 
 ## `v0.6.5` (2021-08-13)
 

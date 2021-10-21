@@ -229,6 +229,7 @@ $ cd server
 $ cargo test
 $ cargo build --release
 $ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
+$ cd ..
 ```
 
 You can build the UI via `npm` and find it in the `ui/build` directory:
@@ -238,6 +239,7 @@ $ cd ui
 $ npm install
 $ npm run build
 $ sudo mkdir /usr/local/lib/moonfire-nvr
+$ cd ..
 $ sudo rsync --recursive --delete --chmod=D755,F644 ui/build/ /usr/local/lib/moonfire-nvr/ui
 ```
 

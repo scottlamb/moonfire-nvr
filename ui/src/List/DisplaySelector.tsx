@@ -2,15 +2,15 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Card from "@material-ui/core/Card";
-import Checkbox from "@material-ui/core/Checkbox";
-import InputLabel from "@material-ui/core/InputLabel";
-import FormControl from "@material-ui/core/FormControl";
-import MenuItem from "@material-ui/core/MenuItem";
-import Select from "@material-ui/core/Select";
+import Card from "@mui/material/Card";
+import Checkbox from "@mui/material/Checkbox";
+import InputLabel from "@mui/material/InputLabel";
+import FormControl from "@mui/material/FormControl";
+import MenuItem from "@mui/material/MenuItem";
+import Select from "@mui/material/Select";
 import React from "react";
-import { useTheme } from "@material-ui/core/styles";
-import FormControlLabel from "@material-ui/core/FormControlLabel";
+import { useTheme } from "@mui/material/styles";
+import FormControlLabel from "@mui/material/FormControlLabel";
 
 interface Props {
   split90k?: number;

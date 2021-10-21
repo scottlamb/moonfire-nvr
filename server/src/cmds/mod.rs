@@ -28,7 +28,9 @@ enum OpenMode {
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
 fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
     let dir = dir::Fd::open(db_dir, mode == OpenMode::Create).map_err(|e| {
-        e.context(if e == nix::Error::ENOENT {
+        e.context(if mode == OpenMode::Create {
+            format!("unable to create db dir {}", db_dir.display())
+        } else if e == nix::Error::ENOENT {
             format!(
                 "db dir {} not found; try running moonfire-nvr init",
                 db_dir.display()
@@ -78,4 +80,44 @@ fn open_conn(db_dir: &Path, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connec
         rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     Ok((dir, conn))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_dir_error_msg() {
+        let tmpdir = tempfile::Builder::new()
+            .prefix("moonfire-nvr-test")
+            .tempdir()
+            .unwrap();
+        let mut nonexistent_dir = tmpdir.path().to_path_buf();
+        nonexistent_dir.push("nonexistent");
+        let nonexistent_open = open_dir(&nonexistent_dir, OpenMode::ReadOnly).unwrap_err();
+        assert!(
+            nonexistent_open
+                .to_string()
+                .contains("try running moonfire-nvr init"),
+            "unexpected error {}",
+            &nonexistent_open
+        );
+    }
+
+    #[test]
+    fn create_dir_error_msg() {
+        let tmpdir = tempfile::Builder::new()
+            .prefix("moonfire-nvr-test")
+            .tempdir()
+            .unwrap();
+        let mut nonexistent_dir = tmpdir.path().to_path_buf();
+        nonexistent_dir.push("nonexistent");
+        nonexistent_dir.push("db");
+        let nonexistent_create = open_dir(&nonexistent_dir, OpenMode::Create).unwrap_err();
+        assert!(
+            nonexistent_create.to_string().contains("unable to create"),
+            "unexpected error {}",
+            &nonexistent_create
+        );
+    }
 }

@@ -197,6 +197,7 @@ fn press_test_inner(url: Url, username: String, password: String) -> Result<Stri
             username: if pass_creds { Some(username) } else { None },
             password: if pass_creds { Some(password) } else { None },
             transport: retina::client::Transport::Tcp,
+            session_group: Default::default(),
         },
     )?;
     Ok(format!(

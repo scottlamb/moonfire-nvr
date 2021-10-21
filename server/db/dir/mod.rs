@@ -212,8 +212,8 @@ impl SampleFileDir {
     ///
     /// `db_meta.in_progress_open` should be filled if the directory should be opened in read/write
     /// mode; absent in read-only mode.
-    pub fn open(path: &str, db_meta: &schema::DirMeta) -> Result<Arc<SampleFileDir>, Error> {
-        let read_write = db_meta.in_progress_open.is_some();
+    pub fn open(path: &str, expected_meta: &schema::DirMeta) -> Result<Arc<SampleFileDir>, Error> {
+        let read_write = expected_meta.in_progress_open.is_some();
         let s = SampleFileDir::open_self(path, false)?;
         s.fd.lock(if read_write {
             FlockArg::LockExclusiveNonblock
@@ -222,45 +222,50 @@ impl SampleFileDir {
         })
         .map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
         let dir_meta = read_meta(&s.fd).map_err(|e| e.context("unable to read meta file"))?;
-        if !SampleFileDir::consistent(db_meta, &dir_meta) {
-            let serialized = db_meta
-                .write_length_delimited_to_bytes()
-                .expect("proto3->vec is infallible");
+        if let Err(e) = SampleFileDir::check_consistent(expected_meta, &dir_meta) {
             bail!(
-                "metadata mismatch.\ndb: {:#?}\ndir: {:#?}\nserialized db: {:#?}",
-                db_meta,
-                &dir_meta,
-                &serialized
+                "metadata mismatch: {}.\nexpected:\n{:#?}\n\nactual:\n{:#?}",
+                e,
+                expected_meta,
+                &dir_meta
             );
         }
-        if db_meta.in_progress_open.is_some() {
-            s.write_meta(db_meta)?;
+        if expected_meta.in_progress_open.is_some() {
+            s.write_meta(expected_meta)?;
         }
         Ok(s)
     }
 
-    /// Returns true if the existing directory and database metadata are consistent; the directory
+    /// Checks that the existing directory and database metadata are consistent; the directory
     /// is then openable.
-    pub(crate) fn consistent(db_meta: &schema::DirMeta, dir_meta: &schema::DirMeta) -> bool {
-        if dir_meta.db_uuid != db_meta.db_uuid {
-            return false;
+    pub(crate) fn check_consistent(
+        expected_meta: &schema::DirMeta,
+        actual_meta: &schema::DirMeta,
+    ) -> Result<(), String> {
+        if actual_meta.db_uuid != expected_meta.db_uuid {
+            return Err("db uuid mismatch".into());
         }
-        if dir_meta.dir_uuid != db_meta.dir_uuid {
-            return false;
+        if actual_meta.dir_uuid != expected_meta.dir_uuid {
+            return Err("dir uuid mismatch".into());
         }
 
-        if db_meta.last_complete_open.is_some()
-            && (db_meta.last_complete_open != dir_meta.last_complete_open
-                && db_meta.last_complete_open != dir_meta.in_progress_open)
+        if expected_meta.last_complete_open.is_some()
+            && (expected_meta.last_complete_open != actual_meta.last_complete_open
+                && expected_meta.last_complete_open != actual_meta.in_progress_open)
         {
-            return false;
+            return Err(format!(
+                "expected open {:?}; but got {:?} (complete) or {:?} (in progress)",
+                &expected_meta.last_complete_open,
+                &actual_meta.last_complete_open,
+                &actual_meta.in_progress_open,
+            ));
         }
 
-        if db_meta.last_complete_open.is_none() && dir_meta.last_complete_open.is_some() {
-            return false;
+        if expected_meta.last_complete_open.is_none() && actual_meta.last_complete_open.is_some() {
+            return Err("expected never opened".into());
         }
 
-        true
+        Ok(())
     }
 
     pub(crate) fn create(

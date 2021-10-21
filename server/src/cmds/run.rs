@@ -8,11 +8,10 @@ use base::clock;
 use db::{dir, writer};
 use failure::{bail, Error, ResultExt};
 use fnv::FnvHashMap;
-use futures::future::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
+use log::error;
 use log::{info, warn};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use structopt::StructOpt;
@@ -150,9 +149,9 @@ fn resolve_zone() -> Result<String, Error> {
         }
     };
 
-    // If `TIMEZONE_PATH` is a file, use its contents as the zone name.
+    // If `TIMEZONE_PATH` is a file, use its contents as the zone name, trimming whitespace.
     match ::std::fs::read_to_string(TIMEZONE_PATH) {
-        Ok(z) => Ok(z),
+        Ok(z) => Ok(z.trim().to_owned()),
         Err(e) => {
             bail!(
                 "Unable to resolve timezone from TZ env, {}, or {}. Last error: {}",
@@ -170,16 +169,55 @@ struct Syncer {
     join: thread::JoinHandle<()>,
 }
 
-pub fn run(args: &Args) -> Result<i32, Error> {
+pub fn run(args: Args) -> Result<i32, Error> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     if let Some(worker_threads) = args.worker_threads {
         builder.worker_threads(worker_threads);
     }
-    builder.build().unwrap().block_on(async_run(args))
+    let rt = builder.build()?;
+    let r = rt.block_on(async_run(args));
+
+    // tokio normally waits for all spawned tasks to complete, but:
+    // * in the graceful shutdown path, we wait for specific tasks with logging.
+    // * in the immediate shutdown path, we don't want to wait.
+    rt.shutdown_background();
+
+    r
 }
 
-async fn async_run(args: &Args) -> Result<i32, Error> {
+async fn async_run(args: Args) -> Result<i32, Error> {
+    let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
+    let mut shutdown_tx = Some(shutdown_tx);
+
+    tokio::pin! {
+        let int = signal(SignalKind::interrupt())?;
+        let term = signal(SignalKind::terminate())?;
+        let inner = inner(args, shutdown_rx);
+    }
+
+    tokio::select! {
+        _ = int.recv() => {
+            info!("Received SIGINT; shutting down gracefully. \
+                   Send another SIGINT or SIGTERM to shut down immediately.");
+            shutdown_tx.take();
+        },
+        _ = term.recv() => {
+            info!("Received SIGTERM; shutting down gracefully. \
+                   Send another SIGINT or SIGTERM to shut down immediately.");
+            shutdown_tx.take();
+        },
+        result = &mut inner => return result,
+    }
+
+    tokio::select! {
+        _ = int.recv() => bail!("immediate shutdown due to second signal (SIGINT)"),
+        _ = term.recv() => bail!("immediate shutdown due to second singal (SIGTERM)"),
+        result = &mut inner => result,
+    }
+}
+
+async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
         &args.db_dir,
@@ -214,8 +252,9 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
     })?);
 
     // Start a streamer for each stream.
-    let shutdown_streamers = Arc::new(AtomicBool::new(false));
     let mut streamers = Vec::new();
+    let mut session_groups_by_camera: FnvHashMap<i32, Arc<retina::client::SessionGroup>> =
+        FnvHashMap::default();
     let syncers = if !args.read_only {
         let l = db.lock();
         let mut dirs = FnvHashMap::with_capacity_and_hasher(
@@ -227,7 +266,7 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
             db: &db,
             opener: args.rtsp_library.opener(),
             transport: args.rtsp_transport,
-            shutdown: &shutdown_streamers,
+            shutdown_rx: &shutdown_rx,
         };
 
         // Get the directories that need syncers.
@@ -253,7 +292,7 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
         drop(l);
         let mut syncers = FnvHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
         for (id, dir) in dirs.drain() {
-            let (channel, join) = writer::start_syncer(db.clone(), id)?;
+            let (channel, join) = writer::start_syncer(db.clone(), shutdown_rx.clone(), id)?;
             syncers.insert(id, Syncer { dir, channel, join });
         }
 
@@ -279,6 +318,10 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
             };
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
             let syncer = syncers.get(&sample_file_dir_id).unwrap();
+            let session_group = session_groups_by_camera
+                .entry(camera.id)
+                .or_default()
+                .clone();
             let mut streamer = streamer::Streamer::new(
                 &env,
                 syncer.dir.clone(),
@@ -286,6 +329,7 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
                 *id,
                 camera,
                 stream,
+                session_group,
                 rotate_offset_sec,
                 streamer::ROTATE_INTERVAL_SEC,
             )?;
@@ -319,39 +363,44 @@ async fn async_run(args: &Args) -> Result<i32, Error> {
         .with_context(|_| format!("unable to bind --http-addr={}", &args.http_addr))?
         .tcp_nodelay(true)
         .serve(make_svc);
-
-    let mut int = signal(SignalKind::interrupt())?;
-    let mut term = signal(SignalKind::terminate())?;
-    let shutdown = futures::future::select(Box::pin(int.recv()), Box::pin(term.recv()));
-
-    let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
-    let server = server.with_graceful_shutdown(shutdown_rx.map(|_| ()));
+    let server = server.with_graceful_shutdown(shutdown_rx.future());
     let server_handle = tokio::spawn(server);
 
     info!("Ready to serve HTTP requests");
-    shutdown.await;
-    shutdown_tx.send(()).unwrap();
+    let _ = shutdown_rx.as_future().await;
 
-    info!("Shutting down streamers.");
-    shutdown_streamers.store(true, Ordering::SeqCst);
-    for streamer in streamers.drain(..) {
-        streamer.join().unwrap();
-    }
-
-    if let Some(mut ss) = syncers {
-        // The syncers shut down when all channels to them have been dropped.
-        // The database maintains one; and `ss` holds one. Drop both.
-        db.lock().clear_on_flush();
-        for (_, s) in ss.drain() {
-            drop(s.channel);
-            s.join.join().unwrap();
+    info!("Shutting down streamers and syncers.");
+    tokio::task::spawn_blocking({
+        let db = db.clone();
+        move || {
+            for streamer in streamers.drain(..) {
+                streamer.join().unwrap();
+            }
+            if let Some(mut ss) = syncers {
+                // The syncers shut down when all channels to them have been dropped.
+                // The database maintains one; and `ss` holds one. Drop both.
+                db.lock().clear_on_flush();
+                for (_, s) in ss.drain() {
+                    drop(s.channel);
+                    s.join.join().unwrap();
+                }
+            }
         }
-    }
+    })
+    .await?;
 
     db.lock().clear_watches();
 
     info!("Waiting for HTTP requests to finish.");
     server_handle.await??;
+
+    info!("Waiting for TEARDOWN requests to complete.");
+    for g in session_groups_by_camera.values() {
+        if let Err(e) = g.await_teardown().await {
+            error!("{}", e);
+        }
+    }
+
     info!("Exiting.");
     Ok(0)
 }

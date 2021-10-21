@@ -37,7 +37,7 @@ pub struct Args {
     arg: Vec<OsString>,
 }
 
-pub fn run(args: &Args) -> Result<i32, Error> {
+pub fn run(args: Args) -> Result<i32, Error> {
     let mode = if args.read_only {
         OpenMode::ReadOnly
     } else {

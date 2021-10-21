@@ -2,11 +2,11 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Card from "@material-ui/core/Card";
+import Card from "@mui/material/Card";
 import { Camera, Stream, StreamType } from "../types";
-import Checkbox from "@material-ui/core/Checkbox";
-import { useTheme } from "@material-ui/core/styles";
-import { makeStyles } from "@material-ui/styles";
+import Checkbox from "@mui/material/Checkbox";
+import { useTheme } from "@mui/material/styles";
+import { makeStyles } from "@mui/styles";
 
 interface Props {
   cameras: Camera[];
