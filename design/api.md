@@ -462,7 +462,7 @@ Bugs and limitations:
     reference them.
 *   The final recording in every "run" ends with a frame that has duration 0.
     It's not possible to append additional segments after such a frame;
-    the server will return an error like `Invalid argument: unable to append
+    the server will return a 400 error like `Invalid argument: unable to append
     recording 2/16672 after recording 2/16671 with trailing zero`. See also
     `hasTrailingZero` above, and
     [#178](https://github.com/scottlamb/moonfire-nvr/issues/178).

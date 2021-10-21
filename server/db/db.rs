@@ -33,6 +33,7 @@ use crate::raw;
 use crate::recording;
 use crate::schema;
 use crate::signal;
+use base::bail_t;
 use base::clock::{self, Clocks};
 use base::strutil::encode_size;
 use failure::{bail, format_err, Error, ResultExt};
@@ -1258,10 +1259,10 @@ impl LockedDatabase {
         &self,
         stream_id: i32,
         desired_time: Range<recording::Time>,
-        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), base::Error>,
+    ) -> Result<(), base::Error> {
         let s = match self.streams_by_id.get(&stream_id) {
-            None => bail!("no such stream {}", stream_id),
+            None => bail_t!(NotFound, "no such stream {}", stream_id),
             Some(s) => s,
         };
         raw::list_recordings_by_time(&self.conn, stream_id, desired_time.clone(), f)?;
@@ -1291,10 +1292,10 @@ impl LockedDatabase {
         &self,
         stream_id: i32,
         desired_ids: Range<i32>,
-        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), base::Error>,
+    ) -> Result<(), base::Error> {
         let s = match self.streams_by_id.get(&stream_id) {
-            None => bail!("no such stream {}", stream_id),
+            None => bail_t!(NotFound, "no such stream {}", stream_id),
             Some(s) => s,
         };
         if desired_ids.start < s.cum_recordings {
@@ -1332,8 +1333,8 @@ impl LockedDatabase {
         stream_id: i32,
         desired_time: Range<recording::Time>,
         forced_split: recording::Duration,
-        f: &mut dyn FnMut(&ListAggregatedRecordingsRow) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        f: &mut dyn FnMut(&ListAggregatedRecordingsRow) -> Result<(), base::Error>,
+    ) -> Result<(), base::Error> {
         // Iterate, maintaining a map from a recording_id to the aggregated row for the latest
         // batch of recordings from the run starting at that id. Runs can be split into multiple
         // batches for a few reasons:
@@ -1371,7 +1372,8 @@ impl LockedDatabase {
                     } else {
                         // append.
                         if a.time.end != row.start {
-                            bail!(
+                            bail_t!(
+                                Internal,
                                 "stream {} recording {} ends at {} but {} starts at {}",
                                 stream_id,
                                 a.ids.end - 1,
@@ -1381,7 +1383,8 @@ impl LockedDatabase {
                             );
                         }
                         if a.open_id != row.open_id {
-                            bail!(
+                            bail_t!(
+                                Internal,
                                 "stream {} recording {} has open id {} but {} has {}",
                                 stream_id,
                                 a.ids.end - 1,
