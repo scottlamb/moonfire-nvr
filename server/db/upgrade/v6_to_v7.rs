@@ -5,6 +5,7 @@
 /// Upgrades a version 6 schema to a version 7 schema.
 use failure::{format_err, Error};
 use fnv::FnvHashMap;
+use log::debug;
 use rusqlite::{named_params, params};
 use std::{convert::TryFrom, path::PathBuf};
 use url::Url;
@@ -338,6 +339,7 @@ fn copy_streams(tx: &rusqlite::Transaction) -> Result<(), Error> {
 }
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
+    debug!("pre batch");
     tx.execute_batch(
         r#"
         alter table open add boot_uuid check (length(boot_uuid) = 16);
@@ -428,20 +430,36 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
 
         drop index user_session_uid;
         create index user_session_uid on user_session (user_id);
+
     "#,
     )?;
+    debug!("copying meta");
     copy_meta(tx)?;
+    debug!("copying sample_file_dir");
     copy_sample_file_dir(tx)?;
+    debug!("copying camera");
     copy_cameras(tx)?;
+    debug!("copying signal_type");
     copy_signal_types(tx)?;
+    debug!("copying signal");
     copy_signals(tx)?;
+    debug!("copying stream");
     copy_streams(tx)?;
+    debug!("copying user");
     copy_users(tx)?;
+    debug!("post batch");
     tx.execute_batch(
         r#"
         insert into user_session select * from old_user_session;
-
+        alter table garbage rename to old_garbage;
+        create table garbage (
+          sample_file_dir_id integer not null references sample_file_dir (id),
+          composite_id integer not null,
+          primary key (sample_file_dir_id, composite_id)
+        ) without rowid;
         drop index recording_cover;
+        insert into garbage select * from old_garbage;
+        drop table old_garbage;
 
         alter table recording rename to old_recording;
         create table recording (
@@ -492,15 +510,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           video_index blob not null check (length(video_index) > 0)
         );
         insert into recording_playback select * from old_recording_playback;
-
-        alter table signal_camera rename to old_signal_camera;
-        create table signal_camera (
-          signal_id integer references signal (id),
-          camera_id integer references camera (id),
-          type integer not null,
-          primary key (signal_id, camera_id)
-        ) without rowid;
-        drop table old_signal_camera;
+        drop table old_signal;
+        drop table signal_camera;
         drop table old_recording_playback;
         drop table old_recording_integrity;
         drop table old_recording;
@@ -508,11 +519,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         drop table old_camera;
         drop table old_sample_file_dir;
         drop table old_meta;
-        drop table old_signal;
         drop table old_user_session;
         drop table old_user;
         drop table signal_type_enum;
-        drop table signal_camera;
     "#,
     )?;
     Ok(())
