@@ -2255,7 +2255,7 @@ impl<C: Clocks + Clone> Database<C> {
 
         // Note: the meta check comes after the version check to improve the error message when
         // trying to open a version 0 or version 1 database (which lacked the meta table).
-        let (uuid, config) = raw::read_meta(&conn)?;
+        let (db_uuid, config) = raw::read_meta(&conn)?;
         let open_monotonic = recording::Time::new(clocks.monotonic());
         let open = if read_write {
             let real = recording::Time::new(clocks.realtime());
@@ -2271,7 +2271,10 @@ impl<C: Clocks + Clone> Database<C> {
             };
             stmt.execute(params![open_uuid, real.0, boot_uuid])?;
             let id = conn.last_insert_rowid() as u32;
-            Some(Open { id, uuid })
+            Some(Open {
+                id,
+                uuid: open_uuid.0,
+            })
         } else {
             None
         };
@@ -2280,7 +2283,7 @@ impl<C: Clocks + Clone> Database<C> {
         let db = Database {
             db: Some(Mutex::new(LockedDatabase {
                 conn,
-                uuid,
+                uuid: db_uuid,
                 flush_count: 0,
                 open,
                 open_monotonic,
