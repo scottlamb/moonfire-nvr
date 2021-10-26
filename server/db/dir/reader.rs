@@ -23,6 +23,7 @@
 use std::convert::TryFrom;
 use std::future::Future;
 use std::os::unix::prelude::AsRawFd;
+use std::path::Path;
 use std::{
     ops::Range,
     pin::Pin,
@@ -44,7 +45,7 @@ use crate::CompositeId;
 pub(super) struct Reader(tokio::sync::mpsc::UnboundedSender<ReaderCommand>);
 
 impl Reader {
-    pub(super) fn spawn(path: &str, dir: Arc<super::Fd>) -> Self {
+    pub(super) fn spawn(path: &Path, dir: Arc<super::Fd>) -> Self {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let page_size = usize::try_from(
             nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)
@@ -54,7 +55,7 @@ impl Reader {
         .expect("PAGE_SIZE fits in usize");
         assert_eq!(page_size.count_ones(), 1, "invalid page size {}", page_size);
         std::thread::Builder::new()
-            .name(format!("r-{}", path))
+            .name(format!("r-{}", path.display()))
             .spawn(move || ReaderInt { dir, page_size }.run(rx))
             .expect("unable to create reader thread");
         Self(tx)
@@ -407,7 +408,7 @@ mod tests {
             .tempdir()
             .unwrap();
         let fd = std::sync::Arc::new(super::super::Fd::open(tmpdir.path(), false).unwrap());
-        let reader = super::Reader::spawn("/path/goes/here", fd);
+        let reader = super::Reader::spawn(tmpdir.path(), fd);
         std::fs::write(tmpdir.path().join("0123456789abcdef"), b"blah blah").unwrap();
         let f = reader.open_file(crate::CompositeId(0x01234567_89abcdef), 1..8);
         assert_eq!(f.try_concat().await.unwrap(), b"lah bla");

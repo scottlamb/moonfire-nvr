@@ -6,12 +6,12 @@
 use failure::{format_err, Error};
 use fnv::FnvHashMap;
 use rusqlite::{named_params, params};
-use std::convert::TryFrom;
+use std::{convert::TryFrom, path::PathBuf};
 use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    json::{CameraConfig, GlobalConfig, SignalConfig, SignalTypeConfig},
+    json::{CameraConfig, GlobalConfig, SampleFileDirConfig, SignalConfig, SignalTypeConfig},
     SqlUuid,
 };
 
@@ -33,6 +33,36 @@ fn copy_meta(tx: &rusqlite::Transaction) -> Result<(), Error> {
         insert.execute(named_params! {
             ":uuid": uuid,
             ":config": &config,
+        })?;
+    }
+
+    Ok(())
+}
+
+fn copy_sample_file_dir(tx: &rusqlite::Transaction) -> Result<(), Error> {
+    let mut stmt =
+        tx.prepare("select id, uuid, path, last_complete_open_id from old_sample_file_dir")?;
+    let mut insert = tx.prepare(
+        r#"
+        insert into sample_file_dir (id,  uuid,  config,  last_complete_open_id)
+                             values (:id, :uuid, :config, :last_complete_open_id)
+        "#,
+    )?;
+    let mut rows = stmt.query(params![])?;
+    while let Some(row) = rows.next()? {
+        let id: i32 = row.get(0)?;
+        let path: String = row.get(2)?;
+        let uuid: SqlUuid = row.get(1)?;
+        let config = SampleFileDirConfig {
+            path: PathBuf::try_from(path)?,
+            ..Default::default()
+        };
+        let last_complete_open_id: Option<i64> = row.get(3)?;
+        insert.execute(named_params! {
+            ":id": id,
+            ":uuid": uuid,
+            ":config": &config,
+            ":last_complete_open_id": &last_complete_open_id,
         })?;
     }
 
@@ -262,11 +292,19 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         alter table camera rename to old_camera;
         alter table stream rename to old_stream;
         alter table signal rename to old_signal;
+        alter table sample_file_dir rename to old_sample_file_dir;
         alter table meta rename to old_meta;
 
         create table meta (
           uuid blob not null check (length(uuid) = 16),
           config text
+        );
+
+        create table sample_file_dir (
+          id integer primary key,
+          uuid blob unique not null check (length(uuid) = 16),
+          config text,
+          last_complete_open_id integer references open (id)
         );
 
         create table camera (
@@ -303,6 +341,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     "#,
     )?;
     copy_meta(tx)?;
+    copy_sample_file_dir(tx)?;
     copy_cameras(tx)?;
     copy_signal_types(tx)?;
     copy_signals(tx)?;
@@ -374,6 +413,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         drop table old_recording;
         drop table old_stream; 
         drop table old_camera;
+        drop table old_sample_file_dir;
         drop table old_meta;
         drop table old_signal;
         drop table signal_type_enum;

@@ -277,7 +277,7 @@ async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32,
             if let Some(id) = stream.sample_file_dir_id {
                 dirs.entry(id).or_insert_with(|| {
                     let d = l.sample_file_dirs_by_id().get(&id).unwrap();
-                    info!("Starting syncer for path {}", d.path);
+                    info!("Starting syncer for path {}", d.path.display());
                     d.get().unwrap()
                 });
             } else {

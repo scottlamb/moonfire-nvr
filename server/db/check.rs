@@ -7,6 +7,7 @@
 use crate::compare;
 use crate::db::{self, CompositeId, SqlUuid};
 use crate::dir;
+use crate::json::SampleFileDirConfig;
 use crate::raw;
 use crate::recording;
 use crate::schema;
@@ -89,7 +90,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
         while let Some(row) = rows.next()? {
             let mut meta = schema::DirMeta::default();
             let dir_id: i32 = row.get(0)?;
-            let dir_path: String = row.get(1)?;
+            let config: SampleFileDirConfig = row.get(1)?;
             let dir_uuid: SqlUuid = row.get(2)?;
             let open_id = row.get(3)?;
             let open_uuid: SqlUuid = row.get(4)?;
@@ -102,8 +103,8 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
             }
 
             // Open the directory (checking its metadata) and hold it open (for the lock).
-            let dir = dir::SampleFileDir::open(&dir_path, &meta)
-                .map_err(|e| e.context(format!("unable to open dir {}", dir_path)))?;
+            let dir = dir::SampleFileDir::open(&config.path, &meta)
+                .map_err(|e| e.context(format!("unable to open dir {}", config.path.display())))?;
             let mut streams = read_dir(&dir, opts)?;
             let mut rows = garbage_stmt.query(params![dir_id])?;
             while let Some(row) = rows.next()? {

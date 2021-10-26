@@ -75,7 +75,7 @@ impl<C: Clocks + Clone> TestDb<C> {
         db::init(&mut conn).unwrap();
         let db = Arc::new(db::Database::new(clocks, conn, true).unwrap());
         let (test_camera_uuid, sample_file_dir_id);
-        let path = tmpdir.path().to_str().unwrap().to_owned();
+        let path = tmpdir.path().to_owned();
         let dir;
         {
             let mut l = db.lock();

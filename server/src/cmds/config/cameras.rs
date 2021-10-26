@@ -415,12 +415,12 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                 .min_height(3),
         );
 
-    let dirs: Vec<_> = ::std::iter::once(("<none>".to_owned(), None))
+    let dirs: Vec<_> = ::std::iter::once(("<none>".into(), None))
         .chain(
             db.lock()
                 .sample_file_dirs_by_id()
                 .iter()
-                .map(|(&id, d)| (d.path.as_str().to_owned(), Some(id))),
+                .map(|(&id, d)| (d.path.to_owned(), Some(id))),
         )
         .collect();
     for &type_ in &db::ALL_STREAM_TYPES {
@@ -449,7 +449,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
             .child(
                 "sample file dir",
                 views::SelectView::<Option<i32>>::new()
-                    .with_all(dirs.iter().cloned())
+                    .with_all(dirs.iter().map(|(p, id)| (p.display().to_string(), *id)))
                     .popup()
                     .with_name(format!("{}_sample_file_dir", type_.as_str())),
             )

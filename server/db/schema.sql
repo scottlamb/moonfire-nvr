@@ -55,8 +55,10 @@ create table open (
 
 create table sample_file_dir (
   id integer primary key,
-  path text unique not null,
   uuid blob unique not null check (length(uuid) = 16),
+
+  -- See json.SampleFileDirConfig.
+  config text,
 
   -- The last (read/write) open of this directory which fully completed.
   -- See schema.proto:DirMeta for a more complete description.

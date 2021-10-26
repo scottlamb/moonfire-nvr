@@ -11,6 +11,7 @@ use failure::Error;
 use log::{debug, trace};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -206,7 +207,7 @@ pub fn top_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
                     db.lock()
                         .sample_file_dirs_by_id()
                         .iter()
-                        .map(|(&id, d)| (d.path.to_string(), Some(id))),
+                        .map(|(&id, d)| (d.path.display().to_string(), Some(id))),
                 )
                 .full_width(),
         )
@@ -224,7 +225,7 @@ fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
                     views::EditView::new()
                         .on_submit({
                             let db = db.clone();
-                            move |siv, path| add_dir(&db, siv, path)
+                            move |siv, path| add_dir(&db, siv, path.as_ref())
                         })
                         .with_name("path")
                         .fixed_width(60),
@@ -237,7 +238,7 @@ fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
                     .find_name::<views::EditView>("path")
                     .unwrap()
                     .get_content();
-                add_dir(&db, siv, &path)
+                add_dir(&db, siv, path.as_ref().as_ref())
             }
         })
         .button("Cancel", |siv| {
@@ -247,10 +248,10 @@ fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
     );
 }
 
-fn add_dir(db: &Arc<db::Database>, siv: &mut Cursive, path: &str) {
+fn add_dir(db: &Arc<db::Database>, siv: &mut Cursive, path: &Path) {
     if let Err(e) = db.lock().add_sample_file_dir(path.to_owned()) {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to add path {}: {}", path, e))
+            views::Dialog::text(format!("Unable to add path {}: {}", path.display(), e))
                 .dismiss_button("Back")
                 .title("Error"),
         );
@@ -426,6 +427,6 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
                 .child(views::DummyView)
                 .child(buttons),
         )
-        .title(format!("Edit retention for {}", path)),
+        .title(format!("Edit retention for {}", path.display())),
     );
 }

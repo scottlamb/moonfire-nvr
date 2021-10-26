@@ -1,5 +1,5 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2018 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 /// Upgrades a version 2 schema to a version 3 schema.
@@ -10,7 +10,9 @@ use crate::dir;
 use crate::schema;
 use failure::Error;
 use rusqlite::params;
+use std::convert::TryFrom;
 use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Opens the sample file dir.
@@ -48,6 +50,7 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
         open.id = o_id as u32;
         open.uuid.extend_from_slice(&o_uuid.0.as_bytes()[..]);
     }
+    let p = PathBuf::try_from(p)?;
     dir::SampleFileDir::open(&p, &meta)
 }
 

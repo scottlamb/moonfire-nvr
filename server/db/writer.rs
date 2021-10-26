@@ -17,6 +17,7 @@ use std::cmp::{self, Ordering};
 use std::convert::TryFrom;
 use std::io;
 use std::mem;
+use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration as StdDuration;
@@ -178,7 +179,7 @@ where
     Ok((
         SyncerChannel(snd),
         thread::Builder::new()
-            .name(format!("sync-{}", path))
+            .name(format!("sync-{}", path.display()))
             .spawn(move || while syncer.iter(&rcv) {})
             .unwrap(),
     ))
@@ -312,7 +313,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
         shutdown_rx: base::shutdown::Receiver,
         db: Arc<db::Database<C>>,
         dir_id: i32,
-    ) -> Result<(Self, String), Error> {
+    ) -> Result<(Self, PathBuf), Error> {
         let d = l
             .sample_file_dirs_by_id()
             .get(&dir_id)

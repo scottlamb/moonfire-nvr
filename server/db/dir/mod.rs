@@ -27,6 +27,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::ops::Range;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::path::Path;
 use std::sync::Arc;
 
 /// The fixed length of a directory's `meta` file.
@@ -212,7 +213,7 @@ impl SampleFileDir {
     ///
     /// `db_meta.in_progress_open` should be filled if the directory should be opened in read/write
     /// mode; absent in read-only mode.
-    pub fn open(path: &str, expected_meta: &schema::DirMeta) -> Result<Arc<SampleFileDir>, Error> {
+    pub fn open(path: &Path, expected_meta: &schema::DirMeta) -> Result<Arc<SampleFileDir>, Error> {
         let read_write = expected_meta.in_progress_open.is_some();
         let s = SampleFileDir::open_self(path, false)?;
         s.fd.lock(if read_write {
@@ -220,7 +221,7 @@ impl SampleFileDir {
         } else {
             FlockArg::LockSharedNonblock
         })
-        .map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
+        .map_err(|e| e.context(format!("unable to lock dir {}", path.display())))?;
         let dir_meta = read_meta(&s.fd).map_err(|e| e.context("unable to read meta file"))?;
         if let Err(e) = SampleFileDir::check_consistent(expected_meta, &dir_meta) {
             bail!(
@@ -269,12 +270,12 @@ impl SampleFileDir {
     }
 
     pub(crate) fn create(
-        path: &str,
+        path: &Path,
         db_meta: &schema::DirMeta,
     ) -> Result<Arc<SampleFileDir>, Error> {
         let s = SampleFileDir::open_self(path, true)?;
         s.fd.lock(FlockArg::LockExclusiveNonblock)
-            .map_err(|e| e.context(format!("unable to lock dir {}", path)))?;
+            .map_err(|e| e.context(format!("unable to lock dir {}", path.display())))?;
         let old_meta = read_meta(&s.fd)?;
 
         // Verify metadata. We only care that it hasn't been completely opened.
@@ -282,12 +283,15 @@ impl SampleFileDir {
         if old_meta.last_complete_open.is_some() {
             bail!(
                 "Can't create dir at path {}: is already in use:\n{:?}",
-                path,
+                path.display(),
                 old_meta
             );
         }
         if !s.is_empty()? {
-            bail!("Can't create dir at path {} with existing files", path);
+            bail!(
+                "Can't create dir at path {} with existing files",
+                path.display()
+            );
         }
         s.write_meta(db_meta)?;
         Ok(s)
@@ -316,7 +320,7 @@ impl SampleFileDir {
         Ok(true)
     }
 
-    fn open_self(path: &str, create: bool) -> Result<Arc<SampleFileDir>, Error> {
+    fn open_self(path: &Path, create: bool) -> Result<Arc<SampleFileDir>, Error> {
         let fd = Arc::new(Fd::open(path, create)?);
         let reader = reader::Reader::spawn(path, fd.clone());
         Ok(Arc::new(SampleFileDir { fd, reader }))

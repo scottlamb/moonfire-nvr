@@ -29,6 +29,7 @@
 use crate::auth;
 use crate::days;
 use crate::dir;
+use crate::json::SampleFileDirConfig;
 use crate::raw;
 use crate::recording;
 use crate::schema;
@@ -52,6 +53,7 @@ use std::convert::TryInto;
 use std::fmt::Write as _;
 use std::mem;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::str;
 use std::string::String;
 use std::sync::Arc;
@@ -317,7 +319,7 @@ pub(crate) struct ListOldestRecordingsRow {
 #[derive(Debug)]
 pub struct SampleFileDir {
     pub id: i32,
-    pub path: String,
+    pub path: PathBuf,
     pub uuid: Uuid,
     dir: Option<Arc<dir::SampleFileDir>>,
     last_complete_open: Option<Open>,
@@ -1114,7 +1116,7 @@ impl LockedDatabase {
                 &mut log_msg,
                 "\n{}: added {}B in {} recordings ({}), deleted {}B in {} ({}), \
                    GCed {} recordings ({}).",
-                &dir.path,
+                dir.path.display(),
                 &encode_size(log.added_bytes),
                 log.added.len(),
                 log.added.iter().join(", "),
@@ -1183,7 +1185,7 @@ impl LockedDatabase {
                 open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
             }
             let d = dir::SampleFileDir::open(&dir.path, &expected_meta)
-                .map_err(|e| e.context(format!("Failed to open dir {}", dir.path)))?;
+                .map_err(|e| e.context(format!("Failed to open dir {}", dir.path.display())))?;
             if self.open.is_none() {
                 // read-only mode; it's already fully opened.
                 dir.dir = Some(d);
@@ -1544,7 +1546,7 @@ impl LockedDatabase {
             r#"
             select
               d.id,
-              d.path,
+              d.config,
               d.uuid,
               d.last_complete_open_id,
               o.uuid
@@ -1555,6 +1557,7 @@ impl LockedDatabase {
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
+            let config: SampleFileDirConfig = row.get(1)?;
             let dir_uuid: SqlUuid = row.get(2)?;
             let open_id: Option<u32> = row.get(3)?;
             let open_uuid: Option<SqlUuid> = row.get(4)?;
@@ -1568,7 +1571,7 @@ impl LockedDatabase {
                 SampleFileDir {
                     id,
                     uuid: dir_uuid.0,
-                    path: row.get(1)?,
+                    path: config.path,
                     dir: None,
                     last_complete_open,
                     garbage_needs_unlink: raw::list_garbage(&self.conn, id)?,
@@ -1735,7 +1738,7 @@ impl LockedDatabase {
         Ok(id)
     }
 
-    pub fn add_sample_file_dir(&mut self, path: String) -> Result<i32, Error> {
+    pub fn add_sample_file_dir(&mut self, path: PathBuf) -> Result<i32, Error> {
         let mut meta = schema::DirMeta::default();
         let uuid = Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
@@ -1754,12 +1757,16 @@ impl LockedDatabase {
         }
 
         let dir = dir::SampleFileDir::create(&path, &meta)?;
+        let config = SampleFileDirConfig {
+            path: path.clone(),
+            ..Default::default()
+        };
         self.conn.execute(
             r#"
-            insert into sample_file_dir (path, uuid, last_complete_open_id)
-                                 values (?,    ?,    ?)
+            insert into sample_file_dir (config, uuid, last_complete_open_id)
+                                 values (?,      ?,    ?)
             "#,
-            params![&path, uuid_bytes, o.id],
+            params![&config, uuid_bytes, o.id],
         )?;
         let id = self.conn.last_insert_rowid() as i32;
         use ::std::collections::btree_map::Entry;
@@ -1794,7 +1801,7 @@ impl LockedDatabase {
         if !d.get().garbage_needs_unlink.is_empty() || !d.get().garbage_unlinked.is_empty() {
             bail!(
                 "must collect garbage before deleting directory {}",
-                d.get().path
+                d.get().path.display()
             );
         }
         let dir = match d.get_mut().dir.take() {
@@ -1810,7 +1817,7 @@ impl LockedDatabase {
         if !dir.is_empty()? {
             bail!(
                 "Can't delete sample file directory {} which still has files",
-                &d.get().path
+                &d.get().path.display()
             );
         }
         let mut meta = d.get().expected_meta(&self.uuid);
@@ -2547,7 +2554,7 @@ mod tests {
             .prefix("moonfire-nvr-test")
             .tempdir()
             .unwrap();
-        let path = tmpdir.path().to_str().unwrap().to_owned();
+        let path = tmpdir.path().to_owned();
         let sample_file_dir_id = { db.lock() }.add_sample_file_dir(path).unwrap();
         let mut c = CameraChange {
             short_name: "testcam".to_owned(),

@@ -31,7 +31,7 @@
 //!     so that they can be removed in a future version if they no longer make
 //!     sense. It also makes sense to avoid serializing them when empty.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use rusqlite::types::{FromSqlError, ValueRef};
 use serde::{Deserialize, Serialize};
@@ -88,6 +88,17 @@ pub struct GlobalConfig {
     pub unknown: Map<String, Value>,
 }
 sql!(GlobalConfig);
+
+/// Sample file directory configuration, used in the `config` column of the `sample_file_dir` table.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleFileDirConfig {
+    pub path: PathBuf,
+
+    #[serde(flatten)]
+    pub unknown: Map<String, Value>,
+}
+sql!(SampleFileDirConfig);
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
