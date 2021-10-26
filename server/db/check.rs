@@ -80,7 +80,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
     {
         let mut dir_stmt = conn.prepare(
             r#"
-            select d.id, d.path, d.uuid, d.last_complete_open_id, o.uuid
+            select d.id, d.config, d.uuid, d.last_complete_open_id, o.uuid
             from sample_file_dir d left join open o on (d.last_complete_open_id = o.id)
             "#,
         )?;
