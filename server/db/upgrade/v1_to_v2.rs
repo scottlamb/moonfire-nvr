@@ -335,7 +335,7 @@ fn verify_dir_contents(
         let mut stmt = tx.prepare(r"select sample_file_uuid from recording_playback")?;
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
-            let uuid: crate::db::FromSqlUuid = row.get(0)?;
+            let uuid: crate::db::SqlUuid = row.get(0)?;
             if !files.remove(&uuid.0) {
                 bail!(
                     "{} is missing from dir {}!",
@@ -349,7 +349,7 @@ fn verify_dir_contents(
     let mut stmt = tx.prepare(r"select uuid from reserved_sample_files")?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
-        let uuid: crate::db::FromSqlUuid = row.get(0)?;
+        let uuid: crate::db::SqlUuid = row.get(0)?;
         if files.remove(&uuid.0) {
             // Also remove the garbage file. For historical reasons (version 2 was originally
             // defined as not having a garbage table so still is), do this here rather than with

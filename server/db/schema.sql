@@ -9,10 +9,8 @@
 create table meta (
   uuid blob not null check (length(uuid) = 16),
 
-  -- The maximum number of entries in the signal_state table. If an update
-  -- causes this to be exceeded, older times will be garbage collected to stay
-  -- within the limit.
-  max_signal_changes integer check (max_signal_changes >= 0)
+  -- Holds a json.GlobalConfig.
+  config text
 );
 
 -- This table tracks the schema version.
@@ -393,65 +391,19 @@ create index user_session_uid on user_session (user_id);
 -- *   security system zone status (unknown, normal, violated, trouble)
 create table signal (
   id integer primary key,
+  uuid blob unique not null check (length(uuid) = 16),
+  type_uuid blob not null references signal_type (uuid)
+      check (length(type_uuid) = 16),
 
-  -- a uuid describing the originating object, such as the uuid of the camera
-  -- for built-in motion detection. There will be a JSON interface for adding
-  -- events; it will require this UUID to be supplied. An external uuid might
-  -- indicate "my house security system's zone 23".
-  source_uuid blob not null check (length(source_uuid) = 16),
-
-  -- a uuid describing the type of event. A registry (TBD) will list built-in
-  -- supported types, such as "Hikvision on-camera motion detection", or
-  -- "ONVIF on-camera motion detection". External programs can use their own
-  -- uuids, such as "Elk security system watcher".
-  type_uuid blob not null check (length(type_uuid) = 16),
-
-  -- a short human-readable description to use in mouseovers or event lists,
-  -- such as "driveway motion" or "front door open".
-  short_name not null,
-
-  unique (source_uuid, type_uuid)
+  -- Holds a json.SignalConfig
+  config text
 );
 
--- e.g. "still/moving", "disarmed/away/stay", etc.
-create table signal_type_enum (
-  type_uuid blob not null check (length(type_uuid) = 16),
-  value integer not null check (value > 0 and value < 16),
-  name text not null,
+create table signal_type (
+  uuid blob primary key check (length(uuid) = 16),
 
-  -- true/1 iff this signal value should be considered "motion" for directly associated cameras.
-  motion int not null check (motion in (0, 1)) default 0,
-
-  color text
-);
-
--- Associations between event sources and cameras.
--- For example, if two cameras have overlapping fields of view, they might be
--- configured such that each camera is associated with both its own motion and
--- the other camera's motion.
-create table signal_camera (
-  signal_id integer references signal (id),
-  camera_id integer references camera (id),
-
-  -- type:
-  --
-  -- 0 means direct association, as if the event source if the camera's own
-  -- motion detection. Here are a couple ways this could be used:
-  --
-  -- * when viewing the camera, hotkeys to go to the start of the next or
-  --   previous event should respect this event.
-  -- * a list of events might include the recordings associated with the
-  --   camera in the same timespan.
-  --
-  -- 1 means indirect association. A screen associated with the camera should
-  -- given some indication of this event, but there should be no assumption
-  -- that the camera will have a direct view of the event. For example, all
-  -- cameras might be indirectly associated with a doorknob press. Cameras at
-  -- the back of the house shouldn't be expected to have a direct view of this
-  -- event, but motion events shortly afterward might warrant extra scrutiny.
-  type integer not null,
-
-  primary key (signal_id, camera_id)
+  -- Holds a json.SignalTypeConfig
+  config text
 ) without rowid;
 
 -- Changes to signals as of a given timestamp.

@@ -5,7 +5,7 @@
 /// Upgrades a version 2 schema to a version 3 schema.
 /// Note that a version 2 schema is never actually used; so we know the upgrade from version 1 was
 /// completed, and possibly an upgrade from 2 to 3 is half-finished.
-use crate::db::{self, FromSqlUuid};
+use crate::db::{self, SqlUuid};
 use crate::dir;
 use crate::schema;
 use failure::Error;
@@ -19,8 +19,8 @@ use std::sync::Arc;
 /// *   there's only one dir.
 /// *   it has a last completed open.
 fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFileDir>, Error> {
-    let (p, s_uuid, o_id, o_uuid, db_uuid): (String, FromSqlUuid, i32, FromSqlUuid, FromSqlUuid) =
-        tx.query_row(
+    let (p, s_uuid, o_id, o_uuid, db_uuid): (String, SqlUuid, i32, SqlUuid, SqlUuid) = tx
+        .query_row(
             r#"
             select
               s.path, s.uuid, s.last_complete_open_id, o.uuid, m.uuid
@@ -65,7 +65,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let id = db::CompositeId(row.get(0)?);
-        let sample_file_uuid: FromSqlUuid = row.get(1)?;
+        let sample_file_uuid: SqlUuid = row.get(1)?;
         let from_path = super::UuidPath::from(sample_file_uuid.0);
         let to_path = crate::dir::CompositeIdPath::from(id);
         if let Err(e) = nix::fcntl::renameat(

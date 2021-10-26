@@ -6,7 +6,7 @@
 ///
 /// This just handles the directory meta files. If they're already in the new format, great.
 /// Otherwise, verify they are consistent with the database then upgrade them.
-use crate::db::FromSqlUuid;
+use crate::db::SqlUuid;
 use crate::{dir, schema};
 use cstr::cstr;
 use failure::{bail, Error, Fail};
@@ -111,7 +111,7 @@ fn maybe_cleanup_garbage_uuids(dir: &dir::Fd) -> Result<bool, Error> {
 }
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let db_uuid: FromSqlUuid =
+    let db_uuid: SqlUuid =
         tx.query_row_and_then(r"select uuid from meta", params![], |row| row.get(0))?;
     let mut stmt = tx.prepare(
         r#"
@@ -129,9 +129,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     while let Some(row) = rows.next()? {
         let path = row.get_ref(0)?.as_str()?;
         info!("path: {}", path);
-        let dir_uuid: FromSqlUuid = row.get(1)?;
+        let dir_uuid: SqlUuid = row.get(1)?;
         let open_id: Option<u32> = row.get(2)?;
-        let open_uuid: Option<FromSqlUuid> = row.get(3)?;
+        let open_uuid: Option<SqlUuid> = row.get(3)?;
         let mut db_meta = schema::DirMeta::new();
         db_meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
         db_meta

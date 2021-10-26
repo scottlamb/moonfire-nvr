@@ -4,7 +4,8 @@
 
 //! Raw database access: SQLite statements which do not touch any cached state.
 
-use crate::db::{self, CompositeId, FromSqlUuid};
+use crate::db::{self, CompositeId, SqlUuid};
+use crate::json::GlobalConfig;
 use crate::recording;
 use base::{ErrorKind, ResultExt as _};
 use failure::{bail, Error, ResultExt as _};
@@ -170,13 +171,14 @@ fn list_recordings_inner(
     Ok(())
 }
 
-pub(crate) fn get_db_uuid(conn: &rusqlite::Connection) -> Result<Uuid, Error> {
+pub(crate) fn read_meta(conn: &rusqlite::Connection) -> Result<(Uuid, GlobalConfig), Error> {
     Ok(conn.query_row(
-        "select uuid from meta",
+        "select uuid, config from meta",
         params![],
-        |row| -> rusqlite::Result<Uuid> {
-            let uuid: FromSqlUuid = row.get(0)?;
-            Ok(uuid.0)
+        |row| -> rusqlite::Result<(Uuid, GlobalConfig)> {
+            let uuid: SqlUuid = row.get(0)?;
+            let config: GlobalConfig = row.get(1)?;
+            Ok((uuid.0, config))
         },
     )?)
 }

@@ -159,7 +159,7 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
         let video_samples: i32 = row.get(5)?;
         let video_sync_samples: i32 = row.get(6)?;
         let video_sample_entry_id: i32 = row.get(7)?;
-        let sample_file_uuid: db::FromSqlUuid = row.get(8)?;
+        let sample_file_uuid: db::SqlUuid = row.get(8)?;
         let sample_file_sha1: Vec<u8> = row.get(9)?;
         let video_index: Vec<u8> = row.get(10)?;
         let old_id: i32 = row.get(11)?;

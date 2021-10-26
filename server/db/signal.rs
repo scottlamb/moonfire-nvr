@@ -5,9 +5,9 @@
 //! Schema for "signals": enum-valued timeserieses.
 //! See the `signal` table within `schema.sql` for more information.
 
-use crate::db::FromSqlUuid;
-use crate::recording;
+use crate::json::{SignalConfig, SignalTypeConfig};
 use crate::{coding, days};
+use crate::{recording, SqlUuid};
 use base::bail_t;
 use failure::{bail, format_err, Error};
 use fnv::FnvHashMap;
@@ -15,6 +15,7 @@ use log::debug;
 use rusqlite::{params, Connection, Transaction};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
+use std::convert::TryFrom;
 use std::ops::Range;
 use uuid::Uuid;
 
@@ -38,7 +39,7 @@ pub(crate) struct State {
     /// These either have a matching `points_by_time` entry or represent a removal.
     dirty_by_time: BTreeSet<recording::Time>,
 
-    max_signal_changes: Option<i64>,
+    max_signal_changes: Option<u32>,
 }
 
 /// Representation of all signals at a point in time.
@@ -186,21 +187,6 @@ impl<'a> PointDataIterator<'a> {
     }
 }
 
-/// Representation of a `signal_camera` row.
-/// `signal_id` is implied by the `Signal` which owns this struct.
-#[derive(Debug)]
-pub struct SignalCamera {
-    pub camera_id: i32,
-    pub type_: SignalCameraType,
-}
-
-/// Representation of the `type` field in a `signal_camera` row.
-#[derive(Debug)]
-pub enum SignalCameraType {
-    Direct = 0,
-    Indirect = 1,
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ListStateChangesRow {
     pub when: recording::Time,
@@ -209,17 +195,12 @@ pub struct ListStateChangesRow {
 }
 
 impl State {
-    pub fn init(conn: &Connection) -> Result<Self, Error> {
-        let max_signal_changes: Option<i64> =
-            conn.query_row("select max_signal_changes from meta", params![], |row| {
-                row.get(0)
-            })?;
+    pub fn init(conn: &Connection, config: &crate::json::GlobalConfig) -> Result<Self, Error> {
         let mut signals_by_id = State::init_signals(conn)?;
-        State::fill_signal_cameras(conn, &mut signals_by_id)?;
         let mut points_by_time = BTreeMap::new();
         State::fill_points(conn, &mut points_by_time, &mut signals_by_id)?;
         let s = State {
-            max_signal_changes,
+            max_signal_changes: config.max_signal_changes,
             signals_by_id,
             types_by_uuid: State::init_types(conn)?,
             points_by_time,
@@ -291,8 +272,6 @@ impl State {
     fn gc(&mut self) {
         let max = match self.max_signal_changes {
             None => return,
-            Some(m) if m < 0 => 0_usize,
-            Some(m) if m > (isize::max_value() as i64) => return,
             Some(m) => m as usize,
         };
         let to_remove = match self.points_by_time.len().checked_sub(max) {
@@ -366,13 +345,12 @@ impl State {
             match self.signals_by_id.get(&signal) {
                 None => bail_t!(InvalidArgument, "unknown signal {}", signal),
                 Some(ref s) => {
-                    let empty = Vec::new();
                     let states = self
                         .types_by_uuid
                         .get(&s.type_)
-                        .map(|t| &t.states)
-                        .unwrap_or(&empty);
-                    if state != 0 && states.binary_search_by_key(&state, |s| s.value).is_err() {
+                        .map(|t| t.valid_states)
+                        .unwrap_or(0);
+                    if state >= 16 || (states & (1 << state)) == 0 {
                         bail_t!(
                             FailedPrecondition,
                             "signal {} specifies unknown state {}",
@@ -671,31 +649,65 @@ impl State {
             r#"
             select
                 id,
-                source_uuid,
+                uuid,
                 type_uuid,
-                short_name
+                config
             from
                 signal
             "#,
         )?;
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
-            let id = row.get(0)?;
-            let source: FromSqlUuid = row.get(1)?;
-            let type_: FromSqlUuid = row.get(2)?;
+            let id: i32 = row.get(0)?;
+            let id = u32::try_from(id)?;
+            let uuid: SqlUuid = row.get(1)?;
+            let type_: SqlUuid = row.get(2)?;
+            let config: SignalConfig = row.get(3)?;
             signals.insert(
                 id,
                 Signal {
                     id,
-                    source: source.0,
-                    type_: type_.0,
-                    short_name: row.get(3)?,
-                    cameras: Vec::new(),
+                    uuid: uuid.0,
                     days: days::Map::default(),
+                    type_: type_.0,
+                    config,
                 },
             );
         }
         Ok(signals)
+    }
+
+    fn init_types(conn: &Connection) -> Result<FnvHashMap<Uuid, Type>, Error> {
+        let mut types = FnvHashMap::default();
+        let mut stmt = conn.prepare(
+            r#"
+            select
+                uuid,
+                config
+            from
+                signal_type
+            "#,
+        )?;
+        let mut rows = stmt.query(params![])?;
+        while let Some(row) = rows.next()? {
+            let uuid: SqlUuid = row.get(0)?;
+            let mut type_ = Type {
+                valid_states: 1, // bit 0 (unknown state) is always valid.
+                config: row.get(1)?,
+            };
+            for &value in type_.config.values.keys() {
+                if value == 0 || value >= 16 {
+                    bail!(
+                        "signal type {} value {} out of accepted range [0, 16)",
+                        uuid.0,
+                        value
+                    );
+                }
+                type_.valid_states |= 1 << value;
+            }
+            types.insert(uuid.0, type_);
+        }
+        Ok(types)
     }
 
     /// Fills `points_by_time` from the database, also filling the `days`
@@ -755,73 +767,6 @@ impl State {
         Ok(())
     }
 
-    /// Fills the `cameras` field of the `Signal` structs within the supplied `signals`.
-    fn fill_signal_cameras(
-        conn: &Connection,
-        signals: &mut BTreeMap<u32, Signal>,
-    ) -> Result<(), Error> {
-        let mut stmt = conn.prepare(
-            r#"
-            select
-                signal_id,
-                camera_id,
-                type
-            from
-                signal_camera
-            order by signal_id, camera_id
-            "#,
-        )?;
-        let mut rows = stmt.query(params![])?;
-        while let Some(row) = rows.next()? {
-            let signal_id = row.get(0)?;
-            let s = signals.get_mut(&signal_id).ok_or_else(|| {
-                format_err!("signal_camera row for unknown signal id {}", signal_id)
-            })?;
-            let type_ = row.get(2)?;
-            s.cameras.push(SignalCamera {
-                camera_id: row.get(1)?,
-                type_: match type_ {
-                    0 => SignalCameraType::Direct,
-                    1 => SignalCameraType::Indirect,
-                    _ => bail!("unknown signal_camera type {}", type_),
-                },
-            });
-        }
-        Ok(())
-    }
-
-    fn init_types(conn: &Connection) -> Result<FnvHashMap<Uuid, Type>, Error> {
-        let mut types = FnvHashMap::default();
-        let mut stmt = conn.prepare(
-            r#"
-            select
-                type_uuid,
-                value,
-                name,
-                motion,
-                color
-            from
-                signal_type_enum
-            order by type_uuid, value
-            "#,
-        )?;
-        let mut rows = stmt.query(params![])?;
-        while let Some(row) = rows.next()? {
-            let type_: FromSqlUuid = row.get(0)?;
-            types
-                .entry(type_.0)
-                .or_insert_with(Type::default)
-                .states
-                .push(TypeState {
-                    value: row.get(1)?,
-                    name: row.get(2)?,
-                    motion: row.get(3)?,
-                    color: row.get(4)?,
-                });
-        }
-        Ok(types)
-    }
-
     pub fn signals_by_id(&self) -> &BTreeMap<u32, Signal> {
         &self.signals_by_id
     }
@@ -853,37 +798,26 @@ impl State {
 #[derive(Debug)]
 pub struct Signal {
     pub id: u32,
-    pub source: Uuid,
+    pub uuid: Uuid,
     pub type_: Uuid,
-    pub short_name: String,
-
-    /// The cameras this signal is associated with. Sorted by camera id, which is unique.
-    pub cameras: Vec<SignalCamera>,
-
     pub days: days::Map<days::SignalValue>,
+    pub config: SignalConfig,
 }
 
-/// Representation of a `signal_type_enum` row.
-/// `type_uuid` is implied by the `Type` which owns this struct.
-#[derive(Debug)]
-pub struct TypeState {
-    pub value: u16,
-    pub name: String,
-    pub motion: bool,
-    pub color: String,
-}
-
-/// Representation of a signal type; currently this just gathers together the TypeStates.
 #[derive(Debug, Default)]
 pub struct Type {
-    /// The possible states associated with this type. They are sorted by value, which is unique.
-    pub states: Vec<TypeState>,
+    pub valid_states: u16,
+    pub config: SignalTypeConfig,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, testutil};
+    use crate::{
+        db,
+        json::{GlobalConfig, SignalTypeConfig, SignalTypeValueConfig},
+        testutil,
+    };
     use rusqlite::Connection;
     use smallvec::smallvec;
 
@@ -903,7 +837,7 @@ mod tests {
         testutil::init();
         let mut conn = Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
-        let s = State::init(&conn).unwrap();
+        let s = State::init(&conn, &GlobalConfig::default()).unwrap();
         s.list_changes_by_time(
             recording::Time::min_value()..recording::Time::max_value(),
             &mut |_r| panic!("no changes expected"),
@@ -915,23 +849,49 @@ mod tests {
         testutil::init();
         let mut conn = Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
+        let mut type_config = SignalTypeConfig::default();
+        type_config.values.insert(
+            1,
+            SignalTypeValueConfig {
+                name: "still".to_owned(),
+                motion: false,
+                color: "black".to_owned(),
+                ..Default::default()
+            },
+        );
+        type_config.values.insert(
+            2,
+            SignalTypeValueConfig {
+                name: "moving".to_owned(),
+                motion: true,
+                color: "red".to_owned(),
+                ..Default::default()
+            },
+        );
+        conn.execute(
+            "insert into signal_type (uuid, config) values (?, ?)",
+            params![
+                SqlUuid(Uuid::parse_str("ee66270f-d9c6-4819-8b33-9720d4cbca6b").unwrap()),
+                &type_config,
+            ],
+        )
+        .unwrap();
         conn.execute_batch(
             r#"
-            update meta set max_signal_changes = 2;
-
-            insert into signal (id, source_uuid, type_uuid, short_name)
+            insert into signal (id, uuid, type_uuid, config)
                         values (1, x'1B3889C0A59F400DA24C94EBEB19CC3A',
-                                x'EE66270FD9C648198B339720D4CBCA6B', 'a'),
+                                x'EE66270FD9C648198B339720D4CBCA6B', '{"name": "a"}'),
                                (2, x'A4A73D9A53424EBCB9F6366F1E5617FA',
-                                x'EE66270FD9C648198B339720D4CBCA6B', 'b');
+                                x'EE66270FD9C648198B339720D4CBCA6B', '{"name": "b"}');
 
-            insert into signal_type_enum (type_uuid, value, name, motion, color)
-               values (x'EE66270FD9C648198B339720D4CBCA6B', 1, 'still', 0, 'black'),
-                      (x'EE66270FD9C648198B339720D4CBCA6B', 2, 'moving', 1, 'red');
             "#,
         )
         .unwrap();
-        let mut s = State::init(&conn).unwrap();
+        let config = GlobalConfig {
+            max_signal_changes: Some(2),
+            ..Default::default()
+        };
+        let mut s = State::init(&conn, &config).unwrap();
         s.list_changes_by_time(
             recording::Time::min_value()..recording::Time::max_value(),
             &mut |_r| panic!("no changes expected"),
@@ -997,7 +957,7 @@ mod tests {
         }
 
         drop(s);
-        let mut s = State::init(&conn).unwrap();
+        let mut s = State::init(&conn, &config).unwrap();
         rows.clear();
         s.list_changes_by_time(
             recording::Time::min_value()..recording::Time::max_value(),
@@ -1044,7 +1004,7 @@ mod tests {
             tx.commit().unwrap();
         }
         drop(s);
-        let s = State::init(&conn).unwrap();
+        let s = State::init(&conn, &config).unwrap();
         rows.clear();
         s.list_changes_by_time(
             recording::Time::min_value()..recording::Time::max_value(),

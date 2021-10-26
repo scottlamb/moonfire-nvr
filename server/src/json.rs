@@ -98,7 +98,7 @@ pub struct Signal<'a> {
     pub id: u32,
     #[serde(serialize_with = "Signal::serialize_cameras")]
     pub cameras: (&'a db::Signal, &'a db::LockedDatabase),
-    pub source: Uuid,
+    pub uuid: Uuid,
     pub type_: Uuid,
     pub short_name: &'a str,
 
@@ -162,7 +162,7 @@ pub struct SignalType<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalTypeState<'a> {
-    value: u16,
+    value: u8,
     name: &'a str,
 
     #[serde(skip_serializing_if = "Not::not")]
@@ -273,9 +273,9 @@ impl<'a> Signal<'a> {
         Signal {
             id: s.id,
             cameras: (s, db),
-            source: s.source,
+            uuid: s.uuid,
             type_: s.type_,
-            short_name: &s.short_name,
+            short_name: &s.config.short_name,
             days: if include_days { Some(&s.days) } else { None },
         }
     }
@@ -288,16 +288,13 @@ impl<'a> Signal<'a> {
         S: Serializer,
     {
         let (s, db) = cameras;
-        let mut map = serializer.serialize_map(Some(s.cameras.len()))?;
-        for sc in &s.cameras {
-            let c = db.cameras_by_id().get(&sc.camera_id).ok_or_else(|| {
-                S::Error::custom(format!("signal has missing camera id {}", sc.camera_id))
+        let mut map = serializer.serialize_map(Some(s.config.camera_associations.len()))?;
+        for (camera_id, association) in &s.config.camera_associations {
+            let c = db.cameras_by_id().get(camera_id).ok_or_else(|| {
+                S::Error::custom(format!("signal has missing camera id {}", camera_id))
             })?;
             map.serialize_key(&c.uuid)?;
-            map.serialize_value(match sc.type_ {
-                db::signal::SignalCameraType::Direct => "direct",
-                db::signal::SignalCameraType::Indirect => "indirect",
-            })?;
+            map.serialize_value(association.as_str())?;
         }
         map.end()
     }
@@ -339,21 +336,21 @@ impl<'a> SignalType<'a> {
     where
         S: Serializer,
     {
-        let mut seq = serializer.serialize_seq(Some(type_.states.len()))?;
-        for s in &type_.states {
-            seq.serialize_element(&SignalTypeState::wrap(s))?;
+        let mut seq = serializer.serialize_seq(Some(type_.config.values.len()))?;
+        for (&value, config) in &type_.config.values {
+            seq.serialize_element(&SignalTypeState::wrap(value, config))?;
         }
         seq.end()
     }
 }
 
 impl<'a> SignalTypeState<'a> {
-    pub fn wrap(s: &'a db::signal::TypeState) -> Self {
+    pub fn wrap(value: u8, config: &'a db::json::SignalTypeValueConfig) -> Self {
         SignalTypeState {
-            value: s.value,
-            name: &s.name,
-            motion: s.motion,
-            color: &s.color,
+            value,
+            name: &config.name,
+            motion: config.motion,
+            color: &config.color,
         }
     }
 }

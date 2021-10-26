@@ -5,7 +5,7 @@
 //! Subcommand to check the database and sample file dir for errors.
 
 use crate::compare;
-use crate::db::{self, CompositeId, FromSqlUuid};
+use crate::db::{self, CompositeId, SqlUuid};
 use crate::dir;
 use crate::raw;
 use crate::recording;
@@ -72,7 +72,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
         warn!("The following analysis may be incorrect or encounter errors due to schema differences.");
     }
 
-    let db_uuid = raw::get_db_uuid(&conn)?;
+    let (db_uuid, _config) = raw::read_meta(&conn)?;
 
     // Scan directories.
     let mut dirs_by_id: FnvHashMap<i32, Dir> = FnvHashMap::default();
@@ -90,9 +90,9 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
             let mut meta = schema::DirMeta::default();
             let dir_id: i32 = row.get(0)?;
             let dir_path: String = row.get(1)?;
-            let dir_uuid: FromSqlUuid = row.get(2)?;
+            let dir_uuid: SqlUuid = row.get(2)?;
             let open_id = row.get(3)?;
-            let open_uuid: FromSqlUuid = row.get(4)?;
+            let open_uuid: SqlUuid = row.get(4)?;
             meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
             meta.dir_uuid.extend_from_slice(&dir_uuid.0.as_bytes()[..]);
             {

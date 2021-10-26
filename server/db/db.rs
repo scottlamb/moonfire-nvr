@@ -104,17 +104,18 @@ pub(crate) fn round_up(bytes: i64) -> i64 {
     (bytes + blk - 1) / blk * blk
 }
 
-pub struct FromSqlUuid(pub Uuid);
+/// A wrapper around `Uuid` which implements `FromSql` and `ToSql`.
+pub struct SqlUuid(pub Uuid);
 
-impl rusqlite::types::FromSql for FromSqlUuid {
+impl rusqlite::types::FromSql for SqlUuid {
     fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
         let uuid = Uuid::from_slice(value.as_blob()?)
             .map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(e)))?;
-        Ok(FromSqlUuid(uuid))
+        Ok(SqlUuid(uuid))
     }
 }
 
-impl rusqlite::types::ToSql for FromSqlUuid {
+impl rusqlite::types::ToSql for SqlUuid {
     fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
         Ok(self.0.as_bytes()[..].into())
     }
@@ -1554,9 +1555,9 @@ impl LockedDatabase {
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
-            let dir_uuid: FromSqlUuid = row.get(2)?;
+            let dir_uuid: SqlUuid = row.get(2)?;
             let open_id: Option<u32> = row.get(3)?;
-            let open_uuid: Option<FromSqlUuid> = row.get(4)?;
+            let open_uuid: Option<SqlUuid> = row.get(4)?;
             let last_complete_open = match (open_id, open_uuid) {
                 (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0 }),
                 (None, None) => None,
@@ -1600,7 +1601,7 @@ impl LockedDatabase {
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
-            let uuid: FromSqlUuid = row.get(1)?;
+            let uuid: SqlUuid = row.get(1)?;
             self.cameras_by_id.insert(
                 id,
                 Camera {
@@ -2247,19 +2248,19 @@ impl<C: Clocks + Clone> Database<C> {
 
         // Note: the meta check comes after the version check to improve the error message when
         // trying to open a version 0 or version 1 database (which lacked the meta table).
-        let uuid = raw::get_db_uuid(&conn)?;
+        let (uuid, config) = raw::read_meta(&conn)?;
         let open_monotonic = recording::Time::new(clocks.monotonic());
         let open = if read_write {
             let real = recording::Time::new(clocks.realtime());
             let mut stmt = conn
                 .prepare(" insert into open (uuid, start_time_90k, boot_uuid) values (?, ?, ?)")?;
-            let open_uuid = FromSqlUuid(Uuid::new_v4());
+            let open_uuid = SqlUuid(Uuid::new_v4());
             let boot_uuid = match get_boot_uuid() {
                 Err(e) => {
                     warn!("Unable to get boot uuid: {}", e);
                     None
                 }
-                Ok(id) => id.map(FromSqlUuid),
+                Ok(id) => id.map(SqlUuid),
             };
             stmt.execute(params![open_uuid, real.0, boot_uuid])?;
             let id = conn.last_insert_rowid() as u32;
@@ -2268,7 +2269,7 @@ impl<C: Clocks + Clone> Database<C> {
             None
         };
         let auth = auth::State::init(&conn)?;
-        let signal = signal::State::init(&conn)?;
+        let signal = signal::State::init(&conn, &config)?;
         let db = Database {
             db: Some(Mutex::new(LockedDatabase {
                 conn,

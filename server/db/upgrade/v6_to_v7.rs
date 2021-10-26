@@ -3,11 +3,138 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 /// Upgrades a version 6 schema to a version 7 schema.
-use failure::Error;
+use failure::{format_err, Error};
+use fnv::FnvHashMap;
 use rusqlite::{named_params, params};
+use std::convert::TryFrom;
 use url::Url;
+use uuid::Uuid;
 
-use crate::{json::CameraConfig, FromSqlUuid};
+use crate::{
+    json::{CameraConfig, GlobalConfig, SignalConfig, SignalTypeConfig},
+    SqlUuid,
+};
+
+fn copy_meta(tx: &rusqlite::Transaction) -> Result<(), Error> {
+    let mut stmt = tx.prepare("select uuid, max_signal_changes from old_meta")?;
+    let mut insert = tx.prepare("insert into meta (uuid, config) values (:uuid, :config)")?;
+    let mut rows = stmt.query(params![])?;
+    while let Some(row) = rows.next()? {
+        let uuid: SqlUuid = row.get(0)?;
+        let max_signal_changes: Option<i64> = row.get(1)?;
+        let config = GlobalConfig {
+            max_signal_changes: max_signal_changes
+                .map(|s| {
+                    u32::try_from(s).map_err(|_| format_err!("max_signal_changes out of range"))
+                })
+                .transpose()?,
+            ..Default::default()
+        };
+        insert.execute(named_params! {
+            ":uuid": uuid,
+            ":config": &config,
+        })?;
+    }
+
+    Ok(())
+}
+
+fn copy_signal_types(tx: &rusqlite::Transaction) -> Result<(), Error> {
+    let mut types_ = FnvHashMap::default();
+    let mut stmt = tx.prepare("select type_uuid, value, name from signal_type_enum")?;
+    let mut rows = stmt.query(params![])?;
+    while let Some(row) = rows.next()? {
+        let type_uuid: SqlUuid = row.get(0)?;
+        let value: i32 = row.get(1)?;
+        let name: Option<String> = row.get(2)?;
+        let type_ = types_
+            .entry(type_uuid.0)
+            .or_insert_with(SignalTypeConfig::default);
+        let value = u8::try_from(value).map_err(|_| format_err!("bad signal type value"))?;
+        let value_config = type_.values.entry(value).or_insert_with(Default::default);
+        if let Some(n) = name {
+            value_config.name = n;
+        }
+    }
+    let mut insert = tx.prepare("insert into signal_type (uuid, config) values (?, ?)")?;
+    for (&uuid, config) in &types_ {
+        insert.execute(params![SqlUuid(uuid), config])?;
+    }
+    Ok(())
+}
+
+struct Signal {
+    uuid: Uuid,
+    type_uuid: Uuid,
+    config: SignalConfig,
+}
+
+fn copy_signals(tx: &rusqlite::Transaction) -> Result<(), Error> {
+    let mut signals = FnvHashMap::default();
+
+    // Read from signal table.
+    {
+        let mut stmt =
+            tx.prepare("select id, source_uuid, type_uuid, short_name from old_signal")?;
+        let mut rows = stmt.query(params![])?;
+        while let Some(row) = rows.next()? {
+            let id: i32 = row.get(0)?;
+            let id = u32::try_from(id)?;
+            let source_uuid: SqlUuid = row.get(1)?;
+            let type_uuid: SqlUuid = row.get(2)?;
+            let short_name: String = row.get(3)?;
+            signals.insert(
+                id,
+                Signal {
+                    uuid: source_uuid.0,
+                    type_uuid: type_uuid.0,
+                    config: SignalConfig {
+                        short_name,
+                        ..Default::default()
+                    },
+                },
+            );
+        }
+    }
+
+    // Read from the signal_camera table.
+    {
+        let mut stmt = tx.prepare("select signal_id, camera_id, type from signal_camera")?;
+        let mut rows = stmt.query(params![])?;
+        while let Some(row) = rows.next()? {
+            let signal_id: i32 = row.get(0)?;
+            let signal_id = u32::try_from(signal_id)?;
+            let camera_id: i32 = row.get(1)?;
+            let type_: i32 = row.get(2)?;
+            let signal = signals.get_mut(&signal_id).unwrap();
+            signal.config.camera_associations.insert(
+                camera_id,
+                match type_ {
+                    0 => "direct",
+                    _ => "indirect",
+                }
+                .to_owned(),
+            );
+        }
+    }
+
+    let mut insert = tx.prepare(
+        r#"
+        insert into signal (id,  uuid,  type_uuid,  config)
+                    values (:id, :uuid, :type_uuid, :config)
+        "#,
+    )?;
+    for (&id, signal) in &signals {
+        insert.execute(named_params! {
+            ":id": id,
+            ":uuid": SqlUuid(signal.uuid),
+            ":type_uuid": SqlUuid(signal.type_uuid),
+            ":config": &signal.config,
+        })?;
+    }
+
+    Ok(())
+}
 
 fn copy_cameras(tx: &rusqlite::Transaction) -> Result<(), Error> {
     let mut insert = tx.prepare(
@@ -34,7 +161,7 @@ fn copy_cameras(tx: &rusqlite::Transaction) -> Result<(), Error> {
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let id: i32 = row.get(0)?;
-        let uuid: FromSqlUuid = row.get(1)?;
+        let uuid: SqlUuid = row.get(1)?;
         let uuid_bytes = &uuid.0.as_bytes()[..];
         let short_name: String = row.get(2)?;
         let mut description: Option<String> = row.get(3)?;
@@ -134,6 +261,13 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         alter table user add preferences text;
         alter table camera rename to old_camera;
         alter table stream rename to old_stream;
+        alter table signal rename to old_signal;
+        alter table meta rename to old_meta;
+
+        create table meta (
+          uuid blob not null check (length(uuid) = 16),
+          config text
+        );
 
         create table camera (
           id integer primary key,
@@ -153,9 +287,25 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           cum_runs integer not null check (cum_runs >= 0),
           unique (camera_id, type)
         );
+
+        create table signal (
+          id integer primary key,
+          uuid blob unique not null check (length(uuid) = 16),
+          type_uuid blob not null references signal_type (uuid)
+              check (length(type_uuid) = 16),
+          config text
+        );
+
+        create table signal_type (
+          uuid blob primary key check (length(uuid) = 16),
+          config text
+        ) without rowid;
     "#,
     )?;
+    copy_meta(tx)?;
     copy_cameras(tx)?;
+    copy_signal_types(tx)?;
+    copy_signals(tx)?;
     copy_streams(tx)?;
     tx.execute_batch(
         r#"
@@ -224,6 +374,10 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         drop table old_recording;
         drop table old_stream; 
         drop table old_camera;
+        drop table old_meta;
+        drop table old_signal;
+        drop table signal_type_enum;
+        drop table signal_camera;
     "#,
     )?;
     Ok(())

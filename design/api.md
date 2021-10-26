@@ -142,7 +142,7 @@ The `application/json` response will have a JSON object as follows:
 *   `signals`: a list of all *signals* known to the server. Each is a JSON
     object with the following properties:
     *   `id`: an integer identifier.
-    *   `source`: a UUID representing the signal source (could be a camera UUID)
+    *   `uuid`: a UUID identifier.
     *   `shortName`: a unique, human-readable description of the signal
     *   `cameras`: a map of associated cameras' UUIDs to the type of association:
         `direct` or `indirect`. See `db/schema.sql` for more description.
