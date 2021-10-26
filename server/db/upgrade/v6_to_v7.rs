@@ -255,7 +255,7 @@ fn copy_cameras(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let config = CameraConfig {
             description: description.take().unwrap_or_default(),
             onvif_base_url: onvif_host
-                .map(|h| Url::parse(&format!("rtsp://{}/", h)))
+                .map(|h| Url::parse(&format!("http://{}/", h)))
                 .transpose()?,
             username: username.take().unwrap_or_default(),
             password: password.take().unwrap_or_default(),
