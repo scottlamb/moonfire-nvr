@@ -314,9 +314,9 @@ fn copy_streams(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let cum_runs: i64 = row.get(10)?;
         let config = crate::json::StreamConfig {
             mode: (if record {
-                ""
-            } else {
                 crate::json::STREAM_MODE_RECORD
+            } else {
+                ""
             })
             .to_owned(),
             url: Some(Url::parse(&rtsp_url)?),
