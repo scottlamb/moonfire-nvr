@@ -457,10 +457,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           composite_id integer not null,
           primary key (sample_file_dir_id, composite_id)
         ) without rowid;
-        drop index recording_cover;
         insert into garbage select * from old_garbage;
         drop table old_garbage;
-
+        drop index recording_cover;
         alter table recording rename to old_recording;
         create table recording (
           composite_id integer primary key,
@@ -510,8 +509,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           video_index blob not null check (length(video_index) > 0)
         );
         insert into recording_playback select * from old_recording_playback;
-        drop table old_signal;
         drop table signal_camera;
+        drop table old_signal;
         drop table old_recording_playback;
         drop table old_recording_integrity;
         drop table old_recording;

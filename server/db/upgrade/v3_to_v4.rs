@@ -27,13 +27,6 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           color text
         );
 
-        create table signal_camera (
-          signal_id integer references signal (id),
-          camera_id integer references camera (id),
-          type integer not null,
-          primary key (signal_id, camera_id)
-        ) without rowid;
-
         create table signal_change (
           time_90k integer primary key,
           changes blob not null
@@ -68,6 +61,13 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           password
         from
           old_camera;
+
+        create table signal_camera (
+          signal_id integer references signal (id),
+          camera_id integer references camera (id),
+          type integer not null,
+          primary key (signal_id, camera_id)
+        ) without rowid;
 
         alter table stream rename to old_stream;
         create table stream (

@@ -296,8 +296,25 @@ mod tests {
                 // anything left over.
                 assert!(!garbage.exists());
                 std::fs::File::create(&garbage)?;
-            }
-            if *ver == 6 {
+            } else if *ver == 4 {
+                // First version that supports signals. Add them and ensure they don't break
+                // subsequent upgrades.
+                upgraded.execute_batch(
+                    r#"
+                    insert into signal (id, source_uuid, type_uuid, short_name)
+                                values (1, x'1B3889C0A59F400DA24C94EBEB19CC3A',
+                                        x'EE66270FD9C648198B339720D4CBCA6B', 'a'),
+                                       (2, x'A4A73D9A53424EBCB9F6366F1E5617FA',
+                                        x'EE66270FD9C648198B339720D4CBCA6B', 'b');
+                    insert into signal_type_enum (type_uuid, value, name, motion, color)
+                       values (x'EE66270FD9C648198B339720D4CBCA6B', 1, 'still', 0, 'black'),
+                              (x'EE66270FD9C648198B339720D4CBCA6B', 2, 'moving', 1, 'red');
+                    insert into signal_camera (signal_id, camera_id, type)
+                                       values (1, 1, 0),
+                                              (2, 1, 1);
+                "#,
+                )?;
+            } else if *ver == 6 {
                 // Check that the pasp was set properly.
                 let mut stmt = upgraded.prepare(
                     r#"
