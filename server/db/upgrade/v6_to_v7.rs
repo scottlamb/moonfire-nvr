@@ -11,7 +11,9 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    json::{CameraConfig, GlobalConfig, SampleFileDirConfig, SignalConfig, SignalTypeConfig},
+    json::{
+        CameraConfig, GlobalConfig, SampleFileDirConfig, SignalConfig, SignalTypeConfig, UserConfig,
+    },
     SqlUuid,
 };
 
@@ -66,6 +68,57 @@ fn copy_sample_file_dir(tx: &rusqlite::Transaction) -> Result<(), Error> {
         })?;
     }
 
+    Ok(())
+}
+
+fn copy_users(tx: &rusqlite::Transaction) -> Result<(), Error> {
+    let mut stmt = tx.prepare(
+        r#"
+        select
+          id,
+          username,
+          flags,
+          password_hash,
+          password_id,
+          password_failure_count,
+          unix_uid,
+          permissions
+        from old_user
+        "#,
+    )?;
+    let mut insert = tx.prepare(
+        r#"
+        insert into user (id,  username,  config,  password_hash,  password_id,
+                          password_failure_count,  permissions)
+                  values (:id, :username, :config, :password_hash, :password_id,
+                          :password_failure_count, :permissions)
+        "#,
+    )?;
+    let mut rows = stmt.query(params![])?;
+    while let Some(row) = rows.next()? {
+        let id: i32 = row.get(0)?;
+        let username: String = row.get(1)?;
+        let flags: i32 = row.get(2)?;
+        let password_hash: String = row.get(3)?;
+        let password_id: i32 = row.get(4)?;
+        let password_failure_count: i32 = row.get(5)?;
+        let unix_uid: Option<i64> = row.get(6)?;
+        let permissions: Vec<u8> = row.get(7)?;
+        let config = UserConfig {
+            disabled: (flags & 1) != 0,
+            unix_uid: unix_uid.map(u64::try_from).transpose()?,
+            ..Default::default()
+        };
+        insert.execute(named_params! {
+            ":id": id,
+            ":username": username,
+            ":config": config,
+            ":password_hash": password_hash,
+            ":password_id": password_id,
+            ":password_failure_count": password_failure_count,
+            ":permissions": permissions,
+        })?;
+    }
     Ok(())
 }
 
@@ -288,7 +341,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     tx.execute_batch(
         r#"
         alter table open add boot_uuid check (length(boot_uuid) = 16);
-        alter table user add preferences text;
+        alter table user rename to old_user;
+        alter table user_session rename to old_user_session;
         alter table camera rename to old_camera;
         alter table stream rename to old_stream;
         alter table signal rename to old_signal;
@@ -338,6 +392,42 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
           uuid blob primary key check (length(uuid) = 16),
           config text
         ) without rowid;
+
+        create table user (
+          id integer primary key,
+          username unique not null,
+          config text,
+          password_hash text,
+          password_id integer not null default 0,
+          password_failure_count integer not null default 0,
+          permissions blob not null default X''
+        );
+
+        create table user_session (
+          session_id_hash blob primary key not null,
+          user_id integer references user (id) not null,
+          seed blob not null,
+          flags integer not null,
+          domain text,
+          description text,
+          creation_password_id integer,
+          creation_time_sec integer not null,
+          creation_user_agent text,
+          creation_peer_addr blob,
+          revocation_time_sec integer,
+          revocation_user_agent text,
+          revocation_peer_addr blob,
+          revocation_reason integer,
+          revocation_reason_detail text,
+          last_use_time_sec integer,
+          last_use_user_agent text,
+          last_use_peer_addr blob,
+          use_count not null default 0,
+          permissions blob not null default X''
+        ) without rowid;
+
+        drop index user_session_uid;
+        create index user_session_uid on user_session (user_id);
     "#,
     )?;
     copy_meta(tx)?;
@@ -346,8 +436,11 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     copy_signal_types(tx)?;
     copy_signals(tx)?;
     copy_streams(tx)?;
+    copy_users(tx)?;
     tx.execute_batch(
         r#"
+        insert into user_session select * from old_user_session;
+
         drop index recording_cover;
 
         alter table recording rename to old_recording;
@@ -416,6 +509,8 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         drop table old_sample_file_dir;
         drop table old_meta;
         drop table old_signal;
+        drop table old_user_session;
+        drop table old_user;
         drop table signal_type_enum;
         drop table signal_camera;
     "#,

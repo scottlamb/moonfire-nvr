@@ -4,6 +4,7 @@
 
 //! Authentication schema: users and sessions/cookies.
 
+use crate::json::UserConfig;
 use crate::schema::Permissions;
 use base::{bail_t, format_err_t, strutil, ErrorKind, ResultExt};
 use failure::{bail, format_err, Error};
@@ -13,7 +14,6 @@ use log::info;
 use parking_lot::Mutex;
 use protobuf::Message;
 use ring::rand::{SecureRandom, SystemRandom};
-use rusqlite::types::FromSqlError;
 use rusqlite::{named_params, params, Connection, Transaction};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -35,47 +35,15 @@ pub(crate) fn set_test_config() {
     ));
 }
 
-#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, Eq, PartialEq)]
-pub struct UserPreferences(serde_json::Map<String, serde_json::Value>);
-
-impl rusqlite::types::FromSql for UserPreferences {
-    fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
-        Ok(Self(match value {
-            rusqlite::types::ValueRef::Null => serde_json::Map::default(),
-            rusqlite::types::ValueRef::Text(t) => {
-                serde_json::from_slice(t).map_err(|e| FromSqlError::Other(Box::new(e)))?
-            }
-            _ => return Err(FromSqlError::InvalidType),
-        }))
-    }
-}
-
-impl rusqlite::types::ToSql for UserPreferences {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        if self.0.is_empty() {
-            return Ok(rusqlite::types::Null.into());
-        }
-        Ok(serde_json::to_string(&self.0)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?
-            .into())
-    }
-}
-
-enum UserFlag {
-    Disabled = 1,
-}
-
 #[derive(Debug)]
 pub struct User {
     pub id: i32,
     pub username: String,
-    pub flags: i32,
+    pub config: UserConfig,
     password_hash: Option<String>,
     pub password_id: i32,
     pub password_failure_count: i64,
-    pub unix_uid: Option<i32>,
     pub permissions: Permissions,
-    pub preferences: UserPreferences,
 
     /// True iff this `User` has changed since the last flush.
     /// Only a couple things are flushed lazily: `password_failure_count` and (on upgrade to a new
@@ -88,19 +56,14 @@ impl User {
         UserChange {
             id: Some(self.id),
             username: self.username.clone(),
-            flags: self.flags,
+            config: self.config.clone(),
             set_password_hash: None,
-            preferences: self.preferences.clone(),
-            unix_uid: self.unix_uid,
             permissions: self.permissions.clone(),
         }
     }
 
     pub fn has_password(&self) -> bool {
         self.password_hash.is_some()
-    }
-    fn disabled(&self) -> bool {
-        (self.flags & UserFlag::Disabled as i32) != 0
     }
 }
 
@@ -114,10 +77,8 @@ impl User {
 pub struct UserChange {
     id: Option<i32>,
     pub username: String,
-    pub flags: i32,
+    pub config: UserConfig,
     set_password_hash: Option<Option<String>>,
-    pub preferences: UserPreferences,
-    pub unix_uid: Option<i32>,
     pub permissions: Permissions,
 }
 
@@ -126,10 +87,8 @@ impl UserChange {
         UserChange {
             id: None,
             username,
-            flags: 0,
+            config: UserConfig::default(),
             set_password_hash: None,
-            preferences: UserPreferences::default(),
-            unix_uid: None,
             permissions: Permissions::default(),
         }
     }
@@ -141,10 +100,6 @@ impl UserChange {
 
     pub fn clear_password(&mut self) {
         self.set_password_hash = Some(None);
-    }
-
-    pub fn disable(&mut self) {
-        self.flags |= UserFlag::Disabled as i32;
     }
 }
 
@@ -385,13 +340,11 @@ impl State {
             select
                 id,
                 username,
-                flags,
+                config,
                 password_hash,
                 password_id,
                 password_failure_count,
-                unix_uid,
-                permissions,
-                preferences
+                permissions
             from
                 user
             "#,
@@ -401,20 +354,18 @@ impl State {
             let id = row.get(0)?;
             let name: String = row.get(1)?;
             let mut permissions = Permissions::new();
-            permissions.merge_from_bytes(row.get_ref(7)?.as_blob()?)?;
+            permissions.merge_from_bytes(row.get_ref(6)?.as_blob()?)?;
             state.users_by_id.insert(
                 id,
                 User {
                     id,
                     username: name.clone(),
-                    flags: row.get(2)?,
+                    config: row.get(2)?,
                     password_hash: row.get(3)?,
                     password_id: row.get(4)?,
                     password_failure_count: row.get(5)?,
-                    unix_uid: row.get(6)?,
                     dirty: false,
                     permissions,
-                    preferences: row.get(8)?,
                 },
             );
             state.users_by_name.insert(name, id);
@@ -448,10 +399,8 @@ impl State {
                 password_hash = :password_hash,
                 password_id = :password_id,
                 password_failure_count = :password_failure_count,
-                flags = :flags,
-                unix_uid = :unix_uid,
-                permissions = :permissions,
-                preferences = :preferences
+                config = :config,
+                permissions = :permissions
             where
                 id = :id
             "#,
@@ -478,11 +427,9 @@ impl State {
                 ":password_hash": phash,
                 ":password_id": &pid,
                 ":password_failure_count": &pcount,
-                ":flags": &change.flags,
-                ":unix_uid": &change.unix_uid,
+                ":config": &change.config,
                 ":id": &id,
                 ":permissions": &permissions,
-                ":preferences": &change.preferences,
             })?;
         }
         let u = e.into_mut();
@@ -492,20 +439,16 @@ impl State {
             u.password_id += 1;
             u.password_failure_count = 0;
         }
-        u.flags = change.flags;
-        u.unix_uid = change.unix_uid;
+        u.config = change.config;
         u.permissions = change.permissions;
-        u.preferences = change.preferences;
         Ok(u)
     }
 
     fn add_user(&mut self, conn: &Connection, change: UserChange) -> Result<&User, Error> {
         let mut stmt = conn.prepare_cached(
             r#"
-            insert into user (username,  password_hash,  flags,  unix_uid,  permissions,
-                              preferences)
-                      values (:username, :password_hash, :flags, :unix_uid, :permissions,
-                              :preferences)
+            insert into user (username,  password_hash,  config,  permissions)
+                      values (:username, :password_hash, :config, :permissions)
             "#,
         )?;
         let password_hash = change.set_password_hash.unwrap_or(None);
@@ -516,10 +459,8 @@ impl State {
         stmt.execute(named_params! {
             ":username": &change.username[..],
             ":password_hash": &password_hash,
-            ":flags": &change.flags,
-            ":unix_uid": &change.unix_uid,
+            ":config": &change.config,
             ":permissions": &permissions,
-            ":preferences": &change.preferences,
         })?;
         let id = conn.last_insert_rowid() as i32;
         self.users_by_name.insert(change.username.clone(), id);
@@ -531,14 +472,12 @@ impl State {
         Ok(e.insert(User {
             id,
             username: change.username,
-            flags: change.flags,
+            config: change.config,
             password_hash,
             password_id: 0,
             password_failure_count: 0,
-            unix_uid: change.unix_uid,
             dirty: false,
             permissions: change.permissions,
-            preferences: change.preferences,
         }))
     }
 
@@ -583,7 +522,7 @@ impl State {
             .users_by_id
             .get_mut(id)
             .expect("users_by_name implies users_by_id");
-        if u.disabled() {
+        if u.config.disabled {
             bail!("user {:?} is disabled", username);
         }
         let new_hash = {
@@ -633,7 +572,7 @@ impl State {
             .users_by_id
             .get_mut(&uid)
             .ok_or_else(|| format_err!("no such uid {:?}", uid))?;
-        if u.disabled() {
+        if u.config.disabled {
             bail!("user is disabled");
         }
         State::make_session_int(
@@ -739,7 +678,7 @@ impl State {
         s.last_use = req;
         s.use_count += 1;
         s.dirty = true;
-        if u.disabled() {
+        if u.config.disabled {
             bail_t!(Unauthenticated, "user {:?} is disabled", &u.username);
         }
         Ok((s, u))
@@ -1207,7 +1146,7 @@ mod tests {
         // Disable the user.
         {
             let mut c = state.users_by_id().get(&uid).unwrap().change();
-            c.disable();
+            c.config.disabled = true;
             state.apply(&conn, c).unwrap();
         }
 
@@ -1331,13 +1270,19 @@ mod tests {
         db::init(&mut conn).unwrap();
         let mut state = State::init(&conn).unwrap();
         let mut change = UserChange::add_user("slamb".to_owned());
-        change.preferences.0.insert("foo".to_string(), 42.into());
+        change
+            .config
+            .preferences
+            .insert("foo".to_string(), 42.into());
         let u = state.apply(&conn, change).unwrap();
         let mut change = u.change();
-        change.preferences.0.insert("bar".to_string(), 26.into());
+        change
+            .config
+            .preferences
+            .insert("bar".to_string(), 26.into());
         let u = state.apply(&conn, change).unwrap();
-        assert_eq!(u.preferences.0.get("foo"), Some(&42.into()));
-        assert_eq!(u.preferences.0.get("bar"), Some(&26.into()));
+        assert_eq!(u.config.preferences.get("foo"), Some(&42.into()));
+        assert_eq!(u.config.preferences.get("bar"), Some(&26.into()));
         let uid = u.id;
 
         {
@@ -1347,7 +1292,7 @@ mod tests {
         }
         let state = State::init(&conn).unwrap();
         let u = state.users_by_id().get(&uid).unwrap();
-        assert_eq!(u.preferences.0.get("foo"), Some(&42.into()));
-        assert_eq!(u.preferences.0.get("bar"), Some(&26.into()));
+        assert_eq!(u.config.preferences.get("foo"), Some(&42.into()));
+        assert_eq!(u.config.preferences.get("bar"), Some(&26.into()));
     }
 }

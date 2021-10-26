@@ -509,7 +509,7 @@ impl VideoSampleEntry {
 pub struct ToplevelUser {
     pub name: String,
     pub id: i32,
-    pub preferences: db::auth::UserPreferences,
+    pub preferences: db::json::UserPreferences,
     pub session: Option<Session>,
 }
 
@@ -523,5 +523,5 @@ pub struct PostUser {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSubset {
-    pub preferences: Option<db::auth::UserPreferences>,
+    pub preferences: Option<db::json::UserPreferences>,
 }

@@ -35,7 +35,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use rusqlite::types::{FromSqlError, ValueRef};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use url::Url;
 use uuid::Uuid;
 
@@ -74,6 +74,7 @@ pub struct GlobalConfig {
     ///
     /// If an update causes this to be exceeded, older times will be garbage
     /// collected to stay within the limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_signal_changes: Option<u32>,
 
     /// Information about signal types.
@@ -85,7 +86,7 @@ pub struct GlobalConfig {
     pub signals: BTreeMap<u32, SignalConfig>,
 
     #[serde(flatten)]
-    pub unknown: Map<String, Value>,
+    pub unknown: BTreeMap<String, Value>,
 }
 sql!(GlobalConfig);
 
@@ -96,7 +97,7 @@ pub struct SampleFileDirConfig {
     pub path: PathBuf,
 
     #[serde(flatten)]
-    pub unknown: Map<String, Value>,
+    pub unknown: BTreeMap<String, Value>,
 }
 sql!(SampleFileDirConfig);
 
@@ -120,7 +121,7 @@ pub struct SignalTypeConfig {
     pub values: BTreeMap<u8, SignalTypeValueConfig>,
 
     #[serde(flatten)]
-    pub unknown: Map<String, Value>,
+    pub unknown: BTreeMap<String, Value>,
 }
 sql!(SignalTypeConfig);
 
@@ -137,7 +138,7 @@ pub struct SignalTypeValueConfig {
     pub color: String,
 
     #[serde(flatten)]
-    pub unknown: Map<String, Value>,
+    pub unknown: BTreeMap<String, Value>,
 }
 
 impl SignalTypeValueConfig {
@@ -172,7 +173,7 @@ pub struct CameraConfig {
     pub password: String,
 
     #[serde(flatten)]
-    pub unknown: Map<String, Value>,
+    pub unknown: BTreeMap<String, Value>,
 }
 sql!(CameraConfig);
 
@@ -230,7 +231,7 @@ pub struct StreamConfig {
     pub flush_if_sec: u32,
 
     #[serde(flatten)]
-    pub unknown: Map<String, Value>,
+    pub unknown: BTreeMap<String, Value>,
 }
 sql!(StreamConfig);
 
@@ -274,6 +275,35 @@ pub struct SignalConfig {
     pub camera_associations: BTreeMap<i32, String>,
 
     #[serde(flatten)]
-    pub unknown: Map<String, Value>,
+    pub unknown: BTreeMap<String, Value>,
 }
 sql!(SignalConfig);
+
+/// User configuration, used in the `config` column of the `user` table.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserConfig {
+    /// If true, no method of authentication will succeed for this user.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
+
+    /// If set, a Unix UID that is accepted for authentication when using HTTP over
+    /// a Unix domain socket.
+    ///
+    /// (Additionally, the UID running Moonfire NVR can authenticate as anyone;
+    /// there's no point in trying to do otherwise.) This might be an easy
+    /// bootstrap method once configuration happens through a web UI rather than
+    /// text UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unix_uid: Option<u64>,
+
+    /// Preferences controlled by the user.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub preferences: UserPreferences,
+
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, Value>,
+}
+sql!(UserConfig);
+
+pub type UserPreferences = BTreeMap<String, Value>;

@@ -1041,14 +1041,14 @@ impl Service {
             .get(&id)
             .ok_or_else(|| format_err_t!(Internal, "can't find currently authenticated user"))?;
         if let Some(precondition) = r.precondition {
-            if matches!(precondition.preferences, Some(p) if p != user.preferences) {
+            if matches!(precondition.preferences, Some(p) if p != user.config.preferences) {
                 bail_t!(FailedPrecondition, "preferences mismatch");
             }
         }
         if let Some(update) = r.update {
             let mut change = user.change();
             if let Some(preferences) = update.preferences {
-                change.preferences = preferences;
+                change.config.preferences = preferences;
             }
             db.apply_user_change(change).map_err(internal_server_err)?;
         }
@@ -1290,7 +1290,7 @@ impl Service {
                         user: Some(json::ToplevelUser {
                             id: s.user_id,
                             name: u.username.clone(),
-                            preferences: u.preferences.clone(),
+                            preferences: u.config.preferences.clone(),
                             session: Some(json::Session { csrf: s.csrf() }),
                         }),
                     })
