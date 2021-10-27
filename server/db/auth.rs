@@ -6,8 +6,8 @@
 
 use crate::json::UserConfig;
 use crate::schema::Permissions;
-use base::{bail_t, format_err_t, strutil, ErrorKind, ResultExt};
-use failure::{bail, format_err, Error};
+use base::{bail_t, format_err_t, strutil, ErrorKind, ResultExt as _};
+use failure::{bail, format_err, Error, Fail, ResultExt as _};
 use fnv::FnvHashMap;
 use lazy_static::lazy_static;
 use log::info;
@@ -15,24 +15,21 @@ use parking_lot::Mutex;
 use protobuf::Message;
 use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::{named_params, params, Connection, Transaction};
+use scrypt::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::Arc;
 
 lazy_static! {
-    static ref PASTA_CONFIG: Mutex<Arc<libpasta::Config>> =
-        Mutex::new(Arc::new(libpasta::Config::default()));
+    static ref PARAMS: Mutex<scrypt::Params> = Mutex::new(scrypt::Params::recommended());
 }
 
-/// For testing only: use a fast but insecure libpasta config.
-/// See also <https://github.com/libpasta/libpasta/issues/9>.
+/// For testing only: use fast but insecure hashes.
 /// Call via `testutil::init()`.
 pub(crate) fn set_test_config() {
-    *PASTA_CONFIG.lock() = Arc::new(libpasta::Config::with_primitive(
-        libpasta::primitives::Bcrypt::new(2),
-    ));
+    let params = scrypt::Params::new(8, 8, 1).unwrap();
+    *PARAMS.lock() = params;
 }
 
 #[derive(Debug)]
@@ -94,8 +91,12 @@ impl UserChange {
     }
 
     pub fn set_password(&mut self, pwd: String) {
-        let c = Arc::clone(&PASTA_CONFIG.lock());
-        self.set_password_hash = Some(Some(c.hash_password(&pwd)));
+        let salt = SaltString::generate(&mut scrypt::password_hash::rand_core::OsRng);
+        let params = PARAMS.lock().clone();
+        let hash = scrypt::Scrypt
+            .hash_password_customized(pwd.as_bytes(), None, None, params, &salt)
+            .unwrap();
+        self.set_password_hash = Some(Some(hash.to_string()));
     }
 
     pub fn clear_password(&mut self) {
@@ -525,25 +526,26 @@ impl State {
         if u.config.disabled {
             bail!("user {:?} is disabled", username);
         }
-        let new_hash = {
-            let hash = match u.password_hash.as_ref() {
-                None => bail!("no password set for user {:?}", username),
-                Some(h) => h,
-            };
-            let c = Arc::clone(&PASTA_CONFIG.lock());
-            match c.verify_password_update_hash(hash, &password) {
-                libpasta::HashUpdate::Failed => {
-                    u.dirty = true;
-                    u.password_failure_count += 1;
-                    bail!("incorrect password for user {:?}", username);
-                }
-                libpasta::HashUpdate::Verified(new_pwd) => new_pwd,
+        let hash = u
+            .password_hash
+            .as_ref()
+            .ok_or_else(|| format_err!("no password set for user {:?}", username))?;
+        let hash = PasswordHash::new(hash)
+            .with_context(|_| format!("bad stored password hash for user {:?}", username))?;
+        match scrypt::Scrypt.verify_password(password.as_bytes(), &hash) {
+            Ok(()) => {}
+            Err(scrypt::password_hash::errors::Error::Password) => {
+                u.dirty = true;
+                u.password_failure_count += 1;
+                bail!("incorrect password for user {:?}", username);
             }
-        };
-        if let Some(h) = new_hash {
-            u.password_hash = Some(h);
-            u.dirty = true;
+            Err(e) => {
+                return Err(e
+                    .context(format!("unable to verify password for user {:?}", username))
+                    .into());
+            }
         }
+
         let password_id = u.password_id;
         State::make_session_int(
             &self.rand,
@@ -1037,78 +1039,6 @@ mod tests {
             format!("{}", e),
             "Unauthenticated: session is no longer valid (reason=1)"
         );
-    }
-
-    #[test]
-    fn upgrade_hash() {
-        // This hash is generated with cost=1 vs the cost=2 of PASTA_CONFIG.
-        let insecure_hash = libpasta::Config::with_primitive(libpasta::primitives::Bcrypt::new(1))
-            .hash_password("hunter2");
-        testutil::init();
-        let mut conn = Connection::open_in_memory().unwrap();
-        db::init(&mut conn).unwrap();
-        let mut state = State::init(&conn).unwrap();
-        let mut change = UserChange::add_user("slamb".to_owned());
-
-        // hunter2, in insecure MD5.
-        change.set_password_hash = Some(Some(insecure_hash.clone()));
-        let uid = {
-            let u = state.apply(&conn, change).unwrap();
-            assert_eq!(&insecure_hash, u.password_hash.as_ref().unwrap());
-            u.id
-        };
-
-        let req = Request {
-            when_sec: Some(42),
-            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(
-                127, 0, 0, 1,
-            ))),
-            user_agent: Some(b"some ua".to_vec()),
-        };
-        state
-            .login_by_password(
-                &conn,
-                req.clone(),
-                "slamb",
-                "hunter2".to_owned(),
-                Some(b"nvr.example.com".to_vec()),
-                0,
-            )
-            .unwrap();
-        let new_hash = {
-            // Password should have been automatically upgraded.
-            let u = state.users_by_id().get(&uid).unwrap();
-            assert!(u.dirty);
-            assert_ne!(u.password_hash.as_ref().unwrap(), &insecure_hash);
-            u.password_hash.as_ref().unwrap().clone()
-        };
-
-        {
-            let tx = conn.transaction().unwrap();
-            state.flush(&tx).unwrap();
-            tx.commit().unwrap();
-        }
-
-        // On reload, the new hash should still be visible.
-        drop(state);
-        let mut state = State::init(&conn).unwrap();
-        {
-            let u = state.users_by_id().get(&uid).unwrap();
-            assert!(!u.dirty);
-            assert_eq!(u.password_hash.as_ref().unwrap(), &new_hash);
-        }
-
-        // Login should still work.
-        state
-            .login_by_password(
-                &conn,
-                req.clone(),
-                "slamb",
-                "hunter2".to_owned(),
-                Some(b"nvr.example.com".to_vec()),
-                0,
-            )
-            .unwrap();
     }
 
     #[test]

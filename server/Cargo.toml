@@ -44,6 +44,7 @@ mylog = { git = "https://github.com/scottlamb/mylog" }
 nix = "0.23.0"
 nom = "7.0.0"
 parking_lot = { version = "0.11.1", features = [] }
+password-hash = "0.3.2"
 protobuf = "3.0.0-alpha.1"
 reffers = "0.6.0"
 retina = "0.3.3"
