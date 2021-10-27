@@ -6,6 +6,11 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## `v0.7.1` (2021-10-27)
+
+*   bugfix: editing a camera from `nvr config` would erroneously clear the
+    sample file directory associated with its streams.
+
 ## `v0.7.0` (2021-10-27)
 
 *   [schema version 7](guide/schema.md#version-7)
