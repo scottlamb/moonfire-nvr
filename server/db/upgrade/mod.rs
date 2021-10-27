@@ -190,7 +190,12 @@ mod tests {
     fn compare(c: &rusqlite::Connection, ver: i32, fresh_sql: &str) -> Result<(), Error> {
         let fresh = new_conn()?;
         fresh.execute_batch(fresh_sql)?;
-        if let Some(diffs) = compare::get_diffs("upgraded", &c, "fresh", &fresh)? {
+        if let Some(diffs) = compare::get_diffs(
+            &format!("upgraded to version {}", ver),
+            &c,
+            &format!("fresh version {}", ver),
+            &fresh,
+        )? {
             panic!("Version {}: differences found:\n{}", ver, diffs);
         }
         Ok(())

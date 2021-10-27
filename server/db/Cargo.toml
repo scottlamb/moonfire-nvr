@@ -18,6 +18,7 @@ base64 = "0.13.0"
 blake3 = "1.0.0"
 byteorder = "1.0"
 cstr = "0.2.5"
+diff = "0.1.12"
 failure = "0.1.1"
 fnv = "1.0"
 futures = "0.3"
@@ -33,12 +34,12 @@ num-rational = { version = "0.4.0", default-features = false, features = ["std"]
 odds = { version = "0.4.0", features = ["std-vec"] }
 parking_lot = { version = "0.11.1", features = [] }
 pretty-hex = "0.2.1"
-prettydiff = { git = "https://github.com/scottlamb/prettydiff", branch = "pr-update-deps" }
 protobuf = "3.0.0-alpha.1"
 ring = "0.16.2"
 rusqlite = "0.26.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+#similar = "2.1.0"
 smallvec = "1.0"
 tempfile = "3.2.0"
 time = "0.1"
