@@ -6,7 +6,7 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## `v0.7.0` (in progress)
+## `v0.7.0` (2021-10-27)
 
 *   [schema version 7](guide/schema.md#version-7)
 
