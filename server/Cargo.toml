@@ -9,7 +9,7 @@ license-file = "../LICENSE.txt"
 
 # The nightly feature is used within moonfire-nvr itself to gate the
 # benchmarks. Also pass it along to crates that can benefit from it.
-nightly = ["db/nightly", "parking_lot/nightly", "smallvec/union"]
+nightly = ["db/nightly", "parking_lot/nightly"]
 
 # The bundled feature includes bundled (aka statically linked) versions of
 # native libraries where possible.
@@ -51,7 +51,7 @@ ring = "0.16.2"
 rusqlite = "0.26.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-smallvec = "1.0"
+smallvec = { version = "1.7", features = ["union"] }
 structopt = { version = "0.3.13", default-features = false }
 sync_wrapper = "0.1.0"
 time = "0.1"
