@@ -86,6 +86,7 @@ The `application/json` response will have a JSON object as follows:
 
 *   `timeZoneName`: the name of the IANA time zone the server is using
     to divide recordings into days as described further below.
+*   `serverVersion`: the version of the server in use, eg `0.7.0`.
 *   `cameras`: a list of cameras. Each is a JSON object as follows:
     *   `uuid`: in text format
     *   `id`: an integer. The client doesn't ever need to send the id

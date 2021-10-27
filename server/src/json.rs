@@ -15,6 +15,8 @@ use uuid::Uuid;
 pub struct TopLevel<'a> {
     pub time_zone_name: &'a str,
 
+    pub server_version: &'static str,
+
     // Use a custom serializer which presents the map's values as a sequence and includes the
     // "days" and "camera_configs" attributes or not, according to the respective bools.
     #[serde(serialize_with = "TopLevel::serialize_cameras")]

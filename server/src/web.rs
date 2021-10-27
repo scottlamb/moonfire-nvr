@@ -679,6 +679,7 @@ impl Service {
             req,
             &json::TopLevel {
                 time_zone_name: &self.time_zone_name,
+                server_version: env!("CARGO_PKG_VERSION"),
                 cameras: (&db, days, camera_configs),
                 user: caller.user,
                 signals: (&db, days),
