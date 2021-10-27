@@ -7,6 +7,7 @@
     * [Version 1 to version 2 to version 3](#version-1-to-version-2-to-version-3)
     * [Version 3 to version 4 to version 5](#version-3-to-version-4-to-version-5)
     * [Version 6](#version-6)
+    * [Version 7](#version-7)
 
 This document has notes about the Moonfire NVR storage schema. As described in
 [README.md](../README.md), this consists of two kinds of state:
@@ -162,7 +163,7 @@ Then use `sqlite3` to manually edit the database. The default
 path is `/var/lib/moonfire-nvr/db/db`; if you've specified a different
 `--db_dir`, use that directory with a suffix of `/db`.
 
-```
+```console
 $ sudo -u moonfire-nvr sqlite3 /var/lib/moonfire-nvr/db/db
 sqlite3>
 ```
@@ -272,8 +273,16 @@ Version 6 adds over version 5:
     before it on that stream. This is useful for MediaSourceExtension-based
     web browser UIs when setting timestamps of video segments in the
     SourceBuffer.
-*   decoupled "wall time" and "media time" of recoridngs, as a step toward
+*   decoupled "wall time" and "media time" of recordings, as a step toward
     implementing audio support without giving up clock frequency adjustment. See
     [this comment](https://github.com/scottlamb/moonfire-nvr/issues/34#issuecomment-651548468).
 
 On upgrading to this version, sessions will be revoked.
+
+### Version 7
+
+This version affects only the SQLite database.
+
+Version 7 extends many database tables with a flexible JSON configuration
+object. This will allow minor configuration expansions without a full
+schema upgrade.

@@ -6,6 +6,10 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## `v0.7.0` (in progress)
+
+*   [schema version 7](guide/schema.md#version-7)
+
 ## `v0.6.7` (2021-10-20)
 
 *   trim whitespace when detecting time zone by reading `/etc/timezone`.
