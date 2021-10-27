@@ -8,6 +8,7 @@ use db::{dir, recording, writer, Camera, Database, Stream};
 use failure::{bail, format_err, Error};
 use log::{debug, info, trace, warn};
 use std::result::Result;
+use std::str::FromStr;
 use std::sync::Arc;
 use url::Url;
 
@@ -19,7 +20,7 @@ where
     C: Clocks + Clone,
 {
     pub opener: &'a dyn stream::Opener,
-    pub transport: retina::client::Transport,
+    pub default_transport: retina::client::Transport,
     pub db: &'tmp Arc<Database<C>>,
     pub shutdown_rx: &'tmp base::shutdown::Receiver,
 }
@@ -71,6 +72,22 @@ where
         if !url.username().is_empty() || url.password().is_some() {
             bail!("RTSP URL shouldn't include credentials");
         }
+        let stream_transport = if s.config.rtsp_transport.is_empty() {
+            None
+        } else {
+            match retina::client::Transport::from_str(&s.config.rtsp_transport) {
+                Ok(t) => Some(t),
+                Err(_) => {
+                    log::warn!(
+                        "Unable to parse configured transport {:?} for {}/{}; ignoring.",
+                        &s.config.rtsp_transport,
+                        &c.short_name,
+                        s.type_
+                    );
+                    None
+                }
+            }
+        };
         Ok(Streamer {
             shutdown_rx: env.shutdown_rx.clone(),
             rotate_offset_sec,
@@ -79,7 +96,7 @@ where
             dir,
             syncer_channel,
             opener: env.opener,
-            transport: env.transport,
+            transport: stream_transport.unwrap_or(env.default_transport),
             stream_id,
             session_group,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
@@ -417,7 +434,7 @@ mod tests {
             opener: &opener,
             db: &db.db,
             shutdown_rx: &shutdown_rx,
-            transport: retina::client::Transport::Tcp,
+            default_transport: retina::client::Transport::Tcp,
         };
         let mut stream;
         {

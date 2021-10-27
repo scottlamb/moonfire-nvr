@@ -76,6 +76,8 @@ pub struct Args {
     #[structopt(long, default_value = "retina", parse(try_from_str))]
     rtsp_library: crate::stream::RtspLibrary,
 
+    /// The RTSP transport (`tcp` or `udp`) to use when none is specified in the
+    /// per-stream configuration.
     #[structopt(long, default_value)]
     rtsp_transport: retina::client::Transport,
 }
@@ -265,7 +267,7 @@ async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32,
         let env = streamer::Environment {
             db: &db,
             opener: args.rtsp_library.opener(),
-            transport: args.rtsp_transport,
+            default_transport: args.rtsp_transport,
             shutdown_rx: &shutdown_rx,
         };
 

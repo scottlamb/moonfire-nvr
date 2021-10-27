@@ -10,6 +10,7 @@ Each release is tagged in Git and on the Docker repository
 
 *   bugfix: editing a camera from `nvr config` would erroneously clear the
     sample file directory associated with its streams.
+*   RTSP transport (TCP or UDP) can be set per-stream from `nvr config`.
 
 ## `v0.7.0` (2021-10-27)
 

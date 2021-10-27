@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use url::Url;
 
+#[derive(Debug)]
 struct Camera {
     short_name: String,
     description: String,
@@ -22,11 +23,12 @@ struct Camera {
     streams: [Stream; db::NUM_STREAM_TYPES],
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Stream {
     url: String,
     record: bool,
     flush_if_sec: String,
+    rtsp_transport: &'static str,
     sample_file_dir_id: Option<i32>,
 }
 
@@ -82,6 +84,11 @@ fn get_camera(siv: &mut Cursive) -> Camera {
             .find_name::<views::Checkbox>(&format!("{}_record", t.as_str()))
             .unwrap()
             .is_checked();
+        let rtsp_transport = *siv
+            .find_name::<views::SelectView<&'static str>>(&format!("{}_rtsp_transport", t.as_str()))
+            .unwrap()
+            .selection()
+            .unwrap();
         let flush_if_sec = siv
             .find_name::<views::EditView>(&format!("{}_flush_if_sec", t.as_str()))
             .unwrap()
@@ -97,9 +104,11 @@ fn get_camera(siv: &mut Cursive) -> Camera {
             url,
             record,
             flush_if_sec,
+            rtsp_transport,
             sample_file_dir_id,
         };
     }
+    log::trace!("camera is: {:#?}", &camera);
     camera
 }
 
@@ -155,6 +164,7 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
             })
             .to_owned();
             stream_change.config.url = parse_url(&stream.url, &["rtsp"])?;
+            stream_change.config.rtsp_transport = stream.rtsp_transport.to_owned();
             stream_change.sample_file_dir_id = stream.sample_file_dir_id;
             stream_change.config.flush_if_sec = if stream.flush_if_sec.is_empty() {
                 0
@@ -175,9 +185,13 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
     })();
     if let Err(e) = result {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to add camera: {}", e))
-                .title("Error")
-                .dismiss_button("Abort"),
+            views::Dialog::text(format!(
+                "Unable to {} camera: {}",
+                if id.is_some() { "edit" } else { "add" },
+                e
+            ))
+            .title("Error")
+            .dismiss_button("Abort"),
         );
     } else {
         siv.pop_layer(); // get rid of the add/edit camera dialog.
@@ -458,6 +472,13 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                 views::Checkbox::new().with_name(format!("{}_record", type_.as_str())),
             )
             .child(
+                "rtsp_transport",
+                views::SelectView::<&str>::new()
+                    .with_all([("(default)", ""), ("tcp", "tcp"), ("udp", "udp")])
+                    .popup()
+                    .with_name(format!("{}_rtsp_transport", type_.as_str())),
+            )
+            .child(
                 "flush_if_sec",
                 views::EditView::new().with_name(format!("{}_flush_if_sec", type_.as_str())),
             )
@@ -530,10 +551,21 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                     },
                 );
                 dialog.call_on_name(
+                    &format!("{}_rtsp_transport", t.as_str()),
+                    |v: &mut views::SelectView<&'static str>| {
+                        v.set_selection(match s.config.rtsp_transport.as_str() {
+                            "tcp" => 1,
+                            "udp" => 2,
+                            _ => 0,
+                        })
+                    },
+                );
+                dialog.call_on_name(
                     &format!("{}_flush_if_sec", t.as_str()),
                     |v: &mut views::EditView| v.set_content(s.config.flush_if_sec.to_string()),
                 );
             }
+            log::debug!("setting {} dir to {}", t.as_str(), selected_dir);
             dialog.call_on_name(
                 &format!("{}_sample_file_dir", t.as_str()),
                 |v: &mut views::SelectView<Option<i32>>| v.set_selection(selected_dir),

@@ -209,6 +209,10 @@ pub struct StreamConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<Url>,
 
+    /// The RTSP transport (`tcp` or `udp`) to use.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rtsp_transport: String,
+
     /// The number of bytes of video to retain, excluding the
     /// currently-recording file.
     ///
