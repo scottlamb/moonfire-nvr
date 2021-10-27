@@ -34,7 +34,7 @@ odds = { version = "0.4.0", features = ["std-vec"] }
 parking_lot = { version = "0.11.1", features = [] }
 pretty-hex = "0.2.1"
 prettydiff = { git = "https://github.com/scottlamb/prettydiff", branch = "pr-update-deps" }
-protobuf = { git = "https://github.com/stepancheg/rust-protobuf" }
+protobuf = "3.0.0-alpha.1"
 ring = "0.16.2"
 rusqlite = "0.26.1"
 serde = { version = "1.0", features = ["derive"] }
@@ -48,4 +48,4 @@ uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 itertools = "0.10.0"
 
 [build-dependencies]
-protobuf-codegen-pure = { git = "https://github.com/stepancheg/rust-protobuf" }
+protobuf-codegen-pure = "3.0.0-alpha.1"
