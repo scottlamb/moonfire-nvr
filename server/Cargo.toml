@@ -26,7 +26,7 @@ bytes = "1"
 byteorder = "1.0"
 clap = { version = "2.33.3", default-features = false, features = ["color", "wrap_help"] }
 cstr = "0.2.5"
-cursive = "0.16.3"
+cursive = "0.17.0-alpha.0"
 db = { package = "moonfire-db", path = "db" }
 failure = "0.1.1"
 ffmpeg = { package = "moonfire-ffmpeg", version = "0.0.1" }
