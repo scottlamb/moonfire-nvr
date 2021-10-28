@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 mod path;
+mod static_file;
 
 use self::path::Path;
 use crate::body::Body;
@@ -899,42 +900,6 @@ impl Service {
         Ok(http_serve::serve(mp4, req))
     }
 
-    async fn static_file(&self, req: Request<hyper::Body>) -> ResponseResult {
-        let dir = self
-            .ui_dir
-            .clone()
-            .ok_or_else(|| not_found("--ui-dir not configured; no static files available."))?;
-        let static_req = match StaticFileRequest::parse(req.uri().path()) {
-            None => return Err(not_found("static file not found")),
-            Some(r) => r,
-        };
-        let f = dir.get(static_req.path, req.headers());
-        let node = f.await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                not_found("no such static file")
-            } else {
-                internal_server_err(e)
-            }
-        })?;
-        let mut hdrs = http::HeaderMap::new();
-        node.add_encoding_headers(&mut hdrs);
-        hdrs.insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static(if static_req.immutable {
-                // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#Caching_static_assets
-                "public, max-age=604800, immutable"
-            } else {
-                "public"
-            }),
-        );
-        hdrs.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static(static_req.mime),
-        );
-        let e = node.into_file_entity(hdrs).map_err(internal_server_err)?;
-        Ok(http_serve::serve(e, &req))
-    }
-
     async fn user(&self, req: Request<hyper::Body>, caller: Caller, id: i32) -> ResponseResult {
         if caller.user.map(|u| u.id) != Some(id) {
             bail_t!(Unauthenticated, "must be authenticated as supplied user");
@@ -1257,60 +1222,9 @@ fn encode_sid(sid: db::RawSessionId, flags: i32) -> String {
     cookie
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct StaticFileRequest<'a> {
-    path: &'a str,
-    immutable: bool,
-    mime: &'static str,
-}
-
-impl<'a> StaticFileRequest<'a> {
-    fn parse(path: &'a str) -> Option<Self> {
-        if !path.starts_with('/') || path == "/index.html" {
-            return None;
-        }
-
-        let (path, immutable) = match &path[1..] {
-            // These well-known URLs don't have content hashes in them, and
-            // thus aren't immutable.
-            "" => ("index.html", false),
-            "robots.txt" => ("robots.txt", false),
-            "site.webmanifest" => ("site.webmanifest", false),
-
-            // Everything else should.
-            p => (p, true),
-        };
-
-        let last_dot = match path.rfind('.') {
-            None => return None,
-            Some(d) => d,
-        };
-        let ext = &path[last_dot + 1..];
-        let mime = match ext {
-            "css" => "text/css",
-            "html" => "text/html",
-            "ico" => "image/x-icon",
-            "js" | "map" => "text/javascript",
-            "json" => "application/json",
-            "png" => "image/png",
-            "svg" => "image/svg+xml",
-            "txt" => "text/plain",
-            "webmanifest" => "application/manifest+json",
-            "woff2" => "font/woff2",
-            _ => return None,
-        };
-
-        Some(StaticFileRequest {
-            path,
-            immutable,
-            mime,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Segments, StaticFileRequest};
+    use super::Segments;
     use db::testutil::{self, TestDb};
     use futures::future::FutureExt;
     use log::info;
@@ -1415,30 +1329,6 @@ mod tests {
         pub fn header(&self) -> String {
             self.0.clone().unwrap()
         }
-    }
-
-    #[test]
-    fn static_file() {
-        testutil::init();
-        let r = StaticFileRequest::parse("/jquery-ui.b6d3d46c828800e78499.js").unwrap();
-        assert_eq!(
-            r,
-            StaticFileRequest {
-                path: "jquery-ui.b6d3d46c828800e78499.js",
-                mime: "text/javascript",
-                immutable: true,
-            }
-        );
-
-        let r = StaticFileRequest::parse("/").unwrap();
-        assert_eq!(
-            r,
-            StaticFileRequest {
-                path: "index.html",
-                mime: "text/html",
-                immutable: false,
-            }
-        );
     }
 
     #[test]
