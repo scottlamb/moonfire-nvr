@@ -114,18 +114,16 @@ fn csrf_matches(csrf: &str, session: auth::SessionHash) -> bool {
 
 /// Extracts `s` cookie from the HTTP request. Does not authenticate.
 fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
-    let hdr = match req.headers().get(header::COOKIE) {
-        None => return None,
-        Some(c) => c,
-    };
-    for mut cookie in hdr.as_bytes().split(|&b| b == b';') {
-        if cookie.starts_with(b" ") {
-            cookie = &cookie[1..];
-        }
-        if cookie.starts_with(b"s=") {
-            let s = &cookie[2..];
-            if let Ok(s) = auth::RawSessionId::decode_base64(s) {
-                return Some(s);
+    for hdr in req.headers().get_all(header::COOKIE) {
+        for mut cookie in hdr.as_bytes().split(|&b| b == b';') {
+            if cookie.starts_with(b" ") {
+                cookie = &cookie[1..];
+            }
+            if cookie.starts_with(b"s=") {
+                let s = &cookie[2..];
+                if let Ok(s) = auth::RawSessionId::decode_base64(s) {
+                    return Some(s);
+                }
             }
         }
     }
@@ -617,6 +615,7 @@ impl Service {
 mod tests {
     use db::testutil::{self, TestDb};
     use futures::future::FutureExt;
+    use http::{header, Request};
     use std::sync::Arc;
 
     pub(super) struct Server {
@@ -696,6 +695,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn test_extract_sid() {
+        let req = Request::builder()
+            .header(header::COOKIE, "foo=asdf; bar=asdf")
+            .header(
+                header::COOKIE,
+                "s=OsL6Cg4ikLw6UIXOT28tI+vPez3qWACovI+nLHWyjsW1ERX83qRrOR3guKedc8IP",
+            )
+            .body(hyper::Body::empty())
+            .unwrap();
+        let sid = super::extract_sid(&req).unwrap();
+        assert_eq!(sid.as_ref(), &b":\xc2\xfa\n\x0e\"\x90\xbc:P\x85\xceOo-#\xeb\xcf{=\xeaX\x00\xa8\xbc\x8f\xa7,u\xb2\x8e\xc5\xb5\x11\x15\xfc\xde\xa4k9\x1d\xe0\xb8\xa7\x9ds\xc2\x0f"[..]);
     }
 }
 
