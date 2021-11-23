@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 /// Upgrades a version 6 schema to a version 7 schema.
-use failure::{format_err, Error};
+use failure::{format_err, Error, ResultExt};
 use fnv::FnvHashMap;
 use log::debug;
 use rusqlite::{named_params, params};
@@ -255,8 +255,13 @@ fn copy_cameras(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let config = CameraConfig {
             description: description.take().unwrap_or_default(),
             onvif_base_url: onvif_host
+                // Older releases set the onvif host to the empty string instead
+                // of using a SQL NULL, so convert empty to None here.
+                // https://github.com/scottlamb/moonfire-nvr/issues/182
+                .filter(|h| !h.is_empty())
                 .map(|h| Url::parse(&format!("http://{}/", h)))
-                .transpose()?,
+                .transpose()
+                .with_context(|_| "bad onvif_host")?,
             username: username.take().unwrap_or_default(),
             password: password.take().unwrap_or_default(),
             ..Default::default()

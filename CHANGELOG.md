@@ -6,6 +6,11 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## unreleased
+
+*   fix [#182](https://github.com/scottlamb/moonfire-nvr/issues/182): error
+    on upgrade from schema 6 to schema 7 when a camera's `onvif_host` is empty.
+
 ## `v0.7.1` (2021-10-27)
 
 *   bugfix: editing a camera from `nvr config` would erroneously clear the
