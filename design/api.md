@@ -150,17 +150,21 @@ The `application/json` response will have a JSON object as follows:
     *   `type`: a UUID, expected to match one of `signalTypes`.
     *   `days`: (only included if request parameter `days` is true) similar to
         `cameras.days` above. Values are objects with the following attributes:
-        *   `states`: an array of the time the signal is in each state, starting
-            from 1. These may not sum to the entire day; if so, the rest of the
-            day is in state 0 (`unknown`).
+        *   `states`: an array of the total time (in 90,000ths of a second) the
+            signal was state 1, state 2, and so on during the day. These may not
+            sum to the entire day; if so, the rest of the day is in state 0
+            (`unknown`).
 *   `signalTypes`: a list of all known signal types.
     *   `uuid`: in text format.
-    *   `states`: a map of all possible states of the enumeration to more
-        information about them:
-        *   `color`: a recommended color to use in UIs to represent this state,
-            as in the [HTML specification](https://html.spec.whatwg.org/#colours).
+    *   `states`: an array of all possible states of the enumeration to more
+        information about them. Each holds a JSON object:
+        *   `value`: an integer used to refer to this state, 1 or higher.
+            Value 0 always means the `unknown` state.
+        *   `name`: a human-readable name of this state.
         *   `motion`: if present and true, directly associated cameras will be
             considered to have motion when this signal is in this state.
+        *   `color` (optional): a recommended color to use in UIs to represent
+            this state, as in the [HTML specification](https://html.spec.whatwg.org/#colours).
 *   `user`: if authenticated, a JSON object:
     *   `name`: a human-readable name
     *   `id`: an integer
