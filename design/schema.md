@@ -697,7 +697,7 @@ to store metadata and the simple, consistent format of sample indexes.
 [seeker]: http://www.linuxinsight.com/how_fast_is_your_disk.html
 [rfc-3551]: https://tools.ietf.org/html/rfc3551
 [hikvision-sr]: http://www.cctvforum.com/viewtopic.php?f=19&t=44534
-[iso-14496-12]: http://www.iso.org/iso/home/store/catalogue_ics/catalogue_detail_ics.htm?csnumber=68960
+[iso-14496-12]: https://github.com/scottlamb/moonfire-nvr/wiki/Standards-and-specifications#multimedia-container-formats
 [sqlite3]: https://www.sqlite.org/
 [sqlite3-wal]: https://www.sqlite.org/wal.html
 [file-consistency]: http://danluu.com/file-consistency/
