@@ -68,14 +68,6 @@ pub struct Camera<'a> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CameraConfig<'a> {
-    pub onvif_host: &'a str,
-    pub username: Option<&'a str>,
-    pub password: Option<&'a str>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Stream<'a> {
     pub id: i32,
     pub retain_bytes: i64,
