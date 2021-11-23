@@ -229,7 +229,7 @@ async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32,
             super::OpenMode::ReadWrite
         },
     )?;
-    let db = Arc::new(db::Database::new(clocks, conn, !args.read_only).unwrap());
+    let db = Arc::new(db::Database::new(clocks, conn, !args.read_only)?);
     info!("Database is loaded.");
 
     {

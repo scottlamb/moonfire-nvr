@@ -2185,16 +2185,19 @@ fn get_boot_uuid() -> Result<Option<Uuid>, Error> {
 pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Error> {
     let ver = get_schema_version(conn)?.ok_or_else(|| {
         format_err!(
-            "no such table: version. \
-            If you are starting from an empty database, see README.md to \
-            complete the installation. If you are starting from a database \
-            that predates schema versioning, see guide/schema.md."
+            "no such table: version.\n\n\
+            If you have created an empty database by hand, delete it and use `nvr init` \
+            instead, as noted in the installation instructions: \
+            <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/install.md>\n\n\
+            If you are starting from a database that predates schema versioning, see \
+            <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/schema.md>."
         )
     })?;
     match ver.cmp(&EXPECTED_VERSION) {
         std::cmp::Ordering::Less => bail!(
             "Database schema version {} is too old (expected {}); \
-            see upgrade instructions in guide/upgrade.md.",
+            see upgrade instructions in \
+            <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/upgrade.md>.",
             ver,
             EXPECTED_VERSION
         ),
