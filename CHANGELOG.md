@@ -10,6 +10,8 @@ Each release is tagged in Git and on the Docker repository
 
 *   fix [#182](https://github.com/scottlamb/moonfire-nvr/issues/182): error
     on upgrade from schema 6 to schema 7 when a camera's `onvif_host` is empty.
+*   API bugfix: in the `GET /api/` response, include `ext` streams if
+    configured.
 
 ## `v0.7.1` (2021-10-27)
 
@@ -20,6 +22,29 @@ Each release is tagged in Git and on the Docker repository
 ## `v0.7.0` (2021-10-27)
 
 *   [schema version 7](guide/schema.md#version-7)
+*   Changes to the [API](guide/api.md):
+    *   Added fields to the `GET /api/` response:
+        *   `serverVersion`
+    *   Altered fields in the `GET /api/` response:
+        *   `session` was moved into a new `user` object, to support providing
+            information about the user when authenticating via Unix uid rather
+            than session cookie (a planned feature). `session.username` is now
+            `user.name`; `session.csrf` is now `user.session.csrf`. `user.id`
+            and `user.preferences` have been added.
+        *   `signals.source` is now `signals.uuid`. The UUID is now expected to
+            be unique, where before only (source, type) was guaranteed to be
+            unique.
+        *   `camera.config` has been altered and extended. `onvifHost` has
+            become `onvifBaseUrl` to allow selecting between `http` and `https`.
+        *   `camera.description` was moved to `camera.config.description`.
+            (This might have been an oversight; now it's only possible to see
+            the description with the `read_camera_configs` permission. This
+            field can be re-introduced if desired.)
+        *   `stream.config` has been altered and extended. `rtspUrl` has become
+            `url` to (in the future) represent a URL for other streaming
+            protocols. The `record` boolean was replaced with `mode`, which
+            currently may be either absent or the string `record`.
+    *   Added `POST /api/users/<id>` for altering a user's UI preferences.
 
 ## `v0.6.7` (2021-10-20)
 

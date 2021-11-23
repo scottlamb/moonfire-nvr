@@ -63,7 +63,7 @@ pub struct Camera<'a> {
     pub config: Option<&'a db::json::CameraConfig>,
 
     #[serde(serialize_with = "Camera::serialize_streams")]
-    pub streams: [Option<Stream<'a>>; 2],
+    pub streams: [Option<Stream<'a>>; db::db::NUM_STREAM_TYPES],
 }
 
 #[derive(Debug, Serialize)]
@@ -182,11 +182,15 @@ impl<'a> Camera<'a> {
             streams: [
                 Stream::wrap(db, c.streams[0], include_days, include_config)?,
                 Stream::wrap(db, c.streams[1], include_days, include_config)?,
+                Stream::wrap(db, c.streams[2], include_days, include_config)?,
             ],
         })
     }
 
-    fn serialize_streams<S>(streams: &[Option<Stream>; 2], serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize_streams<S>(
+        streams: &[Option<Stream>; db::db::NUM_STREAM_TYPES],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {

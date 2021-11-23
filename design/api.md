@@ -21,7 +21,7 @@ Status: **current**.
         * [Request 1](#request-1)
         * [Request 2](#request-2)
         * [Request 3](#request-3)
-* [`POST /api/users/<id>`](#post-apiusersid)
+    * [`POST /api/users/<id>`](#post-apiusersid)
 
 ## Objective
 
@@ -37,6 +37,15 @@ In the future, this is likely to be expanded:
 ## Detailed design
 
 *Note:* italicized terms in this document are defined in the [glossary](glossary.md).
+
+Currently the API is considered an internal contract between the server and the
+UI which are bundled together. Thus, breaking changes in the API may happen in
+any release of Moonfire NVR, even a "minor" or "patch" release. From version
+0.7.0 onward, API changes should be described in the
+[changelog](../CHANGELOG.md).
+
+Future work may introduce versioning to improve compatibility with externally
+developed tools.
 
 All requests for JSON data should be sent with the header
 `Accept: application/json` (exactly).
@@ -94,19 +103,20 @@ The `application/json` response will have a JSON object as follows:
         by reading logs or directly examining the filesystem/database.
     *   `shortName`: a short name (typically one or two words)
     *   `description`: a longer description (typically a phrase or paragraph)
-    *   `config`: (only included if request parameter `cameraConfigs` is true)
-        a JSON object describing the configuration of the camera:
-        *   `username`
-        *   `password`
-        *   `onvif_host`
-    *   `streams`: a JSON object of stream type ("main" or "sub") to a JSON
-        object describing the stream:
+    *   `config`: (only included if request parameter `cameraConfigs` is
+        true) a JSON object describing the configuration of the camera.
+        See doc comments on the `CameraConfig` type in
+        [`server/db/json.rs`](../server/db.json.rs).
+    *   `streams`: a JSON object. Maps each configured stream type (valid types
+        are `main`, `sub`, and `ext`), a JSON object describing the stream:
         *   `id`: an integer. The client doesn't ever need to send the id
             back in API requests, but stream ids are helpful to know when
             debugging by reading logs or directly examining the
             filesystem/database.
         *   `retainBytes`: the configured total number of bytes of completed
-            recordings to retain.
+            recordings to retain. This is copied from the `config` to make it
+            available when the client doesn't have permission to view
+            the full configuration.
         *   `minStartTime90k`: the start time of the earliest recording for
             this camera, in 90kHz units since 1970-01-01 00:00:00 UTC.
         *   `maxEndTime90k`: the end time of the latest recording for this
@@ -138,8 +148,9 @@ The `application/json` response will have a JSON object as follows:
                 might be 23 hours or 25 hours during spring forward or fall
                 back, respectively.
         *   `config`: (only included if request parameter `cameraConfigs` is
-            true) a JSON object describing the configuration of the stream:
-            *   `rtsp_url`
+            true) a JSON object describing the configuration of the stream.
+            See doc comments on the `StreamConfig` type in
+            [`server/db/json.rs`](../server/db.json.rs).
 *   `signals`: a list of all *signals* known to the server. Each is a JSON
     object with the following properties:
     *   `id`: an integer identifier.
@@ -165,7 +176,7 @@ The `application/json` response will have a JSON object as follows:
             considered to have motion when this signal is in this state.
         *   `color` (optional): a recommended color to use in UIs to represent
             this state, as in the [HTML specification](https://html.spec.whatwg.org/#colours).
-*   `user`: if authenticated, a JSON object:
+*   `user`: an object, present only when authenticated:
     *   `name`: a human-readable name
     *   `id`: an integer
     *   `preferences`: a JSON object
@@ -808,7 +819,7 @@ Response:
 }
 ```
 
-## `POST /api/users/<id>`
+### `POST /api/users/<id>`
 
 Currently this request only allows updating the preferences for the
 currently-authenticated user. This is likely to change.
