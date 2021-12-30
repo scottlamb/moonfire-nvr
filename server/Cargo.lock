@@ -736,9 +736,9 @@ dependencies = [
 
 [[package]]
 name = "http-serve"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3e5b6e37897dec068bfacce1a70ed7ed10582e83be73d5304b2ad7a18befb1e"
+checksum = "8fb663bddc0a96082a0131e22ce74623d85f77b7701dc165139c42cb16452cbe"
 dependencies = [
  "bytes",
  "flate2",
@@ -1601,9 +1601,9 @@ dependencies = [
 
 [[package]]
 name = "retina"
-version = "0.3.4"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fff0d27b2637d691ead29895d151928ee6a569fef5788c3f0712cd624bf24d70"
+checksum = "eabc6843bc7b6796cf21741df4bad786e49ffdbf09c1c4b6ec0ad34dcc7058d5"
 dependencies = [
  "base64",
  "bitreader",

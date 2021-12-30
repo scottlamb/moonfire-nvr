@@ -12,6 +12,9 @@ Each release is tagged in Git and on the Docker repository
     on upgrade from schema 6 to schema 7 when a camera's `onvif_host` is empty.
 *   API bugfix: in the `GET /api/` response, include `ext` streams if
     configured.
+*   fix [#184](https://github.com/scottlamb/moonfire-nvr/issues/184):
+    Moonfire NVR would stop recording on a camera that hit the live555 stale
+    file descriptor bug, rather than waiting for the stale session to expire.
 
 ## `v0.7.1` (2021-10-27)
 
