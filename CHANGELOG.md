@@ -15,6 +15,8 @@ Each release is tagged in Git and on the Docker repository
 *   fix [#184](https://github.com/scottlamb/moonfire-nvr/issues/184):
     Moonfire NVR would stop recording on a camera that hit the live555 stale
     file descriptor bug, rather than waiting for the stale session to expire.
+*   progress on [#70](https://github.com/scottlamb/moonfire-nvr/issues/184):
+    shrink the binary from 154 MiB to 70 MiB by reducing debugging information.
 
 ## `v0.7.1` (2021-10-27)
 
