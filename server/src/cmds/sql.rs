@@ -52,6 +52,12 @@ pub fn run(args: Args) -> Result<i32, Error> {
         db.push("?mode=ro");
     }
     Err(Command::new("sqlite3")
+        .args(
+            db::db::INTEGRITY_PRAGMAS
+                .iter()
+                .map(|p| ["-cmd", p])
+                .flatten(),
+        )
         .arg(&db)
         .args(&args.arg)
         .exec()

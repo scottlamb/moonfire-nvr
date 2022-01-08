@@ -2107,17 +2107,26 @@ impl LockedDatabase {
     }
 }
 
-/// Sets pragmas for full database integrity.
-pub(crate) fn set_integrity_pragmas(conn: &mut rusqlite::Connection) -> Result<(), Error> {
+/// Pragmas for full database integrity.
+///
+/// These are `pub` so that the `moonfire-nvr sql` command can pass to the SQLite3 binary with
+/// `-cmd`.
+pub static INTEGRITY_PRAGMAS: [&'static str; 3] = [
     // Enforce foreign keys. This is on by default with --features=bundled (as rusqlite
     // compiles the SQLite3 amalgamation with -DSQLITE_DEFAULT_FOREIGN_KEYS=1). Ensure it's
     // always on. Note that our foreign keys are immediate rather than deferred, so we have to
     // be careful about the order of operations during the upgrade.
-    conn.execute("pragma foreign_keys = on", params![])?;
-
+    "pragma foreign_keys = on",
     // Make the database actually durable.
-    conn.execute("pragma fullfsync = on", params![])?;
-    conn.execute("pragma synchronous = 3", params![])?;
+    "pragma fullfsync = on",
+    "pragma synchronous = 3",
+];
+
+/// Sets pragmas for full database integrity.
+pub(crate) fn set_integrity_pragmas(conn: &mut rusqlite::Connection) -> Result<(), Error> {
+    for pragma in INTEGRITY_PRAGMAS {
+        conn.execute(pragma, params![])?;
+    }
     Ok(())
 }
 
