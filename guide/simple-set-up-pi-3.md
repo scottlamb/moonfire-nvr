@@ -251,7 +251,7 @@ At this point we can reboot to enable log2ram and we no longer need the screen s
 ###### Step 4.4.2 Non-optional 
 
 
-At this point I physically disconnect the USB connected hard drive and re-connect the USB cable, the run. Please remember to eep the SATA adapter powered at all times to avoid disk corruption/ 
+At this point I physically disconnect the USB connected hard drive and re-connect the USB cable, the run. Please remember to keep the SATA adapter powered at all times to avoid disk corruption/ 
 
 	dmesg  | tail -n 5
 
@@ -287,13 +287,14 @@ See note [disable-uas](https://github.com/scottlamb/moonfire-nvr/wiki/System-set
 
 
 
-Next obtain the UUID 
+Next obtain the UUID
+ 
 	sudo blkid /dev/sda1
 	
 
 Replacing with the UUI obtained above 
 
-	echo "UUID=_YOUR_UUID__a8_    /media/nvr   ext4    nofail,noatime,lazytime,data=writeback,journal_async_commit  0       2" | sudo tee -a /etc/fstab
+	echo "UUID=_YOUR_UUID__    /media/nvr   ext4    nofail,noatime,lazytime,data=writeback,journal_async_commit  0       2" | sudo tee -a /etc/fstab
 
 Note the mount point much match the line in Step 4.4 Prepare systemd, RequiresMountsFor
 
@@ -354,8 +355,11 @@ The select Done and Finish
 
 #### Set systemctl
 
+Ctrl-C twice to exit the test above 
+
 	sudo systemctl daemon-reload 
-	
+	sudo systemctl enable moonfire-nvr
+	sudo systemctl start moonfire-nvr	
 
 
 ### Goodnight view 
