@@ -411,9 +411,18 @@ impl RetinaOpener {
             .streams()
             .iter()
             .enumerate()
-            .find_map(|(i, s)| match s.parameters() {
-                Some(retina::codec::Parameters::Video(v)) => Some((i, Box::new(v.clone()))),
-                _ => None,
+            .find_map(|(i, s)| {
+                if s.media == "video" {
+                    Some((
+                        i,
+                        s.parameters().and_then(|p| match p {
+                            retina::codec::Parameters::Video(v) => Some(Box::new(v.clone())),
+                            _ => None,
+                        }),
+                    ))
+                } else {
+                    None
+                }
             })
             .ok_or_else(|| format_err!("couldn't find H.264 video stream"))?;
         session.setup(video_i).await?;
@@ -427,7 +436,7 @@ impl RetinaOpener {
                 Some(Err(e)) => return Err(e.into()),
                 Some(Ok(CodecItem::VideoFrame(mut v))) => {
                     if let Some(v) = v.new_parameters.take() {
-                        video_params = v;
+                        video_params = Some(v);
                     }
                     if v.is_random_access_point {
                         break v;
@@ -436,7 +445,11 @@ impl RetinaOpener {
                 Some(Ok(_)) => {}
             }
         };
-        Ok((session, video_params, first_frame))
+        Ok((
+            session,
+            video_params.ok_or_else(|| format_err!("couldn't find H.264 parameters"))?,
+            first_frame,
+        ))
     }
 }
 
