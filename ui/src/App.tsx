@@ -11,6 +11,7 @@ import { useSnackbars } from "./snackbars";
 import { Camera, Session } from "./types";
 import ListActivity from "./List";
 import AppBar from "@mui/material/AppBar";
+import {BrowserRouter, Routes, Route, Link} from "react-router-dom";
 import LiveActivity, { MultiviewChooser } from "./Live";
 import Drawer from "@mui/material/Drawer";
 import List from "@mui/material/List";
@@ -80,6 +81,20 @@ function App() {
     }
   };
 
+  function fetchedCameras(cameras: Camera[] | null) {
+    if (cameras !== null && cameras.length >0) {
+      return (
+        <>
+          <Route path="" element={ <ListActivity cameras={cameras}
+                                                 showSelectors={showListSelectors}
+                                                 timeZoneName={timeZoneName!}
+          />} />
+          <Route path="live" element={<LiveActivity cameras={cameras} layoutIndex={multiviewLayoutIndex} />} />
+        </>
+      );
+    }
+  }
+
   useEffect(() => {
     const abort = new AbortController();
     const doFetch = async (signal: AbortSignal) => {
@@ -112,7 +127,6 @@ function App() {
     };
   }, [fetchSeq]);
   let activityMenu = null;
-  let activityMain = null;
   if (error === null && cameras !== null && cameras.length > 0) {
     switch (activity) {
       case "list":
@@ -126,13 +140,6 @@ function App() {
             <FilterList />
           </IconButton>
         );
-        activityMain = (
-          <ListActivity
-            cameras={cameras}
-            showSelectors={showListSelectors}
-            timeZoneName={timeZoneName!}
-          />
-        );
         break;
       case "live":
         activityMenu = (
@@ -141,14 +148,11 @@ function App() {
             onChoice={setMultiviewLayoutIndex}
           />
         );
-        activityMain = (
-          <LiveActivity cameras={cameras} layoutIndex={multiviewLayoutIndex} />
-        );
         break;
     }
   }
   return (
-    <>
+    <BrowserRouter>
       <AppBar position="static">
         <MoonfireMenu
           loginState={loginState}
@@ -174,13 +178,14 @@ function App() {
             <ListItemIcon>
               <ListIcon />
             </ListItemIcon>
-            <ListItemText primary="List view" />
+            <Link to="/"><ListItemText primary="List view" /></Link>
           </ListItem>
           <ListItem button key="live" onClick={() => clickActivity("live")}>
             <ListItemIcon>
               <Videocam />
             </ListItemIcon>
-            <ListItemText primary="Live view (experimental)" />
+
+            <Link to="/live"><ListItemText primary="Live view (experimental)" /></Link>
           </ListItem>
         </List>
       </Drawer>
@@ -206,8 +211,10 @@ function App() {
           </p>
         </Container>
       )}
-      {activityMain}
-    </>
+      <Routes >
+        {fetchedCameras(cameras)}
+      </Routes>
+    </BrowserRouter>
   );
 }
 
