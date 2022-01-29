@@ -48,7 +48,7 @@ parking_lot = { version = "0.11.1", features = [] }
 password-hash = "0.3.2"
 protobuf = "3.0.0-alpha.1"
 reffers = "0.6.0"
-retina = "0.3.3"
+retina = "0.3.7"
 ring = "0.16.2"
 rusqlite = "0.26.1"
 serde = { version = "1.0", features = ["derive"] }
