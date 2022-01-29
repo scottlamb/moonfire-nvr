@@ -9,6 +9,7 @@ import { Camera } from "../types";
 import { makeStyles } from "@mui/styles";
 import { Theme } from "@mui/material/styles";
 import {useSearchParams} from "react-router-dom";
+import {isNullOrUndefined} from "util";
 
 export interface Layout {
   className: string;
@@ -205,13 +206,19 @@ const Monoview = (props: MonoviewProps) => {
     const {
       target: { value },
     } = event;
+    if (value !== null && value !== undefined) {
+      setSearchParams(new URLSearchParams({cam: value.toString()}));
+    } else {
+      setSearchParams(new URLSearchParams({ }))
+    }
+
     props.onSelect(typeof value === "string" ? parseInt(value) : value);
   };
 
-  const fromQueryOrFirst = searchParams.has('cam') ? Number.parseInt(searchParams.get('cam') as string, 10) : 0;
+  const fromQueryIndexOrNull = searchParams.has('cam') ? Number.parseInt(searchParams.get('cam') as string, 10) : null;
   const chooser = (
     <Select
-      value={props.cameraIndex == null ? fromQueryOrFirst: props.cameraIndex}
+      value={props.cameraIndex == null ? fromQueryIndexOrNull: props.cameraIndex}
       onChange={handleChange}
       displayEmpty
       size="small"
@@ -232,7 +239,7 @@ const Monoview = (props: MonoviewProps) => {
     </Select>
   );
   return props.renderCamera(
-    props.cameraIndex === null ? props.cameras[fromQueryOrFirst] : props.cameras[props.cameraIndex],
+    props.cameraIndex === null ? fromQueryIndexOrNull === null ? null : props.cameras[fromQueryIndexOrNull] : props.cameras[props.cameraIndex],
     chooser
   );
 };
