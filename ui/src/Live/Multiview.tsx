@@ -8,6 +8,7 @@ import React, { useReducer } from "react";
 import { Camera } from "../types";
 import { makeStyles } from "@mui/styles";
 import { Theme } from "@mui/material/styles";
+import {useSearchParams} from "react-router-dom";
 
 export interface Layout {
   className: string;
@@ -150,6 +151,7 @@ function selectedReducer(old: SelectedCameras, op: SelectOp): SelectedCameras {
  * as possible.
  */
 const Multiview = (props: MultiviewProps) => {
+
   const [selected, updateSelected] = useReducer(
     selectedReducer,
     Array(MAX_CAMERAS).fill(null)
@@ -198,15 +200,18 @@ interface MonoviewProps {
 
 /** A single pane of a Multiview, including its camera chooser. */
 const Monoview = (props: MonoviewProps) => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const handleChange = (event: SelectChangeEvent<number | null>) => {
     const {
       target: { value },
     } = event;
     props.onSelect(typeof value === "string" ? parseInt(value) : value);
   };
+
+  const fromQueryOrFirst = searchParams.has('cam') ? Number.parseInt(searchParams.get('cam') as string, 10) : 0;
   const chooser = (
     <Select
-      value={props.cameraIndex == null ? undefined : props.cameraIndex}
+      value={props.cameraIndex == null ? fromQueryOrFirst: props.cameraIndex}
       onChange={handleChange}
       displayEmpty
       size="small"
@@ -227,7 +232,7 @@ const Monoview = (props: MonoviewProps) => {
     </Select>
   );
   return props.renderCamera(
-    props.cameraIndex === null ? null : props.cameras[props.cameraIndex],
+    props.cameraIndex === null ? props.cameras[fromQueryOrFirst] : props.cameras[props.cameraIndex],
     chooser
   );
 };
