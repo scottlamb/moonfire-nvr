@@ -9,7 +9,6 @@ import { Camera } from "../types";
 import { makeStyles } from "@mui/styles";
 import { Theme } from "@mui/material/styles";
 import {useSearchParams} from "react-router-dom";
-import {isNullOrUndefined} from "util";
 
 export interface Layout {
   className: string;
