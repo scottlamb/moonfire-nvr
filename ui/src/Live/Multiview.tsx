@@ -4,7 +4,7 @@
 
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
-import React, { useReducer } from "react";
+import React, {useReducer} from "react";
 import { Camera } from "../types";
 import { makeStyles } from "@mui/styles";
 import { Theme } from "@mui/material/styles";
@@ -91,13 +91,13 @@ export const MultiviewChooser = (props: MultiviewChooserProps) => {
     <Select
       id="layout"
       value={props.layoutIndex}
-      onChange={(e) =>
+      onChange={(e) => {
         props.onChoice(
           typeof e.target.value === "string"
             ? parseInt(e.target.value)
             : e.target.value
         )
-      }
+      }}
       size="small"
       sx={{
         // Hacky attempt to style for the app menu.
@@ -130,6 +130,7 @@ interface SelectOp {
   cameraIndex: number | null;
 }
 
+
 function selectedReducer(old: SelectedCameras, op: SelectOp): SelectedCameras {
   let selected = [...old]; // shallow clone.
   if (op.cameraIndex !== null) {
@@ -151,15 +152,17 @@ function selectedReducer(old: SelectedCameras, op: SelectOp): SelectedCameras {
  * as possible.
  */
 const Multiview = (props: MultiviewProps) => {
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [selected, updateSelected] = useReducer(
     selectedReducer,
-    Array(MAX_CAMERAS).fill(null)
+    searchParams.has('cams') ? JSON.parse(searchParams.get('cams') || "") : Array(MAX_CAMERAS).fill(null)
   );
-  const outerRef = React.useRef<HTMLDivElement>(null);
 
+  const outerRef = React.useRef<HTMLDivElement>(null);
   const classes = useStyles();
   const layout = LAYOUTS[props.layoutIndex];
+
   const monoviews = selected.slice(0, layout.cameras).map((e, i) => {
     // When a camera is selected, use the camera's index as the key.
     // This allows swapping cameras' positions without tearing down their
@@ -168,18 +171,24 @@ const Multiview = (props: MultiviewProps) => {
     // When no camera is selected, use the index within selected. (Actually,
     // -1 minus the index, to disambiguate between the two cases.)
     const key = e ?? -1 - i;
+
     return (
       <Monoview
         key={key}
         cameras={props.cameras}
         cameraIndex={e}
         renderCamera={props.renderCamera}
-        onSelect={(cameraIndex) =>
-          updateSelected({ selectedIndex: i, cameraIndex })
-        }
+        onSelect={(cameraIndex) => {
+          updateSelected({selectedIndex: i, cameraIndex})
+          searchParams.set('cams',  JSON.stringify(selectedReducer(selected, {selectedIndex: i, cameraIndex})))
+          setSearchParams(searchParams)
+        }}
       />
     );
   });
+
+
+
   return (
     <div className={classes.root} ref={outerRef}>
       <div className="mid">
@@ -200,24 +209,17 @@ interface MonoviewProps {
 
 /** A single pane of a Multiview, including its camera chooser. */
 const Monoview = (props: MonoviewProps) => {
-  const [searchParams, setSearchParams] = useSearchParams();
   const handleChange = (event: SelectChangeEvent<number | null>) => {
     const {
       target: { value },
     } = event;
-    if (value !== null && value !== undefined) {
-      setSearchParams(new URLSearchParams({cam: value.toString()}));
-    } else {
-      setSearchParams(new URLSearchParams({ }))
-    }
 
     props.onSelect(typeof value === "string" ? parseInt(value) : value);
   };
 
-  const fromQueryIndexOrNull = searchParams.has('cam') ? Number.parseInt(searchParams.get('cam') as string, 10) : null;
   const chooser = (
     <Select
-      value={props.cameraIndex == null ? fromQueryIndexOrNull: props.cameraIndex}
+      value={props.cameraIndex == null ? null: props.cameraIndex}
       onChange={handleChange}
       displayEmpty
       size="small"
@@ -238,7 +240,7 @@ const Monoview = (props: MonoviewProps) => {
     </Select>
   );
   return props.renderCamera(
-    props.cameraIndex === null ? fromQueryIndexOrNull === null ? null : props.cameras[fromQueryIndexOrNull] : props.cameras[props.cameraIndex],
+    props.cameraIndex === null ? null : props.cameras[props.cameraIndex],
     chooser
   );
 };
