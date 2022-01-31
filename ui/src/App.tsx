@@ -11,7 +11,7 @@ import { useSnackbars } from "./snackbars";
 import { Camera, Session } from "./types";
 import ListActivity from "./List";
 import AppBar from "@mui/material/AppBar";
-import {BrowserRouter, Routes, Route, Link} from "react-router-dom";
+import {Routes, Route, Link, useSearchParams, useResolvedPath, useMatch} from "react-router-dom";
 import LiveActivity, { MultiviewChooser } from "./Live";
 import Drawer from "@mui/material/Drawer";
 import List from "@mui/material/List";
@@ -34,12 +34,16 @@ type Activity = "list" | "live";
 
 function App() {
   const [showMenu, toggleShowMenu] = useReducer((m: boolean) => !m, false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [showListSelectors, toggleShowListSelectors] = useReducer(
     (m: boolean) => !m,
     true
   );
-  const [activity, setActivity] = useState<Activity>("list");
-  const [multiviewLayoutIndex, setMultiviewLayoutIndex] = useState(0);
+  let resolved = useResolvedPath('live');
+  let match = useMatch({ path: resolved.pathname, end: true });
+  const [activity, setActivity] = useState<Activity>(match ? "live" : "list");
+  const [multiviewLayoutIndex, setMultiviewLayoutIndex] = useState(Number.parseInt(searchParams.get('layout') || '0', 10));
   const [session, setSession] = useState<Session | null>(null);
   const [cameras, setCameras] = useState<Camera[] | null>(null);
   const [timeZoneName, setTimeZoneName] = useState<string | null>(null);
@@ -145,14 +149,17 @@ function App() {
         activityMenu = (
           <MultiviewChooser
             layoutIndex={multiviewLayoutIndex}
-            onChoice={setMultiviewLayoutIndex}
+            onChoice={(value) => {
+              setMultiviewLayoutIndex(value)
+              setSearchParams({layout: value.toString()}, )
+            }}
           />
         );
         break;
     }
   }
   return (
-    <BrowserRouter>
+    <>
       <AppBar position="static">
         <MoonfireMenu
           loginState={loginState}
@@ -174,18 +181,17 @@ function App() {
         }}
       >
         <List>
-          <ListItem button key="list" onClick={() => clickActivity("list")}>
+          <ListItem button key="list" onClick={() => clickActivity("list")} component={Link} to="/">
             <ListItemIcon>
               <ListIcon />
             </ListItemIcon>
-            <Link to="/"><ListItemText primary="List view" /></Link>
+            <ListItemText primary="List view" />
           </ListItem>
-          <ListItem button key="live" onClick={() => clickActivity("live")}>
+          <ListItem button key="live" onClick={() => clickActivity("live")} component={Link} to="/live">
             <ListItemIcon>
               <Videocam />
             </ListItemIcon>
-
-            <Link to="/live"><ListItemText primary="Live view (experimental)" /></Link>
+            <ListItemText primary="Live view (experimental)" />
           </ListItem>
         </List>
       </Drawer>
@@ -211,10 +217,10 @@ function App() {
           </p>
         </Container>
       )}
-      <Routes >
+      <Routes>
         {fetchedCameras(cameras)}
       </Routes>
-    </BrowserRouter>
+    </>
   );
 }
 

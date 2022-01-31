@@ -14,6 +14,7 @@ import ErrorBoundary from "./ErrorBoundary";
 import { SnackbarProvider } from "./snackbars";
 import AdapterDateFns from "@mui/lab/AdapterDateFns";
 import "./index.css";
+import { BrowserRouter } from "react-router-dom";
 
 const theme = createTheme({
   palette: {
@@ -34,7 +35,9 @@ ReactDOM.render(
         <ErrorBoundary>
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <SnackbarProvider autoHideDuration={5000}>
-              <App />
+              <BrowserRouter >
+                <App />
+              </BrowserRouter>
             </SnackbarProvider>
           </LocalizationProvider>
         </ErrorBoundary>
