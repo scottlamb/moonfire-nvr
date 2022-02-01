@@ -4,6 +4,7 @@
 
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { render } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { SnackbarProvider } from "./snackbars";
 
 export function renderWithCtx(
@@ -12,7 +13,11 @@ export function renderWithCtx(
   function wrapped(children: React.ReactElement): React.ReactElement {
     return (
       <ThemeProvider theme={createTheme()}>
-        <SnackbarProvider autoHideDuration={5000}>{children}</SnackbarProvider>
+        <SnackbarProvider autoHideDuration={5000}>
+          <MemoryRouter>
+            {children}
+          </MemoryRouter>
+        </SnackbarProvider>
       </ThemeProvider>
     );
   }
