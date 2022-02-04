@@ -4,11 +4,11 @@
 
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
-import React, {useReducer} from "react";
+import React, { useReducer } from "react";
 import { Camera } from "../types";
 import { makeStyles } from "@mui/styles";
 import { Theme } from "@mui/material/styles";
-import {useSearchParams} from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 export interface Layout {
   className: string;
@@ -96,7 +96,7 @@ export const MultiviewChooser = (props: MultiviewChooserProps) => {
           typeof e.target.value === "string"
             ? parseInt(e.target.value)
             : e.target.value
-        )
+        );
       }}
       size="small"
       sx={{
@@ -130,7 +130,6 @@ interface SelectOp {
   cameraIndex: number | null;
 }
 
-
 function selectedReducer(old: SelectedCameras, op: SelectOp): SelectedCameras {
   let selected = [...old]; // shallow clone.
   if (op.cameraIndex !== null) {
@@ -156,7 +155,9 @@ const Multiview = (props: MultiviewProps) => {
 
   const [selected, updateSelected] = useReducer(
     selectedReducer,
-    searchParams.has('cams') ? JSON.parse(searchParams.get('cams') || "") : Array(MAX_CAMERAS).fill(null)
+    searchParams.has("cams")
+      ? JSON.parse(searchParams.get("cams") || "")
+      : Array(MAX_CAMERAS).fill(null)
   );
 
   const outerRef = React.useRef<HTMLDivElement>(null);
@@ -179,15 +180,18 @@ const Multiview = (props: MultiviewProps) => {
         cameraIndex={e}
         renderCamera={props.renderCamera}
         onSelect={(cameraIndex) => {
-          updateSelected({selectedIndex: i, cameraIndex})
-          searchParams.set('cams',  JSON.stringify(selectedReducer(selected, {selectedIndex: i, cameraIndex})))
-          setSearchParams(searchParams)
+          updateSelected({ selectedIndex: i, cameraIndex });
+          searchParams.set(
+            "cams",
+            JSON.stringify(
+              selectedReducer(selected, { selectedIndex: i, cameraIndex })
+            )
+          );
+          setSearchParams(searchParams);
         }}
       />
     );
   });
-
-
 
   return (
     <div className={classes.root} ref={outerRef}>
@@ -219,7 +223,7 @@ const Monoview = (props: MonoviewProps) => {
 
   const chooser = (
     <Select
-      value={props.cameraIndex == null ? null: props.cameraIndex}
+      value={props.cameraIndex == null ? null : props.cameraIndex}
       onChange={handleChange}
       displayEmpty
       size="small"
