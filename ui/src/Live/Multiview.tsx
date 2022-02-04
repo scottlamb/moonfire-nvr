@@ -223,7 +223,7 @@ const Monoview = (props: MonoviewProps) => {
 
   const chooser = (
     <Select
-      value={props.cameraIndex == null ? null : props.cameraIndex}
+      value={props.cameraIndex == null ? undefined : props.cameraIndex}
       onChange={handleChange}
       displayEmpty
       size="small"
