@@ -14,7 +14,7 @@ import ErrorBoundary from "./ErrorBoundary";
 import { SnackbarProvider } from "./snackbars";
 import AdapterDateFns from "@mui/lab/AdapterDateFns";
 import "./index.css";
-import {HashRouter} from "react-router-dom";
+import { HashRouter } from "react-router-dom";
 
 const theme = createTheme({
   palette: {
@@ -35,7 +35,7 @@ ReactDOM.render(
         <ErrorBoundary>
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <SnackbarProvider autoHideDuration={5000}>
-              <HashRouter >
+              <HashRouter>
                 <App />
               </HashRouter>
             </SnackbarProvider>

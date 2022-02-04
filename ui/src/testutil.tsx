@@ -14,9 +14,7 @@ export function renderWithCtx(
     return (
       <ThemeProvider theme={createTheme()}>
         <SnackbarProvider autoHideDuration={5000}>
-          <MemoryRouter>
-            {children}
-          </MemoryRouter>
+          <MemoryRouter>{children}</MemoryRouter>
         </SnackbarProvider>
       </ThemeProvider>
     );

@@ -11,7 +11,14 @@ import { useSnackbars } from "./snackbars";
 import { Camera, Session } from "./types";
 import ListActivity from "./List";
 import AppBar from "@mui/material/AppBar";
-import {Routes, Route, Link, useSearchParams, useResolvedPath, useMatch} from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Link,
+  useSearchParams,
+  useResolvedPath,
+  useMatch,
+} from "react-router-dom";
 import LiveActivity, { MultiviewChooser } from "./Live";
 import Drawer from "@mui/material/Drawer";
 import List from "@mui/material/List";
@@ -40,10 +47,12 @@ function App() {
     (m: boolean) => !m,
     true
   );
-  let resolved = useResolvedPath('live');
+  let resolved = useResolvedPath("live");
   let match = useMatch({ path: resolved.pathname, end: true });
   const [activity, setActivity] = useState<Activity>(match ? "live" : "list");
-  const [multiviewLayoutIndex, setMultiviewLayoutIndex] = useState(Number.parseInt(searchParams.get('layout') || '0', 10));
+  const [multiviewLayoutIndex, setMultiviewLayoutIndex] = useState(
+    Number.parseInt(searchParams.get("layout") || "0", 10)
+  );
   const [session, setSession] = useState<Session | null>(null);
   const [cameras, setCameras] = useState<Camera[] | null>(null);
   const [timeZoneName, setTimeZoneName] = useState<string | null>(null);
@@ -86,14 +95,28 @@ function App() {
   };
 
   function fetchedCameras(cameras: Camera[] | null) {
-    if (cameras !== null && cameras.length >0) {
+    if (cameras !== null && cameras.length > 0) {
       return (
         <>
-          <Route path="" element={ <ListActivity cameras={cameras}
-                                                 showSelectors={showListSelectors}
-                                                 timeZoneName={timeZoneName!}
-          />} />
-          <Route path="live" element={<LiveActivity cameras={cameras} layoutIndex={multiviewLayoutIndex} />} />
+          <Route
+            path=""
+            element={
+              <ListActivity
+                cameras={cameras}
+                showSelectors={showListSelectors}
+                timeZoneName={timeZoneName!}
+              />
+            }
+          />
+          <Route
+            path="live"
+            element={
+              <LiveActivity
+                cameras={cameras}
+                layoutIndex={multiviewLayoutIndex}
+              />
+            }
+          />
         </>
       );
     }
@@ -150,8 +173,8 @@ function App() {
           <MultiviewChooser
             layoutIndex={multiviewLayoutIndex}
             onChoice={(value) => {
-              setMultiviewLayoutIndex(value)
-              setSearchParams({layout: value.toString()}, )
+              setMultiviewLayoutIndex(value);
+              setSearchParams({ layout: value.toString() });
             }}
           />
         );
@@ -181,13 +204,25 @@ function App() {
         }}
       >
         <List>
-          <ListItem button key="list" onClick={() => clickActivity("list")} component={Link} to="/">
+          <ListItem
+            button
+            key="list"
+            onClick={() => clickActivity("list")}
+            component={Link}
+            to="/"
+          >
             <ListItemIcon>
               <ListIcon />
             </ListItemIcon>
             <ListItemText primary="List view" />
           </ListItem>
-          <ListItem button key="live" onClick={() => clickActivity("live")} component={Link} to="/live">
+          <ListItem
+            button
+            key="live"
+            onClick={() => clickActivity("live")}
+            component={Link}
+            to="/live"
+          >
             <ListItemIcon>
               <Videocam />
             </ListItemIcon>
@@ -217,9 +252,7 @@ function App() {
           </p>
         </Container>
       )}
-      <Routes>
-        {fetchedCameras(cameras)}
-      </Routes>
+      <Routes>{fetchedCameras(cameras)}</Routes>
     </>
   );
 }
