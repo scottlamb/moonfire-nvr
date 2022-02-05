@@ -156,7 +156,7 @@ const Multiview = (props: MultiviewProps) => {
   const [selected, updateSelected] = useReducer(
     selectedReducer,
     searchParams.has("cams")
-      ? JSON.parse(searchParams.get("cams") || "")
+      ? JSON.parse(searchParams.get("cams"))
       : Array(MAX_CAMERAS).fill(null)
   );
 
