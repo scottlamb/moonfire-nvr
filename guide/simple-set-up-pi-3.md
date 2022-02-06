@@ -194,7 +194,7 @@ This takes around 15 minutes.
 	[Service]
 	ExecStart=/usr/local/bin/moonfire-nvr run \
 		--rtsp-library=ffmpeg \
-	    --db-dir=/var/lib/moonfire-nvr/db \
+	    --db-dir=/media/nvr/db \
 	    --http-addr=0.0.0.0:8080 
 	Environment=TZ=:/etc/localtime
 	Environment=MOONFIRE_FORMAT=google-systemd
@@ -221,7 +221,7 @@ disable swap
 
 	sudo dphys-swapfile swapoff
 	sudo dphys-swapfile uninstall 
-	pi@moonfire:~/moonfire-nvr $ sudo systemctl disable dphys-swapfile
+	sudo systemctl disable dphys-swapfile
 
 ###### Step 4.4.1 Optional Log2ram 
 I had many problems with this, the log2ram filling up with logs. Not sure it vital and can be a pain to set-up. Tip once installed and if any problems with moonfire starting check:-
@@ -314,8 +314,8 @@ Connect the PI via the Ethernet port to OpenWRT Router to access the IP cameras 
 
 	ssh pi@moonfire.lan
 
-	moonfire-nvr init
-	moonfire-nvr config
+	moonfire-nvr init --db-dir=/media/nvr/db 
+	moonfire-nvr config --db-dir=/media/nvr/db 
 	
 ![moonfire-config1.png](./images/moonfire-config1.png)
 
@@ -342,12 +342,18 @@ Then select Done and then select Users
 
 ![moonfire-config-add-user1.png](./images/moonfire-config-add-user1.png)
 
-The select Done and Finish 
+The select each sample file directory and set the rentension size
+
+![moonfire-config-add-user1.png](./images/moonfire-config-retent-1.png)
+![moonfire-config-add-user1.png](./images/moonfire-config-retent-2.png)
+![moonfire-config-add-user1.png](./images/moonfire-config-retent-3.png)
+
+Note ensure no spaces if usign G or M in allocating space. Then select Done and Finish 
 
 #### Test set-up
 
 
-	/usr/local/bin/moonfire-nvr run     --rtsp-library=ffmpeg     --db-dir=/var/lib/moonfire-nvr/db     --http-addr=0.0.0.0:8080 
+	/usr/local/bin/moonfire-nvr run     --rtsp-library=ffmpeg     --db-dir=/media/nvr/db    --http-addr=0.0.0.0:8080 
 
 ![moonfire-web-1.png](./images/moonfire-web-1.png)
 ![moonfire-web-2.png](./images/moonfire-web-2.png)
