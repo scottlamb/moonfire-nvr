@@ -175,6 +175,7 @@ This takes around 15 minutes.
 	export NODE_OPTIONS=--max_old_space_size=400
 	npm run build
 	sudo mkdir /usr/local/lib/moonfire-nvr
+	cd ~/moonfire-nvr/
 	sudo rsync --recursive --delete --chmod=D755,F644 ui/build/ /usr/local/lib/moonfire-nvr/ui
 
 
