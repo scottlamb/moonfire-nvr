@@ -42,6 +42,9 @@ async function myfetch(
   try {
     response = await fetch(url, init);
   } catch (e) {
+    if (!(e instanceof DOMException)) {
+      throw e;
+    }
     if (e.name === "AbortError") {
       return { status: "aborted" };
     } else {
@@ -56,6 +59,9 @@ async function myfetch(
     try {
       text = await response.text();
     } catch (e) {
+      if (!(e instanceof DOMException)) {
+        throw e;
+      }
       console.warn(
         `${url}: ${response.status}: unable to read body: ${e.message}`
       );
@@ -105,6 +111,9 @@ export async function init(
   try {
     body = await fetchRes.response.arrayBuffer();
   } catch (e) {
+    if (!(e instanceof DOMException)) {
+      throw e;
+    }
     console.warn(`${url}: unable to read body: ${e.message}`);
     return {
       status: "error",
@@ -130,6 +139,9 @@ async function json<T>(
   try {
     body = await fetchRes.response.json();
   } catch (e) {
+    if (!(e instanceof DOMException)) {
+      throw e;
+    }
     console.warn(`${url}: unable to read body: ${e.message}`);
     return {
       status: "error",

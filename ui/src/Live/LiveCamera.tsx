@@ -121,11 +121,14 @@ class LiveCameraDriver {
     console.error(`${this.camera.shortName}: ws error`);
   };
 
-  onWsMessage = async (e: MessageEvent) => {
+  onWsMessage = async (e: MessageEvent<Blob>) => {
     let raw;
     try {
       raw = new Uint8Array(await e.data.arrayBuffer());
     } catch (e) {
+      if (!(e instanceof DOMException)) {
+        throw e;
+      }
       this.error(`error reading part: ${e.message}`);
       return;
     }
@@ -135,7 +138,7 @@ class LiveCameraDriver {
     }
     let result = parsePart(raw);
     if (result.status === "error") {
-      this.error("unparseable part");
+      this.error(`unparseable part: ${result.errorMessage}`);
       return;
     }
     const part = result.part;
@@ -223,6 +226,9 @@ class LiveCameraDriver {
     try {
       buf.srcBuf.appendBuffer(part.body);
     } catch (e) {
+      if (!(e instanceof DOMException)) {
+        throw e;
+      }
       // In particular, appendBuffer can throw QuotaExceededError.
       // <https://developers.google.com/web/updates/2017/10/quotaexceedederror>
       // tryTrimBuffer removes already-played stuff from the buffer to avoid
