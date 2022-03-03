@@ -43,5 +43,10 @@
   },
   "rust-analyzer.inlayHints.enable": false,
   "markdown.extension.list.indentationSize": "inherit",
-  "markdown.extension.toc.unorderedList.marker": "*"
+  "markdown.extension.toc.unorderedList.marker": "*",
+
+  // Specify the path to the workspace version of TypeScript. Note this only
+  // takes effect when workspace version is selected in the UI.
+  // https://code.visualstudio.com/docs/typescript/typescript-compiling#_using-the-workspace-version-of-typescript
+  "typescript.tsdk": "./ui/node_modules/typescript/lib"
 }
