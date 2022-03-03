@@ -30,23 +30,23 @@ test("notifications that time out", async () => {
   );
 
   // message A should be present immediately.
-  expect(screen.queryByText(/message A/)).toBeInTheDocument();
+  expect(screen.getByText(/message A/)).toBeInTheDocument();
   expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 
   // ...then start to close...
   jest.advanceTimersByTime(5000);
-  expect(screen.queryByText(/message A/)).toBeInTheDocument();
+  expect(screen.getByText(/message A/)).toBeInTheDocument();
   expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 
   // ...then it should close and message B should open...
   jest.runOnlyPendingTimers();
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
-  expect(screen.queryByText(/message B/)).toBeInTheDocument();
+  expect(screen.getByText(/message B/)).toBeInTheDocument();
 
   // ...then message B should start to close...
   jest.advanceTimersByTime(5000);
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
-  expect(screen.queryByText(/message B/)).toBeInTheDocument();
+  expect(screen.getByText(/message B/)).toBeInTheDocument();
 
   // ...then message B should fully close.
   jest.runOnlyPendingTimers();
