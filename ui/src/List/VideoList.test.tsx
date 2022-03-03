@@ -29,6 +29,7 @@ const TEST_STREAM: Stream = {
   totalSampleFileBytes: 0,
   fsBytes: 0,
   days: {},
+  record: true,
 };
 
 const TEST_RANGE1: [number, number] = [
@@ -69,6 +70,8 @@ const TEST_VIDEO_SAMPLE_ENTRIES: { [id: number]: VideoSampleEntry } = {
   4: {
     width: 1920,
     height: 1080,
+    aspectWidth: 16,
+    aspectHeight: 9,
   },
 };
 
@@ -119,6 +122,7 @@ test("load", async () => {
         range90k={TEST_RANGE1}
         setActiveRecording={() => {}}
         formatTime={TestFormat}
+        trimStartAndEnd={false}
       />
     </table>
   );
@@ -136,6 +140,7 @@ test("slow replace", async () => {
         range90k={TEST_RANGE1}
         setActiveRecording={() => {}}
         formatTime={TestFormat}
+        trimStartAndEnd={false}
       />
     </table>
   );
@@ -147,6 +152,7 @@ test("slow replace", async () => {
         range90k={TEST_RANGE2}
         setActiveRecording={() => {}}
         formatTime={TestFormat}
+        trimStartAndEnd={false}
       />
     </table>
   );
@@ -169,6 +175,7 @@ test("error", async () => {
         range90k={[42, 64]}
         setActiveRecording={() => {}}
         formatTime={TestFormat}
+        trimStartAndEnd={false}
       />
     </table>
   );
