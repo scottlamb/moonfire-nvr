@@ -99,7 +99,7 @@ function App() {
             path=""
             element={
               <ListActivity
-                cameras={toplevel.cameras}
+                toplevel={toplevel}
                 showSelectors={showListSelectors}
                 timeZoneName={timeZoneName!}
               />

@@ -21,6 +21,7 @@ const TEST_CAMERA: Camera = {
 
 const TEST_STREAM: Stream = {
   camera: TEST_CAMERA,
+  id: 1,
   streamType: "main",
   retainBytes: 0,
   minStartTime90k: 0,

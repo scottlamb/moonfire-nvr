@@ -11,8 +11,8 @@ import { ToplevelResponse } from "../api";
 
 interface Props {
   toplevel: ToplevelResponse;
-  selected: Set<Stream>;
-  setSelected: (selected: Set<Stream>) => void;
+  selected: Set<number>;
+  setSelected: (selected: Set<number>) => void;
 }
 
 const useStyles = makeStyles({
@@ -42,25 +42,29 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
   const setStream = (s: Stream, checked: boolean) => {
     const updated = new Set(selected);
     if (checked) {
-      updated.add(s);
+      updated.add(s.id);
     } else {
-      updated.delete(s);
+      updated.delete(s.id);
     }
     setSelected(updated);
   };
   const toggleType = (st: StreamType) => {
     let updated = new Set(selected);
     let foundAny = false;
-    for (const s of selected) {
+    for (const sid of selected) {
+      const s = toplevel.streams.get(sid);
+      if (s === undefined) {
+        continue;
+      }
       if (s.streamType === st) {
-        updated.delete(s);
+        updated.delete(s.id);
         foundAny = true;
       }
     }
     if (!foundAny) {
       for (const c of toplevel.cameras) {
         if (c.streams[st] !== undefined) {
-          updated.add(c.streams[st as StreamType]!);
+          updated.add(c.streams[st as StreamType]!.id);
         }
       }
     }
@@ -71,14 +75,14 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
     let foundAny = false;
     for (const st in c.streams) {
       const s = c.streams[st as StreamType]!;
-      if (selected.has(s)) {
-        updated.delete(s);
+      if (selected.has(s.id)) {
+        updated.delete(s.id);
         foundAny = true;
       }
     }
     if (!foundAny) {
       for (const st in c.streams) {
-        updated.add(c.streams[st as StreamType]!);
+        updated.add(c.streams[st as StreamType]!.id);
       }
     }
     setSelected(updated);
@@ -96,7 +100,7 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
         <Checkbox
           className={classes.check}
           size="small"
-          checked={selected.has(s)}
+          checked={selected.has(s.id)}
           color="secondary"
           onChange={(event) => setStream(s, event.target.checked)}
         />

@@ -21,6 +21,7 @@ import VideoList from "./VideoList";
 import { useLayoutEffect } from "react";
 import { fillAspect } from "../aspect";
 import useResizeObserver from "@react-hook/resize-observer";
+import { useSearchParams } from "react-router-dom";
 
 const useStyles = makeStyles((theme: Theme) => ({
   root: {
@@ -100,25 +101,151 @@ interface Props {
   showSelectors: boolean;
 }
 
+/// Parsed URL search parameters.
+interface ParsedSearchParams {
+  selectedStreamIds: Set<number>;
+  split90k: number | undefined;
+  trimStartAndEnd: boolean;
+  timestampTrack: boolean;
+}
+
+/// <tt>ParsedSearchParams</tt> plus <tt>useState</tt>-like setters.
+interface ParsedSearchParamsAndSetters extends ParsedSearchParams {
+  setSelectedStreamIds: (selectedStreamIds: Set<number>) => void;
+  setSplit90k: (split90k: number | undefined) => void;
+  setTrimStartAndEnd: (trimStartAndEnd: boolean) => void;
+  setTimestampTrack: (timestampTrack: boolean) => void;
+}
+
+const parseSearchParams = (raw: URLSearchParams): ParsedSearchParams => {
+  let selectedStreamIds = new Set<number>();
+  let split90k = DEFAULT_DURATION;
+  let trimStartAndEnd = true;
+  let timestampTrack = false;
+  for (const [key, value] of raw) {
+    switch (key) {
+      case "s":
+        selectedStreamIds.add(Number.parseInt(value, 10));
+        break;
+      case "split":
+        split90k = value === "inf" ? undefined : Number.parseInt(value, 10);
+        break;
+      case "trim":
+        trimStartAndEnd = value === "true";
+        break;
+      case "ts":
+        timestampTrack = value === "true";
+        break;
+    }
+  }
+  return {
+    selectedStreamIds,
+    split90k,
+    trimStartAndEnd,
+    timestampTrack,
+  };
+};
+
+const useParsedSearchParams = (): ParsedSearchParamsAndSetters => {
+  const [search, setSearch] = useSearchParams();
+
+  // This useMemo is necessary to avoid a re-rendering loop caused by each
+  // call's selectedStreamIds set having different identity.
+  const { selectedStreamIds, split90k, trimStartAndEnd, timestampTrack } =
+    useMemo(() => parseSearchParams(search), [search]);
+
+  const setSelectedStreamIds = (newSelectedStreamIds: Set<number>) => {
+    // TODO: check if it's worth suppressing no-ops here.
+    search.delete("s");
+    for (const id of newSelectedStreamIds) {
+      search.append("s", id.toString());
+    }
+    setSearch(search);
+  };
+  const setSplit90k = (newSplit90k: number | undefined) => {
+    if (newSplit90k === split90k) {
+      return;
+    } else if (newSplit90k === DEFAULT_DURATION) {
+      search.delete("split");
+    } else if (newSplit90k === undefined) {
+      search.set("split", "inf");
+    } else {
+      search.set("split", newSplit90k.toString());
+    }
+    setSearch(search);
+  };
+  const setTrimStartAndEnd = (newTrimStartAndEnd: boolean) => {
+    if (newTrimStartAndEnd === trimStartAndEnd) {
+      return;
+    } else if (newTrimStartAndEnd === true) {
+      search.delete("trim"); // default
+    } else {
+      search.set("trim", "false");
+    }
+    setSearch(search);
+  };
+  const setTimestampTrack = (newTimestampTrack: boolean) => {
+    if (newTimestampTrack === timestampTrack) {
+      return;
+    } else if (newTimestampTrack === false) {
+      search.delete("ts"); // default
+    } else {
+      search.set("ts", "true");
+    }
+    setSearch(search);
+  };
+  return {
+    selectedStreamIds,
+    setSelectedStreamIds,
+    split90k,
+    setSplit90k,
+    trimStartAndEnd,
+    setTrimStartAndEnd,
+    timestampTrack,
+    setTimestampTrack,
+  };
+};
+
+const calcSelectedStreams = (
+  toplevel: api.ToplevelResponse,
+  ids: Set<number>
+): Set<Stream> => {
+  let streams = new Set<Stream>();
+  for (const id of ids) {
+    const s = toplevel.streams.get(id);
+    if (s === undefined) {
+      continue;
+    }
+    streams.add(s);
+  }
+  return streams;
+};
+
 const Main = ({ toplevel, timeZoneName, showSelectors }: Props) => {
   const classes = useStyles();
 
-  /**
-   * Selected streams to display and use for selecting time ranges.
-   * This currently uses the <tt>Stream</tt> object, which means it will
-   * not be stable across top-level API fetches. Maybe an id would be better.
-   */
-  const [selectedStreams, setSelectedStreams] = useState<Set<Stream>>(
-    new Set()
-  );
+  const {
+    selectedStreamIds,
+    setSelectedStreamIds,
+    split90k,
+    setSplit90k,
+    trimStartAndEnd,
+    setTrimStartAndEnd,
+    timestampTrack,
+    setTimestampTrack,
+  } = useParsedSearchParams();
 
-  /** Selected time range. */
+  // The time range to examine, or null if one hasn't yet been selected. Note
+  // this is derived from state held within TimerangeSelector.
   const [range90k, setRange90k] = useState<[number, number] | null>(null);
 
-  const [split90k, setSplit90k] = useState(DEFAULT_DURATION);
-
-  const [trimStartAndEnd, setTrimStartAndEnd] = useState(true);
-  const [timestampTrack, setTimestampTrack] = useState(false);
+  // TimerangeSelector currently expects a Set<Stream>. Memoize one; otherwise
+  // we'd get an infinite rerendering loop because the Set identity changes
+  // each time.
+  const selectedStreams = useMemo(
+    () => calcSelectedStreams(toplevel, selectedStreamIds),
+    [toplevel, selectedStreamIds]
+  );
 
   const [activeRecording, setActiveRecording] = useState<
     [Stream, api.Recording, api.VideoSampleEntry] | null
@@ -161,9 +288,9 @@ const Main = ({ toplevel, timeZoneName, showSelectors }: Props) => {
         sx={{ display: showSelectors ? "block" : "none" }}
       >
         <StreamMultiSelector
-          cameras={toplevel.cameras}
-          selected={selectedStreams}
-          setSelected={setSelectedStreams}
+          toplevel={toplevel}
+          selected={selectedStreamIds}
+          setSelected={setSelectedStreamIds}
         />
         <TimerangeSelector
           selectedStreams={selectedStreams}
