@@ -8,7 +8,6 @@ import * as api from "./api";
 import MoonfireMenu from "./AppMenu";
 import Login from "./Login";
 import { useSnackbars } from "./snackbars";
-import { Camera, Session } from "./types";
 import ListActivity from "./List";
 import AppBar from "@mui/material/AppBar";
 import {
@@ -53,8 +52,7 @@ function App() {
   const [multiviewLayoutIndex, setMultiviewLayoutIndex] = useState(
     Number.parseInt(searchParams.get("layout") || "0", 10)
   );
-  const [session, setSession] = useState<Session | null>(null);
-  const [cameras, setCameras] = useState<Camera[] | null>(null);
+  const [toplevel, setToplevel] = useState<api.ToplevelResponse | null>(null);
   const [timeZoneName, setTimeZoneName] = useState<string | null>(null);
   const [fetchSeq, setFetchSeq] = useState(0);
   const [loginState, setLoginState] = useState<LoginState>("unknown");
@@ -75,7 +73,7 @@ function App() {
   const logout = async () => {
     const resp = await api.logout(
       {
-        csrf: session!.csrf,
+        csrf: toplevel!.user!.session!.csrf,
       },
       {}
     );
@@ -88,21 +86,20 @@ function App() {
         });
         break;
       case "success":
-        setSession(null);
         needNewFetch();
         break;
     }
   };
 
-  function fetchedCameras(cameras: Camera[] | null) {
-    if (cameras !== null && cameras.length > 0) {
+  function fetchedToplevel(toplevel: api.ToplevelResponse | null) {
+    if (toplevel !== null && toplevel.cameras.length > 0) {
       return (
         <>
           <Route
             path=""
             element={
               <ListActivity
-                cameras={cameras}
+                cameras={toplevel.cameras}
                 showSelectors={showListSelectors}
                 timeZoneName={timeZoneName!}
               />
@@ -112,7 +109,7 @@ function App() {
             path="live"
             element={
               <LiveActivity
-                cameras={cameras}
+                cameras={toplevel.cameras}
                 layoutIndex={multiviewLayoutIndex}
               />
             }
@@ -143,8 +140,7 @@ function App() {
               ? "not-logged-in"
               : "logged-in"
           );
-          setSession(resp.response.user?.session || null);
-          setCameras(resp.response.cameras);
+          setToplevel(resp.response);
           setTimeZoneName(resp.response.timeZoneName);
       }
     };
@@ -154,7 +150,7 @@ function App() {
     };
   }, [fetchSeq]);
   let activityMenu = null;
-  if (error === null && cameras !== null && cameras.length > 0) {
+  if (error === null && toplevel !== null && toplevel.cameras.length > 0) {
     switch (activity) {
       case "list":
         activityMenu = (
@@ -186,7 +182,6 @@ function App() {
       <AppBar position="static">
         <MoonfireMenu
           loginState={loginState}
-          setSession={setSession}
           requestLogin={() => {
             setLoginState("user-requested-login");
           }}
@@ -252,7 +247,7 @@ function App() {
           </p>
         </Container>
       )}
-      <Routes>{fetchedCameras(cameras)}</Routes>
+      <Routes>{fetchedToplevel(toplevel)}</Routes>
     </>
   );
 }

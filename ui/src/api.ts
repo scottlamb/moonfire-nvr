@@ -13,7 +13,7 @@
  * This seems convenient for ensuring the caller handles all possibilities.
  */
 
-import { Camera, Session } from "./types";
+import { Camera, Session, Stream } from "./types";
 
 export type StreamType = "main" | "sub";
 
@@ -157,6 +157,7 @@ async function json<T>(
 export interface ToplevelResponse {
   timeZoneName: string;
   cameras: Camera[];
+  streams: Map<number, Stream>;
   user: ToplevelUser | undefined;
 }
 
@@ -170,11 +171,13 @@ export interface ToplevelUser {
 export async function toplevel(init: RequestInit) {
   const resp = await json<ToplevelResponse>("/api/?days=true", init);
   if (resp.status === "success") {
+    resp.response.streams = new Map();
     resp.response.cameras.forEach((c) => {
       for (const key in c.streams) {
         const s = c.streams[key as StreamType]!;
         s.camera = c;
         s.streamType = key as StreamType;
+        resp.response.streams.set(s.id, s);
       }
     });
   }

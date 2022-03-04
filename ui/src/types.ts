@@ -22,6 +22,7 @@ export interface Camera {
 
 export interface Stream {
   camera: Camera; // back-reference added within api.ts.
+  id: number;
   streamType: StreamType; // likewise.
   retainBytes: number;
   minStartTime90k: number;

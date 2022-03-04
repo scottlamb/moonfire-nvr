@@ -13,7 +13,7 @@ import utcToZonedTime from "date-fns-tz/utcToZonedTime";
 import format from "date-fns/format";
 import React, { useMemo, useState } from "react";
 import * as api from "../api";
-import { Camera, Stream } from "../types";
+import { Stream } from "../types";
 import DisplaySelector, { DEFAULT_DURATION } from "./DisplaySelector";
 import StreamMultiSelector from "./StreamMultiSelector";
 import TimerangeSelector from "./TimerangeSelector";
@@ -96,11 +96,11 @@ const FullScreenVideo = ({ src, aspect }: FullScreenVideoProps) => {
 
 interface Props {
   timeZoneName: string;
-  cameras: Camera[];
+  toplevel: api.ToplevelResponse;
   showSelectors: boolean;
 }
 
-const Main = ({ cameras, timeZoneName, showSelectors }: Props) => {
+const Main = ({ toplevel, timeZoneName, showSelectors }: Props) => {
   const classes = useStyles();
 
   /**
@@ -161,7 +161,7 @@ const Main = ({ cameras, timeZoneName, showSelectors }: Props) => {
         sx={{ display: showSelectors ? "block" : "none" }}
       >
         <StreamMultiSelector
-          cameras={cameras}
+          cameras={toplevel.cameras}
           selected={selectedStreams}
           setSelected={setSelectedStreams}
         />

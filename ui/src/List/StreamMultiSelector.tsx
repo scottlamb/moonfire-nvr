@@ -7,9 +7,10 @@ import { Camera, Stream, StreamType } from "../types";
 import Checkbox from "@mui/material/Checkbox";
 import { useTheme } from "@mui/material/styles";
 import { makeStyles } from "@mui/styles";
+import { ToplevelResponse } from "../api";
 
 interface Props {
-  cameras: Camera[];
+  toplevel: ToplevelResponse;
   selected: Set<Stream>;
   setSelected: (selected: Set<Stream>) => void;
 }
@@ -35,7 +36,7 @@ const useStyles = makeStyles({
 });
 
 /** Returns a table which allows selecting zero or more streams. */
-const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
+const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
   const theme = useTheme();
   const classes = useStyles();
   const setStream = (s: Stream, checked: boolean) => {
@@ -57,7 +58,7 @@ const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
       }
     }
     if (!foundAny) {
-      for (const c of cameras) {
+      for (const c of toplevel.cameras) {
         if (c.streams[st] !== undefined) {
           updated.add(c.streams[st as StreamType]!);
         }
@@ -83,7 +84,7 @@ const StreamMultiSelector = ({ cameras, selected, setSelected }: Props) => {
     setSelected(updated);
   };
 
-  const cameraRows = cameras.map((c) => {
+  const cameraRows = toplevel.cameras.map((c) => {
     function checkbox(st: StreamType) {
       const s = c.streams[st];
       if (s === undefined) {

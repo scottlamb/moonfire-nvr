@@ -14,7 +14,6 @@ import AccountCircle from "@mui/icons-material/AccountCircle";
 import MenuIcon from "@mui/icons-material/Menu";
 import React from "react";
 import { LoginState } from "./App";
-import { Session } from "./types";
 
 const useStyles = makeStyles((theme: Theme) =>
   createStyles({
@@ -29,7 +28,6 @@ const useStyles = makeStyles((theme: Theme) =>
 
 interface Props {
   loginState: LoginState;
-  setSession: (session: Session | null) => void;
   requestLogin: () => void;
   logout: () => void;
   menuClick?: () => void;
