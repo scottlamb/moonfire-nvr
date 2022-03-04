@@ -57,7 +57,6 @@ test("success", async () => {
   );
   userEvent.type(screen.getByLabelText(/Username/), "slamb");
   userEvent.type(screen.getByLabelText(/Password/), "hunter2{enter}");
-  jest.runOnlyPendingTimers();
   await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
 });
 

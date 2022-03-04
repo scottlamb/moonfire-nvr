@@ -114,7 +114,7 @@ export class SnackbarProvider
 
   handleCloseSnackbar = (
     key: React.Key,
-    event: React.SyntheticEvent<any>,
+    event: Event | React.SyntheticEvent<any>,
     reason: SnackbarCloseReason
   ) => {
     if (reason === "clickaway") return;
