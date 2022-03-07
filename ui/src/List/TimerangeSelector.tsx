@@ -1,6 +1,54 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// Copyright (C) 2022 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
+
+/**
+ * @fileoverview Selects a datetime range to view, in the NVR's timezone
+ *
+ * Renders a pair of date pickers for the date range and a radio button
+ * for single-day or multi-day selection (disabling or enabling the end date
+ * picker, respectively). These date pickers show which dates actually have
+ * video for the selected days and only allow selecting those days. As the
+ * selected video streams change, the allowed dates change, and the selected
+ * date range may automatically tighten.
+ *
+ * The start and end time pickers are simpler: they simply honor what was
+ * selected in the UI.
+ *
+ * The internal state is all held in one `DaysState` object; `daysStateReducer`
+ * updates it consistently for a given operation.
+ *
+ * Calls `setRange90k` with the final result. Note that not all of
+ * `TimerangeSelector`'s internal state changes will actually produce a new
+ * `range90k`, e.g.:
+ *
+ * - clicking "To other day" (multi-day selection) doesn't by itself
+ *  change the result; it just allows subsequent UI clicks to do so.
+ * - selecting another stream may expand the list of possible days but doesn't
+ *   also by itself doesn't change the time range.
+ *
+ * # Limitations
+ *
+ * This has several known problems with time zone handling, including:
+ *
+ * - doesn't correctly handle times that exist for the NVR's timezone but not in
+ *   the browser's. Specifically, consider the case in which the browser's
+ *   timezone changes for daylight saving but the NVR doesn't. A Javascript
+ *   `Date` object simply can't represent times during the "spring forward"
+ *   hour. We are currently using `date-fn`, which has the fundamental design
+ *   flaw of assuming that all dates (even in a remote timezone) can be
+ *   represented by `Date`.
+ * - doesn't allow disambiguating times during the "fall back" hour. Ideally
+ *   we'd have support not only in the datetime library but also in the UI
+ *   time picker component, and it doesn't exist today.
+ * - looks up the NVR's time zone name in the browser's time zone database,
+ *   rather than actually transferring and using the NVR's time zone definition.
+ *   Thus if say one has been updated for a new daylight saving transition date
+ *   but the other doesn't, results will be weird.
+ *
+ * We hope to address these problems after the Javascript Temporal library is
+ * standardized.
+ */
 
 import { Stream } from "../types";
 import StaticDatePicker, {
@@ -24,7 +72,6 @@ import Box from "@mui/material/Box";
 interface Props {
   selectedStreams: Set<Stream>;
   timeZoneName: string;
-  range90k: [number, number] | null;
   setRange90k: (range: [number, number] | null) => void;
 }
 
@@ -121,8 +168,14 @@ type EndDayType = "same-day" | "other-day";
 type DaysState = {
   allowed: AllowedDays | null;
 
-  /** [start, end] in same format as described for <tt>AllowedDays</tt>. */
+  /**
+   * `[start, end]` in same (funny) format as described for `AllowedDays`.
+   *
+   * This gets mirrored into `range90k` in its expected format (90k units
+   * since epoch).
+   */
   rangeMillis: [number, number] | null;
+
   endType: EndDayType;
 };
 
@@ -254,7 +307,6 @@ function daysStateReducer(old: DaysState, op: DaysOp): DaysState {
 const TimerangeSelector = ({
   selectedStreams,
   timeZoneName,
-  range90k,
   setRange90k,
 }: Props) => {
   const theme = useTheme();

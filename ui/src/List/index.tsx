@@ -243,8 +243,11 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
     true
   );
 
-  // The time range to examine, or null if one hasn't yet been selected. Note
-  // this is derived from state held within TimerangeSelector.
+  // The time range to examine, or null if one hasn't yet been selected. This
+  // is set by TimerangeSelector. As noted in TimerangeSelector's file-level
+  // doc comment, its internal state changes don't always change range90k.
+  // Other components operate on the end result to avoid unnecessary re-renders
+  // and re-fetches.
   const [range90k, setRange90k] = useState<[number, number] | null>(null);
 
   // TimerangeSelector currently expects a Set<Stream>. Memoize one; otherwise
@@ -314,7 +317,6 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
           />
           <TimerangeSelector
             selectedStreams={selectedStreams}
-            range90k={range90k}
             setRange90k={setRange90k}
             timeZoneName={timeZoneName}
           />
