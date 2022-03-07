@@ -6,39 +6,64 @@ import Container from "@mui/material/Container";
 import ErrorIcon from "@mui/icons-material/Error";
 import { Camera } from "../types";
 import LiveCamera from "./LiveCamera";
-import Multiview from "./Multiview";
+import Multiview, { MultiviewChooser } from "./Multiview";
+import { FrameProps } from "../App";
+import { useSearchParams } from "react-router-dom";
+import { useState } from "react";
 
 export interface LiveProps {
   cameras: Camera[];
-  layoutIndex: number;
+  Frame: (props: FrameProps) => JSX.Element;
 }
 
-const Live = ({ cameras, layoutIndex }: LiveProps) => {
+const Live = ({ cameras, Frame }: LiveProps) => {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [multiviewLayoutIndex, setMultiviewLayoutIndex] = useState(
+    Number.parseInt(searchParams.get("layout") || "0", 10)
+  );
+
   if ("MediaSource" in window === false) {
     return (
-      <Container>
-        <ErrorIcon
-          sx={{
-            float: "left",
-            color: "secondary.main",
-            marginRight: "1em",
-          }}
-        />
-        Live view doesn't work yet on your browser. See{" "}
-        <a href="https://github.com/scottlamb/moonfire-nvr/issues/121">#121</a>.
-      </Container>
+      <Frame>
+        <Container>
+          <ErrorIcon
+            sx={{
+              float: "left",
+              color: "secondary.main",
+              marginRight: "1em",
+            }}
+          />
+          Live view doesn't work yet on your browser. See{" "}
+          <a href="https://github.com/scottlamb/moonfire-nvr/issues/121">
+            #121
+          </a>
+          .
+        </Container>
+      </Frame>
     );
   }
   return (
-    <Multiview
-      layoutIndex={layoutIndex}
-      cameras={cameras}
-      renderCamera={(camera: Camera | null, chooser: JSX.Element) => (
-        <LiveCamera camera={camera} chooser={chooser} />
-      )}
-    />
+    <Frame
+      activityMenuPart={
+        <MultiviewChooser
+          layoutIndex={multiviewLayoutIndex}
+          onChoice={(value) => {
+            setMultiviewLayoutIndex(value);
+            setSearchParams({ layout: value.toString() });
+          }}
+        />
+      }
+    >
+      <Multiview
+        layoutIndex={multiviewLayoutIndex}
+        cameras={cameras}
+        renderCamera={(camera: Camera | null, chooser: JSX.Element) => (
+          <LiveCamera camera={camera} chooser={chooser} />
+        )}
+      />
+    </Frame>
   );
 };
 
-export { MultiviewChooser } from "./Multiview";
 export default Live;

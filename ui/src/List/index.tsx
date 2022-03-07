@@ -11,7 +11,7 @@ import Table from "@mui/material/Table";
 import TableContainer from "@mui/material/TableContainer";
 import utcToZonedTime from "date-fns-tz/utcToZonedTime";
 import format from "date-fns/format";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useReducer, useState } from "react";
 import * as api from "../api";
 import { Stream } from "../types";
 import DisplaySelector, { DEFAULT_DURATION } from "./DisplaySelector";
@@ -22,6 +22,9 @@ import { useLayoutEffect } from "react";
 import { fillAspect } from "../aspect";
 import useResizeObserver from "@react-hook/resize-observer";
 import { useSearchParams } from "react-router-dom";
+import { FrameProps } from "../App";
+import IconButton from "@mui/material/IconButton";
+import FilterList from "@mui/icons-material/FilterList";
 
 const useStyles = makeStyles((theme: Theme) => ({
   root: {
@@ -98,7 +101,7 @@ const FullScreenVideo = ({ src, aspect }: FullScreenVideoProps) => {
 interface Props {
   timeZoneName: string;
   toplevel: api.ToplevelResponse;
-  showSelectors: boolean;
+  Frame: (props: FrameProps) => JSX.Element;
 }
 
 /// Parsed URL search parameters.
@@ -221,7 +224,7 @@ const calcSelectedStreams = (
   return streams;
 };
 
-const Main = ({ toplevel, timeZoneName, showSelectors }: Props) => {
+const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
   const classes = useStyles();
 
   const {
@@ -234,6 +237,11 @@ const Main = ({ toplevel, timeZoneName, showSelectors }: Props) => {
     timestampTrack,
     setTimestampTrack,
   } = useParsedSearchParams();
+
+  const [showSelectors, toggleShowSelectors] = useReducer(
+    (m: boolean) => !m,
+    true
+  );
 
   // The time range to examine, or null if one hasn't yet been selected. Note
   // this is derived from state held within TimerangeSelector.
@@ -282,50 +290,63 @@ const Main = ({ toplevel, timeZoneName, showSelectors }: Props) => {
     </TableContainer>
   );
   return (
-    <div className={classes.root}>
-      <Box
-        className={classes.selectors}
-        sx={{ display: showSelectors ? "block" : "none" }}
-      >
-        <StreamMultiSelector
-          toplevel={toplevel}
-          selected={selectedStreamIds}
-          setSelected={setSelectedStreamIds}
-        />
-        <TimerangeSelector
-          selectedStreams={selectedStreams}
-          range90k={range90k}
-          setRange90k={setRange90k}
-          timeZoneName={timeZoneName}
-        />
-        <DisplaySelector
-          split90k={split90k}
-          setSplit90k={setSplit90k}
-          trimStartAndEnd={trimStartAndEnd}
-          setTrimStartAndEnd={setTrimStartAndEnd}
-          timestampTrack={timestampTrack}
-          setTimestampTrack={setTimestampTrack}
-        />
-      </Box>
-      {videoLists.length > 0 && recordingsTable}
-      {activeRecording != null && (
-        <Modal open onClose={closeModal} className={classes.videoModal}>
-          <FullScreenVideo
-            src={api.recordingUrl(
-              activeRecording[0].camera.uuid,
-              activeRecording[0].streamType,
-              activeRecording[1],
-              timestampTrack,
-              trimStartAndEnd ? range90k! : undefined
-            )}
-            aspect={[
-              activeRecording[2].aspectWidth,
-              activeRecording[2].aspectHeight,
-            ]}
+    <Frame
+      activityMenuPart={
+        <IconButton
+          aria-label="selectors"
+          onClick={toggleShowSelectors}
+          color="inherit"
+          size="small"
+        >
+          <FilterList />
+        </IconButton>
+      }
+    >
+      <div className={classes.root}>
+        <Box
+          className={classes.selectors}
+          sx={{ display: showSelectors ? "block" : "none" }}
+        >
+          <StreamMultiSelector
+            toplevel={toplevel}
+            selected={selectedStreamIds}
+            setSelected={setSelectedStreamIds}
           />
-        </Modal>
-      )}
-    </div>
+          <TimerangeSelector
+            selectedStreams={selectedStreams}
+            range90k={range90k}
+            setRange90k={setRange90k}
+            timeZoneName={timeZoneName}
+          />
+          <DisplaySelector
+            split90k={split90k}
+            setSplit90k={setSplit90k}
+            trimStartAndEnd={trimStartAndEnd}
+            setTrimStartAndEnd={setTrimStartAndEnd}
+            timestampTrack={timestampTrack}
+            setTimestampTrack={setTimestampTrack}
+          />
+        </Box>
+        {videoLists.length > 0 && recordingsTable}
+        {activeRecording != null && (
+          <Modal open onClose={closeModal} className={classes.videoModal}>
+            <FullScreenVideo
+              src={api.recordingUrl(
+                activeRecording[0].camera.uuid,
+                activeRecording[0].streamType,
+                activeRecording[1],
+                timestampTrack,
+                trimStartAndEnd ? range90k! : undefined
+              )}
+              aspect={[
+                activeRecording[2].aspectWidth,
+                activeRecording[2].aspectHeight,
+              ]}
+            />
+          </Modal>
+        )}
+      </div>
+    </Frame>
   );
 };
 

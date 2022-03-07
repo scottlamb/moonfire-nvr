@@ -31,7 +31,7 @@ interface Props {
   requestLogin: () => void;
   logout: () => void;
   menuClick?: () => void;
-  activityMenuPart: JSX.Element | null;
+  activityMenuPart?: JSX.Element;
 }
 
 // https://material-ui.com/components/app-bar/
