@@ -152,10 +152,12 @@ const combine = (dayMillis: number, time: Date | null) => {
  *
  * These are stored in a funny format: number of milliseconds since epoch of
  * the start of the given day in the browser's time zone. This is because
- * (a) Date objects are always in the local time zone and date-fn rolls with
- * that, and (b) Date objects don't work well in a set. Javascript's
- * "same-value-zero algorithm" means that two different Date objects never
- * compare the same.
+ *
+ * 1. `Date` objects are always in the browser's time zone and `date-fn` rolls
+ *     with that, and
+ * 2. `Date` objects don't work well in a `Set`. ECMAScript's [equality
+ *    rules](https://262.ecma-international.org/7.0/#sec-abstract-equality-comparison)
+ *    mean that two different `Date` objects never compare the same.
  */
 type AllowedDays = {
   minMillis: number;
