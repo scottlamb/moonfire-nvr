@@ -1595,9 +1595,9 @@ dependencies = [
 
 [[package]]
 name = "reffers"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae9bd363e8ee03bcc91e287ec7f0f29909dde6a99775c65b2e34c66de5a6356d"
+checksum = "162d659c5126f0981e174637accc2e8dfb5bec1908c3fd688d8cce663afed248"
 dependencies = [
  "stable_deref_trait",
 ]
