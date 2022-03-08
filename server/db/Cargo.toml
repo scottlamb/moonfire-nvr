@@ -31,7 +31,7 @@ mylog = { git = "https://github.com/scottlamb/mylog" }
 nix = "0.23.0"
 num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
 odds = { version = "0.4.0", features = ["std-vec"] }
-parking_lot = { version = "0.11.1", features = [] }
+parking_lot = "0.12.0"
 pretty-hex = "0.2.1"
 protobuf = "3.0.0-alpha.1"
 ring = "0.16.2"
@@ -49,4 +49,4 @@ uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 itertools = "0.10.0"
 
 [build-dependencies]
-protobuf-codegen-pure = "3.0.0-alpha.1"
+protobuf-codegen = "3.0.0-alpha.1"

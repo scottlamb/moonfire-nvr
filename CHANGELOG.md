@@ -8,6 +8,9 @@ Each release is tagged in Git and on the Docker repository
 
 ## unreleased
 
+*   bump minimum Rust version from 1.53 to 1.56.
+*   fix [#187](https://github.com/scottlamb/moonfire-nvr/issues/187):
+    incompatibility with cameras that (incorrectly) omit the SDP origin line.
 *   fix [#182](https://github.com/scottlamb/moonfire-nvr/issues/182): error
     on upgrade from schema 6 to schema 7 when a camera's `onvif_host` is empty.
 *   API bugfix: in the `GET /api/` response, include `ext` streams if
