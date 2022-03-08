@@ -4,7 +4,7 @@
 
 use crate::stream::{self, Opener};
 use base::strutil::{decode_size, encode_size};
-use cursive::traits::{Boxable, Finder, Identifiable, Scrollable};
+use cursive::traits::{Finder, Nameable, Resizable, Scrollable};
 use cursive::views::{self, ViewRef};
 use cursive::Cursive;
 use db::writer;
