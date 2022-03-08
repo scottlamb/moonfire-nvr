@@ -1031,7 +1031,7 @@ dependencies = [
  "libc",
  "log",
  "nom",
- "parking_lot 0.12.0",
+ "parking_lot",
  "serde",
  "serde_json",
  "slab",
@@ -1061,7 +1061,7 @@ dependencies = [
  "nix",
  "num-rational",
  "odds",
- "parking_lot 0.12.0",
+ "parking_lot",
  "pretty-hex",
  "protobuf",
  "protobuf-codegen",
@@ -1080,14 +1080,14 @@ dependencies = [
 
 [[package]]
 name = "moonfire-ffmpeg"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcea35804beaed77b7b565730bcec888f5687a08408cd0986d89b94403a1cefa"
+checksum = "ccb80b7a294201578799191cd66b077cd90cef999f461edc7919465fc118a135"
 dependencies = [
  "cc",
  "libc",
  "log",
- "parking_lot 0.11.2",
+ "parking_lot",
  "pkg-config",
 ]
 
@@ -1120,7 +1120,7 @@ dependencies = [
  "nix",
  "nom",
  "num-rational",
- "parking_lot 0.12.0",
+ "parking_lot",
  "password-hash",
  "protobuf",
  "reffers",
@@ -1166,7 +1166,7 @@ dependencies = [
  "chrono",
  "libc",
  "log",
- "parking_lot 0.12.0",
+ "parking_lot",
 ]
 
 [[package]]
@@ -1338,37 +1338,12 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
-dependencies = [
- "instant",
- "lock_api",
- "parking_lot_core 0.8.5",
-]
-
-[[package]]
-name = "parking_lot"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87f5ec2493a61ac0506c0f4199f99070cbe83857b0337006a30f3e6719b8ef58"
 dependencies = [
  "lock_api",
- "parking_lot_core 0.9.1",
-]
-
-[[package]]
-name = "parking_lot_core"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d76e8e1493bcac0d2766c42737f34458f1c8c50c0d23bcb24ea953affb273216"
-dependencies = [
- "cfg-if",
- "instant",
- "libc",
- "redox_syscall",
- "smallvec",
- "winapi",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -2087,7 +2062,7 @@ dependencies = [
  "mio",
  "num_cpus",
  "once_cell",
- "parking_lot 0.12.0",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

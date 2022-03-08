@@ -30,7 +30,7 @@ cstr = "0.2.5"
 cursive = "0.17.0"
 db = { package = "moonfire-db", path = "db" }
 failure = "0.1.1"
-ffmpeg = { package = "moonfire-ffmpeg", version = "0.0.1" }
+ffmpeg = { package = "moonfire-ffmpeg", version = "0.0.2" }
 futures = "0.3"
 fnv = "1.0"
 h264-reader = "0.5.0"
