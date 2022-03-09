@@ -77,9 +77,9 @@ pub enum AddressConfig {
 
     /// IPv6 address such as `[::]:8080` or `[::1]:8080`.
     Ipv6(std::net::SocketAddrV6),
-    // TODO: /// Unix socket path such as `/var/lib/moonfire-nvr/sock`.
-    // Unix(PathBuf),
 
+    /// Unix socket path such as `/var/lib/moonfire-nvr/sock`.
+    Unix(PathBuf),
     // TODO: SystemdFileDescriptorName(String), see
     // https://www.freedesktop.org/software/systemd/man/systemd.socket.html
 }

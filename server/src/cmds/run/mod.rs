@@ -5,6 +5,7 @@
 use crate::cmds::run::config::Permissions;
 use crate::streamer;
 use crate::web;
+use crate::web::accept::Listener;
 use base::clock;
 use db::{dir, writer};
 use failure::{bail, Error, ResultExt};
@@ -12,6 +13,7 @@ use fnv::FnvHashMap;
 use hyper::service::{make_service_fn, service_fn};
 use log::error;
 use log::{info, warn};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -182,6 +184,26 @@ async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
     }
 }
 
+fn make_listener(addr: &config::AddressConfig) -> Result<Listener, Error> {
+    let sa: SocketAddr = match addr {
+        config::AddressConfig::Ipv4(a) => a.clone().into(),
+        config::AddressConfig::Ipv6(a) => a.clone().into(),
+        config::AddressConfig::Unix(p) => {
+            return Ok(Listener::Unix(
+                tokio::net::UnixListener::bind(p)
+                    .with_context(|_| format!("unable bind Unix socket {}", p.display()))?,
+            ));
+        }
+    };
+
+    // Go through std::net::TcpListener to avoid needing async. That's there for DNS resolution,
+    // but it's unnecessary when starting from a SocketAddr.
+    let listener = std::net::TcpListener::bind(&sa)
+        .with_context(|_| format!("unable to bind TCP socket {}", &sa))?;
+    listener.set_nonblocking(true)?;
+    Ok(Listener::Tcp(tokio::net::TcpListener::from_std(listener)?))
+}
+
 async fn inner(
     read_only: bool,
     config: &ConfigFile,
@@ -334,14 +356,8 @@ async fn inner(
                     move |req| Arc::clone(&svc).serve(req)
                 }))
             });
-            let socket_addr = match b.address {
-                config::AddressConfig::Ipv4(a) => a.into(),
-                config::AddressConfig::Ipv6(a) => a.into(),
-            };
-            let server = ::hyper::Server::try_bind(&socket_addr)
-                .with_context(|_| format!("unable to bind to {}", &socket_addr))?
-                .tcp_nodelay(true)
-                .serve(make_svc);
+            let listener = make_listener(&b.address)?;
+            let server = ::hyper::Server::builder(listener).serve(make_svc);
             let server = server.with_graceful_shutdown(shutdown_rx.future());
             Ok(tokio::spawn(server))
         })
