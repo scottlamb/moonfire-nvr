@@ -1,7 +1,8 @@
 // This file is part of Moonfire NVR, a security camera network video recorder.
-// Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
+// Copyright (C) 2022 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use crate::cmds::run::config::Permissions;
 use crate::streamer;
 use crate::web;
 use base::clock;
@@ -11,75 +12,28 @@ use fnv::FnvHashMap;
 use hyper::service::{make_service_fn, service_fn};
 use log::error;
 use log::{info, warn};
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use structopt::StructOpt;
 use tokio::signal::unix::{signal, SignalKind};
 
+use self::config::ConfigFile;
+
+mod config;
+
 #[derive(StructOpt)]
 pub struct Args {
-    /// Directory holding the SQLite3 index database.
-    #[structopt(
-        long,
-        default_value = "/var/lib/moonfire-nvr/db",
-        value_name = "path",
-        parse(from_os_str)
-    )]
-    db_dir: PathBuf,
-
-    /// The number of worker threads used by the asynchronous runtime.
-    /// Defaults to the number of cores on the system.
-    #[structopt(long, value_name = "worker_threads")]
-    worker_threads: Option<usize>,
-
-    /// Directory holding user interface files (.html, .js, etc).
-    #[structopt(
-        long,
-        default_value = "/usr/local/lib/moonfire-nvr/ui",
-        value_name = "path",
-        parse(from_os_str)
-    )]
-    ui_dir: std::path::PathBuf,
-
-    /// Bind address for unencrypted HTTP server.
-    #[structopt(long, default_value = "0.0.0.0:8080", parse(try_from_str))]
-    http_addr: std::net::SocketAddr,
+    #[structopt(short, long, default_value = "/etc/moonfire-nvr.json")]
+    config: PathBuf,
 
     /// Open the database in read-only mode and disables recording.
     ///
-    /// Note this is incompatible with authentication, so you'll likely want to specify
-    /// --allow_unauthenticated_permissions.
+    /// Note this is incompatible with session authentication; consider adding
+    /// a bind with `allowUnauthenticatedPermissions` your config.
     #[structopt(long)]
     read_only: bool,
-
-    /// Allow unauthenticated access to the web interface, with the given permissions (may be
-    /// empty). Should be a text Permissions protobuf such as "view_videos: true".
-    ///
-    /// Note that even an empty string allows some basic access that would be rejected if the
-    /// argument were omitted.
-    #[structopt(long, parse(try_from_str = protobuf::text_format::parse_from_str))]
-    allow_unauthenticated_permissions: Option<db::Permissions>,
-
-    /// Trust X-Real-IP: and X-Forwarded-Proto: headers on the incoming request.
-    ///
-    /// Set this only after ensuring your proxy server is configured to set them and that no
-    /// untrusted requests bypass the proxy server. You may want to specify
-    /// --http-addr=127.0.0.1:8080.
-    #[structopt(long)]
-    trust_forward_hdrs: bool,
-
-    /// RTSP library to use for fetching the cameras' video stream.
-    /// Moonfire NVR is in the process of switching from `ffmpeg` (used since
-    /// the beginning of the project) to `retina` (a pure-Rust RTSP library
-    /// developed by Moonfire NVR's author).
-    #[structopt(long, default_value = "retina", parse(try_from_str))]
-    rtsp_library: crate::stream::RtspLibrary,
-
-    /// The RTSP transport (`tcp` or `udp`) to use when none is specified in the
-    /// per-stream configuration.
-    #[structopt(long, default_value)]
-    rtsp_transport: retina::client::Transport,
 }
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
@@ -171,14 +125,23 @@ struct Syncer {
     join: thread::JoinHandle<()>,
 }
 
+fn read_config(path: &Path) -> Result<ConfigFile, Error> {
+    let config = std::fs::read(path)?;
+    let config = serde_json::from_slice(&config)?;
+    Ok(config)
+}
+
 pub fn run(args: Args) -> Result<i32, Error> {
+    let config = read_config(&args.config)
+        .with_context(|_| format!("unable to read {}", &args.config.display()))?;
+
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    if let Some(worker_threads) = args.worker_threads {
+    if let Some(worker_threads) = config.worker_threads {
         builder.worker_threads(worker_threads);
     }
     let rt = builder.build()?;
-    let r = rt.block_on(async_run(args));
+    let r = rt.block_on(async_run(args.read_only, &config));
 
     // tokio normally waits for all spawned tasks to complete, but:
     // * in the graceful shutdown path, we wait for specific tasks with logging.
@@ -188,14 +151,14 @@ pub fn run(args: Args) -> Result<i32, Error> {
     r
 }
 
-async fn async_run(args: Args) -> Result<i32, Error> {
+async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
     let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
     let mut shutdown_tx = Some(shutdown_tx);
 
     tokio::pin! {
         let int = signal(SignalKind::interrupt())?;
         let term = signal(SignalKind::terminate())?;
-        let inner = inner(args, shutdown_rx);
+        let inner = inner(read_only, config, shutdown_rx);
     }
 
     tokio::select! {
@@ -219,17 +182,21 @@ async fn async_run(args: Args) -> Result<i32, Error> {
     }
 }
 
-async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32, Error> {
+async fn inner(
+    read_only: bool,
+    config: &ConfigFile,
+    shutdown_rx: base::shutdown::Receiver,
+) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
-        &args.db_dir,
-        if args.read_only {
+        &config.db_dir,
+        if read_only {
             super::OpenMode::ReadOnly
         } else {
             super::OpenMode::ReadWrite
         },
     )?;
-    let db = Arc::new(db::Database::new(clocks, conn, !args.read_only)?);
+    let db = Arc::new(db::Database::new(clocks, conn, !read_only)?);
     info!("Database is loaded.");
 
     {
@@ -245,19 +212,12 @@ async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32,
 
     let time_zone_name = resolve_zone()?;
     info!("Resolved timezone: {}", &time_zone_name);
-    let svc = Arc::new(web::Service::new(web::Config {
-        db: db.clone(),
-        ui_dir: Some(&args.ui_dir),
-        allow_unauthenticated_permissions: args.allow_unauthenticated_permissions.clone(),
-        trust_forward_hdrs: args.trust_forward_hdrs,
-        time_zone_name,
-    })?);
 
     // Start a streamer for each stream.
     let mut streamers = Vec::new();
     let mut session_groups_by_camera: FnvHashMap<i32, Arc<retina::client::SessionGroup>> =
         FnvHashMap::default();
-    let syncers = if !args.read_only {
+    let syncers = if !read_only {
         let l = db.lock();
         let mut dirs = FnvHashMap::with_capacity_and_hasher(
             l.sample_file_dirs_by_id().len(),
@@ -266,8 +226,7 @@ async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32,
         let streams = l.streams_by_id().len();
         let env = streamer::Environment {
             db: &db,
-            opener: args.rtsp_library.opener(),
-            default_transport: args.rtsp_transport,
+            opener: config.rtsp_library.opener(),
             shutdown_rx: &shutdown_rx,
         };
 
@@ -354,19 +313,40 @@ async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32,
         None
     };
 
-    // Start the web interface.
-    let make_svc = make_service_fn(move |_conn| {
-        futures::future::ok::<_, std::convert::Infallible>(service_fn({
-            let svc = Arc::clone(&svc);
-            move |req| Arc::clone(&svc).serve(req)
-        }))
-    });
-    let server = ::hyper::Server::try_bind(&args.http_addr)
-        .with_context(|_| format!("unable to bind --http-addr={}", &args.http_addr))?
-        .tcp_nodelay(true)
-        .serve(make_svc);
-    let server = server.with_graceful_shutdown(shutdown_rx.future());
-    let server_handle = tokio::spawn(server);
+    // Start the web interface(s).
+    let web_handles: Result<Vec<_>, Error> = config
+        .binds
+        .iter()
+        .map(|b| {
+            let svc = Arc::new(web::Service::new(web::Config {
+                db: db.clone(),
+                ui_dir: Some(&config.ui_dir),
+                allow_unauthenticated_permissions: b
+                    .allow_unauthenticated_permissions
+                    .as_ref()
+                    .map(Permissions::as_proto),
+                trust_forward_hdrs: b.trust_forward_hdrs,
+                time_zone_name: time_zone_name.clone(),
+            })?);
+            let make_svc = make_service_fn(move |_conn| {
+                futures::future::ok::<_, std::convert::Infallible>(service_fn({
+                    let svc = Arc::clone(&svc);
+                    move |req| Arc::clone(&svc).serve(req)
+                }))
+            });
+            let socket_addr = match b.address {
+                config::AddressConfig::Ipv4(a) => a.into(),
+                config::AddressConfig::Ipv6(a) => a.into(),
+            };
+            let server = ::hyper::Server::try_bind(&socket_addr)
+                .with_context(|_| format!("unable to bind to {}", &socket_addr))?
+                .tcp_nodelay(true)
+                .serve(make_svc);
+            let server = server.with_graceful_shutdown(shutdown_rx.future());
+            Ok(tokio::spawn(server))
+        })
+        .collect();
+    let web_handles = web_handles?;
 
     info!("Ready to serve HTTP requests");
     let _ = shutdown_rx.as_future().await;
@@ -394,7 +374,9 @@ async fn inner(args: Args, shutdown_rx: base::shutdown::Receiver) -> Result<i32,
     db.lock().clear_watches();
 
     info!("Waiting for HTTP requests to finish.");
-    server_handle.await??;
+    for h in web_handles {
+        h.await??;
+    }
 
     info!("Waiting for TEARDOWN requests to complete.");
     for g in session_groups_by_camera.values() {

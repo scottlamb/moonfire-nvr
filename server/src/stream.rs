@@ -11,6 +11,7 @@ use lazy_static::lazy_static;
 use log::warn;
 use retina::client::{Credentials, Transport};
 use retina::codec::{CodecItem, VideoParameters};
+use serde::Deserialize;
 use std::convert::TryFrom;
 use std::ffi::CString;
 use std::pin::Pin;
@@ -26,9 +27,16 @@ lazy_static! {
     pub static ref FFMPEG: Ffmpeg = Ffmpeg::new();
 }
 
+#[derive(Copy, Clone, Debug, Deserialize)]
 pub enum RtspLibrary {
     Ffmpeg,
     Retina,
+}
+
+impl Default for RtspLibrary {
+    fn default() -> Self {
+        RtspLibrary::Retina
+    }
 }
 
 impl std::str::FromStr for RtspLibrary {

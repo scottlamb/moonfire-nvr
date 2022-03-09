@@ -277,23 +277,19 @@ some of the shell script's subcommands that wrap Docker (`start`, `stop`, and
 If you want to deploy a non-Docker build on Linux, you may want to use
 `systemd`. Create `/etc/systemd/system/moonfire-nvr.service`:
 
-```
+```ini
 [Unit]
 Description=Moonfire NVR
 After=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/moonfire-nvr run \
-    --db-dir=/var/lib/moonfire-nvr/db \
-    --http-addr=0.0.0.0:8080 \
-    --allow-unauthenticated-permissions='view_video: true'
+ExecStart=/usr/local/bin/moonfire-nvr run
 Environment=TZ=:/etc/localtime
 Environment=MOONFIRE_FORMAT=google-systemd
 Environment=MOONFIRE_LOG=info
 Environment=RUST_BACKTRACE=1
 Type=simple
 User=moonfire-nvr
-Nice=-20
 Restart=on-failure
 CPUAccounting=true
 MemoryAccounting=true
@@ -303,10 +299,24 @@ BlockIOAccounting=true
 WantedBy=multi-user.target
 ```
 
-Note that the arguments used here are insecure. You can change that via
-replacing the `--allow-unauthenticated-permissions` argument here as
-described in [Securing Moonfire NVR and exposing it to the
-Internet](secure.md).
+You'll also need a `/etc/moonfire-nvr.json`:
+
+```json
+{
+    "binds": [
+        {
+            "ipv4": "0.0.0.0:8080",
+            "allowUnauthenticatedPermissions": {
+                "viewVideo": true
+            }
+        }
+    ]
+}
+```
+
+Note this configuration is insecure. You can change that via replacing the
+`allowUnauthenticatedPermissions` here as described in [Securing Moonfire NVR
+and exposing it to the Internet](secure.md).
 
 Some handy commands:
 

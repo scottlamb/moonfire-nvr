@@ -27,7 +27,7 @@ mod proto {
 }
 mod raw;
 pub mod recording;
-use proto::schema;
+pub use proto::schema;
 pub mod signal;
 pub mod upgrade;
 pub mod writer;

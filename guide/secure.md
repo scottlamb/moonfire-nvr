@@ -161,31 +161,33 @@ your browser. See [How to secure Nginx with Let's Encrypt on Ubuntu
 
 ## 6. Reconfigure Moonfire NVR
 
-If you follow the recommended Docker setup, your `/usr/local/bin/nvr` script
-will contain this line:
+If you follow the recommended Docker setup, your `/etc/moonfire-nvr.json`
+will contain these lines:
 
-```
-                --allow-unauthenticated-permissions='view_video: true'
+```json
+            "allowUnauthenticatedPermissions": {
+                "viewVideo": true
+            }
 ```
 
-Replace it with the following:
+Replace them with the following:
 
-```
-                --trust-forward-hdrs
+```json
+            "trustForwardHdrs": true
 ```
 
 This change has two effects:
 
-   * No `--allow-unauthenticated-permissions` means that web users must
-     authenticate.
-   * `--trust-forward-hdrs` means that Moonfire NVR will look for `X-Real-IP`
+   * No `allowUnauthenticatePermissions` means that web users must authenticate.
+   * `trustForwardHdrs` means that Moonfire NVR will look for `X-Real-IP`
      and `X-Forwarded-Proto` headers as added by the webserver configuration
      in the next section.
 
 If the webserver is running on the same machine as Moonfire NVR, you might
-also change `--publish=8080:8080` to `--publish=127.0.0.1:8080:8080`, which
-prevents other machines on the network from impersonating the proxy,
-effectively allowing them to lie about the client's IP and protocol.
+also change `--publish=8080:8080` to `--publish=127.0.0.1:8080:8080` in your
+`/usr/local/bin/nvr` script, preventing other machines on the network from
+impersonating the proxy, effectively allowing them to lie about the client's IP
+and protocol.
 
 To make this take effect, you'll need to stop the running Docker container,
 delete it, and create/run a new one:

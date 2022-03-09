@@ -71,6 +71,7 @@ image_name="scottlamb/moonfire-nvr:latest"
 container_name="moonfire-nvr"
 common_docker_run_args=(
         --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
+        --mount=type=bind,source=/etc/moonfire-nvr.json,destination=/etc/moonfire-nvr.json
 
         # Add additional mount lines here for each sample file directory
         # outside of /var/lib/moonfire-nvr, eg:
@@ -107,12 +108,6 @@ run)
                 --name="${container_name}" \
                 "${image_name}" \
                 run \
-
-                # Add any additional `moonfire-nvr run` arguments here, eg
-                # "--rtsp-library=ffmpeg" if the default "--rtsp-library=retina"
-                # isn't working.
-                --allow-unauthenticated-permissions='view_video: true' \
-
                 "$@"
         ;;
 start|stop|logs|rm)
@@ -262,6 +257,21 @@ In the user interface,
     this to access the web UI once you enable authentication.
 
 ### Starting it up
+
+You'll need to create the runtime configuration file, `/etc/moonfire-nvr.json`:
+
+```json
+{
+    "binds": [
+        {
+            "ipv4": "0.0.0.0:8080",
+            "allowUnauthenticatedPermissions": {
+                "viewVideo": true
+            }
+        }
+    ]
+}
+```
 
 Note that at this stage, Moonfire NVR's web interface is **insecure**: it
 doesn't use `https` and doesn't require you to authenticate

@@ -20,7 +20,6 @@ where
     C: Clocks + Clone,
 {
     pub opener: &'a dyn stream::Opener,
-    pub default_transport: retina::client::Transport,
     pub db: &'tmp Arc<Database<C>>,
     pub shutdown_rx: &'tmp base::shutdown::Receiver,
 }
@@ -96,7 +95,7 @@ where
             dir,
             syncer_channel,
             opener: env.opener,
-            transport: stream_transport.unwrap_or(env.default_transport),
+            transport: stream_transport.unwrap_or_default(),
             stream_id,
             session_group,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
@@ -434,7 +433,6 @@ mod tests {
             opener: &opener,
             db: &db.db,
             shutdown_rx: &shutdown_rx,
-            default_transport: retina::client::Transport::Tcp,
         };
         let mut stream;
         {
