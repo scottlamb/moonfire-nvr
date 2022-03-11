@@ -12,7 +12,13 @@ via the prebuilt Docker images available for x86-64, arm64, and arm. If you
 instead want to build Moonfire NVR yourself, see the [Build
 instructions](build.md).
 
-First, install [Docker](https://www.docker.com/) if you haven't already,
+First, make sure you are viewing instructions that match the release you intend
+to install. When viewing this page on Github, look for a pull-down in the upper
+left, and pick the latest tagged version:
+
+![Selecting a version of install instructions](install-version.png)
+
+Next, install [Docker](https://www.docker.com/) if you haven't already,
 and verify `sudo docker run --rm hello-world` works.
 
 <details>
