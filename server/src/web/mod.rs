@@ -661,7 +661,7 @@ mod tests {
                     allow_unauthenticated_permissions,
                     trust_forward_hdrs: true,
                     time_zone_name: "".to_owned(),
-                    privileged_unix_uid: nix::unistd::Uid::from_raw(!0),
+                    privileged_unix_uid: None,
                 })
                 .unwrap(),
             );
@@ -772,7 +772,7 @@ mod bench {
                     allow_unauthenticated_permissions: Some(db::Permissions::default()),
                     trust_forward_hdrs: false,
                     time_zone_name: "".to_owned(),
-                    privileged_unix_uid: nix::unistd::Uid::from_raw(!0),
+                    privileged_unix_uid: None,
                 })
                 .unwrap(),
             );
