@@ -28,8 +28,10 @@ impl Accept for Listener {
                 }
                 Some(Ok(Conn {
                     stream: Stream::Tcp(s),
-                    client_unix_uid: None,
-                    client_addr: Some(a),
+                    data: ConnData {
+                        client_unix_uid: None,
+                        client_addr: Some(a),
+                    },
                 }))
             }),
             Listener::Unix(l) => Pin::new(l).poll_accept(cx)?.map(|(s, _a)| {
@@ -39,8 +41,10 @@ impl Accept for Listener {
                 };
                 Some(Ok(Conn {
                     stream: Stream::Unix(s),
-                    client_unix_uid: Some(ucred.uid()),
-                    client_addr: None,
+                    data: ConnData {
+                        client_unix_uid: Some(nix::unistd::Uid::from_raw(ucred.uid())),
+                        client_addr: None,
+                    },
                 }))
             }),
         }
@@ -50,19 +54,19 @@ impl Accept for Listener {
 /// An open connection.
 pub struct Conn {
     stream: Stream,
-    client_unix_uid: Option<libc::uid_t>,
-    client_addr: Option<std::net::SocketAddr>,
+    data: ConnData,
+}
+
+/// Extra data associated with a connection.
+#[derive(Copy, Clone)]
+pub struct ConnData {
+    pub client_unix_uid: Option<nix::unistd::Uid>,
+    pub client_addr: Option<std::net::SocketAddr>,
 }
 
 impl Conn {
-    #[allow(dead_code)] // TODO: feed this onward.
-    pub fn client_unix_uid(&self) -> Option<libc::uid_t> {
-        self.client_unix_uid
-    }
-
-    #[allow(dead_code)] // TODO: feed this onward.
-    pub fn client_addr(&self) -> Option<&std::net::SocketAddr> {
-        self.client_addr.as_ref()
+    pub fn data(&self) -> &ConnData {
+        &self.data
     }
 }
 

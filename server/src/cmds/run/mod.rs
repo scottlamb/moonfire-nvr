@@ -336,6 +336,7 @@ async fn inner(
     };
 
     // Start the web interface(s).
+    let own_euid = nix::unistd::Uid::effective();
     let web_handles: Result<Vec<_>, Error> = config
         .binds
         .iter()
@@ -349,11 +350,13 @@ async fn inner(
                     .map(Permissions::as_proto),
                 trust_forward_hdrs: b.trust_forward_hdrs,
                 time_zone_name: time_zone_name.clone(),
+                privileged_unix_uid: b.own_uid_is_privileged.then(|| own_euid),
             })?);
-            let make_svc = make_service_fn(move |_conn| {
+            let make_svc = make_service_fn(move |conn: &crate::web::accept::Conn| {
+                let conn_data = *conn.data();
                 futures::future::ok::<_, std::convert::Infallible>(service_fn({
                     let svc = Arc::clone(&svc);
-                    move |req| Arc::clone(&svc).serve(req)
+                    move |req| Arc::clone(&svc).serve(req, conn_data)
                 }))
             });
             let listener = make_listener(&b.address)?;

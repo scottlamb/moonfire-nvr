@@ -10,6 +10,7 @@ mod signals;
 mod static_file;
 mod view;
 
+use self::accept::ConnData;
 use self::path::Path;
 use crate::body::Body;
 use crate::json;
@@ -88,6 +89,7 @@ fn from_base_error(err: base::Error) -> Response<Body> {
     plain_response(status_code, err.to_string())
 }
 
+#[derive(Debug)]
 struct Caller {
     permissions: db::Permissions,
     user: Option<json::ToplevelUser>,
@@ -160,6 +162,7 @@ pub struct Config<'a> {
     pub trust_forward_hdrs: bool,
     pub time_zone_name: String,
     pub allow_unauthenticated_permissions: Option<db::Permissions>,
+    pub privileged_unix_uid: Option<nix::unistd::Uid>,
 }
 
 pub struct Service {
@@ -169,6 +172,7 @@ pub struct Service {
     time_zone_name: String,
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
+    privileged_unix_uid: Option<nix::unistd::Uid>,
 }
 
 /// Useful HTTP `Cache-Control` values to set on successful (HTTP 200) API responses.
@@ -221,6 +225,7 @@ impl Service {
             allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
             trust_forward_hdrs: config.trust_forward_hdrs,
             time_zone_name: config.time_zone_name,
+            privileged_unix_uid: config.privileged_unix_uid,
         })
     }
 
@@ -240,7 +245,7 @@ impl Service {
                 self.init_segment(sha1, debug, &req)?,
             ),
             Path::TopLevel => (CacheControl::PrivateDynamic, self.top_level(&req, caller)?),
-            Path::Request => (CacheControl::PrivateDynamic, self.request(&req)?),
+            Path::Request => (CacheControl::PrivateDynamic, self.request(&req, caller)?),
             Path::Camera(uuid) => (CacheControl::PrivateDynamic, self.camera(&req, uuid)?),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
@@ -298,6 +303,7 @@ impl Service {
     pub async fn serve(
         self: Arc<Self>,
         req: Request<::hyper::Body>,
+        conn_data: ConnData,
     ) -> Result<Response<Body>, std::convert::Infallible> {
         let p = Path::decode(req.uri().path());
         let always_allow_unauthenticated = matches!(
@@ -305,7 +311,7 @@ impl Service {
             Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static
         );
         debug!("request on: {}: {:?}", req.uri(), p);
-        let caller = match self.authenticate(&req, always_allow_unauthenticated) {
+        let caller = match self.authenticate(&req, &conn_data, always_allow_unauthenticated) {
             Ok(c) => c,
             Err(e) => return Ok(from_base_error(e)),
         };
@@ -506,7 +512,7 @@ impl Service {
         }
     }
 
-    fn request(&self, req: &Request<::hyper::Body>) -> ResponseResult {
+    fn request(&self, req: &Request<::hyper::Body>, caller: Caller) -> ResponseResult {
         let authreq = self.authreq(req);
         let host = req
             .headers()
@@ -523,7 +529,8 @@ impl Service {
                     host: {:?}\n\
                     addr: {:?}\n\
                     user_agent: {:?}\n\
-                    secure: {:?}",
+                    secure: {:?}\n\
+                    caller: {:?}\n",
                 time::at(time::Timespec {
                     sec: authreq.when_sec.unwrap(),
                     nsec: 0
@@ -534,7 +541,8 @@ impl Service {
                 host.as_deref(),
                 &authreq.addr,
                 agent.as_deref(),
-                self.is_secure(req)
+                self.is_secure(req),
+                &caller,
             ),
         ))
     }
@@ -555,11 +563,13 @@ impl Service {
     /// Authenticates the session (if any) and returns a Caller.
     ///
     /// If there's no session,
-    /// 1.  if `allow_unauthenticated_permissions` is configured, returns okay
+    /// 1.  if connected via Unix domain socket from the same effective uid
+    ///     as Moonfire NVR itself, return with all privileges.
+    /// 2.  if `allow_unauthenticated_permissions` is configured, returns okay
     ///     with those permissions.
-    /// 2.  if the caller specifies `unauth_path`, returns okay with no
+    /// 3.  if the caller specifies `unauth_path`, returns okay with no
     ///     permissions.
-    /// 3.  returns `Unauthenticated` error otherwise.
+    /// 4.  returns `Unauthenticated` error otherwise.
     ///
     /// Does no authorization. That is, this doesn't check that the returned
     /// permissions are sufficient for whatever operation the caller is
@@ -567,6 +577,7 @@ impl Service {
     fn authenticate(
         &self,
         req: &Request<hyper::Body>,
+        conn_data: &ConnData,
         unauth_path: bool,
     ) -> Result<Caller, base::Error> {
         if let Some(sid) = extract_sid(req) {
@@ -592,6 +603,18 @@ impl Service {
                 }
                 Err(e) => return Err(e),
             };
+        }
+
+        if matches!(conn_data.client_unix_uid, Some(uid) if Some(uid) == self.privileged_unix_uid) {
+            return Ok(Caller {
+                permissions: db::Permissions {
+                    view_video: true,
+                    read_camera_configs: true,
+                    update_signals: true,
+                    ..Default::default()
+                },
+                user: None,
+            });
         }
 
         if let Some(s) = self.allow_unauthenticated_permissions.as_ref() {
@@ -638,13 +661,22 @@ mod tests {
                     allow_unauthenticated_permissions,
                     trust_forward_hdrs: true,
                     time_zone_name: "".to_owned(),
+                    privileged_unix_uid: nix::unistd::Uid::from_raw(!0),
                 })
                 .unwrap(),
             );
             let make_svc = hyper::service::make_service_fn(move |_conn| {
                 futures::future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
                     let s = Arc::clone(&service);
-                    move |req| Arc::clone(&s).serve(req)
+                    move |req| {
+                        Arc::clone(&s).serve(
+                            req,
+                            super::accept::ConnData {
+                                client_unix_uid: None,
+                                client_addr: None,
+                            },
+                        )
+                    }
                 }))
             });
             let (tx, rx) = std::sync::mpsc::channel();
@@ -740,13 +772,22 @@ mod bench {
                     allow_unauthenticated_permissions: Some(db::Permissions::default()),
                     trust_forward_hdrs: false,
                     time_zone_name: "".to_owned(),
+                    privileged_unix_uid: nix::unistd::Uid::from_raw(!0),
                 })
                 .unwrap(),
             );
             let make_svc = hyper::service::make_service_fn(move |_conn| {
                 futures::future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
                     let s = Arc::clone(&service);
-                    move |req| Arc::clone(&s).serve(req)
+                    move |req| {
+                        Arc::clone(&s).serve(
+                            req,
+                            super::accept::ConnData {
+                                client_unix_uid: None,
+                                client_addr: None,
+                            },
+                        )
+                    }
                 }))
             });
             let rt = tokio::runtime::Runtime::new().unwrap();

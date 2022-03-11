@@ -67,6 +67,11 @@ pub struct BindConfig {
     /// specify a localhost bind address.
     #[serde(default)]
     pub trust_forward_hdrs: bool,
+
+    /// On Unix-domain sockets, treat clients with the Moonfire NVR server's own
+    /// effective UID as privileged.
+    #[serde(default)]
+    pub own_uid_is_privileged: bool,
 }
 
 #[derive(Debug, Deserialize)]
