@@ -947,8 +947,10 @@ impl LockedDatabase {
             None => bail!("no such stream {}", stream),
             Some(s) => s,
         };
-        use odds::vec::VecExt;
-        s.on_live_segment.retain_mut(|cb| cb(l.clone()));
+
+        // TODO: use std's retain_mut after it's available in our minimum supported Rust version.
+        // <https://github.com/rust-lang/rust/issues/48919>
+        odds::vec::VecExt::retain_mut(&mut s.on_live_segment, |cb| cb(l.clone()));
         Ok(())
     }
 

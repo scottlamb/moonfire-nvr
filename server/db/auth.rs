@@ -189,6 +189,7 @@ pub enum RevocationReason {
     AlgorithmChange = 2,
 }
 
+#[allow(dead_code)] // Some of these fields are currently only used in Debug. That's fine.
 #[derive(Debug, Default)]
 pub struct Session {
     pub user_id: i32,
