@@ -268,17 +268,20 @@ You'll need to create the runtime configuration file, `/etc/moonfire-nvr.json`:
             "allowUnauthenticatedPermissions": {
                 "viewVideo": true
             }
+        },
+        {
+            "unix": "/var/lib/moonfire-nvr/sock",
+            "ownUidIsPrivileged": true
         }
     ]
 }
 ```
 
-Note that at this stage, Moonfire NVR's web interface is **insecure**: it
-doesn't use `https` and doesn't require you to authenticate
-to it. You might be comfortable starting it in this configuration to try it
-out, particularly if the machine it's running on is behind a home router's
-firewall. You might not; in that case read through [secure the
-system](secure.md) first.
+With this config, Moonfire NVR's web interface is **insecure**: it doesn't use
+`https` and doesn't require you to authenticate to it. You might be comfortable
+starting it in this configuration to try it out, particularly if the machine
+it's running on is behind a home router's firewall. You might not; in that case
+read through [secure the system](secure.md) first.
 
 This command will start a detached Docker container for the web interface.
 It will automatically restart when your system does.

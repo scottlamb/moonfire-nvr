@@ -184,11 +184,33 @@ async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
     }
 }
 
+/// Makes a best-effort attempt to prepare a path for binding as a Unix-domain socket.
+///
+/// Binding to a Unix-domain socket fails with `EADDRINUSE` if the dirent already exists,
+/// and the dirent isn't automatically deleted when the previous server closes. Clean up a
+/// previous socket. As a defense against misconfiguration, make sure it actually is
+/// a socket first.
+///
+/// This mechanism is inherently racy, but it's expected that the database has already
+/// been locked.
+fn prepare_unix_socket(p: &Path) {
+    use nix::sys::stat::{stat, SFlag};
+    let stat = match stat(p) {
+        Err(_) => return,
+        Ok(s) => s,
+    };
+    if !SFlag::from_bits_truncate(stat.st_mode).intersects(SFlag::S_IFSOCK) {
+        return;
+    }
+    let _ = nix::unistd::unlink(p);
+}
+
 fn make_listener(addr: &config::AddressConfig) -> Result<Listener, Error> {
     let sa: SocketAddr = match addr {
         config::AddressConfig::Ipv4(a) => a.clone().into(),
         config::AddressConfig::Ipv6(a) => a.clone().into(),
         config::AddressConfig::Unix(p) => {
+            prepare_unix_socket(p);
             return Ok(Listener::Unix(
                 tokio::net::UnixListener::bind(p)
                     .with_context(|_| format!("unable bind Unix socket {}", p.display()))?,

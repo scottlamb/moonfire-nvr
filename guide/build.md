@@ -309,6 +309,10 @@ You'll also need a `/etc/moonfire-nvr.json`:
             "allowUnauthenticatedPermissions": {
                 "viewVideo": true
             }
+        },
+        {
+            "unix": "/var/lib/moonfire-nvr/sock",
+            "ownUidIsPrivileged": true
         }
     ]
 }
