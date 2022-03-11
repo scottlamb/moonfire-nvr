@@ -50,13 +50,33 @@ and managing a long-lived Docker container for its web interface.
 As you set up this script, adjust the `tz` variable as appropriate for your
 time zone.
 
-Use your favorite editor to create `/usr/local/bin/nvr`, starting from the
-configuration below:
+Use your favorite editor to create `/etc/moonfire-nvr.json` and
+`/usr/local/bin/nvr`, starting from the configurations below:
 
 ```console
+$ sudo nano /etc/moonfire-nvr.json
+(see below for contents)
 $ sudo nano /usr/local/bin/nvr
 (see below for contents)
 $ sudo chmod a+rx /usr/local/bin/nvr
+```
+
+`/etc/moonfire-nvr.json`:
+```json
+{
+    "binds": [
+        {
+            "ipv4": "0.0.0.0:8080",
+            "allowUnauthenticatedPermissions": {
+                "viewVideo": true
+            }
+        },
+        {
+            "unix": "/var/lib/moonfire-nvr/sock",
+            "ownUidIsPrivileged": true
+        }
+    ]
+}
 ```
 
 `/usr/local/bin/nvr`:
@@ -150,8 +170,11 @@ using UAS, as described there. UAS has been linked to filesystem corruption.
 Set up the mount point and sample file directory:
 
 ```console
-$ sudo vim /etc/fstab
-$ sudo mkdir /media/nvr
+$ sudo blkid
+(note the UUID of your new device)
+$ sudo nano /etc/fstab
+(see below for line to add)
+$ sudo mkdir -p /media/nvr
 $ sudo mount /media/nvr
 $ sudo install -d -o moonfire-nvr -g moonfire-nvr -m 700 /media/nvr/sample
 ```
@@ -162,23 +185,14 @@ In `/etc/fstab`, add a line similar to this:
 UUID=23d550bc-0e38-4825-acac-1cac8a7e091f    /media/nvr   ext4    nofail,noatime,lazytime,data=writeback,journal_async_commit  0       2
 ```
 
-You can look up the correct uuid for your disk via `blkid`.
-
 If you use the `nofail` attribute in `/etc/fstab` as described above, your
 system will boot successfully even when the hard drive is unavailable (such as
 when your external USB storage is unmounted). This can be helpful when
 recovering from problems.
 
-Create the sample directory.
-
-```console
-$ sudo mkdir /media/nvr/sample
-$ sudo chown -R moonfire-nvr:moonfire-nvr /media/nvr
-```
-
 Add a new `--mount` line to your Docker wrapper script `/usr/local/bin/nvr`
-to expose this new volume to the Docker container, right where a comment
-mentions "Additional mount lines".
+to expose the new sample directory `/media/nvr/sample` to the Docker container,
+right where a comment mentions "Additional mount lines".
 
 ### Completing configuration through the UI
 
@@ -257,25 +271,6 @@ In the user interface,
     this to access the web UI once you enable authentication.
 
 ### Starting it up
-
-You'll need to create the runtime configuration file, `/etc/moonfire-nvr.json`:
-
-```json
-{
-    "binds": [
-        {
-            "ipv4": "0.0.0.0:8080",
-            "allowUnauthenticatedPermissions": {
-                "viewVideo": true
-            }
-        },
-        {
-            "unix": "/var/lib/moonfire-nvr/sock",
-            "ownUidIsPrivileged": true
-        }
-    ]
-}
-```
 
 With this config, Moonfire NVR's web interface is **insecure**: it doesn't use
 `https` and doesn't require you to authenticate to it. You might be comfortable
