@@ -6,7 +6,7 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## unreleased
+## `v0.7.2` (2022-03-16)
 
 *   introduce a configuration file `/etc/moonfire-nvr.toml`; you will need
     to create one when upgrading.
