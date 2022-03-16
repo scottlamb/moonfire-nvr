@@ -85,7 +85,7 @@ own_uid_is_privileged = true
 # Set your timezone here.
 tz="America/Los_Angeles"
 
-# or eg "scottlamb/moonfire-nvr:v0.7.1" to specify a particular version.
+# or e.g. "scottlamb/moonfire-nvr:v0.7.1" to specify a particular version.
 image_name="scottlamb/moonfire-nvr:latest"
 container_name="moonfire-nvr"
 common_docker_run_args=(
@@ -93,13 +93,19 @@ common_docker_run_args=(
         --mount=type=bind,source=/etc/moonfire-nvr.toml,destination=/etc/moonfire-nvr.toml
 
         # Add additional mount lines here for each sample file directory
-        # outside of /var/lib/moonfire-nvr, eg:
+        # outside of /var/lib/moonfire-nvr, e.g.:
         # --mount=type=bind,source=/media/nvr/sample,destination=/media/nvr/sample
 
         --user="$(id -u moonfire-nvr):$(id -g moonfire-nvr)"
 
-        # This avoids errors with broken seccomp on Raspberry Pi OS.
+        # This avoids errors with broken seccomp on older 32-bit hosts.
+        # https://github.com/moby/moby/issues/40734
         --security-opt=seccomp:unconfined
+
+        # This is the simplest way of configuring networking, although
+        # you can use e.g. --publish=8080:8080 in the run) case below if you
+        # prefer.
+        --network=host
 
         # docker's default log driver won't rotate logs properly, and will throw
         # away logs when you destroy and recreate the container. Using journald
@@ -119,11 +125,6 @@ run)
                 --detach=true \
                 --restart=unless-stopped \
                 "${common_docker_run_args[@]}" \
-
-                # This is the simplest way of configuring networking, although
-                # you can use eg --publish=8080:8080 if you prefer.
-                --network=host \
-
                 --name="${container_name}" \
                 "${image_name}" \
                 run \
