@@ -74,7 +74,7 @@ ipv4 = "0.0.0.0:8080"
 
 [[binds]]
 unix = "/var/lib/moonfire-nvr/sock"
-allow_unauthenticated_permissions: { "view_video": true }
+allow_unauthenticated_permissions = { view_video = true }
 own_uid_is_privileged = true
 ```
 
