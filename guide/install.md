@@ -56,33 +56,26 @@ and managing a long-lived Docker container for its web interface.
 As you set up this script, adjust the `tz` variable as appropriate for your
 time zone.
 
-Use your favorite editor to create `/etc/moonfire-nvr.json` and
+Use your favorite editor to create `/etc/moonfire-nvr.toml` and
 `/usr/local/bin/nvr`, starting from the configurations below:
 
 ```console
-$ sudo nano /etc/moonfire-nvr.json
+$ sudo nano /etc/moonfire-nvr.toml
 (see below for contents)
 $ sudo nano /usr/local/bin/nvr
 (see below for contents)
 $ sudo chmod a+rx /usr/local/bin/nvr
 ```
 
-`/etc/moonfire-nvr.json`:
-```json
-{
-    "binds": [
-        {
-            "ipv4": "0.0.0.0:8080",
-            "allowUnauthenticatedPermissions": {
-                "viewVideo": true
-            }
-        },
-        {
-            "unix": "/var/lib/moonfire-nvr/sock",
-            "ownUidIsPrivileged": true
-        }
-    ]
-}
+`/etc/moonfire-nvr.toml`:
+```toml
+[[binds]]
+ipv4 = "0.0.0.0:8080"
+
+[[binds]]
+unix = "/var/lib/moonfire-nvr/sock"
+allow_unauthenticated_permissions: { "view_video": true }
+own_uid_is_privileged = true
 ```
 
 `/usr/local/bin/nvr`:
@@ -97,7 +90,7 @@ image_name="scottlamb/moonfire-nvr:latest"
 container_name="moonfire-nvr"
 common_docker_run_args=(
         --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
-        --mount=type=bind,source=/etc/moonfire-nvr.json,destination=/etc/moonfire-nvr.json
+        --mount=type=bind,source=/etc/moonfire-nvr.toml,destination=/etc/moonfire-nvr.toml
 
         # Add additional mount lines here for each sample file directory
         # outside of /var/lib/moonfire-nvr, eg:

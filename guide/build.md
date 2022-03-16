@@ -299,27 +299,20 @@ BlockIOAccounting=true
 WantedBy=multi-user.target
 ```
 
-You'll also need a `/etc/moonfire-nvr.json`:
+You'll also need a `/etc/moonfire-nvr.toml`:
 
-```json
-{
-    "binds": [
-        {
-            "ipv4": "0.0.0.0:8080",
-            "allowUnauthenticatedPermissions": {
-                "viewVideo": true
-            }
-        },
-        {
-            "unix": "/var/lib/moonfire-nvr/sock",
-            "ownUidIsPrivileged": true
-        }
-    ]
-}
+```toml
+[[binds]]
+ipv4 = "0.0.0.0:8080"
+allow_unauthenticated_permissions = { view_video = true }
+
+[[binds]]
+unix = "/var/lib/moonfire-nvr/sock"
+own_uid_is_privileged = true
 ```
 
 Note this configuration is insecure. You can change that via replacing the
-`allowUnauthenticatedPermissions` here as described in [Securing Moonfire NVR
+`allow_unauthenticated_permissions` here as described in [Securing Moonfire NVR
 and exposing it to the Internet](secure.md).
 
 Some handy commands:

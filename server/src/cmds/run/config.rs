@@ -2,7 +2,7 @@
 // Copyright (C) 2022 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-//! Runtime configuration file (`/etc/moonfire-nvr.conf`).
+//! Runtime configuration file (`/etc/moonfire-nvr.toml`).
 
 use std::path::PathBuf;
 
@@ -18,7 +18,7 @@ fn default_ui_dir() -> PathBuf {
 
 /// Top-level configuration file object.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFile {
     pub binds: Vec<BindConfig>,
 
@@ -46,7 +46,7 @@ pub struct ConfigFile {
 
 /// Per-bind configuration.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct BindConfig {
     /// The address to bind to.
     #[serde(flatten)]
@@ -66,7 +66,7 @@ pub struct BindConfig {
     /// and that no untrusted requests bypass the proxy server. You may want to
     /// specify a localhost bind address.
     #[serde(default)]
-    pub trust_forward_hdrs: bool,
+    pub trust_forward_headers: bool,
 
     /// On Unix-domain sockets, treat clients with the Moonfire NVR server's own
     /// effective UID as privileged.
@@ -75,7 +75,8 @@ pub struct BindConfig {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields)]
 pub enum AddressConfig {
     /// IPv4 address such as `0.0.0.0:8080` or `127.0.0.1:8080`.
     Ipv4(std::net::SocketAddrV4),
@@ -91,7 +92,7 @@ pub enum AddressConfig {
 
 /// JSON analog of `Permissions` defined in `db/proto/schema.proto`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct Permissions {
     view_video: bool,
     read_camera_configs: bool,

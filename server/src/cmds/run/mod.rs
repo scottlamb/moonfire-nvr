@@ -27,13 +27,13 @@ mod config;
 
 #[derive(StructOpt)]
 pub struct Args {
-    #[structopt(short, long, default_value = "/etc/moonfire-nvr.json")]
+    #[structopt(short, long, default_value = "/etc/moonfire-nvr.toml")]
     config: PathBuf,
 
     /// Open the database in read-only mode and disables recording.
     ///
     /// Note this is incompatible with session authentication; consider adding
-    /// a bind with `allowUnauthenticatedPermissions` your config.
+    /// a bind with `allow_unauthenticated_permissions` to your config.
     #[structopt(long)]
     read_only: bool,
 }
@@ -129,7 +129,7 @@ struct Syncer {
 
 fn read_config(path: &Path) -> Result<ConfigFile, Error> {
     let config = std::fs::read(path)?;
-    let config = serde_json::from_slice(&config)?;
+    let config = toml::from_slice(&config)?;
     Ok(config)
 }
 
@@ -370,7 +370,7 @@ async fn inner(
                     .allow_unauthenticated_permissions
                     .as_ref()
                     .map(Permissions::as_proto),
-                trust_forward_hdrs: b.trust_forward_hdrs,
+                trust_forward_hdrs: b.trust_forward_headers,
                 time_zone_name: time_zone_name.clone(),
                 privileged_unix_uid: b.own_uid_is_privileged.then(|| own_euid),
             })?);

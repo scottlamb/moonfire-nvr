@@ -60,6 +60,7 @@ time = "0.1"
 tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1.5"
 tokio-tungstenite = "0.17.1"
+toml = "0.5"
 tracing = { version = "0.1", features = ["log"] }
 url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }

@@ -8,7 +8,7 @@ Each release is tagged in Git and on the Docker repository
 
 ## unreleased
 
-*   introduce a configuration file `/etc/moonfire-nvr.json`; you will need
+*   introduce a configuration file `/etc/moonfire-nvr.toml`; you will need
     to create one when upgrading.
 *   bump minimum Rust version from 1.53 to 1.56.
 *   fix [#187](https://github.com/scottlamb/moonfire-nvr/issues/187):
