@@ -178,7 +178,7 @@ This change has two effects:
 
    * No `allow_unauthenticated_permissions` means that web users must 
      authenticate.
-   * `trust-forward-headers` means that Moonfire NVR will look for `X-Real-IP`
+   * `trust_forward_headers` means that Moonfire NVR will look for `X-Real-IP`
      and `X-Forwarded-Proto` headers as added by the webserver configuration
      in the next section.
 

@@ -71,10 +71,10 @@ $ sudo chmod a+rx /usr/local/bin/nvr
 ```toml
 [[binds]]
 ipv4 = "0.0.0.0:8080"
+allow_unauthenticated_permissions = { view_video = true }
 
 [[binds]]
 unix = "/var/lib/moonfire-nvr/sock"
-allow_unauthenticated_permissions = { view_video = true }
 own_uid_is_privileged = true
 ```
 
