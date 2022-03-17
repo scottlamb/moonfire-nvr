@@ -94,8 +94,13 @@ pub enum AddressConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Permissions {
+    #[serde(default)]
     view_video: bool,
+
+    #[serde(default)]
     read_camera_configs: bool,
+
+    #[serde(default)]
     update_signals: bool,
 }
 
