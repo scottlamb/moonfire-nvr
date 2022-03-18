@@ -26,11 +26,9 @@ blake3 = "1.0.0"
 bytes = "1"
 byteorder = "1.0"
 clap = { version = "2.33.3", default-features = false, features = ["color", "wrap_help"] }
-cstr = "0.2.5"
 cursive = "0.17.0"
 db = { package = "moonfire-db", path = "db" }
 failure = "0.1.1"
-ffmpeg = { package = "moonfire-ffmpeg", version = "0.0.2" }
 futures = "0.3"
 fnv = "1.0"
 h264-reader = "0.5.0"
@@ -66,6 +64,7 @@ url = "2.1.1"
 uuid = { version = "0.8", features = ["serde", "std", "v4"] }
 
 [dev-dependencies]
+mp4 = { git = "https://github.com/scottlamb/mp4-rust", branch = "moonfire" }
 num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
 reqwest = { version = "0.11.0", default-features = false, features = ["json"] }
 tempfile = "3.2.0"

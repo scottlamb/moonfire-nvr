@@ -19,7 +19,6 @@ uname -a
 export DEBIAN_FRONTEND=noninteractive
 time apt-get update
 time apt-get install --assume-yes --no-install-recommends \
-    ffmpeg \
     libncurses6 \
     libncursesw6 \
     locales \

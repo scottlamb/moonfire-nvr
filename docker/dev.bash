@@ -78,10 +78,6 @@ time apt-get update
 
 # Install the packages for the target architecture.
 packages+=(
-    ffmpeg"${apt_target_suffix}"
-    libavcodec-dev"${apt_target_suffix}"
-    libavformat-dev"${apt_target_suffix}"
-    libavutil-dev"${apt_target_suffix}"
     libncurses-dev"${apt_target_suffix}"
     libsqlite3-dev"${apt_target_suffix}"
 )

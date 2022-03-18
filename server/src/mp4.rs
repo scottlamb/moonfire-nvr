@@ -1984,7 +1984,7 @@ impl fmt::Debug for File {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream::{self, Opener};
+    use crate::stream;
     use base::clock::RealClocks;
     use byteorder::{BigEndian, ByteOrder};
     use db::recording::{self, TIME_UNITS_PER_SEC};
@@ -2278,20 +2278,13 @@ mod tests {
     }
 
     fn copy_mp4_to_db(db: &mut TestDb<RealClocks>) {
-        let (extra_data, mut input) = stream::FFMPEG
-            .open(
-                "test".to_owned(),
-                stream::Source::File("src/testdata/clip.mp4"),
-            )
-            .unwrap();
+        let (extra_data, input) =
+            stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
+        let mut input: Box<dyn stream::Stream> = Box::new(input);
 
         // 2015-04-26 00:00:00 UTC.
         const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-        let video_sample_entry_id = db
-            .db
-            .lock()
-            .insert_video_sample_entry(extra_data.entry)
-            .unwrap();
+        let video_sample_entry_id = db.db.lock().insert_video_sample_entry(extra_data).unwrap();
         let dir = db.dirs_by_stream_id.get(&TEST_STREAM_ID).unwrap();
         let mut output = writer::Writer::new(
             dir,
@@ -2324,7 +2317,7 @@ mod tests {
             output
                 .write(
                     &mut db.shutdown_rx,
-                    pkt.data,
+                    &pkt.data[..],
                     frame_time,
                     pkt.pts,
                     pkt.is_key,
@@ -2398,18 +2391,28 @@ mod tests {
     }
 
     fn compare_mp4s(new_filename: &str, pts_offset: i64, shorten: i64) {
-        let (orig_extra_data, mut orig) = stream::FFMPEG
-            .open(
-                "test".to_owned(),
-                stream::Source::File("src/testdata/clip.mp4"),
-            )
-            .unwrap();
-        let (new_extra_data, mut new) = stream::FFMPEG
-            .open("test".to_owned(), stream::Source::File(new_filename))
-            .unwrap();
+        let (orig_extra_data, orig) =
+            stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
+        let (new_extra_data, new) = stream::testutil::Mp4Stream::open(new_filename).unwrap();
+
+        if pts_offset > 0 {
+            // The mp4 crate doesn't interpret the edit list. Manually inspect it.
+            let elst = new.elst().unwrap();
+            assert_eq!(
+                &elst.entries,
+                &[mp4::mp4box::elst::ElstEntry {
+                    segment_duration: new.duration(),
+                    media_time: pts_offset as u64,
+                    media_rate: mp4::FixedPointU16::new(1),
+                }]
+            );
+        }
+
+        let mut orig: Box<dyn stream::Stream> = Box::new(orig);
+        let mut new: Box<dyn stream::Stream> = Box::new(new);
         assert_eq!(orig_extra_data, new_extra_data);
         let mut final_durations = None;
-        loop {
+        for i in 0.. {
             let orig_pkt = match orig.next() {
                 Ok(p) => Some(p),
                 Err(e) if e.to_string() == "End of file" => None,
@@ -2431,9 +2434,13 @@ mod tests {
                 (None, None) => break,
                 (o, n) => panic!("orig: {} new: {}", o.is_some(), n.is_some()),
             };
-            assert_eq!(orig_pkt.pts, new_pkt.pts + pts_offset);
-            assert_eq!(orig_pkt.data, new_pkt.data);
-            assert_eq!(orig_pkt.is_key, new_pkt.is_key);
+            assert_eq!(
+                orig_pkt.pts, new_pkt.pts, /*+ pts_offset*/
+                "pkt {} pts",
+                i
+            );
+            assert_eq!(orig_pkt.data, new_pkt.data, "pkt {} data", i);
+            assert_eq!(orig_pkt.is_key, new_pkt.is_key, "pkt {} key", i);
             final_durations = Some((i64::from(orig_pkt.duration), i64::from(new_pkt.duration)));
         }
 

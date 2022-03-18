@@ -11,7 +11,6 @@ need more help.
     * [Camera stream errors](#camera-stream-errors)
 * [Problems](#problems)
     * [Server errors](#server-errors)
-        * [Problems reading video from cameras](#problems-reading-video-from-cameras)
         * [`clock_gettime failed: EPERM: Operation not permitted`](#clock_gettime-failed-eperm-operation-not-permitted)
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
@@ -88,8 +87,7 @@ Moonfire NVR names a few important thread types as follows:
 *   `main`: during `moonfire-nvr run`, the main thread does initial setup then
     just waits for the other threads. In other subcommands, it does everything.
 *   `s-CAMERA-TYPE` (one per stream, where `TYPE` is `main` or `sub`): these
-    threads write video data to disk. When using `--rtsp-library=ffmpeg`, they
-    also read the video data from the cameras via RTSP.
+    threads receive video from the cameras (via RTSP) and write it to disk.
 *   `sync-PATH` (one per sample file directory): These threads call `fsync` to
 *   commit sample files to disk, delete old sample files, and flush the
     database.
@@ -210,27 +208,19 @@ W20201228 21:27:11.402 s-driveway-sub moonfire_base::clock] writing 37 bytes too
 ### Camera stream errors
 
 Warnings like the following indicate that a camera stream was lost due to some
-error and Moonfire NVR will try reconnecting shortly. In this case,
-`End of file` means that the camera ended the stream. This might happen when the
-camera is rebooting or if Moonfire is not consuming packets quickly enough.
-In the latter case, you'll likely see a `getting next packet took PT...S!`
-message as described above.
+error and Moonfire NVR will try reconnecting shortly. `Stream ended` might
+happen when the camera is rebooting or if Moonfire is not consuming packets
+quickly enough. In the latter case, you'll likely see a
+`getting next packet took PT...S!` message as described above.
 
 ```
-W20210309 00:28:55.527 s-courtyard-sub moonfire_nvr::streamer] courtyard-sub: sleeping for PT1S after error: End of file
+W20210309 00:28:55.527 s-courtyard-sub moonfire_nvr::streamer] courtyard-sub: sleeping for PT1S after error: Stream ended
 (set environment variable RUST_BACKTRACE=1 to see backtraces)
 ```
 
 ## Problems
 
 ### Server errors
-
-#### Problems reading video from cameras
-
-Moonfire NVR is switching its RTSP handling from ffmpeg to a pure-Rust
-library developed by Moonfire NVR's author. If it doesn't read camera
-data successfully, please try restarting with `--rtsp-library=ffmpeg` to see
-if the problem goes away. Then please file a bug!
 
 #### `clock_gettime failed: EPERM: Operation not permitted`
 

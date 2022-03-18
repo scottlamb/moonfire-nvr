@@ -3,96 +3,37 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use crate::h264;
-use cstr::cstr;
+use bytes::Bytes;
 use failure::format_err;
 use failure::{bail, Error};
 use futures::StreamExt;
-use lazy_static::lazy_static;
-use log::warn;
-use retina::client::{Credentials, Transport};
+use retina::client::Demuxed;
 use retina::codec::{CodecItem, VideoParameters};
-use serde::Deserialize;
-use std::convert::TryFrom;
-use std::ffi::CString;
 use std::pin::Pin;
 use std::result::Result;
-use std::sync::Arc;
 use url::Url;
-
-static START_FFMPEG: parking_lot::Once = parking_lot::Once::new();
 
 static RETINA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-lazy_static! {
-    pub static ref FFMPEG: Ffmpeg = Ffmpeg::new();
-}
-
-#[derive(Copy, Clone, Debug, Deserialize)]
-pub enum RtspLibrary {
-    Ffmpeg,
-    Retina,
-}
-
-impl Default for RtspLibrary {
-    fn default() -> Self {
-        RtspLibrary::Retina
-    }
-}
-
-impl std::str::FromStr for RtspLibrary {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "ffmpeg" => RtspLibrary::Ffmpeg,
-            "retina" => RtspLibrary::Retina,
-            _ => bail!("unknown RTSP library {:?}", s),
-        })
-    }
-}
-
-impl RtspLibrary {
-    pub fn opener(&self) -> &'static dyn Opener {
-        match self {
-            RtspLibrary::Ffmpeg => &*FFMPEG,
-            RtspLibrary::Retina => &RETINA,
-        }
-    }
-}
-
-#[cfg(test)]
-pub enum Source<'a> {
-    /// A filename, for testing.
-    File(&'a str),
-
-    /// An RTSP stream, for production use.
-    Rtsp {
-        url: Url,
-        username: Option<String>,
-        password: Option<String>,
-        transport: Transport,
-        session_group: Arc<retina::client::SessionGroup>,
-    },
-}
-
-#[cfg(not(test))]
-pub enum Source {
-    /// An RTSP stream, for production use.
-    Rtsp {
-        url: Url,
-        username: Option<String>,
-        password: Option<String>,
-        transport: Transport,
-        session_group: Arc<retina::client::SessionGroup>,
-    },
-}
-
+/// Opens a RTSP stream. This is a trait for test injection.
 pub trait Opener: Send + Sync {
-    fn open(&self, label: String, src: Source)
-        -> Result<(h264::ExtraData, Box<dyn Stream>), Error>;
+    /// Opens the given RTSP URL.
+    ///
+    /// Note: despite the blocking interface, this expects to be called from
+    /// a tokio runtime with IO and time enabled. Takes the
+    /// [`tokio::runtime::Runtime`] rather than using
+    /// `tokio::runtime::Handle::current()` because `Runtime::block_on` can
+    /// drive IO and timers while `Handle::block_on` can not.
+    fn open<'a>(
+        &self,
+        rt: &'a tokio::runtime::Runtime,
+        label: String,
+        url: Url,
+        options: retina::client::SessionOptions,
+    ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn Stream + 'a>), Error>;
 }
 
-pub struct VideoFrame<'a> {
+pub struct VideoFrame {
     pub pts: i64,
 
     /// An estimate of the duration of the frame, or zero.
@@ -100,308 +41,54 @@ pub struct VideoFrame<'a> {
     pub duration: i32,
 
     pub is_key: bool,
-    pub data: &'a [u8],
+    pub data: Bytes,
 }
 
 pub trait Stream: Send {
     fn next(&mut self) -> Result<VideoFrame, Error>;
 }
 
-pub struct Ffmpeg {}
+pub struct RealOpener;
 
-impl Ffmpeg {
-    fn new() -> Ffmpeg {
-        START_FFMPEG.call_once(|| {
-            ffmpeg::Ffmpeg::new();
-        });
-        Ffmpeg {}
-    }
-}
+pub const OPENER: RealOpener = RealOpener;
 
-impl Opener for Ffmpeg {
-    fn open(
+impl Opener for RealOpener {
+    fn open<'a>(
         &self,
+        rt: &'a tokio::runtime::Runtime,
         label: String,
-        src: Source,
-    ) -> Result<(h264::ExtraData, Box<dyn Stream>), Error> {
-        use ffmpeg::avformat::InputFormatContext;
-        let mut input = match src {
-            #[cfg(test)]
-            Source::File(filename) => {
-                let mut open_options = ffmpeg::avutil::Dictionary::new();
-
-                // Work around https://github.com/scottlamb/moonfire-nvr/issues/10
-                open_options
-                    .set(cstr!("advanced_editlist"), cstr!("false"))
-                    .unwrap();
-                let url = format!("file:{}", filename);
-                let i = InputFormatContext::open(
-                    &CString::new(url.clone()).unwrap(),
-                    &mut open_options,
-                )?;
-                if !open_options.empty() {
-                    warn!(
-                        "{}: While opening URL {}, some options were not understood: {}",
-                        &label, url, open_options
-                    );
-                }
-                i
-            }
-            Source::Rtsp {
-                url,
-                username,
-                password,
-                transport,
-                ..
-            } => {
-                let mut open_options = ffmpeg::avutil::Dictionary::new();
-                open_options
-                    .set(
-                        cstr!("rtsp_transport"),
-                        match transport {
-                            Transport::Tcp => cstr!("tcp"),
-                            Transport::Udp => cstr!("udp"),
-                        },
-                    )
-                    .unwrap();
-                open_options
-                    .set(cstr!("user-agent"), cstr!("moonfire-nvr"))
-                    .unwrap();
-
-                // 10-second socket timeout, in microseconds.
-                open_options
-                    .set(cstr!("stimeout"), cstr!("10000000"))
-                    .unwrap();
-
-                // Without this option, the first packet has an incorrect pts.
-                // https://trac.ffmpeg.org/ticket/5018
-                open_options
-                    .set(cstr!("fflags"), cstr!("nobuffer"))
-                    .unwrap();
-
-                // Moonfire NVR currently only supports video, so receiving audio is wasteful.
-                // It also triggers <https://github.com/scottlamb/moonfire-nvr/issues/36>.
-                open_options
-                    .set(cstr!("allowed_media_types"), cstr!("video"))
-                    .unwrap();
-
-                let mut url_with_credentials = url.clone();
-                if let Some(u) = username.as_deref() {
-                    url_with_credentials
-                        .set_username(u)
-                        .map_err(|_| format_err!("unable to set username on url {}", url))?;
-                }
-                url_with_credentials
-                    .set_password(password.as_deref())
-                    .map_err(|_| format_err!("unable to set password on url {}", url))?;
-                let i = InputFormatContext::open(
-                    &CString::new(url_with_credentials.as_str())?,
-                    &mut open_options,
-                )?;
-                if !open_options.empty() {
-                    warn!(
-                        "{}: While opening URL {}, some options were not understood: {}",
-                        &label, url, open_options
-                    );
-                }
-                i
-            }
-        };
-
-        input.find_stream_info()?;
-
-        // Find the video stream.
-        let mut video_i = None;
-        {
-            let s = input.streams();
-            for i in 0..s.len() {
-                if s.get(i).codecpar().codec_type().is_video() {
-                    video_i = Some(i);
-                    break;
-                }
-            }
-        }
-        let video_i = match video_i {
-            Some(i) => i,
-            None => bail!("no video stream"),
-        };
-
-        let video = input.streams().get(video_i);
-        let codec = video.codecpar();
-        let codec_id = codec.codec_id();
-        if !codec_id.is_h264() {
-            bail!("stream's video codec {:?} is not h264", codec_id);
-        }
-        let tb = video.time_base();
-        if tb.num != 1 || tb.den != 90000 {
-            bail!(
-                "video stream has timebase {}/{}; expected 1/90000",
-                tb.num,
-                tb.den
-            );
-        }
-        let dims = codec.dims();
-        let extra_data = h264::ExtraData::parse(
-            codec.extradata(),
-            u16::try_from(dims.width)?,
-            u16::try_from(dims.height)?,
-        )?;
-        let need_transform = extra_data.need_transform;
-        let stream = Box::new(FfmpegStream {
-            input,
-            video_i,
-            data: Vec::new(),
-            need_transform,
-        });
-        Ok((extra_data, stream))
-    }
-}
-
-struct FfmpegStream {
-    input: ffmpeg::avformat::InputFormatContext<'static>,
-    video_i: usize,
-    data: Vec<u8>,
-    need_transform: bool,
-}
-
-impl Stream for FfmpegStream {
-    fn next(&mut self) -> Result<VideoFrame, Error> {
-        let pkt = loop {
-            let pkt = self.input.read_frame()?;
-            if pkt.stream_index() == self.video_i {
-                break pkt;
-            }
-        };
-        let data = pkt
-            .data()
-            .ok_or_else(|| format_err!("packet with no data"))?;
-        if self.need_transform {
-            h264::transform_sample_data(data, &mut self.data)?;
-        } else {
-            // This copy isn't strictly necessary, but this path is only taken in testing anyway.
-            self.data.clear();
-            self.data.extend_from_slice(data);
-        }
-        let pts = pkt.pts().ok_or_else(|| format_err!("packet with no pts"))?;
-        Ok(VideoFrame {
-            pts,
-            is_key: pkt.is_key(),
-            duration: pkt.duration(),
-            data: &self.data,
-        })
-    }
-}
-
-pub struct RetinaOpener {}
-
-pub const RETINA: RetinaOpener = RetinaOpener {};
-
-impl Opener for RetinaOpener {
-    fn open(
-        &self,
-        label: String,
-        src: Source,
-    ) -> Result<(h264::ExtraData, Box<dyn Stream>), Error> {
-        let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
-        let (frame_tx, frame_rx) = tokio::sync::mpsc::channel(1);
-        let handle = tokio::runtime::Handle::current();
-        let (url, options) = match src {
-            #[cfg(test)]
-            Source::File(_) => bail!("Retina doesn't support .mp4 files"),
-            Source::Rtsp {
-                url,
-                username,
-                password,
-                transport,
-                session_group,
-            } => (
-                url,
-                retina::client::SessionOptions::default()
-                    .creds(match (username, password) {
-                        (None, None) => None,
-                        (Some(username), password) => Some(Credentials {
-                            username,
-                            password: password.unwrap_or_default(),
-                        }),
-                        _ => bail!("must supply username when supplying password"),
-                    })
-                    .transport(transport)
-                    .session_group(session_group)
-                    .user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION"))),
-            ),
-        };
-
-        handle.spawn(async move {
-            let r = tokio::time::timeout(RETINA_TIMEOUT, RetinaOpener::play(url, options)).await;
-            let (mut session, video_params, first_frame) =
-                match r.unwrap_or_else(|_| Err(format_err!("timeout opening stream"))) {
-                    Err(e) => {
-                        let _ = startup_tx.send(Err(e));
-                        return;
-                    }
-                    Ok((s, p, f)) => (s, p, f),
-                };
-            if startup_tx.send(Ok(video_params)).is_err() {
-                return;
-            }
-            if frame_tx.send(Ok(first_frame)).await.is_err() {
-                return;
-            }
-
-            // Read following frames.
-            let mut deadline = tokio::time::Instant::now() + RETINA_TIMEOUT;
-            loop {
-                match tokio::time::timeout_at(deadline, session.next()).await {
-                    Err(_) => {
-                        let _ = frame_tx
-                            .send(Err(format_err!("timeout getting next frame")))
-                            .await;
-                        return;
-                    }
-                    Ok(Some(Err(e))) => {
-                        let _ = frame_tx.send(Err(e.into())).await;
-                        return;
-                    }
-                    Ok(None) => break,
-                    Ok(Some(Ok(CodecItem::VideoFrame(v)))) => {
-                        if let Some(p) = v.new_parameters {
-                            // TODO: we could start a new recording without dropping the connection.
-                            let _ = frame_tx.send(Err(format_err!("parameter; change: {:?}", p)));
-                            return;
-                        }
-                        deadline = tokio::time::Instant::now() + RETINA_TIMEOUT;
-                        if v.loss > 0 {
-                            log::warn!(
-                                "{}: lost {} RTP packets @ {}",
-                                &label,
-                                v.loss,
-                                v.start_ctx()
-                            );
-                        }
-                        if frame_tx.send(Ok(v)).await.is_err() {
-                            return; // other end died.
-                        }
-                    }
-                    Ok(Some(Ok(_))) => {}
-                }
-            }
-        });
-        let video_params = handle.block_on(startup_rx)??;
-        let dims = video_params.pixel_dimensions();
-        let extra_data = h264::ExtraData::parse(
-            video_params.extra_data(),
-            u16::try_from(dims.0)?,
-            u16::try_from(dims.1)?,
-        )?;
+        url: Url,
+        options: retina::client::SessionOptions,
+    ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn Stream + 'a>), Error> {
+        let options = options.user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
+        let (session, video_params, first_frame) = rt.block_on(tokio::time::timeout(
+            RETINA_TIMEOUT,
+            RetinaStream::play(url, options),
+        ))??;
+        let extra_data = h264::parse_extra_data(video_params.extra_data())?;
         let stream = Box::new(RetinaStream {
-            frame_rx,
-            frame: None,
+            rt,
+            label,
+            session,
+            first_frame: Some(first_frame),
         });
         Ok((extra_data, stream))
     }
 }
 
-impl RetinaOpener {
+struct RetinaStream<'a> {
+    rt: &'a tokio::runtime::Runtime,
+    label: String,
+    session: Pin<Box<Demuxed>>,
+
+    /// The first frame, if not yet returned from `next`.
+    ///
+    /// This frame is special because we sometimes need to fetch it as part of getting the video
+    /// parameters.
+    first_frame: Option<retina::codec::VideoFrame>,
+}
+
+impl<'a> RetinaStream<'a> {
     /// Plays to first frame. No timeout; that's the caller's responsibility.
     async fn play(
         url: Url,
@@ -459,27 +146,119 @@ impl RetinaOpener {
             first_frame,
         ))
     }
+
+    /// Fetches a non-initial frame.
+    async fn fetch_next_frame(
+        label: &str,
+        mut session: Pin<&mut Demuxed>,
+    ) -> Result<retina::codec::VideoFrame, Error> {
+        loop {
+            match session.next().await.transpose()? {
+                None => bail!("end of stream"),
+                Some(CodecItem::VideoFrame(v)) => {
+                    if let Some(p) = v.new_parameters {
+                        // TODO: we could start a new recording without dropping the connection.
+                        bail!("parameter change: {:?}", p);
+                    }
+                    if v.loss > 0 {
+                        log::warn!(
+                            "{}: lost {} RTP packets @ {}",
+                            &label,
+                            v.loss,
+                            v.start_ctx()
+                        );
+                    }
+                    return Ok(v);
+                }
+                Some(_) => {}
+            }
+        }
+    }
 }
 
-struct RetinaStream {
-    frame_rx: tokio::sync::mpsc::Receiver<Result<retina::codec::VideoFrame, Error>>,
-    frame: Option<retina::codec::VideoFrame>,
-}
-
-impl Stream for RetinaStream {
+impl<'a> Stream for RetinaStream<'a> {
     fn next(&mut self) -> Result<VideoFrame, Error> {
-        // TODO: use Option::insert after bumping MSRV to 1.53.
-        self.frame = Some(
-            self.frame_rx
-                .blocking_recv()
-                .ok_or_else(|| format_err!("stream ended"))??,
-        );
-        let frame = self.frame.as_ref().unwrap();
+        let frame = self.first_frame.take().map(Ok).unwrap_or_else(|| {
+            self.rt
+                .block_on(tokio::time::timeout(
+                    RETINA_TIMEOUT,
+                    RetinaStream::fetch_next_frame(&self.label, self.session.as_mut()),
+                ))
+                .map_err(|_| format_err!("timeout getting next frame"))?
+        })?;
         Ok(VideoFrame {
             pts: frame.timestamp.elapsed(),
             duration: 0,
             is_key: frame.is_random_access_point,
-            data: &frame.data()[..],
+            data: frame.into_data(),
         })
+    }
+}
+
+#[cfg(test)]
+pub mod testutil {
+    use super::*;
+    use std::convert::TryFrom;
+    use std::io::Cursor;
+
+    pub struct Mp4Stream {
+        reader: mp4::Mp4Reader<Cursor<Vec<u8>>>,
+        h264_track_id: u32,
+        next_sample_id: u32,
+    }
+
+    impl Mp4Stream {
+        /// Opens a stream, with a return matching that expected by [`Opener`].
+        pub fn open(path: &str) -> Result<(db::VideoSampleEntryToInsert, Self), Error> {
+            let f = std::fs::read(path)?;
+            let len = f.len();
+            let reader = mp4::Mp4Reader::read_header(Cursor::new(f), u64::try_from(len)?)?;
+            let h264_track = match reader
+                .tracks()
+                .values()
+                .find(|t| matches!(t.media_type(), Ok(mp4::MediaType::H264)))
+            {
+                None => bail!("expected a H.264 track"),
+                Some(t) => t,
+            };
+            let extra_data = h264::parse_extra_data(&h264_track.extra_data()?[..])?;
+            let h264_track_id = h264_track.track_id();
+            let stream = Mp4Stream {
+                reader,
+                h264_track_id,
+                next_sample_id: 1,
+            };
+            Ok((extra_data, stream))
+        }
+
+        pub fn duration(&self) -> u64 {
+            self.reader.moov.mvhd.duration
+        }
+
+        /// Returns the edit list from the H.264 stream, if any.
+        pub fn elst(&self) -> Option<&mp4::mp4box::elst::ElstBox> {
+            let h264_track = self.reader.tracks().get(&self.h264_track_id).unwrap();
+            h264_track
+                .trak
+                .edts
+                .as_ref()
+                .and_then(|edts| edts.elst.as_ref())
+        }
+    }
+
+    impl Stream for Mp4Stream {
+        fn next(&mut self) -> Result<VideoFrame, Error> {
+            let sample = self
+                .reader
+                .read_sample(self.h264_track_id, self.next_sample_id)?
+                .ok_or_else(|| format_err!("End of file"))?;
+            self.next_sample_id += 1;
+            Ok(VideoFrame {
+                pts: sample.start_time as i64,
+                duration: sample.duration as i32,
+                is_key: sample.is_sync,
+                data: sample.bytes,
+            })
+        }
     }
 }

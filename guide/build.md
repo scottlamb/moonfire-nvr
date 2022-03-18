@@ -168,15 +168,6 @@ Linux VM and filesystem overlay.
 
 To build the server, you will need the following C libraries installed:
 
-*   [ffmpeg](http://ffmpeg.org/) version 2.x or 3.x, including `libavutil`,
-    `libavcodec` (to inspect H.264 frames), and `libavformat` (to connect to
-    RTSP servers and write `.mp4` files).
-
-    Note ffmpeg library versions older than 55.1.101, along with all versions of
-    the competing project [libav](http://libav.org), don't support socket
-    timeouts for RTSP. For reliable reconnections on error, it's strongly
-    recommended to use ffmpeg library versions >= 55.1.101.
-
 *   [SQLite3](https://www.sqlite.org/), at least version 3.8.2.
     (You can skip this if you compile with `--features=bundled` and
     don't mind the `moonfire-nvr sql` command not working.)
@@ -213,7 +204,7 @@ On macOS with [Homebrew](https://brew.sh/) and Xcode installed, try the
 following command:
 
 ```console
-$ brew install ffmpeg node
+$ brew install node
 ```
 
 Next, you need Rust 1.56+ and Cargo. The easiest way to install them is by

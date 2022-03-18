@@ -1079,19 +1079,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "moonfire-ffmpeg"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccb80b7a294201578799191cd66b077cd90cef999f461edc7919465fc118a135"
-dependencies = [
- "cc",
- "libc",
- "log",
- "parking_lot",
- "pkg-config",
-]
-
-[[package]]
 name = "moonfire-nvr"
 version = "0.7.2"
 dependencies = [
@@ -1100,7 +1087,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "clap",
- "cstr",
  "cursive",
  "failure",
  "fnv",
@@ -1115,7 +1101,7 @@ dependencies = [
  "memchr",
  "moonfire-base",
  "moonfire-db",
- "moonfire-ffmpeg",
+ "mp4",
  "mylog",
  "nix",
  "nom",
@@ -1142,6 +1128,19 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "mp4"
+version = "0.9.2"
+source = "git+https://github.com/scottlamb/mp4-rust?branch=moonfire#388fb47653305fb153de4e11d8cbc6f307e02ee5"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "num-rational",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -1228,6 +1227,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f93ab6289c7b344a8a9f60f88d80aa20032336fe78da341afc91c8a2341fc75f"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-complex"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1264,8 +1274,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d41702bd167c2df5520b384281bc111a4b5efcf7fbc4c9c222c815b07e0a6a6a"
 dependencies = [
  "autocfg",
+ "num-bigint",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]

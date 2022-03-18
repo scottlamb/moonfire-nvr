@@ -270,7 +270,7 @@ async fn inner(
         let streams = l.streams_by_id().len();
         let env = streamer::Environment {
             db: &db,
-            opener: config.rtsp_library.opener(),
+            opener: &crate::stream::OPENER,
             shutdown_rx: &shutdown_rx,
         };
 
@@ -302,7 +302,6 @@ async fn inner(
         }
 
         // Then start up streams.
-        let handle = tokio::runtime::Handle::current();
         let l = db.lock();
         for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
             if stream.config.mode != db::json::STREAM_MODE_RECORD {
@@ -340,14 +339,10 @@ async fn inner(
             )?;
             info!("Starting streamer for {}", streamer.short_name());
             let name = format!("s-{}", streamer.short_name());
-            let handle = handle.clone();
             streamers.push(
                 thread::Builder::new()
                     .name(name)
-                    .spawn(move || {
-                        let _enter = handle.enter();
-                        streamer.run();
-                    })
+                    .spawn(move || streamer.run())
                     .expect("can't create thread"),
             );
         }
@@ -397,7 +392,9 @@ async fn inner(
         let db = db.clone();
         move || {
             for streamer in streamers.drain(..) {
-                streamer.join().unwrap();
+                if streamer.join().is_err() {
+                    log::error!("streamer panicked; look for previous panic message");
+                }
             }
             if let Some(mut ss) = syncers {
                 // The syncers shut down when all channels to them have been dropped.

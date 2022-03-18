@@ -10,6 +10,7 @@ use cursive::Cursive;
 use db::writer;
 use failure::{bail, format_err, Error, ResultExt};
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use url::Url;
 
@@ -202,32 +203,44 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
     }
 }
 
-fn press_test_inner(url: Url, username: String, password: String) -> Result<String, Error> {
-    let pass_creds = !username.is_empty();
-    let (extra_data, _stream) = stream::FFMPEG.open(
+fn press_test_inner(
+    url: Url,
+    username: String,
+    password: String,
+    transport: retina::client::Transport,
+) -> Result<String, Error> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .enable_io()
+        .build()?;
+    let _guard = rt.enter();
+    let (extra_data, _stream) = stream::OPENER.open(
+        &rt,
         "test stream".to_owned(),
-        stream::Source::Rtsp {
-            url,
-            username: if pass_creds { Some(username) } else { None },
-            password: if pass_creds { Some(password) } else { None },
-            transport: retina::client::Transport::Tcp,
-            session_group: Default::default(),
-        },
+        url,
+        retina::client::SessionOptions::default()
+            .creds(if username.is_empty() {
+                None
+            } else {
+                Some(retina::client::Credentials { username, password })
+            })
+            .transport(transport),
     )?;
     Ok(format!(
         "{}x{} video stream",
-        extra_data.entry.width, extra_data.entry.height
+        extra_data.width, extra_data.height
     ))
 }
 
 fn press_test(siv: &mut Cursive, t: db::StreamType) {
     let c = get_camera(siv);
-    let url = &c.streams[t.index()].url;
-    let url = match parse_url(url, &["rtsp"]) {
+    let s = &c.streams[t.index()];
+    let transport = retina::client::Transport::from_str(s.rtsp_transport).unwrap_or_default();
+    let url = match parse_url(&s.url, &["rtsp"]) {
         Ok(Some(u)) => u,
         _ => panic!(
             "test button should only be enabled with valid URL, not {:?}",
-            url
+            &s.url
         ),
     };
     let username = c.username;
@@ -248,7 +261,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
     siv.set_fps(5);
     let sink = siv.cb_sink().clone();
     ::std::thread::spawn(move || {
-        let r = press_test_inner(url.clone(), username, password);
+        let r = press_test_inner(url.clone(), username, password, transport);
         sink.send(Box::new(move |siv: &mut Cursive| {
             // Polling is no longer necessary.
             siv.set_fps(0);

@@ -125,9 +125,6 @@ information:
     beginning of the session.  Some cameras omit them entirely depending on
     firmware version, as noted in
     [this forum post](https://www.cctvforum.com/topic/40914-video-sync-with-hikvision-ipcams-tech-query-about-rtcp/).
-    Additionally, Moonfire NVR currently uses ffmpeg's libavformat for RTSP
-    protocol handling; this library exposes these reports in a limited
-    fashion.
 
 The camera records video frames as in the diagram below:
 

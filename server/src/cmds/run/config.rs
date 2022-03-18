@@ -35,13 +35,6 @@ pub struct ConfigFile {
     /// Defaults to the number of cores on the system.
     #[serde(default)]
     pub worker_threads: Option<usize>,
-
-    /// RTSP library to use for fetching the cameras' video stream.
-    /// Moonfire NVR is in the process of switching from `ffmpeg` (used since
-    /// the beginning of the project) to `retina` (a pure-Rust RTSP library
-    /// developed by Moonfire NVR's author).
-    #[serde(default)]
-    pub rtsp_library: crate::stream::RtspLibrary,
 }
 
 /// Per-bind configuration.

@@ -110,11 +110,15 @@ where
     }
 
     /// Runs the streamer; blocks.
-    /// Note that when using Retina as the RTSP library, this must be called
-    /// within a tokio runtime context; see [tokio::runtime::Handle].
     pub fn run(&mut self) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .unwrap();
+        let _guard = rt.enter();
         while self.shutdown_rx.check().is_ok() {
-            if let Err(e) = self.run_once() {
+            if let Err(e) = self.run_once(&rt) {
                 let sleep_time = time::Duration::seconds(1);
                 warn!(
                     "{}: sleeping for {} after error: {}",
@@ -128,7 +132,7 @@ where
         info!("{}: shutting down", self.short_name);
     }
 
-    fn run_once(&mut self) -> Result<(), Error> {
+    fn run_once(&mut self, rt: &tokio::runtime::Runtime) -> Result<(), Error> {
         info!("{}: Opening input: {}", self.short_name, self.url.as_str());
         let clocks = self.db.clocks();
 
@@ -142,7 +146,7 @@ where
                     max_expires.saturating_duration_since(tokio::time::Instant::now()),
                     status.num_sessions
                 );
-                tokio::runtime::Handle::current().block_on(async {
+                rt.block_on(async {
                     tokio::select! {
                         _ = self.session_group.await_stale_sessions(&status) => Ok(()),
                         _ = self.shutdown_rx.as_future() => Err(base::shutdown::ShutdownError),
@@ -160,28 +164,26 @@ where
         let (extra_data, mut stream) = {
             let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url.as_str()));
             self.opener.open(
+                rt,
                 self.short_name.clone(),
-                stream::Source::Rtsp {
-                    url: self.url.clone(),
-                    username: if self.username.is_empty() {
+                self.url.clone(),
+                retina::client::SessionOptions::default()
+                    .creds(if self.username.is_empty() {
                         None
                     } else {
-                        Some(self.username.clone())
-                    },
-                    password: if self.password.is_empty() {
-                        None
-                    } else {
-                        Some(self.password.clone())
-                    },
-                    transport: self.transport,
-                    session_group: self.session_group.clone(),
-                },
+                        Some(retina::client::Credentials {
+                            username: self.username.clone(),
+                            password: self.password.clone(),
+                        })
+                    })
+                    .transport(self.transport)
+                    .session_group(self.session_group.clone()),
             )?
         };
         let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();
         let video_sample_entry_id = {
             let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
-            self.db.lock().insert_video_sample_entry(extra_data.entry)?
+            self.db.lock().insert_video_sample_entry(extra_data)?
         };
         let mut seen_key_frame = false;
 
@@ -253,7 +255,7 @@ where
             let _t = TimerGuard::new(&clocks, || format!("writing {} bytes", pkt.data.len()));
             w.write(
                 &mut self.shutdown_rx,
-                pkt.data,
+                &pkt.data[..],
                 local_time,
                 pkt.pts,
                 pkt.is_key,
@@ -270,8 +272,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::h264;
-    use crate::stream::{self, Opener, Stream};
+    use crate::stream::{self, Stream};
     use base::clock::{self, Clocks};
     use db::{recording, testutil, CompositeId};
     use failure::{bail, Error};
@@ -353,20 +354,19 @@ mod tests {
 
     struct MockOpener {
         expected_url: url::Url,
-        streams: Mutex<Vec<(h264::ExtraData, Box<dyn stream::Stream>)>>,
+        streams: Mutex<Vec<(db::VideoSampleEntryToInsert, Box<dyn stream::Stream>)>>,
         shutdown_tx: Mutex<Option<base::shutdown::Sender>>,
     }
 
     impl stream::Opener for MockOpener {
         fn open(
             &self,
+            _rt: &tokio::runtime::Runtime,
             _label: String,
-            src: stream::Source,
-        ) -> Result<(h264::ExtraData, Box<dyn stream::Stream>), Error> {
-            match src {
-                stream::Source::Rtsp { url, .. } => assert_eq!(&url, &self.expected_url),
-                stream::Source::File(_) => panic!("expected rtsp url"),
-            };
+            url: url::Url,
+            _options: retina::client::SessionOptions,
+        ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn stream::Stream>), Error> {
+            assert_eq!(&url, &self.expected_url);
             let mut l = self.streams.lock();
             match l.pop() {
                 Some(stream) => {
@@ -412,13 +412,10 @@ mod tests {
         let clocks = clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0));
         clocks.sleep(time::Duration::seconds(86400)); // to 2015-04-26 00:00:00 UTC
 
-        let (extra_data, stream) = stream::FFMPEG
-            .open(
-                "test".to_owned(),
-                stream::Source::File("src/testdata/clip.mp4"),
-            )
-            .unwrap();
-        let mut stream = ProxyingStream::new(clocks.clone(), time::Duration::seconds(2), stream);
+        let (extra_data, stream) =
+            stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
+        let mut stream =
+            ProxyingStream::new(clocks.clone(), time::Duration::seconds(2), Box::new(stream));
         stream.ts_offset = 123456; // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::max_value();
         stream.pkts_left = u32::max_value();
