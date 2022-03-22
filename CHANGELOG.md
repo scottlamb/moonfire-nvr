@@ -6,7 +6,7 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## unreleased
+## `v0.7.3` (2022-03-22)
 
 *   security fix: check the `Origin` header on live stream WebSocket requests
     to avoid cross-site WebSocket hijacking (CSWSH).
