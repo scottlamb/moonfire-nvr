@@ -27,6 +27,36 @@ impl Service {
         uuid: Uuid,
         stream_type: db::StreamType,
     ) -> ResponseResult {
+        // Web browsers must supply origin:
+        // https://datatracker.ietf.org/doc/html/rfc6455#section-4.1
+        //
+        // If present, verify it. Chrome doesn't honor the `s=` cookie's
+        // `SameSite=Lax` setting for WebSocket requests, so this is the sole
+        // protection against CSWSH.
+        // https://christian-schneider.net/CrossSiteWebSocketHijacking.html
+        if let Some(origin) = req.headers().get(http::header::ORIGIN) {
+            let host = req
+                .headers()
+                .get(header::HOST)
+                .ok_or_else(|| bad_req("missing Host header"))?;
+            let origin = origin
+                .to_str()
+                .ok()
+                .and_then(|o| url::Url::parse(o).ok())
+                .ok_or_else(|| bad_req("bad Origin header"))?;
+            let origin_host = origin
+                .host_str()
+                .ok_or_else(|| bad_req("bad Origin header"))?;
+            if host.as_bytes() != origin_host.as_bytes() {
+                bail_t!(
+                    PermissionDenied,
+                    "cross-origin request forbidden (request host {:?}, origin host {:?})",
+                    host,
+                    origin_host
+                );
+            }
+        }
+
         if !caller.permissions.view_video {
             bail_t!(PermissionDenied, "view_video required");
         }

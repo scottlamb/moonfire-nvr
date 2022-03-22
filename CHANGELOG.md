@@ -6,6 +6,12 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## unreleased
+
+*   security fix: check the `Origin` header on live stream WebSocket requests
+    to avoid cross-site WebSocket hijacking (CSWSH).
+*   RTSP connections always use the Retina library rather than FFmpeg.
+
 ## `v0.7.2` (2022-03-16)
 
 *   introduce a configuration file `/etc/moonfire-nvr.toml`; you will need
