@@ -214,7 +214,7 @@ fn press_test_inner(
         .enable_io()
         .build()?;
     let _guard = rt.enter();
-    let (extra_data, _stream) = stream::OPENER.open(
+    let (extra_data, stream) = stream::OPENER.open(
         &rt,
         "test stream".to_owned(),
         url,
@@ -227,8 +227,10 @@ fn press_test_inner(
             .transport(transport),
     )?;
     Ok(format!(
-        "{}x{} video stream",
-        extra_data.width, extra_data.height
+        "{}x{} video stream served by tool {:?}",
+        extra_data.width,
+        extra_data.height,
+        stream.tool(),
     ))
 }
 

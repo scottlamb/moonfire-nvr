@@ -45,6 +45,7 @@ pub struct VideoFrame {
 }
 
 pub trait Stream: Send {
+    fn tool(&self) -> Option<&retina::client::Tool>;
     fn next(&mut self) -> Result<VideoFrame, Error>;
 }
 
@@ -63,7 +64,7 @@ impl Opener for RealOpener {
         let options = options.user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
         let (session, video_params, first_frame) = rt.block_on(tokio::time::timeout(
             RETINA_TIMEOUT,
-            RetinaStream::play(url, options),
+            RetinaStream::play(&label, url, options),
         ))??;
         let extra_data = h264::parse_extra_data(video_params.extra_data())?;
         let stream = Box::new(RetinaStream {
@@ -91,6 +92,7 @@ struct RetinaStream<'a> {
 impl<'a> RetinaStream<'a> {
     /// Plays to first frame. No timeout; that's the caller's responsibility.
     async fn play(
+        label: &str,
         url: Url,
         options: retina::client::SessionOptions,
     ) -> Result<
@@ -102,6 +104,7 @@ impl<'a> RetinaStream<'a> {
         Error,
     > {
         let mut session = retina::client::Session::describe(url, options).await?;
+        log::debug!("connected to {:?}, tool {:?}", label, session.tool());
         let (video_i, mut video_params) = session
             .streams()
             .iter()
@@ -177,6 +180,10 @@ impl<'a> RetinaStream<'a> {
 }
 
 impl<'a> Stream for RetinaStream<'a> {
+    fn tool(&self) -> Option<&retina::client::Tool> {
+        Pin::into_inner(self.session.as_ref()).tool()
+    }
+
     fn next(&mut self) -> Result<VideoFrame, Error> {
         let frame = self.first_frame.take().map(Ok).unwrap_or_else(|| {
             self.rt
@@ -247,6 +254,10 @@ pub mod testutil {
     }
 
     impl Stream for Mp4Stream {
+        fn tool(&self) -> Option<&retina::client::Tool> {
+            None
+        }
+
         fn next(&mut self) -> Result<VideoFrame, Error> {
             let sample = self
                 .reader

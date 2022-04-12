@@ -13,6 +13,7 @@ use fnv::FnvHashMap;
 use hyper::service::{make_service_fn, service_fn};
 use log::error;
 use log::{info, warn};
+use retina::client::SessionGroup;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -324,7 +325,9 @@ async fn inner(
             let syncer = syncers.get(&sample_file_dir_id).unwrap();
             let session_group = session_groups_by_camera
                 .entry(camera.id)
-                .or_default()
+                .or_insert_with(|| {
+                    Arc::new(SessionGroup::default().named(camera.short_name.clone()))
+                })
                 .clone();
             let mut streamer = streamer::Streamer::new(
                 &env,

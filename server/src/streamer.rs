@@ -313,6 +313,10 @@ mod tests {
     }
 
     impl Stream for ProxyingStream {
+        fn tool(&self) -> Option<&retina::client::Tool> {
+            self.inner.tool()
+        }
+
         fn next(&mut self) -> Result<stream::VideoFrame, Error> {
             if self.pkts_left == 0 {
                 bail!("end of stream");
