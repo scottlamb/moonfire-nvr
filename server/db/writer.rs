@@ -1226,6 +1226,7 @@ mod tests {
                 recording::Time(2),
                 i32::max_value() as i64 + 1,
                 true,
+                video_sample_entry_id,
             )
             .unwrap_err();
         assert!(e.to_string().contains("excessive pts jump"));
@@ -1265,13 +1266,7 @@ mod tests {
                     rfc6381_codec: "avc1.000000".to_owned(),
                 })
                 .unwrap();
-        let mut w = Writer::new(
-            &h.dir,
-            &h.db,
-            &h.channel,
-            testutil::TEST_STREAM_ID,
-            video_sample_entry_id,
-        );
+        let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID);
         let f = MockFile::new();
         h.dir.expect(MockDirAction::Create(
             CompositeId::new(1, 0),
@@ -1285,8 +1280,15 @@ mod tests {
             Ok(3)
         })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
-        w.write(&mut h.shutdown_rx, b"123", recording::Time(2), 0, true)
-            .unwrap();
+        w.write(
+            &mut h.shutdown_rx,
+            b"123",
+            recording::Time(2),
+            0,
+            true,
+            video_sample_entry_id,
+        )
+        .unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
         w.close(Some(1), None).unwrap();
         assert!(h.syncer.iter(&h.syncer_rx)); // AsyncSave
@@ -1311,8 +1313,15 @@ mod tests {
             Ok(1)
         })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
-        w.write(&mut h.shutdown_rx, b"4", recording::Time(3), 1, true)
-            .unwrap();
+        w.write(
+            &mut h.shutdown_rx,
+            b"4",
+            recording::Time(3),
+            1,
+            true,
+            video_sample_entry_id,
+        )
+        .unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
         h.dir.expect(MockDirAction::Unlink(
             CompositeId::new(1, 0),
@@ -1385,13 +1394,7 @@ mod tests {
                     rfc6381_codec: "avc1.000000".to_owned(),
                 })
                 .unwrap();
-        let mut w = Writer::new(
-            &h.dir,
-            &h.db,
-            &h.channel,
-            testutil::TEST_STREAM_ID,
-            video_sample_entry_id,
-        );
+        let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID);
         h.dir.expect(MockDirAction::Create(
             CompositeId::new(1, 0),
             Box::new(|_id| Err(nix::Error::EIO)),
@@ -1422,8 +1425,15 @@ mod tests {
         })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Err(eio()))));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
-        w.write(&mut h.shutdown_rx, b"1234", recording::Time(1), 0, true)
-            .unwrap();
+        w.write(
+            &mut h.shutdown_rx,
+            b"1234",
+            recording::Time(1),
+            0,
+            true,
+            video_sample_entry_id,
+        )
+        .unwrap();
         h.dir
             .expect(MockDirAction::Sync(Box::new(|| Err(nix::Error::EIO))));
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
@@ -1477,13 +1487,7 @@ mod tests {
                     rfc6381_codec: "avc1.000000".to_owned(),
                 })
                 .unwrap();
-        let mut w = Writer::new(
-            &h.dir,
-            &h.db,
-            &h.channel,
-            testutil::TEST_STREAM_ID,
-            video_sample_entry_id,
-        );
+        let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID);
         let f = MockFile::new();
         h.dir.expect(MockDirAction::Create(
             CompositeId::new(1, 0),
@@ -1497,8 +1501,15 @@ mod tests {
             Ok(3)
         })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
-        w.write(&mut h.shutdown_rx, b"123", recording::Time(2), 0, true)
-            .unwrap();
+        w.write(
+            &mut h.shutdown_rx,
+            b"123",
+            recording::Time(2),
+            0,
+            true,
+            video_sample_entry_id,
+        )
+        .unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
         w.close(Some(1), None).unwrap();
 
@@ -1524,8 +1535,15 @@ mod tests {
             Ok(1)
         })));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
-        w.write(&mut h.shutdown_rx, b"4", recording::Time(3), 1, true)
-            .unwrap();
+        w.write(
+            &mut h.shutdown_rx,
+            b"4",
+            recording::Time(3),
+            1,
+            true,
+            video_sample_entry_id,
+        )
+        .unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
         h.dir.expect(MockDirAction::Unlink(
             CompositeId::new(1, 0),
@@ -1609,13 +1627,7 @@ mod tests {
                     rfc6381_codec: "avc1.000000".to_owned(),
                 })
                 .unwrap();
-        let mut w = Writer::new(
-            &h.dir,
-            &h.db,
-            &h.channel,
-            testutil::TEST_STREAM_ID,
-            video_sample_entry_id,
-        );
+        let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID);
         let f1 = MockFile::new();
         h.dir.expect(MockDirAction::Create(
             CompositeId::new(1, 0),
@@ -1635,6 +1647,7 @@ mod tests {
             recording::Time(recording::TIME_UNITS_PER_SEC),
             0,
             true,
+            video_sample_entry_id,
         )
         .unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
@@ -1650,13 +1663,7 @@ mod tests {
         h.db.clocks().sleep(time::Duration::seconds(30));
 
         // Then, a 1-byte recording.
-        let mut w = Writer::new(
-            &h.dir,
-            &h.db,
-            &h.channel,
-            testutil::TEST_STREAM_ID,
-            video_sample_entry_id,
-        );
+        let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID);
         let f2 = MockFile::new();
         h.dir.expect(MockDirAction::Create(
             CompositeId::new(1, 1),
@@ -1676,6 +1683,7 @@ mod tests {
             recording::Time(31 * recording::TIME_UNITS_PER_SEC),
             1,
             true,
+            video_sample_entry_id,
         )
         .unwrap();
         h.dir.expect(MockDirAction::Sync(Box::new(|| Ok(()))));
