@@ -13,13 +13,13 @@ Each release is tagged in Git and on the Docker repository
     drop the connection to the camera when it changes video parameters, instead
     continuing the run seamlessly.
 
-## `v0.7.3` (2022-03-22)
+## 0.7.3 (2022-03-22)
 
 *   security fix: check the `Origin` header on live stream WebSocket requests
     to avoid cross-site WebSocket hijacking (CSWSH).
 *   RTSP connections always use the Retina library rather than FFmpeg.
 
-## `v0.7.2` (2022-03-16)
+## 0.7.2 (2022-03-16)
 
 *   introduce a configuration file `/etc/moonfire-nvr.toml`; you will need
     to create one when upgrading.
@@ -36,13 +36,13 @@ Each release is tagged in Git and on the Docker repository
 *   progress on [#70](https://github.com/scottlamb/moonfire-nvr/issues/184):
     shrink the binary from 154 MiB to 70 MiB by reducing debugging information.
 
-## `v0.7.1` (2021-10-27)
+## 0.7.1 (2021-10-27)
 
 *   bugfix: editing a camera from `nvr config` would erroneously clear the
     sample file directory associated with its streams.
 *   RTSP transport (TCP or UDP) can be set per-stream from `nvr config`.
 
-## `v0.7.0` (2021-10-27)
+## 0.7.0 (2021-10-27)
 
 *   [schema version 7](guide/schema.md#version-7)
 *   Changes to the [API](guide/api.md):
@@ -69,7 +69,7 @@ Each release is tagged in Git and on the Docker repository
             currently may be either absent or the string `record`.
     *   Added `POST /api/users/<id>` for altering a user's UI preferences.
 
-## `v0.6.7` (2021-10-20)
+## 0.6.7 (2021-10-20)
 
 *   trim whitespace when detecting time zone by reading `/etc/timezone`.
 *   (Retina 0.3.2) better `TEARDOWN` handling with the default
@@ -81,7 +81,7 @@ Each release is tagged in Git and on the Docker repository
     `--rtsp-library=retina` (see
     [scottlamb/retina#25](https://github.com/scottlamb/retina/25)).
 
-## `v0.6.6` (2021-09-23)
+## 0.6.6 (2021-09-23)
 
 *   fix [#146](https://github.com/scottlamb/moonfire-nvr/issues/146): "init
     segment fetch error" when browsers have cached data from `v0.6.4` and
@@ -106,7 +106,7 @@ Each release is tagged in Git and on the Docker repository
     impatient to get fast results with ctrl-C when running interactively, rather
     than having to use `SIGKILL` from another terminal.
 
-## `v0.6.5` (2021-08-13)
+## 0.6.5 (2021-08-13)
 
 *   UI: improve video aspect ratio handling. Live streams formerly worked
     around a Firefox pixel aspect ratio bug by forcing all videos to 16:9, which
@@ -120,7 +120,7 @@ Each release is tagged in Git and on the Docker repository
     `GET_PARAMETERS` as a RTSP keepalive. GW Security cameras would ignored
     the latter, causing Moonfire NVR to drop the connection every minute.
 
-## `v0.6.4` (2021-06-28)
+## 0.6.4 (2021-06-28)
 
 *   Default to a new pure-Rust RTSP library, `retina`. If you hit problems, you
     can switch back via `--rtsp-library=ffmpeg`. Please report a bug if this
@@ -128,7 +128,7 @@ Each release is tagged in Git and on the Docker repository
 *   Correct the pixel aspect ratio of 9:16 sub streams (eg a standard 16x9
     camera rotated 90 degrees) in the same way as 16:9 sub streams.
 
-## `v0.6.3` (2021-03-31)
+## 0.6.3 (2021-03-31)
 
 *   New user interface! Besides a more modern appearance, it has better
     error handling and an experimental live view UI.
@@ -138,7 +138,7 @@ Each release is tagged in Git and on the Docker repository
     not calculated properly there might be unexpected gaps or overlaps in
     playback.
 
-## `v0.6.2` (2021-03-12)
+## 0.6.2 (2021-03-12)
 
 *   Fix panics when a stream's PTS has extreme jumps
     ([#113](https://github.com/scottlamb/moonfire-nvr/issues/113))
@@ -148,7 +148,7 @@ Each release is tagged in Git and on the Docker repository
     `moonfire-nvr check --delete-orphan-rows` command from actually deleting
     rows.
 
-## `v0.6.1` (2021-02-16)
+## 0.6.1 (2021-02-16)
 
 *   Improve the server's error messages on the console and in logs.
 *   Switch the UI build from the `yarn` package manager to `npm`.
@@ -160,7 +160,7 @@ Each release is tagged in Git and on the Docker repository
 *   Fix mangled favicons
     ([#105](https://github.com/scottlamb/moonfire-nvr/issues/105))
 
-## `v0.6.0` (2021-01-22)
+## 0.6.0 (2021-01-22)
 
 This is the first tagged version and first Docker image release. I chose the
 version number 0.6.0 to match the current schema version 6.
