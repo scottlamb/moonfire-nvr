@@ -41,7 +41,6 @@
     "editor.defaultFormatter": "matklad.rust-analyzer"
     //"editor.defaultFormatter": null
   },
-  "rust-analyzer.inlayHints.enable": false,
   "markdown.extension.list.indentationSize": "inherit",
   "markdown.extension.toc.unorderedList.marker": "*",
 
