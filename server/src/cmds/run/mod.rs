@@ -303,6 +303,7 @@ async fn inner(
         }
 
         // Then start up streams.
+        let handle = tokio::runtime::Handle::current();
         let l = db.lock();
         for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
             if stream.config.mode != db::json::STREAM_MODE_RECORD {
@@ -342,10 +343,14 @@ async fn inner(
             )?;
             info!("Starting streamer for {}", streamer.short_name());
             let name = format!("s-{}", streamer.short_name());
+            let handle = handle.clone();
             streamers.push(
                 thread::Builder::new()
                     .name(name)
-                    .spawn(move || streamer.run())
+                    .spawn(move || {
+                        let _enter = handle.enter();
+                        streamer.run();
+                    })
                     .expect("can't create thread"),
             );
         }

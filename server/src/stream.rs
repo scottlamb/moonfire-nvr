@@ -20,17 +20,13 @@ pub trait Opener: Send + Sync {
     /// Opens the given RTSP URL.
     ///
     /// Note: despite the blocking interface, this expects to be called from
-    /// a tokio runtime with IO and time enabled. Takes the
-    /// [`tokio::runtime::Runtime`] rather than using
-    /// `tokio::runtime::Handle::current()` because `Runtime::block_on` can
-    /// drive IO and timers while `Handle::block_on` can not.
-    fn open<'a>(
+    /// the context of a multithreaded tokio runtime with IO and time enabled.
+    fn open(
         &self,
-        rt: &'a tokio::runtime::Runtime,
         label: String,
         url: Url,
         options: retina::client::SessionOptions,
-    ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn Stream + 'a>), Error>;
+    ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn Stream>), Error>;
 }
 
 pub struct VideoFrame {
@@ -54,33 +50,33 @@ pub struct RealOpener;
 pub const OPENER: RealOpener = RealOpener;
 
 impl Opener for RealOpener {
-    fn open<'a>(
+    fn open(
         &self,
-        rt: &'a tokio::runtime::Runtime,
         label: String,
         url: Url,
         options: retina::client::SessionOptions,
-    ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn Stream + 'a>), Error> {
+    ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn Stream>), Error> {
         let options = options.user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
-        let (session, video_params, first_frame) = rt.block_on(tokio::time::timeout(
+        let rt_handle = tokio::runtime::Handle::current();
+        let (session, video_params, first_frame) = rt_handle.block_on(tokio::time::timeout(
             RETINA_TIMEOUT,
             RetinaStream::play(&label, url, options),
         ))??;
         let extra_data = h264::parse_extra_data(video_params.extra_data())?;
         let stream = Box::new(RetinaStream {
-            rt,
             label,
             session,
+            rt_handle,
             first_frame: Some(first_frame),
         });
         Ok((extra_data, stream))
     }
 }
 
-struct RetinaStream<'a> {
-    rt: &'a tokio::runtime::Runtime,
+struct RetinaStream {
     label: String,
     session: Pin<Box<Demuxed>>,
+    rt_handle: tokio::runtime::Handle,
 
     /// The first frame, if not yet returned from `next`.
     ///
@@ -89,7 +85,7 @@ struct RetinaStream<'a> {
     first_frame: Option<retina::codec::VideoFrame>,
 }
 
-impl<'a> RetinaStream<'a> {
+impl RetinaStream {
     /// Plays to first frame. No timeout; that's the caller's responsibility.
     async fn play(
         label: &str,
@@ -179,14 +175,14 @@ impl<'a> RetinaStream<'a> {
     }
 }
 
-impl<'a> Stream for RetinaStream<'a> {
+impl Stream for RetinaStream {
     fn tool(&self) -> Option<&retina::client::Tool> {
         Pin::into_inner(self.session.as_ref()).tool()
     }
 
     fn next(&mut self) -> Result<VideoFrame, Error> {
         let frame = self.first_frame.take().map(Ok).unwrap_or_else(|| {
-            self.rt
+            self.rt_handle
                 .block_on(tokio::time::timeout(
                     RETINA_TIMEOUT,
                     RetinaStream::fetch_next_frame(&self.label, self.session.as_mut()),

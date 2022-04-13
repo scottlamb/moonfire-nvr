@@ -36,6 +36,13 @@ pub fn run(args: Args) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let db = Arc::new(db::Database::new(clocks, conn, true)?);
 
+    // This runtime is needed by the "Test" button in the camera config.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_io()
+        .enable_time()
+        .build()?;
+    let _enter = rt.enter();
+
     let mut siv = cursive::default();
     //siv.add_global_callback('q', |s| s.quit());
 

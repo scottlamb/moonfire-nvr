@@ -204,18 +204,14 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
 }
 
 fn press_test_inner(
+    handle: tokio::runtime::Handle,
     url: Url,
     username: String,
     password: String,
     transport: retina::client::Transport,
 ) -> Result<String, Error> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .enable_io()
-        .build()?;
-    let _guard = rt.enter();
+    let _enter = handle.enter();
     let (extra_data, stream) = stream::OPENER.open(
-        &rt,
         "test stream".to_owned(),
         url,
         retina::client::SessionOptions::default()
@@ -262,8 +258,12 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
     // siv.cb_sink doesn't actually wake up the event loop. Tell siv to poll, as a workaround.
     siv.set_fps(5);
     let sink = siv.cb_sink().clone();
+
+    // Note: this expects to be called within a tokio runtime. Currently this
+    // is set up by the config subcommand's run().
+    let handle = tokio::runtime::Handle::current();
     ::std::thread::spawn(move || {
-        let r = press_test_inner(url.clone(), username, password, transport);
+        let r = press_test_inner(handle, url.clone(), username, password, transport);
         sink.send(Box::new(move |siv: &mut Cursive| {
             // Polling is no longer necessary.
             siv.set_fps(0);

@@ -110,15 +110,12 @@ where
     }
 
     /// Runs the streamer; blocks.
+    ///
+    /// Note: despite the blocking interface, this expects to be called from
+    /// the context of a multithreaded tokio runtime with IO and time enabled.
     pub fn run(&mut self) {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_io()
-            .enable_time()
-            .build()
-            .unwrap();
-        let _guard = rt.enter();
         while self.shutdown_rx.check().is_ok() {
-            if let Err(e) = self.run_once(&rt) {
+            if let Err(e) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
                 warn!(
                     "{}: sleeping for {} after error: {}",
@@ -132,10 +129,11 @@ where
         info!("{}: shutting down", self.short_name);
     }
 
-    fn run_once(&mut self, rt: &tokio::runtime::Runtime) -> Result<(), Error> {
+    fn run_once(&mut self) -> Result<(), Error> {
         info!("{}: Opening input: {}", self.short_name, self.url.as_str());
         let clocks = self.db.clocks();
 
+        let handle = tokio::runtime::Handle::current();
         let mut waited = false;
         loop {
             let status = self.session_group.stale_sessions();
@@ -146,7 +144,7 @@ where
                     max_expires.saturating_duration_since(tokio::time::Instant::now()),
                     status.num_sessions
                 );
-                rt.block_on(async {
+                handle.block_on(async {
                     tokio::select! {
                         _ = self.session_group.await_stale_sessions(&status) => Ok(()),
                         _ = self.shutdown_rx.as_future() => Err(base::shutdown::ShutdownError),
@@ -164,7 +162,6 @@ where
         let (extra_data, mut stream) = {
             let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url.as_str()));
             self.opener.open(
-                rt,
                 self.short_name.clone(),
                 self.url.clone(),
                 retina::client::SessionOptions::default()
@@ -365,7 +362,6 @@ mod tests {
     impl stream::Opener for MockOpener {
         fn open(
             &self,
-            _rt: &tokio::runtime::Runtime,
             _label: String,
             url: url::Url,
             _options: retina::client::SessionOptions,
@@ -409,8 +405,8 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn basic() {
+    #[tokio::test]
+    async fn basic() {
         testutil::init();
         // 2015-04-25 00:00:00 UTC
         let clocks = clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0));
