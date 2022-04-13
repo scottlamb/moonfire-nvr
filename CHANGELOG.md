@@ -6,9 +6,11 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
-## unreleased
+## 0.7.4 (2022-04-13)
 
-*   upgrade to Retina 0.3.9, improving camera interop and diagnostics
+*   upgrade to Retina 0.3.9, improving camera interop and diagnostics.
+    Fixes [#213](https://github.com/scottlamb/moonfire-nvr/issues/213),
+    [#209](https://github.com/scottlamb/moonfire-nvr/issues/209).
 *   [#217](https://github.com/scottlamb/moonfire-nvr/issues/217): no longer
     drop the connection to the camera when it changes video parameters, instead
     continuing the run seamlessly.
