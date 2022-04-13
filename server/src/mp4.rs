@@ -2278,21 +2278,18 @@ mod tests {
     }
 
     fn copy_mp4_to_db(db: &mut TestDb<RealClocks>) {
-        let (extra_data, input) =
-            stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
+        let input = stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
         let mut input: Box<dyn stream::Stream> = Box::new(input);
 
         // 2015-04-26 00:00:00 UTC.
         const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
-        let video_sample_entry_id = db.db.lock().insert_video_sample_entry(extra_data).unwrap();
+        let video_sample_entry_id = db
+            .db
+            .lock()
+            .insert_video_sample_entry(input.video_sample_entry().clone())
+            .unwrap();
         let dir = db.dirs_by_stream_id.get(&TEST_STREAM_ID).unwrap();
-        let mut output = writer::Writer::new(
-            dir,
-            &db.db,
-            &db.syncer_channel,
-            TEST_STREAM_ID,
-            video_sample_entry_id,
-        );
+        let mut output = writer::Writer::new(dir, &db.db, &db.syncer_channel, TEST_STREAM_ID);
 
         // end_pts is the pts of the end of the most recent frame (start + duration).
         // It's needed because dir::Writer calculates a packet's duration from its pts and the
@@ -2321,6 +2318,7 @@ mod tests {
                     frame_time,
                     pkt.pts,
                     pkt.is_key,
+                    video_sample_entry_id,
                 )
                 .unwrap();
             end_pts = Some(pkt.pts + i64::from(pkt.duration));
@@ -2391,9 +2389,8 @@ mod tests {
     }
 
     fn compare_mp4s(new_filename: &str, pts_offset: i64, shorten: i64) {
-        let (orig_extra_data, orig) =
-            stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
-        let (new_extra_data, new) = stream::testutil::Mp4Stream::open(new_filename).unwrap();
+        let orig = stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
+        let new = stream::testutil::Mp4Stream::open(new_filename).unwrap();
 
         if pts_offset > 0 {
             // The mp4 crate doesn't interpret the edit list. Manually inspect it.
@@ -2410,7 +2407,7 @@ mod tests {
 
         let mut orig: Box<dyn stream::Stream> = Box::new(orig);
         let mut new: Box<dyn stream::Stream> = Box::new(new);
-        assert_eq!(orig_extra_data, new_extra_data);
+        assert_eq!(orig.video_sample_entry(), new.video_sample_entry());
         let mut final_durations = None;
         for i in 0.. {
             let orig_pkt = match orig.next() {

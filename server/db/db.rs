@@ -156,7 +156,7 @@ impl VideoSampleEntry {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct VideoSampleEntryToInsert {
     pub data: Vec<u8>,
     pub rfc6381_codec: String,

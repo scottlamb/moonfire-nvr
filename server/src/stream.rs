@@ -8,7 +8,7 @@ use failure::format_err;
 use failure::{bail, Error};
 use futures::StreamExt;
 use retina::client::Demuxed;
-use retina::codec::{CodecItem, VideoParameters};
+use retina::codec::CodecItem;
 use std::pin::Pin;
 use std::result::Result;
 use url::Url;
@@ -26,7 +26,7 @@ pub trait Opener: Send + Sync {
         label: String,
         url: Url,
         options: retina::client::SessionOptions,
-    ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn Stream>), Error>;
+    ) -> Result<Box<dyn Stream>, Error>;
 }
 
 pub struct VideoFrame {
@@ -38,10 +38,13 @@ pub struct VideoFrame {
 
     pub is_key: bool,
     pub data: Bytes,
+
+    pub new_video_sample_entry: bool,
 }
 
 pub trait Stream: Send {
     fn tool(&self) -> Option<&retina::client::Tool>;
+    fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert;
     fn next(&mut self) -> Result<VideoFrame, Error>;
 }
 
@@ -55,22 +58,20 @@ impl Opener for RealOpener {
         label: String,
         url: Url,
         options: retina::client::SessionOptions,
-    ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn Stream>), Error> {
+    ) -> Result<Box<dyn Stream>, Error> {
         let options = options.user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
         let rt_handle = tokio::runtime::Handle::current();
-        let (inner, video_params, first_frame) = rt_handle
+        let (inner, first_frame) = rt_handle
             .block_on(rt_handle.spawn(tokio::time::timeout(
                 RETINA_TIMEOUT,
                 RetinaStreamInner::play(label, url, options),
             )))
             .expect("RetinaStream::play task panicked, see earlier error")??;
-        let extra_data = h264::parse_extra_data(video_params.extra_data())?;
-        let stream = Box::new(RetinaStream {
+        Ok(Box::new(RetinaStream {
             inner: Some(inner),
             rt_handle,
             first_frame: Some(first_frame),
-        });
-        Ok((extra_data, stream))
+        }))
     }
 }
 
@@ -102,6 +103,7 @@ struct RetinaStream {
 struct RetinaStreamInner {
     label: String,
     session: Demuxed,
+    video_sample_entry: db::VideoSampleEntryToInsert,
 }
 
 impl RetinaStreamInner {
@@ -110,7 +112,7 @@ impl RetinaStreamInner {
         label: String,
         url: Url,
         options: retina::client::SessionOptions,
-    ) -> Result<(Box<Self>, Box<VideoParameters>, retina::codec::VideoFrame), Error> {
+    ) -> Result<(Box<Self>, retina::codec::VideoFrame), Error> {
         let mut session = retina::client::Session::describe(url, options).await?;
         log::debug!("connected to {:?}, tool {:?}", &label, session.tool());
         let (video_i, mut video_params) = session
@@ -151,12 +153,17 @@ impl RetinaStreamInner {
                 Some(Ok(_)) => {}
             }
         };
-        let self_ = Box::new(Self { label, session });
-        Ok((
-            self_,
-            video_params.ok_or_else(|| format_err!("couldn't find H.264 parameters"))?,
-            first_frame,
-        ))
+        let video_sample_entry = h264::parse_extra_data(
+            video_params
+                .ok_or_else(|| format_err!("couldn't find H.264 parameters"))?
+                .extra_data(),
+        )?;
+        let self_ = Box::new(Self {
+            label,
+            session,
+            video_sample_entry,
+        });
+        Ok((self_, first_frame))
     }
 
     /// Fetches a non-initial frame.
@@ -167,10 +174,6 @@ impl RetinaStreamInner {
             match Pin::new(&mut self.session).next().await.transpose()? {
                 None => bail!("end of stream"),
                 Some(CodecItem::VideoFrame(v)) => {
-                    if let Some(p) = v.new_parameters {
-                        // TODO: we could start a new recording without dropping the connection.
-                        bail!("parameter change: {:?}", p);
-                    }
                     if v.loss > 0 {
                         log::warn!(
                             "{}: lost {} RTP packets @ {}",
@@ -192,25 +195,48 @@ impl Stream for RetinaStream {
         self.inner.as_ref().unwrap().session.tool()
     }
 
+    fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert {
+        &self.inner.as_ref().unwrap().video_sample_entry
+    }
+
     fn next(&mut self) -> Result<VideoFrame, Error> {
-        let frame = self.first_frame.take().map(Ok).unwrap_or_else(move || {
-            let inner = self.inner.take().unwrap();
-            let (inner, frame) = self
-                .rt_handle
-                .block_on(self.rt_handle.spawn(tokio::time::timeout(
-                    RETINA_TIMEOUT,
-                    inner.fetch_next_frame(),
-                )))
-                .expect("fetch_next_frame task panicked, see earlier error")
-                .map_err(|_| format_err!("timeout getting next frame"))??;
-            self.inner = Some(inner);
-            Ok::<_, failure::Error>(frame)
-        })?;
+        let (frame, new_video_sample_entry) = self
+            .first_frame
+            .take()
+            .map(|f| Ok((f, false)))
+            .unwrap_or_else(move || {
+                let inner = self.inner.take().unwrap();
+                let (mut inner, mut frame) = self
+                    .rt_handle
+                    .block_on(self.rt_handle.spawn(tokio::time::timeout(
+                        RETINA_TIMEOUT,
+                        inner.fetch_next_frame(),
+                    )))
+                    .expect("fetch_next_frame task panicked, see earlier error")
+                    .map_err(|_| format_err!("timeout getting next frame"))??;
+                let mut new_video_sample_entry = false;
+                if let Some(p) = frame.new_parameters.take() {
+                    let video_sample_entry = h264::parse_extra_data(p.extra_data())?;
+                    if video_sample_entry != inner.video_sample_entry {
+                        log::debug!(
+                            "{}: parameter change:\nold: {:?}\nnew: {:?}",
+                            &inner.label,
+                            &inner.video_sample_entry,
+                            &video_sample_entry
+                        );
+                        inner.video_sample_entry = video_sample_entry;
+                        new_video_sample_entry = true;
+                    }
+                };
+                self.inner = Some(inner);
+                Ok::<_, failure::Error>((frame, new_video_sample_entry))
+            })?;
         Ok(VideoFrame {
             pts: frame.timestamp.elapsed(),
             duration: 0,
             is_key: frame.is_random_access_point,
             data: frame.into_data(),
+            new_video_sample_entry,
         })
     }
 }
@@ -225,11 +251,12 @@ pub mod testutil {
         reader: mp4::Mp4Reader<Cursor<Vec<u8>>>,
         h264_track_id: u32,
         next_sample_id: u32,
+        video_sample_entry: db::VideoSampleEntryToInsert,
     }
 
     impl Mp4Stream {
         /// Opens a stream, with a return matching that expected by [`Opener`].
-        pub fn open(path: &str) -> Result<(db::VideoSampleEntryToInsert, Self), Error> {
+        pub fn open(path: &str) -> Result<Self, Error> {
             let f = std::fs::read(path)?;
             let len = f.len();
             let reader = mp4::Mp4Reader::read_header(Cursor::new(f), u64::try_from(len)?)?;
@@ -241,14 +268,15 @@ pub mod testutil {
                 None => bail!("expected a H.264 track"),
                 Some(t) => t,
             };
-            let extra_data = h264::parse_extra_data(&h264_track.extra_data()?[..])?;
+            let video_sample_entry = h264::parse_extra_data(&h264_track.extra_data()?[..])?;
             let h264_track_id = h264_track.track_id();
             let stream = Mp4Stream {
                 reader,
                 h264_track_id,
                 next_sample_id: 1,
+                video_sample_entry,
             };
-            Ok((extra_data, stream))
+            Ok(stream)
         }
 
         pub fn duration(&self) -> u64 {
@@ -282,7 +310,12 @@ pub mod testutil {
                 duration: sample.duration as i32,
                 is_key: sample.is_sync,
                 data: sample.bytes,
+                new_video_sample_entry: false,
             })
+        }
+
+        fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert {
+            &self.video_sample_entry
         }
     }
 }

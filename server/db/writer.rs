@@ -615,7 +615,6 @@ pub struct Writer<'a, C: Clocks + Clone, D: DirWriter> {
     db: &'a db::Database<C>,
     channel: &'a SyncerChannel<D::File>,
     stream_id: i32,
-    video_sample_entry_id: i32,
     state: WriterState<D::File>,
 }
 
@@ -634,6 +633,7 @@ struct InnerWriter<F: FileWriter> {
     r: Arc<Mutex<db::RecordingToInsert>>,
     e: recording::SampleIndexEncoder,
     id: CompositeId,
+    video_sample_entry_id: i32,
 
     hasher: blake3::Hasher,
 
@@ -680,26 +680,34 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
         db: &'a db::Database<C>,
         channel: &'a SyncerChannel<D::File>,
         stream_id: i32,
-        video_sample_entry_id: i32,
     ) -> Self {
         Writer {
             dir,
             db,
             channel,
             stream_id,
-            video_sample_entry_id,
             state: WriterState::Unopened,
         }
     }
 
-    /// Opens a new writer.
+    /// Opens a new recording if not already open.
+    ///
     /// On successful return, `self.state` will be `WriterState::Open(w)` with `w` violating the
     /// invariant that `unindexed_sample` is `Some`. The caller (`write`) is responsible for
     /// correcting this.
-    fn open(&mut self, shutdown_rx: &mut base::shutdown::Receiver) -> Result<(), Error> {
+    fn open(
+        &mut self,
+        shutdown_rx: &mut base::shutdown::Receiver,
+        video_sample_entry_id: i32,
+    ) -> Result<(), Error> {
         let prev = match self.state {
             WriterState::Unopened => None,
-            WriterState::Open(_) => return Ok(()),
+            WriterState::Open(ref o) => {
+                if o.video_sample_entry_id != video_sample_entry_id {
+                    bail!("inconsistent video_sample_entry_id");
+                }
+                return Ok(());
+            }
             WriterState::Closed(prev) => Some(prev),
         };
         let (id, r) = self.db.lock().add_recording(
@@ -709,7 +717,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
                 start: prev
                     .map(|p| p.end)
                     .unwrap_or(recording::Time(i64::max_value())),
-                video_sample_entry_id: self.video_sample_entry_id,
+                video_sample_entry_id,
                 flags: db::RecordingFlags::Growing as i32,
                 ..Default::default()
             },
@@ -726,6 +734,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             hasher: blake3::Hasher::new(),
             local_start: recording::Time(i64::max_value()),
             unindexed_sample: None,
+            video_sample_entry_id,
         });
         Ok(())
     }
@@ -747,8 +756,9 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
         local_time: recording::Time,
         pts_90k: i64,
         is_key: bool,
+        video_sample_entry_id: i32,
     ) -> Result<(), Error> {
-        self.open(shutdown_rx)?;
+        self.open(shutdown_rx, video_sample_entry_id)?;
         let w = match self.state {
             WriterState::Open(ref mut w) => w,
             _ => unreachable!(),
@@ -816,9 +826,14 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
         Ok(())
     }
 
-    /// Cleanly closes the writer, using a supplied pts of the next sample for the last sample's
-    /// duration (if known). If `close` is not called, the `Drop` trait impl will close the trait,
-    /// swallowing errors and using a zero duration for the last sample.
+    /// Cleanly closes a single recording within this writer, using a supplied
+    /// pts of the next sample for the last sample's duration (if known).
+    ///
+    /// The `Writer` may be used again, causing another recording to be created
+    /// within the same run.
+    ///
+    /// If the `Writer` is dropped without `close`, the `Drop` trait impl will
+    /// close, swallowing errors and using a zero duration for the last sample.
     pub fn close(&mut self, next_pts: Option<i64>, reason: Option<String>) -> Result<(), Error> {
         self.state = match mem::replace(&mut self.state, WriterState::Unopened) {
             WriterState::Open(w) => {
@@ -1179,13 +1194,7 @@ mod tests {
                     rfc6381_codec: "avc1.000000".to_owned(),
                 })
                 .unwrap();
-        let mut w = Writer::new(
-            &h.dir,
-            &h.db,
-            &h.channel,
-            testutil::TEST_STREAM_ID,
-            video_sample_entry_id,
-        );
+        let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID);
         h.dir.expect(MockDirAction::Create(
             CompositeId::new(1, 0),
             Box::new(|_id| Err(nix::Error::EIO)),
@@ -1200,8 +1209,15 @@ mod tests {
         ));
         f.expect(MockFileAction::Write(Box::new(|_| Ok(1))));
         f.expect(MockFileAction::SyncAll(Box::new(|| Ok(()))));
-        w.write(&mut h.shutdown_rx, b"1", recording::Time(1), 0, true)
-            .unwrap();
+        w.write(
+            &mut h.shutdown_rx,
+            b"1",
+            recording::Time(1),
+            0,
+            true,
+            video_sample_entry_id,
+        )
+        .unwrap();
 
         let e = w
             .write(

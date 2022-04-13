@@ -159,7 +159,7 @@ where
             }
         }
 
-        let (extra_data, mut stream) = {
+        let mut stream = {
             let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url.as_str()));
             self.opener.open(
                 self.short_name.clone(),
@@ -178,34 +178,33 @@ where
             )?
         };
         let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();
-        let video_sample_entry_id = {
+        let mut video_sample_entry_id = {
             let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
-            self.db.lock().insert_video_sample_entry(extra_data)?
+            self.db
+                .lock()
+                .insert_video_sample_entry(stream.video_sample_entry().clone())?
         };
         let mut seen_key_frame = false;
 
-        // Seconds since epoch at which to next rotate.
+        // Seconds since epoch at which to next rotate. See comment at start
+        // of while loop.
         let mut rotate: Option<i64> = None;
-        let mut w = writer::Writer::new(
-            &self.dir,
-            &self.db,
-            &self.syncer_channel,
-            self.stream_id,
-            video_sample_entry_id,
-        );
+        let mut w = writer::Writer::new(&self.dir, &self.db, &self.syncer_channel, self.stream_id);
         while self.shutdown_rx.check().is_ok() {
-            let pkt = {
+            // `rotate` should now be set iff `w` has an open recording.
+
+            let frame = {
                 let _t = TimerGuard::new(&clocks, || "getting next packet");
                 stream.next()
             };
-            let pkt = match pkt {
-                Ok(p) => p,
+            let frame = match frame {
+                Ok(f) => f,
                 Err(e) => {
                     let _ = w.close(None, Some(e.to_string()));
                     return Err(e);
                 }
             };
-            if !seen_key_frame && !pkt.is_key {
+            if !seen_key_frame && !frame.is_key {
                 continue;
             } else if !seen_key_frame {
                 debug!("{}: have first key frame", self.short_name);
@@ -214,10 +213,24 @@ where
             let frame_realtime = clocks.monotonic() + realtime_offset;
             let local_time = recording::Time::new(frame_realtime);
             rotate = if let Some(r) = rotate {
-                if frame_realtime.sec > r && pkt.is_key {
-                    trace!("{}: write on normal rotation", self.short_name);
+                if frame_realtime.sec > r && frame.is_key {
+                    trace!("{}: close on normal rotation", self.short_name);
                     let _t = TimerGuard::new(&clocks, || "closing writer");
-                    w.close(Some(pkt.pts), None)?;
+                    w.close(Some(frame.pts), None)?;
+                    None
+                } else if frame.new_video_sample_entry {
+                    if !frame.is_key {
+                        bail!("parameter change on non-key frame");
+                    }
+                    trace!("{}: close on parameter change", self.short_name);
+                    video_sample_entry_id = {
+                        let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
+                        self.db
+                            .lock()
+                            .insert_video_sample_entry(stream.video_sample_entry().clone())?
+                    };
+                    let _t = TimerGuard::new(&clocks, || "closing writer");
+                    w.close(Some(frame.pts), None)?;
                     None
                 } else {
                     Some(r)
@@ -249,13 +262,14 @@ where
                     r
                 }
             };
-            let _t = TimerGuard::new(&clocks, || format!("writing {} bytes", pkt.data.len()));
+            let _t = TimerGuard::new(&clocks, || format!("writing {} bytes", frame.data.len()));
             w.write(
                 &mut self.shutdown_rx,
-                &pkt.data[..],
+                &frame.data[..],
                 local_time,
-                pkt.pts,
-                pkt.is_key,
+                frame.pts,
+                frame.is_key,
+                video_sample_entry_id,
             )?;
             rotate = Some(r);
         }
@@ -314,6 +328,10 @@ mod tests {
             self.inner.tool()
         }
 
+        fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert {
+            self.inner.video_sample_entry()
+        }
+
         fn next(&mut self) -> Result<stream::VideoFrame, Error> {
             if self.pkts_left == 0 {
                 bail!("end of stream");
@@ -355,7 +373,7 @@ mod tests {
 
     struct MockOpener {
         expected_url: url::Url,
-        streams: Mutex<Vec<(db::VideoSampleEntryToInsert, Box<dyn stream::Stream>)>>,
+        streams: Mutex<Vec<Box<dyn stream::Stream>>>,
         shutdown_tx: Mutex<Option<base::shutdown::Sender>>,
     }
 
@@ -365,7 +383,7 @@ mod tests {
             _label: String,
             url: url::Url,
             _options: retina::client::SessionOptions,
-        ) -> Result<(db::VideoSampleEntryToInsert, Box<dyn stream::Stream>), Error> {
+        ) -> Result<Box<dyn stream::Stream>, Error> {
             assert_eq!(&url, &self.expected_url);
             let mut l = self.streams.lock();
             match l.pop() {
@@ -412,8 +430,7 @@ mod tests {
         let clocks = clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0));
         clocks.sleep(time::Duration::seconds(86400)); // to 2015-04-26 00:00:00 UTC
 
-        let (extra_data, stream) =
-            stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
+        let stream = stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
         let mut stream =
             ProxyingStream::new(clocks.clone(), time::Duration::seconds(2), Box::new(stream));
         stream.ts_offset = 123456; // starting pts of the input should be irrelevant
@@ -422,7 +439,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
         let opener = MockOpener {
             expected_url: url::Url::parse("rtsp://test-camera/main").unwrap(),
-            streams: Mutex::new(vec![(extra_data, Box::new(stream))]),
+            streams: Mutex::new(vec![Box::new(stream)]),
             shutdown_tx: Mutex::new(Some(shutdown_tx)),
         };
         let db = testutil::TestDb::new(clocks.clone());

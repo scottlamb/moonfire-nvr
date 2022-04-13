@@ -211,7 +211,7 @@ fn press_test_inner(
     transport: retina::client::Transport,
 ) -> Result<String, Error> {
     let _enter = handle.enter();
-    let (extra_data, stream) = stream::OPENER.open(
+    let stream = stream::OPENER.open(
         "test stream".to_owned(),
         url,
         retina::client::SessionOptions::default()
@@ -222,10 +222,17 @@ fn press_test_inner(
             })
             .transport(transport),
     )?;
+    let video_sample_entry = stream.video_sample_entry();
     Ok(format!(
-        "{}x{} video stream served by tool {:?}",
-        extra_data.width,
-        extra_data.height,
+        "codec: {}\n\
+         dimensions: {}x{}\n\
+         pixel aspect ratio: {}x{}\n\
+         tool: {:?}",
+        &video_sample_entry.rfc6381_codec,
+        video_sample_entry.width,
+        video_sample_entry.height,
+        video_sample_entry.pasp_h_spacing,
+        video_sample_entry.pasp_v_spacing,
         stream.tool(),
     ))
 }
