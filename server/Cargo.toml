@@ -5,6 +5,7 @@ authors = ["Scott Lamb <slamb@slamb.org>"]
 edition = "2018"
 resolver = "2"
 license-file = "../LICENSE.txt"
+rust-version = "1.57"
 
 [features]
 
