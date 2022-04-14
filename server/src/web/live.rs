@@ -19,6 +19,50 @@ use crate::{mp4, web::plain_response};
 
 use super::{bad_req, Caller, ResponseResult, Service};
 
+/// Checks the `Host` and `Origin` headers match, if the latter is supplied.
+///
+/// Web browsers must supply origin, according to [RFC 6455 section
+/// 4.1](https://datatracker.ietf.org/doc/html/rfc6455#section-4.1).
+/// It's not required for non-browser HTTP clients.
+///
+/// If present, verify it. Chrome doesn't honor the `s=` cookie's
+/// `SameSite=Lax` setting for WebSocket requests, so this is the sole
+/// protection against [CSWSH](https://christian-schneider.net/CrossSiteWebSocketHijacking.html).
+fn check_origin(headers: &header::HeaderMap) -> Result<(), super::HttpError> {
+    let origin_hdr = match headers.get(http::header::ORIGIN) {
+        None => return Ok(()),
+        Some(o) => o,
+    };
+    let host_hdr = headers
+        .get(header::HOST)
+        .ok_or_else(|| bad_req("missing Host header"))?;
+    let host_str = host_hdr.to_str().map_err(|_| bad_req("bad Host header"))?;
+
+    // Currently this ignores the port number. This is easiest and I think matches the browser's
+    // rules for when it sends a cookie, so it probably doesn't cause great security problems.
+    let host = match host_str.split_once(':') {
+        Some((host, _port)) => host,
+        None => host_str,
+    };
+    let origin_url = origin_hdr
+        .to_str()
+        .ok()
+        .and_then(|o| url::Url::parse(o).ok())
+        .ok_or_else(|| bad_req("bad Origin header"))?;
+    let origin_host = origin_url
+        .host_str()
+        .ok_or_else(|| bad_req("bad Origin header"))?;
+    if host != origin_host {
+        bail_t!(
+            PermissionDenied,
+            "cross-origin request forbidden (request host {:?}, origin {:?})",
+            host_hdr,
+            origin_hdr
+        );
+    }
+    Ok(())
+}
+
 impl Service {
     pub(super) fn stream_live_m4s(
         self: Arc<Self>,
@@ -27,36 +71,7 @@ impl Service {
         uuid: Uuid,
         stream_type: db::StreamType,
     ) -> ResponseResult {
-        // Web browsers must supply origin:
-        // https://datatracker.ietf.org/doc/html/rfc6455#section-4.1
-        //
-        // If present, verify it. Chrome doesn't honor the `s=` cookie's
-        // `SameSite=Lax` setting for WebSocket requests, so this is the sole
-        // protection against CSWSH.
-        // https://christian-schneider.net/CrossSiteWebSocketHijacking.html
-        if let Some(origin) = req.headers().get(http::header::ORIGIN) {
-            let host = req
-                .headers()
-                .get(header::HOST)
-                .ok_or_else(|| bad_req("missing Host header"))?;
-            let origin = origin
-                .to_str()
-                .ok()
-                .and_then(|o| url::Url::parse(o).ok())
-                .ok_or_else(|| bad_req("bad Origin header"))?;
-            let origin_host = origin
-                .host_str()
-                .ok_or_else(|| bad_req("bad Origin header"))?;
-            if host.as_bytes() != origin_host.as_bytes() {
-                bail_t!(
-                    PermissionDenied,
-                    "cross-origin request forbidden (request host {:?}, origin host {:?})",
-                    host,
-                    origin_host
-                );
-            }
-        }
-
+        check_origin(req.headers())?;
         if !caller.permissions.view_video {
             bail_t!(PermissionDenied, "view_video required");
         }
@@ -218,5 +233,36 @@ impl Service {
         mp4.append_into_vec(&mut v).await?;
         ws.send(tungstenite::Message::Binary(v)).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::TryInto;
+
+    use super::*;
+
+    #[test]
+    fn origin_port_8080_okay() {
+        // By default, Moonfire binds to port 8080. Make sure that specifying a port number works.
+        let mut hdrs = header::HeaderMap::new();
+        hdrs.insert(header::HOST, "nvr:8080".try_into().unwrap());
+        hdrs.insert(header::ORIGIN, "http://nvr:8080/".try_into().unwrap());
+        assert!(check_origin(&hdrs).is_ok());
+    }
+
+    #[test]
+    fn origin_missing_okay() {
+        let mut hdrs = header::HeaderMap::new();
+        hdrs.insert(header::HOST, "nvr".try_into().unwrap());
+        assert!(check_origin(&hdrs).is_ok());
+    }
+
+    #[test]
+    fn origin_mismatch_fails() {
+        let mut hdrs = header::HeaderMap::new();
+        hdrs.insert(header::HOST, "nvr".try_into().unwrap());
+        hdrs.insert(header::ORIGIN, "http://evil/".try_into().unwrap());
+        assert!(check_origin(&hdrs).is_err());
     }
 }
