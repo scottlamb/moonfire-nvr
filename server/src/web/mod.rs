@@ -196,7 +196,7 @@ impl Service {
             match FsDir::builder().for_path(&d) {
                 Err(e) => {
                     warn!(
-                        "Unable to load --ui-dir={}; will serve no static files: {}",
+                        "Unable to load ui dir {}; will serve no static files: {}",
                         d.display(),
                         e
                     );

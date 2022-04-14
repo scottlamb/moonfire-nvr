@@ -11,10 +11,9 @@ use super::{internal_server_err, not_found, ResponseResult, Service};
 impl Service {
     /// Serves a static file if possible.
     pub(super) async fn static_file(&self, req: Request<hyper::Body>) -> ResponseResult {
-        let dir = self
-            .ui_dir
-            .clone()
-            .ok_or_else(|| not_found("--ui-dir not configured; no static files available."))?;
+        let dir = self.ui_dir.clone().ok_or_else(|| {
+            not_found("ui dir not configured or missing; no static files available.")
+        })?;
         let static_req = match StaticFileRequest::parse(req.uri().path()) {
             None => return Err(not_found("static file not found")),
             Some(r) => r,
