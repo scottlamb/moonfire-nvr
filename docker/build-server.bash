@@ -28,7 +28,7 @@ ln -s /cargo-cache/{git,registry} ~/.cargo
 
 cd src/server
 time cargo test
-time cargo build --release
+time cargo build --profile=release-lto
 sudo install -m 755 ~/moonfire-nvr /usr/local/bin/moonfire-nvr
 
 ls -laFR /cargo-cache > /docker-build-debug/build-server/cargo-cache-after
