@@ -14,6 +14,8 @@ Each release is tagged in Git and on the Docker repository
 *   [#217](https://github.com/scottlamb/moonfire-nvr/issues/217): no longer
     drop the connection to the camera when it changes video parameters, instead
     continuing the run seamlessly.
+*   [#206](https://github.com/scottlamb/moonfire-nvr/issues/206#issuecomment-1086442543):
+    fix `teardown Sender shouldn't be dropped: RecvError(())` errors on shutdown.
 
 ## 0.7.3 (2022-03-22)
 
