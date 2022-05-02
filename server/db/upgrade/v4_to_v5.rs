@@ -139,7 +139,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             .extend_from_slice(&dir_uuid.0.as_bytes()[..]);
         match (open_id, open_uuid) {
             (Some(id), Some(uuid)) => {
-                let mut o = db_meta.last_complete_open.set_default();
+                let mut o = db_meta.last_complete_open.mut_or_insert_default();
                 o.id = id;
                 o.uuid.extend_from_slice(&uuid.0.as_bytes()[..]);
             }

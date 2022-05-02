@@ -352,7 +352,7 @@ impl SampleFileDir {
         meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
         meta.dir_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
         if let Some(o) = self.last_complete_open {
-            let open = meta.last_complete_open.set_default();
+            let open = meta.last_complete_open.mut_or_insert_default();
             open.id = o.id;
             open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
         }
@@ -1182,7 +1182,7 @@ impl LockedDatabase {
             }
             let mut expected_meta = dir.expected_meta(&self.uuid);
             if let Some(o) = self.open.as_ref() {
-                let open = expected_meta.in_progress_open.set_default();
+                let open = expected_meta.in_progress_open.mut_or_insert_default();
                 open.id = o.id;
                 open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
             }
@@ -1753,7 +1753,7 @@ impl LockedDatabase {
         {
             meta.db_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
             meta.dir_uuid.extend_from_slice(uuid_bytes);
-            let open = meta.in_progress_open.set_default();
+            let open = meta.in_progress_open.mut_or_insert_default();
             open.id = o.id;
             open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
         }

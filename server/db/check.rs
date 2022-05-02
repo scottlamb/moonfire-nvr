@@ -97,7 +97,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
             meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
             meta.dir_uuid.extend_from_slice(&dir_uuid.0.as_bytes()[..]);
             {
-                let o = meta.last_complete_open.set_default();
+                let o = meta.last_complete_open.mut_or_insert_default();
                 o.id = open_id;
                 o.uuid.extend_from_slice(&open_uuid.0.as_bytes()[..]);
             }

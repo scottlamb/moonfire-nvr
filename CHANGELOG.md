@@ -11,7 +11,7 @@ Each release is tagged in Git and on the Docker repository
 *   [#219](https://github.com/scottlamb/moonfire-nvr/issues/219): fix
     live stream failing with `ws close: 1006` on URLs with port numbers.
 *   build Docker images with link-time optimization.
-*   bump minimum Rust version to 1.57.
+*   bump minimum Rust version to 1.60.
 
 ## 0.7.4 (2022-04-13)
 

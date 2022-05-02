@@ -46,7 +46,7 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
     meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
     meta.dir_uuid.extend_from_slice(&s_uuid.0.as_bytes()[..]);
     {
-        let open = meta.last_complete_open.set_default();
+        let open = meta.last_complete_open.mut_or_insert_default();
         open.id = o_id as u32;
         open.uuid.extend_from_slice(&o_uuid.0.as_bytes()[..]);
     }
