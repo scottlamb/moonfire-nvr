@@ -1,6 +1,6 @@
 [package]
 name = "moonfire-nvr"
-version = "0.7.4"
+version = "0.7.5"
 authors = ["Scott Lamb <slamb@slamb.org>"]
 edition = "2018"
 resolver = "2"

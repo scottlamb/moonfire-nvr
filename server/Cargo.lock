@@ -1029,7 +1029,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-db"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "base64",
  "blake3",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-nvr"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "base64",
  "blake3",
@@ -1654,9 +1654,9 @@ dependencies = [
 
 [[package]]
 name = "retina"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df90aca400866f8b1327902f7c9e93ab17f195c36b7e06b804e8acd3a79bbe41"
+checksum = "01358b10b0e442f1cbe1417a888698c88969bfef230290c0aaec65228238a8ca"
 dependencies = [
  "base64",
  "bitreader",

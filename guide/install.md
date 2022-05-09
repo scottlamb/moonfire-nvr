@@ -85,7 +85,7 @@ own_uid_is_privileged = true
 # Set your timezone here.
 tz="America/Los_Angeles"
 
-image_name="scottlamb/moonfire-nvr:v0.7.4"
+image_name="scottlamb/moonfire-nvr:v0.7.5"
 container_name="moonfire-nvr"
 common_docker_run_args=(
         --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
