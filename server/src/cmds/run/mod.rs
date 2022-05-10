@@ -43,18 +43,13 @@ pub struct Args {
 // They seem to be correct for Linux and macOS at least.
 const LOCALTIME_PATH: &str = "/etc/localtime";
 const TIMEZONE_PATH: &str = "/etc/timezone";
-const ZONEINFO_PATHS: [&str; 2] = [
-    "/usr/share/zoneinfo/",       // Linux, macOS < High Sierra
-    "/var/db/timezone/zoneinfo/", // macOS High Sierra
-];
 
-fn trim_zoneinfo(path: &str) -> &str {
-    for zp in &ZONEINFO_PATHS {
-        if let Some(p) = path.strip_prefix(zp) {
-            return p;
-        }
-    }
-    path
+// Some well-known zone paths looks like the following:
+//   /usr/share/zoneinfo/*          for Linux and macOS < High Sierra
+//   /var/db/timezone/zoneinfo/*    for macOS High Sierra
+//   /etc/zoneinfo/*                for NixOS
+fn zoneinfo_name(path: &str) -> Option<&str> {
+    path.rsplit_once("/zoneinfo/").map(|(_, name)| name)
 }
 
 /// Attempt to resolve the timezone of the server.
@@ -72,11 +67,14 @@ fn resolve_zone() -> Result<String, Error> {
             p = &p[1..];
         }
 
-        p = trim_zoneinfo(p);
+        if let Some(p) = zoneinfo_name(p) {
+            return Ok(p.to_owned());
+        }
 
         if !p.starts_with('/') {
             return Ok(p.to_owned());
         }
+
         if p != LOCALTIME_PATH {
             bail!("Unable to resolve env TZ={} to a timezone.", &tz);
         }
@@ -90,15 +88,14 @@ fn resolve_zone() -> Result<String, Error> {
                 Some(d) => d,
                 None => bail!("{} symlink destination is invalid UTF-8", LOCALTIME_PATH),
             };
-            let p = trim_zoneinfo(localtime_dest);
-            if p.starts_with('/') {
-                bail!(
-                    "Unable to resolve {} symlink destination {} to a timezone.",
-                    LOCALTIME_PATH,
-                    &localtime_dest
-                );
+            if let Some(p) = zoneinfo_name(localtime_dest) {
+                return Ok(p.to_owned());
             }
-            return Ok(p.to_owned());
+            bail!(
+                "Unable to resolve {} symlink destination {} to a timezone.",
+                LOCALTIME_PATH,
+                &localtime_dest
+            );
         }
         Err(e) => {
             use ::std::io::ErrorKind;
