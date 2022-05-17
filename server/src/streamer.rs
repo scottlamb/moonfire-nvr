@@ -161,10 +161,8 @@ where
 
         let mut stream = {
             let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url.as_str()));
-            self.opener.open(
-                self.short_name.clone(),
-                self.url.clone(),
-                retina::client::SessionOptions::default()
+            let options = stream::Options {
+                session: retina::client::SessionOptions::default()
                     .creds(if self.username.is_empty() {
                         None
                     } else {
@@ -173,9 +171,11 @@ where
                             password: self.password.clone(),
                         })
                     })
-                    .transport(self.transport)
                     .session_group(self.session_group.clone()),
-            )?
+                setup: retina::client::SetupOptions::default().transport(self.transport.clone()),
+            };
+            self.opener
+                .open(self.short_name.clone(), self.url.clone(), options)?
         };
         let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();
         let mut video_sample_entry_id = {
@@ -382,7 +382,7 @@ mod tests {
             &self,
             _label: String,
             url: url::Url,
-            _options: retina::client::SessionOptions,
+            _options: stream::Options,
         ) -> Result<Box<dyn stream::Stream>, Error> {
             assert_eq!(&url, &self.expected_url);
             let mut l = self.streams.lock();

@@ -1654,9 +1654,9 @@ dependencies = [
 
 [[package]]
 name = "retina"
-version = "0.3.10"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01358b10b0e442f1cbe1417a888698c88969bfef230290c0aaec65228238a8ca"
+checksum = "57bdeafed8d429e892754895f028852e666cdf77c3fb248c3780d70606e3e2c7"
 dependencies = [
  "base64",
  "bitreader",
@@ -1670,7 +1670,6 @@ dependencies = [
  "pin-project",
  "pretty-hex",
  "rand",
- "rtp-rs",
  "rtsp-types",
  "sdp-types",
  "smallvec",
@@ -1706,12 +1705,6 @@ dependencies = [
  "web-sys",
  "winapi",
 ]
-
-[[package]]
-name = "rtp-rs"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4ed274a5b3d36c4434cff6a4de1b42f43e64ae326b1cfa72d13d9037a314355"
 
 [[package]]
 name = "rtsp-types"

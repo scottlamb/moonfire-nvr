@@ -15,18 +15,18 @@ use url::Url;
 
 static RETINA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+pub struct Options {
+    pub session: retina::client::SessionOptions,
+    pub setup: retina::client::SetupOptions,
+}
+
 /// Opens a RTSP stream. This is a trait for test injection.
 pub trait Opener: Send + Sync {
     /// Opens the given RTSP URL.
     ///
     /// Note: despite the blocking interface, this expects to be called from
     /// the context of a multithreaded tokio runtime with IO and time enabled.
-    fn open(
-        &self,
-        label: String,
-        url: Url,
-        options: retina::client::SessionOptions,
-    ) -> Result<Box<dyn Stream>, Error>;
+    fn open(&self, label: String, url: Url, options: Options) -> Result<Box<dyn Stream>, Error>;
 }
 
 pub struct VideoFrame {
@@ -57,9 +57,11 @@ impl Opener for RealOpener {
         &self,
         label: String,
         url: Url,
-        options: retina::client::SessionOptions,
+        mut options: Options,
     ) -> Result<Box<dyn Stream>, Error> {
-        let options = options.user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
+        options.session = options
+            .session
+            .user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
         let rt_handle = tokio::runtime::Handle::current();
         let (inner, first_frame) = rt_handle
             .block_on(rt_handle.spawn(tokio::time::timeout(
@@ -111,29 +113,16 @@ impl RetinaStreamInner {
     async fn play(
         label: String,
         url: Url,
-        options: retina::client::SessionOptions,
+        options: Options,
     ) -> Result<(Box<Self>, retina::codec::VideoFrame), Error> {
-        let mut session = retina::client::Session::describe(url, options).await?;
+        let mut session = retina::client::Session::describe(url, options.session).await?;
         log::debug!("connected to {:?}, tool {:?}", &label, session.tool());
-        let (video_i, mut video_params) = session
+        let video_i = session
             .streams()
             .iter()
-            .enumerate()
-            .find_map(|(i, s)| {
-                if s.media == "video" && s.encoding_name == "h264" {
-                    Some((
-                        i,
-                        s.parameters().and_then(|p| match p {
-                            retina::codec::Parameters::Video(v) => Some(Box::new(v.clone())),
-                            _ => None,
-                        }),
-                    ))
-                } else {
-                    None
-                }
-            })
+            .position(|s| s.media() == "video" && s.encoding_name() == "h264")
             .ok_or_else(|| format_err!("couldn't find H.264 video stream"))?;
-        session.setup(video_i).await?;
+        session.setup(video_i, options.setup).await?;
         let session = session.play(retina::client::PlayOptions::default()).await?;
         let mut session = session.demuxed()?;
 
@@ -142,22 +131,20 @@ impl RetinaStreamInner {
             match Pin::new(&mut session).next().await {
                 None => bail!("stream closed before first frame"),
                 Some(Err(e)) => return Err(e.into()),
-                Some(Ok(CodecItem::VideoFrame(mut v))) => {
-                    if let Some(v) = v.new_parameters.take() {
-                        video_params = Some(v);
-                    }
-                    if v.is_random_access_point {
+                Some(Ok(CodecItem::VideoFrame(v))) => {
+                    if v.is_random_access_point() {
                         break v;
                     }
                 }
                 Some(Ok(_)) => {}
             }
         };
-        let video_sample_entry = h264::parse_extra_data(
-            video_params
-                .ok_or_else(|| format_err!("couldn't find H.264 parameters"))?
-                .extra_data(),
-        )?;
+        let video_params = match session.streams()[video_i].parameters() {
+            Some(retina::codec::ParametersRef::Video(v)) => v.clone(),
+            Some(_) => unreachable!(),
+            None => bail!("couldn't find H.264 parameters"),
+        };
+        let video_sample_entry = h264::parse_extra_data(video_params.extra_data())?;
         let self_ = Box::new(Self {
             label,
             session,
@@ -169,20 +156,35 @@ impl RetinaStreamInner {
     /// Fetches a non-initial frame.
     async fn fetch_next_frame(
         mut self: Box<Self>,
-    ) -> Result<(Box<Self>, retina::codec::VideoFrame), Error> {
+    ) -> Result<
+        (
+            Box<Self>,
+            retina::codec::VideoFrame,
+            Option<retina::codec::VideoParameters>,
+        ),
+        Error,
+    > {
         loop {
             match Pin::new(&mut self.session).next().await.transpose()? {
                 None => bail!("end of stream"),
                 Some(CodecItem::VideoFrame(v)) => {
-                    if v.loss > 0 {
+                    if v.loss() > 0 {
                         log::warn!(
                             "{}: lost {} RTP packets @ {}",
                             &self.label,
-                            v.loss,
+                            v.loss(),
                             v.start_ctx()
                         );
                     }
-                    return Ok((self, v));
+                    let p = if v.has_new_parameters() {
+                        Some(match self.session.streams()[v.stream_id()].parameters() {
+                            Some(retina::codec::ParametersRef::Video(v)) => v.clone(),
+                            _ => unreachable!(),
+                        })
+                    } else {
+                        None
+                    };
+                    return Ok((self, v, p));
                 }
                 Some(_) => {}
             }
@@ -206,7 +208,7 @@ impl Stream for RetinaStream {
             .map(|f| Ok((f, false)))
             .unwrap_or_else(move || {
                 let inner = self.inner.take().unwrap();
-                let (mut inner, mut frame) = self
+                let (mut inner, frame, new_parameters) = self
                     .rt_handle
                     .block_on(self.rt_handle.spawn(tokio::time::timeout(
                         RETINA_TIMEOUT,
@@ -215,7 +217,7 @@ impl Stream for RetinaStream {
                     .expect("fetch_next_frame task panicked, see earlier error")
                     .map_err(|_| format_err!("timeout getting next frame"))??;
                 let mut new_video_sample_entry = false;
-                if let Some(p) = frame.new_parameters.take() {
+                if let Some(p) = new_parameters {
                     let video_sample_entry = h264::parse_extra_data(p.extra_data())?;
                     if video_sample_entry != inner.video_sample_entry {
                         log::debug!(
@@ -232,10 +234,10 @@ impl Stream for RetinaStream {
                 Ok::<_, failure::Error>((frame, new_video_sample_entry))
             })?;
         Ok(VideoFrame {
-            pts: frame.timestamp.elapsed(),
+            pts: frame.timestamp().elapsed(),
             duration: 0,
-            is_key: frame.is_random_access_point,
-            data: frame.into_data(),
+            is_key: frame.is_random_access_point(),
+            data: frame.into_data().into(),
             new_video_sample_entry,
         })
     }

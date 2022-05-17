@@ -211,17 +211,15 @@ fn press_test_inner(
     transport: retina::client::Transport,
 ) -> Result<String, Error> {
     let _enter = handle.enter();
-    let stream = stream::OPENER.open(
-        "test stream".to_owned(),
-        url,
-        retina::client::SessionOptions::default()
-            .creds(if username.is_empty() {
-                None
-            } else {
-                Some(retina::client::Credentials { username, password })
-            })
-            .transport(transport),
-    )?;
+    let options = stream::Options {
+        session: retina::client::SessionOptions::default().creds(if username.is_empty() {
+            None
+        } else {
+            Some(retina::client::Credentials { username, password })
+        }),
+        setup: retina::client::SetupOptions::default().transport(transport),
+    };
+    let stream = stream::OPENER.open("test stream".to_owned(), url, options)?;
     let video_sample_entry = stream.video_sample_entry();
     Ok(format!(
         "codec: {}\n\
