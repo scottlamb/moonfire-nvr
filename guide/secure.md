@@ -99,7 +99,7 @@ proxy through a webserver that does. If Moonfire NVR will be sharing an
 `https` port with anything else, you'll need to set up the webserver to proxy
 to all of these interfaces as well.
 
-I use [nginx](https://https://nginx.com/) as the proxy server. Some folks may
+I use [nginx](https://nginx.com/) as the proxy server. Some folks may
 prefer [Apache httpd](https://httpd.apache.org/) or some other webserver.
 Anything will work. I include snippets of a `nginx` config below, so stick
 with that if you're not comfortable adapting it to some other server.
