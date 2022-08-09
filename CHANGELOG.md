@@ -6,6 +6,10 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+## unreleased
+
+*   use Retina 0.4.1, which is compatible with rtsp-simple-server v0.19.3.
+
 ## 0.7.5 (2022-05-09)
 
 *   [#219](https://github.com/scottlamb/moonfire-nvr/issues/219): fix

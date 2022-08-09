@@ -32,7 +32,7 @@ nix = "0.23.0"
 num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
 odds = { version = "0.4.0", features = ["std-vec"] }
 parking_lot = "0.12.0"
-pretty-hex = "0.2.1"
+pretty-hex = "0.3.0"
 protobuf = "3.0"
 ring = "0.16.2"
 rusqlite = "0.27.0"
