@@ -221,7 +221,7 @@ fn update_camera(
       update camera set next_recording_id = :next_recording_id where id = :id
     "#,
     )?;
-    for (ref id, ref state) in &camera_state {
+    for (ref id, state) in &camera_state {
         stmt.execute(named_params! {
             ":id": &id,
             ":next_recording_id": &state.next_recording_id,

@@ -344,7 +344,7 @@ impl State {
             }
             match self.signals_by_id.get(&signal) {
                 None => bail_t!(InvalidArgument, "unknown signal {}", signal),
-                Some(ref s) => {
+                Some(s) => {
                     let states = self
                         .types_by_uuid
                         .get(&s.type_)

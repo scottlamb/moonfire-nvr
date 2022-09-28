@@ -98,7 +98,7 @@ struct Caller {
 type ResponseResult = Result<Response<Body>, HttpError>;
 
 fn serve_json<T: serde::ser::Serialize>(req: &Request<hyper::Body>, out: &T) -> ResponseResult {
-    let (mut resp, writer) = http_serve::streaming_body(&req).build();
+    let (mut resp, writer) = http_serve::streaming_body(req).build();
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),

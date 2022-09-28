@@ -67,12 +67,12 @@ fn diff_slices<T: std::fmt::Display + PartialEq>(
         match item {
             diff::Result::Left(i) => {
                 changed = true;
-                write!(&mut diff, "-{}\n", i)
+                writeln!(&mut diff, "-{}", i)
             }
-            diff::Result::Both(i, _) => write!(&mut diff, " {}\n", i),
+            diff::Result::Both(i, _) => writeln!(&mut diff, " {}", i),
             diff::Result::Right(i) => {
                 changed = true;
-                write!(&mut diff, "+{}\n", i)
+                writeln!(&mut diff, "+{}", i)
             }
         }
         .unwrap();
@@ -177,8 +177,8 @@ pub fn get_diffs(
 
     // Compare columns and indices for each table.
     for t in &tables1 {
-        let columns1 = get_table_columns(c1, &t)?;
-        let columns2 = get_table_columns(c2, &t)?;
+        let columns1 = get_table_columns(c1, t)?;
+        let columns2 = get_table_columns(c2, t)?;
         if let Some(diff) = diff_slices(n1, &columns1[..], n2, &columns2[..]) {
             write!(
                 &mut diffs,
@@ -187,8 +187,8 @@ pub fn get_diffs(
             )?;
         }
 
-        let mut indices1 = get_indices(c1, &t)?;
-        let mut indices2 = get_indices(c2, &t)?;
+        let mut indices1 = get_indices(c1, t)?;
+        let mut indices2 = get_indices(c2, t)?;
         indices1.sort_by(|a, b| a.name.cmp(&b.name));
         indices2.sort_by(|a, b| a.name.cmp(&b.name));
         if let Some(diff) = diff_slices(n1, &indices1[..], n2, &indices2[..]) {

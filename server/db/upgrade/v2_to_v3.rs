@@ -55,7 +55,7 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
 }
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let d = open_sample_file_dir(&tx)?;
+    let d = open_sample_file_dir(tx)?;
     let mut stmt = tx.prepare(
         r#"
         select

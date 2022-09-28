@@ -118,12 +118,8 @@ fn parse_url(raw: &str, allowed_schemes: &'static [&'static str]) -> Result<Opti
     if raw.is_empty() {
         return Ok(None);
     }
-    let url = url::Url::parse(&raw).with_context(|_| format!("can't parse {:?} as URL", &raw))?;
-    if allowed_schemes
-        .iter()
-        .find(|scheme| **scheme == url.scheme())
-        .is_none()
-    {
+    let url = url::Url::parse(raw).with_context(|_| format!("can't parse {:?} as URL", &raw))?;
+    if allowed_schemes.iter().any(|scheme| *scheme == url.scheme()) {
         bail!("Unexpected scheme in URL {}", &url);
     }
     if !url.username().is_empty() || url.password().is_some() {
@@ -391,7 +387,7 @@ fn lower_retention(
     let dirs_to_open: Vec<_> = zero_limits.keys().copied().collect();
     db.lock().open_sample_file_dirs(&dirs_to_open[..])?;
     for (&dir_id, l) in &zero_limits {
-        writer::lower_retention(db.clone(), dir_id, &l)?;
+        writer::lower_retention(db.clone(), dir_id, l)?;
     }
     Ok(())
 }
@@ -557,7 +553,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                     .find_name::<views::Button>(&format!("{}_test", t.as_str()))
                     .unwrap();
                 edit_url(
-                    &s.config.url.as_ref().map(Url::as_str).unwrap_or(""),
+                    s.config.url.as_ref().map(Url::as_str).unwrap_or(""),
                     test_button,
                 );
                 dialog.call_on_name(
@@ -596,7 +592,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
             ("short_name", &*camera.short_name),
             (
                 "onvif_base_url",
-                &camera
+                camera
                     .config
                     .onvif_base_url
                     .as_ref()

@@ -61,6 +61,7 @@ fn decode_size_internal(input: &str) -> IResult<&str, i64> {
 }
 
 /// Decodes a human-readable size as output by encode_size.
+#[allow(clippy::result_unit_err)]
 pub fn decode_size(encoded: &str) -> Result<i64, ()> {
     let (remaining, decoded) = decode_size_internal(encoded).map_err(|_e| ())?;
     if !remaining.is_empty() {
@@ -85,6 +86,7 @@ pub fn hex(raw: &[u8]) -> String {
 }
 
 /// Returns [0, 16) or error.
+#[allow(clippy::result_unit_err)]
 fn dehex_byte(hex_byte: u8) -> Result<u8, ()> {
     match hex_byte {
         b'0'..=b'9' => Ok(hex_byte - b'0'),
@@ -95,6 +97,7 @@ fn dehex_byte(hex_byte: u8) -> Result<u8, ()> {
 
 /// Returns a 20-byte raw form of the given hex string.
 /// (This is the size of a SHA1 hash, the only current use of this function.)
+#[allow(clippy::result_unit_err)]
 pub fn dehex(hexed: &[u8]) -> Result<[u8; 20], ()> {
     if hexed.len() != 40 {
         return Err(());

@@ -92,7 +92,7 @@ impl UserChange {
 
     pub fn set_password(&mut self, pwd: String) {
         let salt = SaltString::generate(&mut scrypt::password_hash::rand_core::OsRng);
-        let params = PARAMS.lock().clone();
+        let params = *PARAMS.lock();
         let hash = scrypt::Scrypt
             .hash_password_customized(pwd.as_bytes(), None, None, params, &salt)
             .unwrap();
@@ -142,7 +142,7 @@ impl rusqlite::types::FromSql for FromSqlIpAddr {
         use rusqlite::types::ValueRef;
         match value {
             ValueRef::Null => Ok(FromSqlIpAddr(None)),
-            ValueRef::Blob(ref b) => match b.len() {
+            ValueRef::Blob(b) => match b.len() {
                 4 => {
                     let mut buf = [0u8; 4];
                     buf.copy_from_slice(b);

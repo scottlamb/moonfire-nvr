@@ -37,7 +37,7 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
     dir_meta
         .merge_from(&mut s)
         .map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
-    if let Err(e) = dir::SampleFileDir::check_consistent(&db_meta, &dir_meta) {
+    if let Err(e) = dir::SampleFileDir::check_consistent(db_meta, &dir_meta) {
         bail!(
             "Inconsistent db_meta={:?} dir_meta={:?}: {}",
             &db_meta,

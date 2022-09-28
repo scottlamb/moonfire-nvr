@@ -73,7 +73,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
         warn!("The following analysis may be incorrect or encounter errors due to schema differences.");
     }
 
-    let (db_uuid, _config) = raw::read_meta(&conn)?;
+    let (db_uuid, _config) = raw::read_meta(conn)?;
 
     // Scan directories.
     let mut dirs_by_id: FnvHashMap<i32, Dir> = FnvHashMap::default();
@@ -141,7 +141,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
             let cum_recordings = row.get(2)?;
             let mut stream = match dirs_by_id.get_mut(&dir_id) {
                 None => Stream::default(),
-                Some(d) => d.remove(&stream_id).unwrap_or_else(Stream::default),
+                Some(d) => d.remove(&stream_id).unwrap_or_default(),
             };
             stream.cum_recordings = Some(cum_recordings);
             printed_error |= compare_stream(conn, dir_id, stream_id, opts, stream, &mut ctx)?;

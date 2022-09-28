@@ -76,7 +76,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
         for ver in old_ver..target_ver {
             info!("...from version {} to version {}", ver, ver + 1);
             let tx = conn.transaction()?;
-            upgraders[ver as usize](&args, &tx)?;
+            upgraders[ver as usize](args, &tx)?;
             tx.execute(
                 r#"
                 insert into version (id, unix_time, notes)
@@ -94,7 +94,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
 pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     db::check_sqlite_version()?;
     db::set_integrity_pragmas(conn)?;
-    set_journal_mode(&conn, args.preset_journal)?;
+    set_journal_mode(conn, args.preset_journal)?;
     upgrade(args, db::EXPECTED_VERSION, conn)?;
 
     // As in "moonfire-nvr init": try for page_size=16384 and wal for the reasons explained there.
@@ -114,7 +114,7 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
         )?;
     }
 
-    set_journal_mode(&conn, "wal")?;
+    set_journal_mode(conn, "wal")?;
     info!("...done.");
 
     Ok(())

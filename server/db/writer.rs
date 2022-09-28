@@ -432,7 +432,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
                 let timeout = (t - now)
                     .to_std()
                     .unwrap_or_else(|_| StdDuration::new(0, 0));
-                match self.db.clocks().recv_timeout(&cmds, timeout) {
+                match self.db.clocks().recv_timeout(cmds, timeout) {
                     Err(mpsc::RecvTimeoutError::Disconnected) => return false, // cmd senders gone.
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         self.flush();

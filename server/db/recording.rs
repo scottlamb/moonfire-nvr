@@ -374,6 +374,7 @@ impl Segment {
             // Note: this inner loop avoids ? for performance. Don't change these lines without
             // reading https://github.com/rust-lang/rust/issues/37939 and running
             // mp4::bench::build_index.
+            #[allow(clippy::question_mark)]
             if let Err(e) = f(&it) {
                 return Err(e);
             }

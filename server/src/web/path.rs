@@ -50,10 +50,10 @@ impl Path {
                 Some(p) => p,
                 None => return Path::NotFound,
             };
-            if let Ok(id) = i32::from_str(&path) {
+            if let Ok(id) = i32::from_str(path) {
                 return Path::InitSegment(id, debug);
             }
-            return Path::NotFound;
+            Path::NotFound
         } else if let Some(path) = path.strip_prefix("cameras/") {
             let (uuid, path) = match path.split_once('/') {
                 Some(pair) => pair,

@@ -446,7 +446,7 @@ impl<'a> ListRecordings<'a> {
         for id in v {
             map.serialize_entry(
                 id,
-                &VideoSampleEntry::from(&db.video_sample_entries_by_id().get(id).unwrap()),
+                &VideoSampleEntry::from(db.video_sample_entries_by_id().get(id).unwrap()),
             )?;
         }
         map.end()

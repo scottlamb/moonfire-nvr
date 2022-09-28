@@ -205,8 +205,8 @@ fn prepare_unix_socket(p: &Path) {
 
 fn make_listener(addr: &config::AddressConfig) -> Result<Listener, Error> {
     let sa: SocketAddr = match addr {
-        config::AddressConfig::Ipv4(a) => a.clone().into(),
-        config::AddressConfig::Ipv6(a) => a.clone().into(),
+        config::AddressConfig::Ipv4(a) => (*a).into(),
+        config::AddressConfig::Ipv6(a) => (*a).into(),
         config::AddressConfig::Unix(p) => {
             prepare_unix_socket(p);
             return Ok(Listener::Unix(
@@ -390,7 +390,7 @@ async fn inner(
     let web_handles = web_handles?;
 
     info!("Ready to serve HTTP requests");
-    let _ = shutdown_rx.as_future().await;
+    shutdown_rx.as_future().await;
 
     info!("Shutting down streamers and syncers.");
     tokio::task::spawn_blocking({

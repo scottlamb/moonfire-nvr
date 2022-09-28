@@ -2113,7 +2113,7 @@ impl LockedDatabase {
 ///
 /// These are `pub` so that the `moonfire-nvr sql` command can pass to the SQLite3 binary with
 /// `-cmd`.
-pub static INTEGRITY_PRAGMAS: [&'static str; 3] = [
+pub static INTEGRITY_PRAGMAS: [&str; 3] = [
     // Enforce foreign keys. This is on by default with --features=bundled (as rusqlite
     // compiles the SQLite3 amalgamation with -DSQLITE_DEFAULT_FOREIGN_KEYS=1). Ensure it's
     // always on. Note that our foreign keys are immediate rather than deferred, so we have to

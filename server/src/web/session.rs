@@ -53,7 +53,7 @@ impl Service {
                 0
             };
         let (sid, _) = l
-            .login_by_password(authreq, &r.username, r.password, Some(domain), flags)
+            .login_by_password(authreq, r.username, r.password, Some(domain), flags)
             .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
         let cookie = encode_sid(sid, flags);
         Ok(Response::builder()

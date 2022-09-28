@@ -156,7 +156,7 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
         );
     }
     let data = &data[pos..pos + len as usize];
-    let mut s = protobuf::CodedInputStream::from_bytes(&data);
+    let mut s = protobuf::CodedInputStream::from_bytes(data);
     meta.merge_from(&mut s)
         .map_err(|e| e.context("Unable to parse metadata proto"))?;
     Ok(meta)

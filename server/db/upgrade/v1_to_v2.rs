@@ -97,7 +97,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         meta.dir_uuid.extend_from_slice(dir_uuid_bytes);
         let open = meta.last_complete_open.mut_or_insert_default();
         open.id = open_id;
-        open.uuid.extend_from_slice(&open_uuid_bytes);
+        open.uuid.extend_from_slice(open_uuid_bytes);
     }
     dir::write_meta(d.as_raw_fd(), &meta)?;
 

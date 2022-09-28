@@ -801,7 +801,7 @@ impl slices::Slice for Slice {
             SliceType::Stsz => self.wrap_index(f, range.clone(), len, &Segment::stsz),
             SliceType::Stss => self.wrap_index(f, range.clone(), len, &Segment::stss),
             SliceType::Co64 => f.0.get_co64(range.clone(), len),
-            SliceType::VideoSampleData => return f.0.get_video_sample_data(p, range.clone()),
+            SliceType::VideoSampleData => return f.0.get_video_sample_data(p, range),
             SliceType::SubtitleSampleData => f.0.get_subtitle_sample_data(p, range.clone(), len),
             SliceType::Truns => self.wrap_truns(f, range.clone(), len as usize),
         };
