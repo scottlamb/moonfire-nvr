@@ -66,7 +66,6 @@ use futures::Stream;
 use http::header::HeaderValue;
 use hyper::body::Buf;
 use log::{debug, error, trace, warn};
-use parking_lot::Once;
 use reffers::ARefss;
 use smallvec::SmallVec;
 use std::cell::UnsafeCell;
@@ -77,6 +76,7 @@ use std::io;
 use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::Once;
 use std::time::SystemTime;
 
 /// This value should be incremented any time a change is made to this file that causes different

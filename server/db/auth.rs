@@ -11,7 +11,6 @@ use failure::{bail, format_err, Error, Fail, ResultExt as _};
 use fnv::FnvHashMap;
 use lazy_static::lazy_static;
 use log::info;
-use parking_lot::Mutex;
 use protobuf::Message;
 use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::{named_params, params, Connection, Transaction};
@@ -20,6 +19,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::sync::Mutex;
 
 lazy_static! {
     static ref PARAMS: Mutex<scrypt::Params> = Mutex::new(scrypt::Params::recommended());
@@ -29,7 +29,7 @@ lazy_static! {
 /// Call via `testutil::init()`.
 pub(crate) fn set_test_config() {
     let params = scrypt::Params::new(8, 8, 1).unwrap();
-    *PARAMS.lock() = params;
+    *PARAMS.lock().unwrap() = params;
 }
 
 #[derive(Debug)]
@@ -92,7 +92,7 @@ impl UserChange {
 
     pub fn set_password(&mut self, pwd: String) {
         let salt = SaltString::generate(&mut scrypt::password_hash::rand_core::OsRng);
-        let params = *PARAMS.lock();
+        let params = *PARAMS.lock().unwrap();
         let hash = scrypt::Scrypt
             .hash_password_customized(pwd.as_bytes(), None, None, params, &salt)
             .unwrap();

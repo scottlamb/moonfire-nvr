@@ -288,10 +288,10 @@ mod tests {
     use db::{recording, testutil, CompositeId};
     use failure::{bail, Error};
     use log::trace;
-    use parking_lot::Mutex;
     use std::cmp;
     use std::convert::TryFrom;
     use std::sync::Arc;
+    use std::sync::Mutex;
     use time;
 
     struct ProxyingStream {
@@ -385,7 +385,7 @@ mod tests {
             _options: stream::Options,
         ) -> Result<Box<dyn stream::Stream>, Error> {
             assert_eq!(&url, &self.expected_url);
-            let mut l = self.streams.lock();
+            let mut l = self.streams.lock().unwrap();
             match l.pop() {
                 Some(stream) => {
                     trace!("MockOpener returning next stream");
@@ -393,7 +393,7 @@ mod tests {
                 }
                 None => {
                     trace!("MockOpener shutting down");
-                    self.shutdown_tx.lock().take();
+                    self.shutdown_tx.lock().unwrap().take();
                     bail!("done")
                 }
             }
@@ -472,7 +472,7 @@ mod tests {
             .unwrap();
         }
         stream.run();
-        assert!(opener.streams.lock().is_empty());
+        assert!(opener.streams.lock().unwrap().is_empty());
         db.syncer_channel.flush();
         let db = db.db.lock();
 

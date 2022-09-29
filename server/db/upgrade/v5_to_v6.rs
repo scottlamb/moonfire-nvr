@@ -108,7 +108,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         if avcc.num_of_sequence_parameter_sets() != 1 {
             bail!("Multiple SPSs!");
         }
-        let ctx = avcc.create_context(()).map_err(|e| {
+        let ctx = avcc.create_context().map_err(|e| {
             format_err!(
                 "Can't load SPS+PPS for video_sample_entry_id {}: {:?}",
                 id,

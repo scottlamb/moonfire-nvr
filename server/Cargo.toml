@@ -11,7 +11,7 @@ rust-version = "1.60"
 
 # The nightly feature is used within moonfire-nvr itself to gate the
 # benchmarks. Also pass it along to crates that can benefit from it.
-nightly = ["db/nightly", "parking_lot/nightly"]
+nightly = ["db/nightly"]
 
 # The bundled feature includes bundled (aka statically linked) versions of
 # native libraries where possible.
@@ -27,12 +27,12 @@ blake3 = "1.0.0"
 bytes = "1"
 byteorder = "1.0"
 clap = { version = "2.33.3", default-features = false, features = ["color", "wrap_help"] }
-cursive = "0.17.0"
+cursive = "0.19.0"
 db = { package = "moonfire-db", path = "db" }
 failure = "0.1.1"
 futures = "0.3"
 fnv = "1.0"
-h264-reader = "0.5.0"
+h264-reader = "0.6.0"
 http = "0.2.3"
 http-serve = { version = "0.3.1", features = ["dir"] }
 hyper = { version = "0.14.2", features = ["http1", "server", "stream", "tcp"] }
@@ -41,28 +41,27 @@ libc = "0.2"
 log = { version = "0.4" }
 memchr = "2.0.2"
 mylog = { git = "https://github.com/scottlamb/mylog" }
-nix = "0.23.0"
+nix = "0.25.0"
 nom = "7.0.0"
-parking_lot = "0.12.0"
-password-hash = "0.3.2"
+password-hash = "0.4.2"
 protobuf = "3.0"
 reffers = "0.7.0"
 retina = "0.4.0"
 ring = "0.16.2"
-rusqlite = "0.27.0"
+rusqlite = "0.28.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = { version = "1.7", features = ["union"] }
 structopt = { version = "0.3.13", default-features = false }
 sync_wrapper = "0.1.0"
 time = "0.1"
-tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1.5"
 tokio-tungstenite = "0.17.1"
 toml = "0.5"
 tracing = { version = "0.1", features = ["log"] }
 url = "2.1.1"
-uuid = { version = "0.8", features = ["serde", "std", "v4"] }
+uuid = { version = "1.1.2", features = ["serde", "std", "v4"] }
 
 [dev-dependencies]
 mp4 = { git = "https://github.com/scottlamb/mp4-rust", branch = "moonfire" }

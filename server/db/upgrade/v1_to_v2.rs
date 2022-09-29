@@ -323,7 +323,7 @@ fn verify_dir_contents(
             Ok(u) => u,
             Err(_) => bail!("unexpected file {:?} in {:?}", f, sample_file_path),
         };
-        if s != uuid.to_hyphenated_ref().to_string() {
+        if s != uuid.as_hyphenated().to_string() {
             // non-canonical form.
             bail!("unexpected file {:?} in {:?}", f, sample_file_path);
         }

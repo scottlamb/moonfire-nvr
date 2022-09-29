@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use futures::Future;
-use parking_lot::{Condvar, Mutex};
 use slab::Slab;
+use std::sync::{Condvar, Mutex};
 
 #[derive(Debug)]
 pub struct ShutdownError;
@@ -47,6 +47,7 @@ impl Drop for Sender {
             .0
             .wakers
             .lock()
+            .unwrap()
             .take()
             .expect("only the single Sender takes the slab");
         for w in wakers.drain() {
@@ -77,7 +78,7 @@ const NO_WAKER: usize = usize::MAX;
 
 impl Receiver {
     pub fn check(&self) -> Result<(), ShutdownError> {
-        if self.0.wakers.lock().is_none() {
+        if self.0.wakers.lock().unwrap().is_none() {
             Err(ShutdownError)
         } else {
             Ok(())
@@ -106,22 +107,22 @@ impl Receiver {
     }
 
     pub fn wait_for(&self, timeout: std::time::Duration) -> Result<(), ShutdownError> {
-        let mut l = self.0.wakers.lock();
-        if l.is_none() {
-            return Err(ShutdownError);
-        }
-        if self.0.condvar.wait_for(&mut l, timeout).timed_out() {
+        let l = self.0.wakers.lock().unwrap();
+        let result = self
+            .0
+            .condvar
+            .wait_timeout_while(l, timeout, |wakers| wakers.is_some())
+            .unwrap();
+        if result.1.timed_out() {
             Ok(())
         } else {
-            // parking_lot guarantees no spurious wakeups.
-            debug_assert!(l.is_none());
             Err(ShutdownError)
         }
     }
 }
 
 fn poll_impl(inner: &Inner, waker_i: &mut usize, cx: &mut Context<'_>) -> Poll<()> {
-    let mut l = inner.wakers.lock();
+    let mut l = inner.wakers.lock().unwrap();
     let wakers = match &mut *l {
         None => return Poll::Ready(()),
         Some(w) => w,

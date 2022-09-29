@@ -22,30 +22,29 @@ diff = "0.1.12"
 failure = "0.1.1"
 fnv = "1.0"
 futures = "0.3"
-h264-reader = "0.5.0"
-hashlink = "0.7.0"
+h264-reader = "0.6.0"
+hashlink = "0.8.1"
 lazy_static = "1.0"
 libc = "0.2"
 log = "0.4"
 mylog = { git = "https://github.com/scottlamb/mylog" }
-nix = "0.23.0"
+nix = "0.25.0"
 num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
 odds = { version = "0.4.0", features = ["std-vec"] }
-parking_lot = "0.12.0"
 pretty-hex = "0.3.0"
 protobuf = "3.0"
 ring = "0.16.2"
-rusqlite = "0.27.0"
-scrypt = "0.9.0"
+rusqlite = "0.28.0"
+scrypt = "0.10.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 #similar = "2.1.0"
 smallvec = "1.0"
 tempfile = "3.2.0"
 time = "0.1"
-tokio = { version = "1.0", features = ["macros", "parking_lot", "rt-multi-thread", "sync"] }
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "sync"] }
 url = { version = "2.1.1", features = ["serde"] }
-uuid = { version = "0.8", features = ["serde", "std", "v4"] }
+uuid = { version = "1.1.2", features = ["serde", "std", "v4"] }
 itertools = "0.10.0"
 
 [build-dependencies]

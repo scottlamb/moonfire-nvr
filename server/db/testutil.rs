@@ -16,7 +16,7 @@ use std::thread;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-static INIT: parking_lot::Once = parking_lot::Once::new();
+static INIT: std::sync::Once = std::sync::Once::new();
 
 /// id of the camera created by `TestDb::new` below.
 pub const TEST_CAMERA_ID: i32 = 1;

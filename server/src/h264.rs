@@ -68,7 +68,7 @@ pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Er
         bail!("Multiple SPSs!");
     }
     let ctx = avcc
-        .create_context(())
+        .create_context()
         .map_err(|e| format_err!("Can't load SPS+PPS: {:?}", e))?;
     let sps = ctx
         .sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())

@@ -8,7 +8,8 @@ Each release is tagged in Git and on the Docker repository
 
 ## unreleased
 
-*   use Retina 0.4.1, which is compatible with rtsp-simple-server v0.19.3.
+*   use Retina 0.4.3, which is newly compatible with rtsp-simple-server v0.19.3
+    and some TP-Link cameras. Fixes [#238](https://github.com/scottlamb/moonfire-nvr/issues/238).
 
 ## 0.7.5 (2022-05-09)
 

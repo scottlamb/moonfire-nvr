@@ -126,7 +126,7 @@ struct UuidPath([u8; 37]);
 impl UuidPath {
     pub(crate) fn from(uuid: Uuid) -> Self {
         let mut buf = [0u8; 37];
-        write!(&mut buf[..36], "{}", uuid.to_hyphenated_ref())
+        write!(&mut buf[..36], "{}", uuid.as_hyphenated())
             .expect("can't format uuid to pathname buf");
         UuidPath(buf)
     }

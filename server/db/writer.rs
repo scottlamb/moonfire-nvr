@@ -12,12 +12,12 @@ use base::shutdown::ShutdownError;
 use failure::{bail, format_err, Error};
 use fnv::FnvHashMap;
 use log::{debug, trace, warn};
-use parking_lot::Mutex;
 use std::cmp::{self, Ordering};
 use std::convert::TryFrom;
 use std::io;
 use std::mem;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration as StdDuration;
@@ -860,7 +860,7 @@ impl<F: FileWriter> InnerWriter<F> {
         db: &db::Database<C>,
         stream_id: i32,
     ) -> Result<(), Error> {
-        let mut l = self.r.lock();
+        let mut l = self.r.lock().unwrap();
 
         // design/time.md explains these time manipulations in detail.
         let prev_media_duration_90k = l.media_duration_90k;
@@ -935,7 +935,7 @@ impl<F: FileWriter> InnerWriter<F> {
         // This always ends a live segment.
         let wall_duration;
         {
-            let mut l = self.r.lock();
+            let mut l = self.r.lock().unwrap();
             l.flags = flags;
             l.local_time_delta = self.local_start - l.start;
             l.sample_file_blake3 = Some(*blake3.as_bytes());
@@ -979,11 +979,11 @@ mod tests {
     use crate::testutil;
     use base::clock::{Clocks, SimulatedClocks};
     use log::{trace, warn};
-    use parking_lot::Mutex;
     use std::collections::VecDeque;
     use std::io;
     use std::sync::mpsc;
     use std::sync::Arc;
+    use std::sync::Mutex;
 
     #[derive(Clone)]
     struct MockDir(Arc<Mutex<VecDeque<MockDirAction>>>);
@@ -1005,10 +1005,10 @@ mod tests {
             MockDir(Arc::new(Mutex::new(VecDeque::new())))
         }
         fn expect(&self, action: MockDirAction) {
-            self.0.lock().push_back(action);
+            self.0.lock().unwrap().push_back(action);
         }
         fn ensure_done(&self) {
-            assert_eq!(self.0.lock().len(), 0);
+            assert_eq!(self.0.lock().unwrap().len(), 0);
         }
     }
 
@@ -1019,6 +1019,7 @@ mod tests {
             match self
                 .0
                 .lock()
+                .unwrap()
                 .pop_front()
                 .expect("got create_file with no expectation")
             {
@@ -1033,6 +1034,7 @@ mod tests {
             match self
                 .0
                 .lock()
+                .unwrap()
                 .pop_front()
                 .expect("got sync with no expectation")
             {
@@ -1044,6 +1046,7 @@ mod tests {
             match self
                 .0
                 .lock()
+                .unwrap()
                 .pop_front()
                 .expect("got unlink_file with no expectation")
             {
@@ -1059,7 +1062,7 @@ mod tests {
     impl Drop for MockDir {
         fn drop(&mut self) {
             if !::std::thread::panicking() {
-                assert_eq!(self.0.lock().len(), 0);
+                assert_eq!(self.0.lock().unwrap().len(), 0);
             }
         }
     }
@@ -1077,10 +1080,10 @@ mod tests {
             MockFile(Arc::new(Mutex::new(VecDeque::new())))
         }
         fn expect(&self, action: MockFileAction) {
-            self.0.lock().push_back(action);
+            self.0.lock().unwrap().push_back(action);
         }
         fn ensure_done(&self) {
-            assert_eq!(self.0.lock().len(), 0);
+            assert_eq!(self.0.lock().unwrap().len(), 0);
         }
     }
 
@@ -1089,6 +1092,7 @@ mod tests {
             match self
                 .0
                 .lock()
+                .unwrap()
                 .pop_front()
                 .expect("got sync_all with no expectation")
             {
@@ -1100,6 +1104,7 @@ mod tests {
             match self
                 .0
                 .lock()
+                .unwrap()
                 .pop_front()
                 .expect("got write with no expectation")
             {

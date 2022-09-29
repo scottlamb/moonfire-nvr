@@ -6,8 +6,8 @@
 
 use failure::Error;
 use log::warn;
-use parking_lot::Mutex;
 use std::mem;
+use std::sync::Mutex;
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration as StdDuration;
@@ -160,15 +160,15 @@ impl SimulatedClocks {
 
 impl Clocks for SimulatedClocks {
     fn realtime(&self) -> Timespec {
-        self.0.boot + *self.0.uptime.lock()
+        self.0.boot + *self.0.uptime.lock().unwrap()
     }
     fn monotonic(&self) -> Timespec {
-        Timespec::new(0, 0) + *self.0.uptime.lock()
+        Timespec::new(0, 0) + *self.0.uptime.lock().unwrap()
     }
 
     /// Advances the clock by the specified amount without actually sleeping.
     fn sleep(&self, how_long: Duration) {
-        let mut l = self.0.uptime.lock();
+        let mut l = self.0.uptime.lock().unwrap();
         *l = *l + how_long;
     }
 
