@@ -9,6 +9,7 @@ use cursive::views::{self, ViewRef};
 use cursive::Cursive;
 use db::writer;
 use failure::{bail, format_err, Error, ResultExt};
+use itertools::Itertools;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -114,21 +115,36 @@ fn get_camera(siv: &mut Cursive) -> Camera {
 }
 
 /// Attempts to parse a URL field into a sort-of-validated URL.
-fn parse_url(raw: &str, allowed_schemes: &'static [&'static str]) -> Result<Option<Url>, Error> {
+fn parse_url(
+    field_name: &str,
+    raw: &str,
+    allowed_schemes: &'static [&'static str],
+) -> Result<Option<Url>, Error> {
     if raw.is_empty() {
         return Ok(None);
     }
-    let url = url::Url::parse(raw).with_context(|_| format!("can't parse {:?} as URL", &raw))?;
-    if allowed_schemes.iter().any(|scheme| *scheme == url.scheme()) {
-        bail!("Unexpected scheme in URL {}", &url);
+    let url = url::Url::parse(raw)
+        .with_context(|_| format!("can't parse {} {:?} as URL", field_name, &raw))?;
+    if !allowed_schemes.iter().any(|scheme| *scheme == url.scheme()) {
+        bail!(
+            "Unexpected scheme in {} {:?}; should be one of: {}",
+            field_name,
+            url.as_str(),
+            allowed_schemes.iter().join(", ")
+        );
     }
     if !url.username().is_empty() || url.password().is_some() {
         bail!(
-            "Unexpected credentials in URL {}; use the username and password fields instead",
-            &url
+            "Unexpected credentials in {} {:?}; use the username and password fields instead",
+            field_name,
+            url.as_str()
         );
     }
     Ok(Some(url))
+}
+
+fn parse_stream_url(type_: db::StreamType, raw: &str) -> Result<Option<Url>, Error> {
+    parse_url(&format!("{} stream url", type_.as_str()), raw, &["rtsp"])
 }
 
 fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
@@ -142,7 +158,8 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
         let camera = get_camera(siv);
         change.short_name = camera.short_name;
         change.config.description = camera.description;
-        change.config.onvif_base_url = parse_url(&camera.onvif_base_url, &["http", "https"])?;
+        change.config.onvif_base_url =
+            parse_url("onvif_base_url", &camera.onvif_base_url, &["http", "https"])?;
         change.config.username = camera.username;
         change.config.password = camera.password;
         for (i, stream) in camera.streams.iter().enumerate() {
@@ -160,7 +177,7 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
                 ""
             })
             .to_owned();
-            stream_change.config.url = parse_url(&stream.url, &["rtsp"])?;
+            stream_change.config.url = parse_stream_url(type_, &stream.url)?;
             stream_change.config.rtsp_transport = stream.rtsp_transport.to_owned();
             stream_change.sample_file_dir_id = stream.sample_file_dir_id;
             stream_change.config.flush_if_sec = if stream.flush_if_sec.is_empty() {
@@ -235,7 +252,7 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
     let c = get_camera(siv);
     let s = &c.streams[t.index()];
     let transport = retina::client::Transport::from_str(s.rtsp_transport).unwrap_or_default();
-    let url = match parse_url(&s.url, &["rtsp"]) {
+    let url = match parse_stream_url(t, &s.url) {
         Ok(Some(u)) => u,
         _ => panic!(
             "test button should only be enabled with valid URL, not {:?}",
@@ -411,8 +428,8 @@ fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32) {
     }
 }
 
-fn edit_url(content: &str, mut test_button: ViewRef<views::Button>) {
-    let enable_test = matches!(parse_url(content, &["rtsp"]), Ok(Some(_)));
+fn edit_stream_url(type_: db::StreamType, content: &str, mut test_button: ViewRef<views::Button>) {
+    let enable_test = matches!(parse_stream_url(type_, content), Ok(Some(_)));
     test_button.set_enabled(enable_test);
 }
 
@@ -464,7 +481,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                                 let test_button = siv
                                     .find_name::<views::Button>(&format!("{}_test", type_.as_str()))
                                     .unwrap();
-                                edit_url(content, test_button)
+                                edit_stream_url(type_, content, test_button);
                             })
                             .with_name(format!("{}_url", type_.as_str()))
                             .full_width(),
@@ -552,7 +569,8 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
                 let test_button = dialog
                     .find_name::<views::Button>(&format!("{}_test", t.as_str()))
                     .unwrap();
-                edit_url(
+                edit_stream_url(
+                    t,
                     s.config.url.as_ref().map(Url::as_str).unwrap_or(""),
                     test_button,
                 );

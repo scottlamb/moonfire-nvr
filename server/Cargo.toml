@@ -36,6 +36,7 @@ h264-reader = "0.6.0"
 http = "0.2.3"
 http-serve = { version = "0.3.1", features = ["dir"] }
 hyper = { version = "0.14.2", features = ["http1", "server", "stream", "tcp"] }
+itertools = "0.10.0"
 lazy_static = "1.0"
 libc = "0.2"
 log = { version = "0.4" }
