@@ -1809,11 +1809,16 @@ impl LockedDatabase {
         let dir = match d.get_mut().dir.take() {
             None => dir::SampleFileDir::open(&d.get().path, &d.get().expected_meta(&self.uuid))?,
             Some(arc) => match Arc::strong_count(&arc) {
-                1 => {
+                1 => arc, // LockedDatabase is only reference
+                c => {
+                    // a writer::Syncer also has a reference.
                     d.get_mut().dir = Some(arc); // put it back.
-                    bail!("can't delete in-use directory {}", dir_id);
+                    bail!(
+                        "can't delete directory {} with active syncer (refcnt {}",
+                        dir_id,
+                        c
+                    );
                 }
-                _ => arc,
             },
         };
         if !dir.is_empty()? {
