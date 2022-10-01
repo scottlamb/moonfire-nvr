@@ -2,11 +2,11 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
+import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import { Camera, Stream, StreamType } from "../types";
 import Checkbox from "@mui/material/Checkbox";
 import { useTheme } from "@mui/material/styles";
-import { makeStyles } from "@mui/styles";
 import { ToplevelResponse } from "../api";
 
 interface Props {
@@ -15,30 +15,9 @@ interface Props {
   setSelected: (selected: Set<number>) => void;
 }
 
-const useStyles = makeStyles({
-  streamSelectorTable: {
-    fontSize: "0.9rem",
-    "& td:first-child": {
-      paddingRight: "3px",
-    },
-    "& td:not(:first-child)": {
-      textAlign: "center",
-    },
-  },
-  check: {
-    padding: "3px",
-  },
-  "@media (pointer: fine)": {
-    check: {
-      padding: "0px",
-    },
-  },
-});
-
 /** Returns a table which allows selecting zero or more streams. */
 const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
   const theme = useTheme();
-  const classes = useStyles();
   const setStream = (s: Stream, checked: boolean) => {
     const updated = new Set(selected);
     if (checked) {
@@ -92,13 +71,10 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
     function checkbox(st: StreamType) {
       const s = c.streams[st];
       if (s === undefined) {
-        return (
-          <Checkbox className={classes.check} color="secondary" disabled />
-        );
+        return <Checkbox color="secondary" disabled />;
       }
       return (
         <Checkbox
-          className={classes.check}
           size="small"
           checked={selected.has(s.id)}
           color="secondary"
@@ -120,7 +96,26 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
         padding: theme.spacing(1),
       }}
     >
-      <table className={classes.streamSelectorTable}>
+      <Box
+        component="table"
+        sx={{
+          fontSize: "0.9rem",
+          "& td:first-child": {
+            paddingRight: "3px",
+          },
+          "& td:not(:first-child)": {
+            textAlign: "center",
+          },
+          "& .MuiCheckbox-root": {
+            padding: "3px",
+          },
+          "@media (pointer: fine)": {
+            "& .MuiCheckbox-root": {
+              padding: "0px",
+            },
+          },
+        }}
+      >
         <thead>
           <tr>
             <td />
@@ -129,7 +124,7 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
           </tr>
         </thead>
         <tbody>{cameraRows}</tbody>
-      </table>
+      </Box>
     </Card>
   );
 };

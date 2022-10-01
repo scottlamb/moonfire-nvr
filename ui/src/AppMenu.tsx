@@ -6,25 +6,14 @@ import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
-import { Theme } from "@mui/material/styles";
-import { createStyles, makeStyles } from "@mui/styles";
+import { useTheme } from "@mui/material/styles";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import AccountCircle from "@mui/icons-material/AccountCircle";
 import MenuIcon from "@mui/icons-material/Menu";
 import React from "react";
 import { LoginState } from "./App";
-
-const useStyles = makeStyles((theme: Theme) =>
-  createStyles({
-    title: {
-      flexGrow: 1,
-    },
-    activity: {
-      marginRight: theme.spacing(2),
-    },
-  })
-);
+import Box from "@mui/material/Box";
 
 interface Props {
   loginState: LoginState;
@@ -36,7 +25,7 @@ interface Props {
 
 // https://material-ui.com/components/app-bar/
 function MoonfireMenu(props: Props) {
-  const classes = useStyles();
+  const theme = useTheme();
   const [accountMenuAnchor, setAccountMenuAnchor] =
     React.useState<null | HTMLElement>(null);
 
@@ -66,11 +55,13 @@ function MoonfireMenu(props: Props) {
         >
           <MenuIcon />
         </IconButton>
-        <Typography variant="h6" className={classes.title}>
+        <Typography variant="h6" sx={{ flexGrow: 1 }}>
           Moonfire NVR
         </Typography>
         {props.activityMenuPart !== null && (
-          <div className={classes.activity}>{props.activityMenuPart}</div>
+          <Box sx={{ marginRight: theme.spacing(2) }}>
+            {props.activityMenuPart}
+          </Box>
         )}
         {props.loginState !== "unknown" && props.loginState !== "logged-in" && (
           <Button color="inherit" onClick={props.requestLogin}>

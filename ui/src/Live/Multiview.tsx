@@ -2,12 +2,12 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
+import Box from "@mui/material/Box";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import React, { useReducer } from "react";
 import { Camera } from "../types";
-import { makeStyles } from "@mui/styles";
-import { Theme } from "@mui/material/styles";
+import { useTheme } from "@mui/material/styles";
 import { useSearchParams } from "react-router-dom";
 
 export interface Layout {
@@ -23,52 +23,6 @@ const LAYOUTS: Layout[] = [
   { className: "three-by-three", cameras: 9 },
 ];
 const MAX_CAMERAS = 9;
-
-const useStyles = makeStyles((theme: Theme) => ({
-  root: {
-    flex: "1 0 0",
-    color: "white",
-    marginTop: theme.spacing(2),
-    overflow: "hidden",
-
-    // TODO: this mid-level div can probably be removed.
-    "& .mid": {
-      width: "100%",
-      height: "100%",
-      position: "relative",
-      display: "inline-block",
-    },
-  },
-  inner: {
-    // match parent's size without influencing it.
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-
-    backgroundColor: "#000",
-    overflow: "hidden",
-    display: "grid",
-    gridGap: "0px",
-
-    // These class names must match LAYOUTS (above).
-    "&.solo": {
-      gridTemplateColumns: "100%",
-      gridTemplateRows: "100%",
-    },
-    "&.two-by-two": {
-      gridTemplateColumns: "repeat(2, calc(100% / 2))",
-      gridTemplateRows: "repeat(2, calc(100% / 2))",
-    },
-    "&.main-plus-five, &.three-by-three": {
-      gridTemplateColumns: "repeat(3, calc(100% / 3))",
-      gridTemplateRows: "repeat(3, calc(100% / 3))",
-    },
-    "&.main-plus-five > div:nth-child(1)": {
-      gridColumn: "span 2",
-      gridRow: "span 2",
-    },
-  },
-}));
 
 export interface MultiviewProps {
   cameras: Camera[];
@@ -152,6 +106,7 @@ function selectedReducer(old: SelectedCameras, op: SelectOp): SelectedCameras {
  */
 const Multiview = (props: MultiviewProps) => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const theme = useTheme();
 
   const [selected, updateSelected] = useReducer(
     selectedReducer,
@@ -161,7 +116,6 @@ const Multiview = (props: MultiviewProps) => {
   );
 
   const outerRef = React.useRef<HTMLDivElement>(null);
-  const classes = useStyles();
   const layout = LAYOUTS[props.layoutIndex];
 
   const monoviews = selected.slice(0, layout.cameras).map((e, i) => {
@@ -194,13 +148,60 @@ const Multiview = (props: MultiviewProps) => {
   });
 
   return (
-    <div className={classes.root} ref={outerRef}>
+    <Box
+      ref={outerRef}
+      sx={{
+        flex: "1 0 0",
+        color: "white",
+        marginTop: theme.spacing(2),
+        overflow: "hidden",
+
+        // TODO: this mid-level div can probably be removed.
+        "& > .mid": {
+          width: "100%",
+          height: "100%",
+          position: "relative",
+          display: "inline-block",
+        },
+      }}
+    >
       <div className="mid">
-        <div className={`${classes.inner} ${layout.className}`}>
+        <Box
+          className={layout.className}
+          sx={{
+            // match parent's size without influencing it.
+            position: "absolute",
+            width: "100%",
+            height: "100%",
+
+            backgroundColor: "#000",
+            overflow: "hidden",
+            display: "grid",
+            gridGap: "0px",
+
+            // These class names must match LAYOUTS (above).
+            "&.solo": {
+              gridTemplateColumns: "100%",
+              gridTemplateRows: "100%",
+            },
+            "&.two-by-two": {
+              gridTemplateColumns: "repeat(2, calc(100% / 2))",
+              gridTemplateRows: "repeat(2, calc(100% / 2))",
+            },
+            "&.main-plus-five, &.three-by-three": {
+              gridTemplateColumns: "repeat(3, calc(100% / 3))",
+              gridTemplateRows: "repeat(3, calc(100% / 3))",
+            },
+            "&.main-plus-five > div:nth-child(1)": {
+              gridColumn: "span 2",
+              gridRow: "span 2",
+            },
+          }}
+        >
           {monoviews}
-        </div>
+        </Box>
       </div>
-    </div>
+    </Box>
   );
 };
 

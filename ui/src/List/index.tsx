@@ -5,8 +5,7 @@
 import Box from "@mui/material/Box";
 import Modal from "@mui/material/Modal";
 import Paper from "@mui/material/Paper";
-import { Theme } from "@mui/material/styles";
-import { makeStyles } from "@mui/styles";
+import { useTheme } from "@mui/material/styles";
 import Table from "@mui/material/Table";
 import TableContainer from "@mui/material/TableContainer";
 import utcToZonedTime from "date-fns-tz/utcToZonedTime";
@@ -25,56 +24,6 @@ import { useSearchParams } from "react-router-dom";
 import { FrameProps } from "../App";
 import IconButton from "@mui/material/IconButton";
 import FilterList from "@mui/icons-material/FilterList";
-
-const useStyles = makeStyles((theme: Theme) => ({
-  root: {
-    display: "flex",
-    flexWrap: "wrap",
-    margin: theme.spacing(2),
-  },
-  selectors: {
-    width: "max-content",
-    "& .MuiCard-root": {
-      marginRight: theme.spacing(2),
-      marginBottom: theme.spacing(2),
-    },
-  },
-  videoTable: {
-    flexGrow: 1,
-    width: "max-content",
-    height: "max-content",
-    "& .streamHeader": {
-      background: theme.palette.primary.light,
-      color: theme.palette.primary.contrastText,
-    },
-    "& .MuiTableBody-root:not(:last-child):after": {
-      content: "''",
-      display: "block",
-      height: theme.spacing(2),
-    },
-    "& tbody .recording": {
-      cursor: "pointer",
-    },
-    "& .opt": {
-      [theme.breakpoints.down("lg")]: {
-        display: "none",
-      },
-    },
-  },
-
-  // When there's a video modal up, make the content as large as possible
-  // without distorting it. Center it in the screen and ensure that the video
-  // element only takes up the space actually used by the content, so that
-  // clicking outside it will dismiss the modal.
-  videoModal: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    "& video": {
-      objectFit: "fill",
-    },
-  },
-}));
 
 interface FullScreenVideoProps {
   src: string;
@@ -225,7 +174,7 @@ const calcSelectedStreams = (
 };
 
 const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
-  const classes = useStyles();
+  const theme = useTheme();
 
   const {
     selectedStreamIds,
@@ -288,7 +237,31 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
     setActiveRecording(null);
   };
   const recordingsTable = (
-    <TableContainer component={Paper} className={classes.videoTable}>
+    <TableContainer
+      component={Paper}
+      sx={{
+        flexGrow: 1,
+        width: "max-content",
+        height: "max-content",
+        "& .streamHeader": {
+          background: theme.palette.primary.light,
+          color: theme.palette.primary.contrastText,
+        },
+        "& .MuiTableBody-root:not(:last-child):after": {
+          content: "''",
+          display: "block",
+          height: theme.spacing(2),
+        },
+        "& tbody .recording": {
+          cursor: "pointer",
+        },
+        "& .opt": {
+          [theme.breakpoints.down("lg")]: {
+            display: "none",
+          },
+        },
+      }}
+    >
       <Table size="small">{videoLists}</Table>
     </TableContainer>
   );
@@ -305,10 +278,22 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
         </IconButton>
       }
     >
-      <div className={classes.root}>
+      <Box
+        sx={{
+          display: "flex",
+          flexWrap: "wrap",
+          margin: theme.spacing(2),
+        }}
+      >
         <Box
-          className={classes.selectors}
-          sx={{ display: showSelectors ? "block" : "none" }}
+          sx={{
+            display: showSelectors ? "block" : "none",
+            width: "max-content",
+            "& .MuiCard-root": {
+              marginRight: theme.spacing(2),
+              marginBottom: theme.spacing(2),
+            },
+          }}
         >
           <StreamMultiSelector
             toplevel={toplevel}
@@ -331,7 +316,22 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
         </Box>
         {videoLists.length > 0 && recordingsTable}
         {activeRecording != null && (
-          <Modal open onClose={closeModal} className={classes.videoModal}>
+          <Modal
+            open
+            onClose={closeModal}
+            sx={{
+              // Make the content as large as possible without distorting it.
+              // Center it in the screen and ensure that the video element only
+              // takes up the space actually used by the content, so that clicking
+              // outside it will dismiss the modal.
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              "& video": {
+                objectFit: "fill",
+              },
+            }}
+          >
             <FullScreenVideo
               src={api.recordingUrl(
                 activeRecording[0].camera.uuid,
@@ -347,7 +347,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
             />
           </Modal>
         )}
-      </div>
+      </Box>
     </Frame>
   );
 };

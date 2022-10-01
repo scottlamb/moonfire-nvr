@@ -8,20 +8,13 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormControl from "@mui/material/FormControl";
 import FormHelperText from "@mui/material/FormHelperText";
-import { Theme } from "@mui/material/styles";
-import { makeStyles } from "@mui/styles";
+import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import LoadingButton from "@mui/lab/LoadingButton";
 import React, { useEffect } from "react";
 import * as api from "./api";
 import { useSnackbars } from "./snackbars";
-
-const useStyles = makeStyles((theme: Theme) => ({
-  avatar: {
-    backgroundColor: theme.palette.secondary.main,
-  },
-}));
 
 interface Props {
   open: boolean;
@@ -55,7 +48,7 @@ interface Props {
  * <tt>--allow-unauthenticated-permissions</tt>), the caller may ignore this.
  */
 const Login = ({ open, onSuccess, handleClose }: Props) => {
-  const classes = useStyles();
+  const theme = useTheme();
   const snackbars = useSnackbars();
 
   // This is a simple uncontrolled form; use refs.
@@ -119,7 +112,7 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
       fullWidth={true}
     >
       <DialogTitle id="login-title">
-        <Avatar className={classes.avatar}>
+        <Avatar sx={{ backgroundColor: theme.palette.secondary.main }}>
           <LockOutlinedIcon />
         </Avatar>
         Log in
