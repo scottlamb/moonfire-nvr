@@ -5,14 +5,14 @@
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import StyledEngineProvider from "@mui/material/StyledEngineProvider";
-import LocalizationProvider from "@mui/lab/LocalizationProvider";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import "@fontsource/roboto";
 import React from "react";
 import ReactDOM from "react-dom";
 import App from "./App";
 import ErrorBoundary from "./ErrorBoundary";
 import { SnackbarProvider } from "./snackbars";
-import AdapterDateFns from "@mui/lab/AdapterDateFns";
+import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import "./index.css";
 import { HashRouter } from "react-router-dom";
 

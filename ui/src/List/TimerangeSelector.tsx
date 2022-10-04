@@ -51,9 +51,10 @@
  */
 
 import { Stream } from "../types";
-import StaticDatePicker, {
+import {
+  StaticDatePicker,
   StaticDatePickerProps,
-} from "@mui/lab/StaticDatePicker";
+} from "@mui/x-date-pickers/StaticDatePicker";
 import React, { useEffect } from "react";
 import { zonedTimeToUtc } from "date-fns-tz";
 import { addDays, addMilliseconds, differenceInMilliseconds } from "date-fns";
@@ -65,7 +66,7 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import FormLabel from "@mui/material/FormLabel";
 import Radio from "@mui/material/Radio";
 import RadioGroup from "@mui/material/RadioGroup";
-import TimePicker, { TimePickerProps } from "@mui/lab/TimePicker";
+import { TimePicker, TimePickerProps } from "@mui/x-date-pickers/TimePicker";
 import Collapse from "@mui/material/Collapse";
 import Box from "@mui/material/Box";
 
@@ -76,7 +77,7 @@ interface Props {
 }
 
 const MyTimePicker = (
-  props: Pick<TimePickerProps, "value" | "onChange" | "disabled">
+  props: Pick<TimePickerProps<Date, Date>, "value" | "onChange" | "disabled">
 ) => (
   <TimePicker
     label="Time"
@@ -89,7 +90,7 @@ const MyTimePicker = (
   />
 );
 
-const SmallStaticDatePicker = (props: StaticDatePickerProps<Date>) => {
+const SmallStaticDatePicker = (props: StaticDatePickerProps<Date, Date>) => {
   // The spacing defined at https://material.io/components/date-pickers#specs
   // seems plenty big enough (on desktop). Not sure why material-ui wants
   // to make it bigger but that doesn't work well with our layout.
@@ -100,20 +101,26 @@ const SmallStaticDatePicker = (props: StaticDatePickerProps<Date>) => {
     <Box
       sx={{
         "@media (pointer: fine)": {
-          "& > div": {
-            minWidth: 256,
+          "& .MuiPickerStaticWrapper-content": {
+            minWidth: "auto", // defaults to 320px
           },
-          "& > div > div, & > div > div > div, & .MuiCalendarPicker-root": {
-            width: 256,
+          "& .MuiCalendarOrClockPicker-root > div, & .MuiCalendarPicker-root": {
+            width: 256, // defaults to 320px
+            margin: 0,
           },
-          "& .MuiTypography-caption": {
+          "& .MuiPickersArrowSwitcher-spacer": {
+            // By default, this spacer is so big that there's not enough space
+            // in the row for October. Shrink it.
+            width: 12,
+          },
+          "& .MuiDayPicker-weekDayLabel": {
             width: DATE_SIZE,
             margin: 0,
           },
           "& .PrivatePickersSlideTransition-root": {
             minHeight: DATE_SIZE * 6,
           },
-          '& .PrivatePickersSlideTransition-root [role="row"]': {
+          "& .MuiDayPicker-weekContainer": {
             margin: 0,
           },
           "& .MuiPickersDay-dayWithMargin": {
@@ -362,6 +369,7 @@ const TimerangeSelector = ({
         <SmallStaticDatePicker
           displayStaticWrapperAs="desktop"
           value={startDate}
+          disabled={days.allowed === null}
           shouldDisableDate={shouldDisableDate}
           maxDate={
             days.allowed === null ? today : new Date(days.allowed.maxMillis)

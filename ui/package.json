@@ -9,6 +9,7 @@
     "@mui/icons-material": "^5.10.6",
     "@mui/lab": "^5.0.0-alpha.73",
     "@mui/material": "^5.10.8",
+    "@mui/x-date-pickers": "^5.0.3",
     "@react-hook/resize-observer": "^1.2.5",
     "@types/jest": "^27.4.1",
     "@types/node": "^17.0.21",
