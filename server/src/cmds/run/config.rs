@@ -95,6 +95,9 @@ pub struct Permissions {
 
     #[serde(default)]
     update_signals: bool,
+
+    #[serde(default)]
+    admin_users: bool,
 }
 
 impl Permissions {
@@ -103,6 +106,7 @@ impl Permissions {
             view_video: self.view_video,
             read_camera_configs: self.read_camera_configs,
             update_signals: self.update_signals,
+            admin_users: self.admin_users,
             ..Default::default()
         }
     }

@@ -4,8 +4,9 @@ Status: **current**.
 
 * [Objective](#objective)
 * [Detailed design](#detailed-design)
-    * [`POST /api/login`](#post-apilogin)
-    * [`POST /api/logout`](#post-apilogout)
+    * [Authentication](#authentication)
+        * [`POST /api/login`](#post-apilogin)
+        * [`POST /api/logout`](#post-apilogout)
     * [`GET /api/`](#get-api)
     * [`GET /api/cameras/<uuid>/`](#get-apicamerasuuid)
     * [`GET /api/cameras/<uuid>/<stream>/recordings`](#get-apicamerasuuidstreamrecordings)
@@ -50,7 +51,9 @@ developed tools.
 All requests for JSON data should be sent with the header
 `Accept: application/json` (exactly).
 
-### `POST /api/login`
+### Authentication
+
+#### `POST /api/login`
 
 The request should have an `application/json` body containing a JSON object with
 `username` and `password` keys.
@@ -63,7 +66,7 @@ If authentication or authorization fails, the server will return a HTTP 403
 (forbidden) response. Currently the body will be a `text/plain` error message;
 future versions will likely be more sophisticated.
 
-### `POST /api/logout`
+#### `POST /api/logout`
 
 The request should have an `application/json` body containing
 a `csrf` parameter copied from the `session.csrf` of the
@@ -821,17 +824,22 @@ Response:
 
 ### `POST /api/users/<id>`
 
-Currently this request only allows updating the preferences for the
-currently-authenticated user. This is likely to change.
+Allows updating the given user. Requires the `admin_users` permission if the
+caller is not authenticated as the user in question.
 
 Expects a JSON object:
 
+*   `csrf`: a CSRF token, required when using session authentication.
 *   `update`: sets the provided fields
 *   `precondition`: forces the request to fail with HTTP status 412
     (Precondition failed) if the provided fields don't have the given value.
 
-Currently both objects support a single field, `preferences`, which should be
-a JSON dictionary.
+Currently the following fields are supported for `update` and `precondition`:
+
+* `preferences`, a JSON dictionary.
+* `password`, a cleartext string. When updating the password, the previous
+  password must be supplied as a precondition, unless the caller has
+  `admin_users` permission.
 
 Returns HTTP status 204 (No Content) on success.
 
