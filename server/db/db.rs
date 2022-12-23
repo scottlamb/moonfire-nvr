@@ -2034,6 +2034,10 @@ impl LockedDatabase {
         self.auth.users_by_id()
     }
 
+    pub fn get_user_by_id_mut(&mut self, id: i32) -> Option<&mut User> {
+        self.auth.get_user_by_id_mut(id)
+    }
+
     pub fn apply_user_change(&mut self, change: UserChange) -> Result<&User, Error> {
         self.auth.apply(&self.conn, change)
     }

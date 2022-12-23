@@ -15,8 +15,7 @@ use self::path::Path;
 use crate::body::Body;
 use crate::json;
 use crate::mp4;
-use base::{bail_t, ErrorKind};
-use base::{clock::Clocks, format_err_t};
+use base::{bail_t, clock::Clocks, format_err_t, ErrorKind};
 use core::borrow::Borrow;
 use core::str::FromStr;
 use db::dir::SampleFileDir;
@@ -82,7 +81,8 @@ fn from_base_error(err: base::Error) -> Response<Body> {
     let status_code = match err.kind() {
         Unauthenticated => StatusCode::UNAUTHORIZED,
         PermissionDenied => StatusCode::FORBIDDEN,
-        InvalidArgument | FailedPrecondition => StatusCode::BAD_REQUEST,
+        InvalidArgument => StatusCode::BAD_REQUEST,
+        FailedPrecondition => StatusCode::PRECONDITION_FAILED,
         NotFound => StatusCode::NOT_FOUND,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -462,32 +462,65 @@ impl Service {
     }
 
     async fn user(&self, req: Request<hyper::Body>, caller: Caller, id: i32) -> ResponseResult {
-        if caller.user.map(|u| u.id) != Some(id) {
-            bail_t!(Unauthenticated, "must be authenticated as supplied user");
+        if caller.user.as_ref().map(|u| u.id) != Some(id) && !caller.permissions.admin_users {
+            bail_t!(
+                Unauthenticated,
+                "must be authenticated as supplied user or have admin_users permission"
+            );
         }
         match *req.method() {
-            Method::POST => self.post_user(req, id).await,
+            Method::POST => self.post_user(req, caller, id).await,
             _ => Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into()),
         }
     }
 
-    async fn post_user(&self, mut req: Request<hyper::Body>, id: i32) -> ResponseResult {
+    async fn post_user(
+        &self,
+        mut req: Request<hyper::Body>,
+        caller: Caller,
+        id: i32,
+    ) -> ResponseResult {
         let r = extract_json_body(&mut req).await?;
         let r: json::PostUser = serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
         let mut db = self.db.lock();
         let user = db
-            .users_by_id()
-            .get(&id)
-            .ok_or_else(|| format_err_t!(Internal, "can't find currently authenticated user"))?;
-        if let Some(precondition) = r.precondition {
-            if matches!(precondition.preferences, Some(p) if p != user.config.preferences) {
+            .get_user_by_id_mut(id)
+            .ok_or_else(|| format_err_t!(Internal, "can't find requested user"))?;
+        if r.update.as_ref().map(|u| u.password).is_some()
+            && r.precondition.as_ref().map(|p| p.password).is_none()
+            && !caller.permissions.admin_users
+        {
+            bail_t!(
+                Unauthenticated,
+                "to change password, must supply previous password or have admin_users permission"
+            );
+        }
+        match (r.csrf, caller.user.and_then(|u| u.session)) {
+            (None, Some(_)) => bail_t!(Unauthenticated, "csrf must be supplied"),
+            (Some(csrf), Some(session)) if !csrf_matches(csrf, session.csrf) => {
+                bail_t!(Unauthenticated, "incorrect csrf");
+            }
+            (_, _) => {}
+        }
+        if let Some(ref precondition) = r.precondition {
+            if matches!(precondition.preferences, Some(ref p) if p != &user.config.preferences) {
                 bail_t!(FailedPrecondition, "preferences mismatch");
+            }
+            if let Some(p) = precondition.password {
+                if !user.check_password(p)? {
+                    bail_t!(FailedPrecondition, "password mismatch"); // or Unauthenticated?
+                }
             }
         }
         if let Some(update) = r.update {
             let mut change = user.change();
             if let Some(preferences) = update.preferences {
                 change.config.preferences = preferences;
+            }
+            match update.password {
+                None => {}
+                Some(None) => change.clear_password(),
+                Some(Some(p)) => change.set_password(p.to_owned()),
             }
             db.apply_user_change(change).map_err(internal_server_err)?;
         }
@@ -611,6 +644,7 @@ impl Service {
                     view_video: true,
                     read_camera_configs: true,
                     update_signals: true,
+                    admin_users: true,
                     ..Default::default()
                 },
                 user: None,

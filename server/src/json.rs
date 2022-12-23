@@ -6,7 +6,7 @@ use base::time::{Duration, Time};
 use db::auth::SessionHash;
 use failure::{format_err, Error};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::ops::Not;
 use uuid::Uuid;
 
@@ -513,13 +513,31 @@ pub struct ToplevelUser {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PostUser {
-    pub update: Option<UserSubset>,
-    pub precondition: Option<UserSubset>,
+pub struct PostUser<'a> {
+    pub csrf: Option<&'a str>,
+    pub update: Option<UserSubset<'a>>,
+    pub precondition: Option<UserSubset<'a>>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UserSubset {
+pub struct UserSubset<'a> {
     pub preferences: Option<db::json::UserPreferences>,
+
+    /// An optional password value.
+    ///
+    /// `None` indicates the password does not wish to check/update the password.
+    /// `Some(None)` indicates the password should be absent.
+    #[serde(borrow, default, deserialize_with = "deserialize_some")]
+    pub password: Option<Option<&'a str>>,
+}
+
+// Any value that is present is considered Some value, including null.
+// https://github.com/serde-rs/serde/issues/984#issuecomment-314143738
+fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
 }

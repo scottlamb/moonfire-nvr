@@ -72,4 +72,8 @@ message Permissions {
   bool read_camera_configs = 2;
 
   bool update_signals = 3;
+
+  // Administrate user accounts: create, delete accounts; modify passwords of
+  // accounts other than the caller's own.
+  bool admin_users = 4;
 }

@@ -62,6 +62,42 @@ impl User {
     pub fn has_password(&self) -> bool {
         self.password_hash.is_some()
     }
+
+    /// Checks if the user's password hash matches the supplied password.
+    ///
+    /// As a side effect, increments `password_failure_count` and sets `dirty`
+    /// if `password` is incorrect.
+    pub fn check_password(&mut self, password: Option<&str>) -> Result<bool, base::Error> {
+        let hash = self.password_hash.as_ref();
+        let (password, hash) = match (password, hash) {
+            (None, None) => return Ok(true),
+            (Some(p), Some(h)) => (p, h),
+            _ => return Ok(false),
+        };
+        let hash = PasswordHash::new(hash)
+            .with_context(|_| {
+                format!(
+                    "bad stored password hash for user {:?}: {:?}",
+                    self.username, hash
+                )
+            })
+            .context(ErrorKind::DataLoss)?;
+        match scrypt::Scrypt.verify_password(password.as_bytes(), &hash) {
+            Ok(()) => Ok(true),
+            Err(scrypt::password_hash::errors::Error::Password) => {
+                self.dirty = true;
+                self.password_failure_count += 1;
+                Ok(false)
+            }
+            Err(e) => Err(e
+                .context(format!(
+                    "unable to verify password for user {:?}",
+                    self.username
+                ))
+                .context(ErrorKind::Internal)
+                .into()),
+        }
+    }
 }
 
 /// A change to a user.
@@ -387,6 +423,10 @@ impl State {
         &self.users_by_id
     }
 
+    pub fn get_user_by_id_mut(&mut self, id: i32) -> Option<&mut User> {
+        self.users_by_id.get_mut(&id)
+    }
+
     fn update_user(
         &mut self,
         conn: &Connection,
@@ -527,26 +567,9 @@ impl State {
         if u.config.disabled {
             bail!("user {:?} is disabled", username);
         }
-        let hash = u
-            .password_hash
-            .as_ref()
-            .ok_or_else(|| format_err!("no password set for user {:?}", username))?;
-        let hash = PasswordHash::new(hash)
-            .with_context(|_| format!("bad stored password hash for user {:?}", username))?;
-        match scrypt::Scrypt.verify_password(password.as_bytes(), &hash) {
-            Ok(()) => {}
-            Err(scrypt::password_hash::errors::Error::Password) => {
-                u.dirty = true;
-                u.password_failure_count += 1;
-                bail!("incorrect password for user {:?}", username);
-            }
-            Err(e) => {
-                return Err(e
-                    .context(format!("unable to verify password for user {:?}", username))
-                    .into());
-            }
+        if !u.check_password(Some(&password))? {
+            bail_t!(Unauthenticated, "incorrect password");
         }
-
         let password_id = u.password_id;
         State::make_session_int(
             &self.rand,
@@ -924,7 +947,7 @@ mod tests {
                 0,
             )
             .unwrap_err();
-        assert_eq!(format!("{}", e), "no password set for user \"slamb\"");
+        assert_eq!(format!("{}", e), "Unauthenticated: incorrect password");
         c.set_password("hunter2".to_owned());
         state.apply(&conn, c).unwrap();
         let e = state
@@ -937,7 +960,7 @@ mod tests {
                 0,
             )
             .unwrap_err();
-        assert_eq!(format!("{}", e), "incorrect password for user \"slamb\"");
+        assert_eq!(format!("{}", e), "Unauthenticated: incorrect password");
         let sid = {
             let (sid, s) = state
                 .login_by_password(
