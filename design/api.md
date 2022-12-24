@@ -22,6 +22,7 @@ Status: **current**.
         * [Request 1](#request-1)
         * [Request 2](#request-2)
         * [Request 3](#request-3)
+    * [`GET /api/users/<id>`](#get-apiusersid)
     * [`POST /api/users/<id>`](#post-apiusersid)
 
 ## Objective
@@ -822,6 +823,19 @@ Response:
 }
 ```
 
+### `GET /api/users/<id>`
+
+Retrieves the user. Requires the `admin_users` permission if the caller is
+not authenticated as the user in question.
+
+Returns a HTTP status 200 on success with a JSON dict:
+
+*   `preferences`: a JSON dictionary.
+*   `password`: absent (no password set) or a placeholder string to indicate
+    the password is set. Passwords are stored hashed, so the cleartext can not
+    be retrieved.
+*   `permissions`.
+
 ### `POST /api/users/<id>`
 
 Allows updating the given user. Requires the `admin_users` permission if the
@@ -840,6 +854,7 @@ Currently the following fields are supported for `update` and `precondition`:
 * `password`, a cleartext string. When updating the password, the previous
   password must be supplied as a precondition, unless the caller has
   `admin_users` permission.
+* `permissions`, which always requires `admin_users` permission to update.
 
 Returns HTTP status 204 (No Content) on success.
 

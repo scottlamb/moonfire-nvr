@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+use crate::json::Permissions;
+
 fn default_db_dir() -> PathBuf {
     "/var/lib/moonfire-nvr/db".into()
 }
@@ -81,33 +83,4 @@ pub enum AddressConfig {
     Unix(PathBuf),
     // TODO: SystemdFileDescriptorName(String), see
     // https://www.freedesktop.org/software/systemd/man/systemd.socket.html
-}
-
-/// JSON analog of `Permissions` defined in `db/proto/schema.proto`.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Permissions {
-    #[serde(default)]
-    view_video: bool,
-
-    #[serde(default)]
-    read_camera_configs: bool,
-
-    #[serde(default)]
-    update_signals: bool,
-
-    #[serde(default)]
-    admin_users: bool,
-}
-
-impl Permissions {
-    pub fn as_proto(&self) -> db::schema::Permissions {
-        db::schema::Permissions {
-            view_video: self.view_video,
-            read_camera_configs: self.read_camera_configs,
-            update_signals: self.update_signals,
-            admin_users: self.admin_users,
-            ..Default::default()
-        }
-    }
 }

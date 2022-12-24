@@ -2,7 +2,6 @@
 // Copyright (C) 2022 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-use crate::cmds::run::config::Permissions;
 use crate::streamer;
 use crate::web;
 use crate::web::accept::Listener;
@@ -369,7 +368,7 @@ async fn inner(
                 allow_unauthenticated_permissions: b
                     .allow_unauthenticated_permissions
                     .as_ref()
-                    .map(Permissions::as_proto),
+                    .map(db::Permissions::from),
                 trust_forward_hdrs: b.trust_forward_headers,
                 time_zone_name: time_zone_name.clone(),
                 privileged_unix_uid: b.own_uid_is_privileged.then(|| own_euid),

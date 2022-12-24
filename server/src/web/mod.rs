@@ -14,6 +14,7 @@ use self::accept::ConnData;
 use self::path::Path;
 use crate::body::Body;
 use crate::json;
+use crate::json::UserSubset;
 use crate::mp4;
 use base::{bail_t, clock::Clocks, format_err_t, ErrorKind};
 use core::borrow::Borrow;
@@ -469,9 +470,28 @@ impl Service {
             );
         }
         match *req.method() {
+            Method::GET | Method::HEAD => self.get_user(req, id).await,
             Method::POST => self.post_user(req, caller, id).await,
             _ => Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into()),
         }
+    }
+
+    async fn get_user(&self, req: Request<hyper::Body>, id: i32) -> ResponseResult {
+        let db = self.db.lock();
+        let user = db
+            .users_by_id()
+            .get(&id)
+            .ok_or_else(|| format_err_t!(NotFound, "can't find requested user"))?;
+        let out = UserSubset {
+            preferences: Some(user.config.preferences.clone()),
+            password: Some(if user.has_password() {
+                Some("(censored)")
+            } else {
+                None
+            }),
+            permissions: Some((&user.permissions).into()),
+        };
+        serve_json(&req, &out)
     }
 
     async fn post_user(
@@ -485,7 +505,7 @@ impl Service {
         let mut db = self.db.lock();
         let user = db
             .get_user_by_id_mut(id)
-            .ok_or_else(|| format_err_t!(Internal, "can't find requested user"))?;
+            .ok_or_else(|| format_err_t!(NotFound, "can't find requested user"))?;
         if r.update.as_ref().map(|u| u.password).is_some()
             && r.precondition.as_ref().map(|p| p.password).is_none()
             && !caller.permissions.admin_users
@@ -493,6 +513,12 @@ impl Service {
             bail_t!(
                 Unauthenticated,
                 "to change password, must supply previous password or have admin_users permission"
+            );
+        }
+        if r.update.as_ref().map(|u| &u.permissions).is_some() && !caller.permissions.admin_users {
+            bail_t!(
+                Unauthenticated,
+                "to change permissions, must have admin_users permission"
             );
         }
         match (r.csrf, caller.user.and_then(|u| u.session)) {
@@ -511,6 +537,11 @@ impl Service {
                     bail_t!(FailedPrecondition, "password mismatch"); // or Unauthenticated?
                 }
             }
+            if let Some(ref p) = precondition.permissions {
+                if user.permissions != db::Permissions::from(p) {
+                    bail_t!(FailedPrecondition, "permissions mismatch");
+                }
+            }
         }
         if let Some(update) = r.update {
             let mut change = user.change();
@@ -521,6 +552,9 @@ impl Service {
                 None => {}
                 Some(None) => change.clear_password(),
                 Some(Some(p)) => change.set_password(p.to_owned()),
+            }
+            if let Some(ref permissions) = update.permissions {
+                change.permissions = permissions.into();
             }
             db.apply_user_change(change).map_err(internal_server_err)?;
         }
