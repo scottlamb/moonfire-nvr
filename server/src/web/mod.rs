@@ -24,7 +24,6 @@ use db::{auth, recording};
 use failure::{format_err, Error};
 use fnv::FnvHashMap;
 use http::header::{self, HeaderValue};
-use http::method::Method;
 use http::{status::StatusCode, Request, Response};
 use http_serve::dir::FsDir;
 use hyper::body::Bytes;
@@ -140,9 +139,6 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
 /// deserialization. Keeping the bytes allows the caller to use a `Deserialize`
 /// that borrows from the bytes.
 async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, HttpError> {
-    if *req.method() != Method::POST {
-        return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
-    }
     let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(t) if t == "application/json" => true,
         Some(t) if t == "application/json; charset=UTF-8" => true,

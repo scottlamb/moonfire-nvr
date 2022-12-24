@@ -19,7 +19,9 @@ impl Service {
         match *req.method() {
             Method::GET | Method::HEAD => self.get_users(req, caller).await,
             Method::PUT => self.put_users(req, caller).await,
-            _ => Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into()),
+            _ => Err(
+                plain_response(StatusCode::METHOD_NOT_ALLOWED, "GET, HEAD, or PUT expected").into(),
+            ),
         }
     }
 
@@ -71,7 +73,11 @@ impl Service {
             Method::GET | Method::HEAD => self.get_user(req, caller, id).await,
             Method::DELETE => self.delete_user(caller, id).await,
             Method::POST => self.post_user(req, caller, id).await,
-            _ => Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into()),
+            _ => Err(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "GET, HEAD, DELETE, or POST expected",
+            )
+            .into()),
         }
     }
 
