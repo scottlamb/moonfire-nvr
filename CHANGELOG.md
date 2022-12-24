@@ -10,6 +10,11 @@ Each release is tagged in Git and on the Docker repository
 
 *   use Retina 0.4.3, which is newly compatible with rtsp-simple-server v0.19.3
     and some TP-Link cameras. Fixes [#238](https://github.com/scottlamb/moonfire-nvr/issues/238).
+*   expanded API interface for examining and updating users:
+    *   `admin_users` permission for operating on arbitrary users.
+    *   `GET /users/<id>` endpoint
+    *   expanded `POST /users/<id>` endpoint, including password and
+        permissions.
 
 ## 0.7.5 (2022-05-09)
 

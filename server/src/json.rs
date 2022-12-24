@@ -2,6 +2,8 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+//! JSON/TOML-compatible serde types for use in the web API and `moonfire-nvr.toml`.
+
 use base::time::{Duration, Time};
 use db::auth::SessionHash;
 use failure::{format_err, Error};
@@ -519,7 +521,7 @@ pub struct PostUser<'a> {
     pub precondition: Option<UserSubset<'a>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSubset<'a> {
     pub preferences: Option<db::json::UserPreferences>,
@@ -530,6 +532,8 @@ pub struct UserSubset<'a> {
     /// `Some(None)` indicates the password should be absent.
     #[serde(borrow, default, deserialize_with = "deserialize_some")]
     pub password: Option<Option<&'a str>>,
+
+    pub permissions: Option<Permissions>,
 }
 
 // Any value that is present is considered Some value, including null.
@@ -540,4 +544,44 @@ where
     D: Deserializer<'de>,
 {
     Deserialize::deserialize(deserializer).map(Some)
+}
+
+/// API/config analog of `Permissions` defined in `db/proto/schema.proto`.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Permissions {
+    #[serde(default)]
+    view_video: bool,
+
+    #[serde(default)]
+    read_camera_configs: bool,
+
+    #[serde(default)]
+    update_signals: bool,
+
+    #[serde(default)]
+    admin_users: bool,
+}
+
+impl From<&Permissions> for db::schema::Permissions {
+    fn from(p: &Permissions) -> Self {
+        Self {
+            view_video: p.view_video,
+            read_camera_configs: p.read_camera_configs,
+            update_signals: p.update_signals,
+            admin_users: p.admin_users,
+            special_fields: Default::default(),
+        }
+    }
+}
+
+impl From<&db::schema::Permissions> for Permissions {
+    fn from(p: &db::schema::Permissions) -> Self {
+        Self {
+            view_video: p.view_video,
+            read_camera_configs: p.read_camera_configs,
+            update_signals: p.update_signals,
+            admin_users: p.admin_users,
+        }
+    }
 }
