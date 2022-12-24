@@ -5,7 +5,7 @@
 //! Session management: `/api/login` and `/api/logout`.
 
 use db::auth;
-use http::{header, HeaderValue, Request, Response, StatusCode};
+use http::{header, HeaderValue, Method, Request, Response, StatusCode};
 use log::{info, warn};
 use memchr::memchr;
 
@@ -19,6 +19,9 @@ use std::convert::TryFrom;
 
 impl Service {
     pub(super) async fn login(&self, mut req: Request<::hyper::Body>) -> ResponseResult {
+        if *req.method() != Method::POST {
+            return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
+        }
         let r = extract_json_body(&mut req).await?;
         let r: json::LoginRequest =
             serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
@@ -67,6 +70,9 @@ impl Service {
     }
 
     pub(super) async fn logout(&self, mut req: Request<hyper::Body>) -> ResponseResult {
+        if *req.method() != Method::POST {
+            return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
+        }
         let r = extract_json_body(&mut req).await?;
         let r: json::LogoutRequest =
             serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
