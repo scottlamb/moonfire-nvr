@@ -2038,11 +2038,11 @@ impl LockedDatabase {
         self.auth.get_user_by_id_mut(id)
     }
 
-    pub fn apply_user_change(&mut self, change: UserChange) -> Result<&User, Error> {
+    pub fn apply_user_change(&mut self, change: UserChange) -> Result<&User, base::Error> {
         self.auth.apply(&self.conn, change)
     }
 
-    pub fn delete_user(&mut self, id: i32) -> Result<(), Error> {
+    pub fn delete_user(&mut self, id: i32) -> Result<(), base::Error> {
         self.auth.delete_user(&mut self.conn, id)
     }
 

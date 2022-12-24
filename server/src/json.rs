@@ -525,6 +525,9 @@ pub struct PostUser<'a> {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSubset<'a> {
+    #[serde(borrow)]
+    pub username: Option<&'a str>,
+
     pub preferences: Option<db::json::UserPreferences>,
 
     /// An optional password value.
@@ -587,8 +590,14 @@ impl From<&db::schema::Permissions> for Permissions {
     }
 }
 
-/// Response to `GET /users/`.
+/// Response to `GET /api/users/`.
 #[derive(Serialize)]
-pub struct UsersResponse {
+pub struct GetUsersResponse {
     pub users: BTreeMap<i32, String>,
+}
+
+/// Response to `PUT /api/users/`.
+#[derive(Serialize)]
+pub struct PutUsersResponse {
+    pub id: i32,
 }

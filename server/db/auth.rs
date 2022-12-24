@@ -411,7 +411,7 @@ impl State {
         Ok(state)
     }
 
-    pub fn apply(&mut self, conn: &Connection, change: UserChange) -> Result<&User, Error> {
+    pub fn apply(&mut self, conn: &Connection, change: UserChange) -> Result<&User, base::Error> {
         if let Some(id) = change.id {
             self.update_user(conn, id, change)
         } else {
@@ -432,9 +432,10 @@ impl State {
         conn: &Connection,
         id: i32,
         change: UserChange,
-    ) -> Result<&User, Error> {
-        let mut stmt = conn.prepare_cached(
-            r#"
+    ) -> Result<&User, base::Error> {
+        let mut stmt = conn
+            .prepare_cached(
+                r#"
             update user
             set
                 username = :username,
@@ -446,7 +447,8 @@ impl State {
             where
                 id = :id
             "#,
-        )?;
+            )
+            .context(ErrorKind::Unknown)?;
         let e = self.users_by_id.entry(id);
         let e = match e {
             ::std::collections::btree_map::Entry::Vacant(_) => panic!("missing uid {}!", id),
@@ -472,7 +474,8 @@ impl State {
                 ":config": &change.config,
                 ":id": &id,
                 ":permissions": &permissions,
-            })?;
+            })
+            .context(ErrorKind::Unknown)?;
         }
         let u = e.into_mut();
         u.username = change.username;
@@ -486,13 +489,15 @@ impl State {
         Ok(u)
     }
 
-    fn add_user(&mut self, conn: &Connection, change: UserChange) -> Result<&User, Error> {
-        let mut stmt = conn.prepare_cached(
-            r#"
+    fn add_user(&mut self, conn: &Connection, change: UserChange) -> Result<&User, base::Error> {
+        let mut stmt = conn
+            .prepare_cached(
+                r#"
             insert into user (username,  password_hash,  config,  permissions)
                       values (:username, :password_hash, :config, :permissions)
             "#,
-        )?;
+            )
+            .context(ErrorKind::Unknown)?;
         let password_hash = change.set_password_hash.unwrap_or(None);
         let permissions = change
             .permissions
@@ -503,7 +508,8 @@ impl State {
             ":password_hash": &password_hash,
             ":config": &change.config,
             ":permissions": &permissions,
-        })?;
+        })
+        .context(ErrorKind::Unknown)?;
         let id = conn.last_insert_rowid() as i32;
         self.users_by_name.insert(change.username.clone(), id);
         let e = self.users_by_id.entry(id);
@@ -523,16 +529,19 @@ impl State {
         }))
     }
 
-    pub fn delete_user(&mut self, conn: &mut Connection, id: i32) -> Result<(), Error> {
-        let tx = conn.transaction()?;
-        tx.execute("delete from user_session where user_id = ?", params![id])?;
+    pub fn delete_user(&mut self, conn: &mut Connection, id: i32) -> Result<(), base::Error> {
+        let tx = conn.transaction().context(ErrorKind::Unknown)?;
+        tx.execute("delete from user_session where user_id = ?", params![id])
+            .context(ErrorKind::Unknown)?;
         {
-            let mut user_stmt = tx.prepare_cached("delete from user where id = ?")?;
-            if user_stmt.execute(params![id])? != 1 {
-                bail!("user {} not found", id);
+            let mut user_stmt = tx
+                .prepare_cached("delete from user where id = ?")
+                .context(ErrorKind::Unknown)?;
+            if user_stmt.execute(params![id]).context(ErrorKind::Unknown)? != 1 {
+                bail_t!(NotFound, "user {} not found", id);
             }
         }
-        tx.commit()?;
+        tx.commit().context(ErrorKind::Unknown)?;
         let name = self.users_by_id.remove(&id).unwrap().username;
         self.users_by_name.remove(&name).unwrap();
         self.sessions.retain(|_k, ref mut v| v.user_id != id);

@@ -24,8 +24,10 @@ Status: **current**.
         * [Request 3](#request-3)
     * [User management](#user-management)
         * [`GET /api/users`](#get-apiusers)
+        * [`PUT /api/users`](#put-apiusers)
         * [`GET /api/users/<id>`](#get-apiusersid)
         * [`POST /api/users/<id>`](#post-apiusersid)
+        * [`DELETE /api/users/<id>`](#delete-apiusersid)
 
 ## Objective
 
@@ -834,6 +836,19 @@ Requires the `admin_users` permission.
 Lists all users. Currently there's no paging. Returns a JSON object with
 a `users` key with a map of id to username.
 
+#### `PUT /api/users`
+
+Requires the `admin_users` permission.
+
+Adds a user. Expects a JSON dictionary with the parameters for the user:
+
+*   `username`: a string, which must be unique.
+*   `permissions`: a JSON dictionary of permissions.
+*   `password` (optional): a string.
+*   `preferences` (optional): a JSON dictionary.
+
+Returns status 204 (No Content) on success.
+
 #### `GET /api/users/<id>`
 
 Retrieves the user. Requires the `admin_users` permission if the caller is
@@ -866,6 +881,12 @@ Currently the following fields are supported for `update` and `precondition`:
   password must be supplied as a precondition, unless the caller has
   `admin_users` permission.
 * `permissions`, which always requires `admin_users` permission to update.
+
+Returns HTTP status 204 (No Content) on success.
+
+#### `DELETE /api/users/<id>`
+
+Deletes the given user. Requires the `admin_users` permission.
 
 Returns HTTP status 204 (No Content) on success.
 
