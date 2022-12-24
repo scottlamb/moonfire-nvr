@@ -22,6 +22,7 @@ pub(super) enum Path {
     Login,                                            // "/api/login"
     Logout,                                           // "/api/logout"
     Static,                                           // (anything that doesn't start with "/api/")
+    Users,                                            // "/api/users"
     User(i32),                                        // "/api/users/<id>"
     NotFound,
 }
@@ -92,6 +93,9 @@ impl Path {
         } else if let Some(path) = path.strip_prefix("users/") {
             if let Ok(id) = i32::from_str(path) {
                 return Path::User(id);
+            }
+            if path.is_empty() {
+                return Path::Users;
             }
             Path::NotFound
         } else {
@@ -165,5 +169,6 @@ mod tests {
         assert_eq!(Path::decode("/api/junk"), Path::NotFound);
         assert_eq!(Path::decode("/api/users/42"), Path::User(42));
         assert_eq!(Path::decode("/api/users/asdf"), Path::NotFound);
+        assert_eq!(Path::decode("/api/users/"), Path::Users);
     }
 }

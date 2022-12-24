@@ -9,6 +9,7 @@ use db::auth::SessionHash;
 use failure::{format_err, Error};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::BTreeMap;
 use std::ops::Not;
 use uuid::Uuid;
 
@@ -584,4 +585,10 @@ impl From<&db::schema::Permissions> for Permissions {
             admin_users: p.admin_users,
         }
     }
+}
+
+/// Response to `GET /users/`.
+#[derive(Serialize)]
+pub struct UsersResponse {
+    pub users: BTreeMap<i32, String>,
 }

@@ -12,6 +12,7 @@ Each release is tagged in Git and on the Docker repository
     and some TP-Link cameras. Fixes [#238](https://github.com/scottlamb/moonfire-nvr/issues/238).
 *   expanded API interface for examining and updating users:
     *   `admin_users` permission for operating on arbitrary users.
+    *   `GET /users/` endpoint
     *   `GET /users/<id>` endpoint
     *   expanded `POST /users/<id>` endpoint, including password and
         permissions.

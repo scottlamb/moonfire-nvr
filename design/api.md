@@ -22,8 +22,10 @@ Status: **current**.
         * [Request 1](#request-1)
         * [Request 2](#request-2)
         * [Request 3](#request-3)
-    * [`GET /api/users/<id>`](#get-apiusersid)
-    * [`POST /api/users/<id>`](#post-apiusersid)
+    * [User management](#user-management)
+        * [`GET /api/users`](#get-apiusers)
+        * [`GET /api/users/<id>`](#get-apiusersid)
+        * [`POST /api/users/<id>`](#post-apiusersid)
 
 ## Objective
 
@@ -823,7 +825,16 @@ Response:
 }
 ```
 
-### `GET /api/users/<id>`
+### User management
+
+#### `GET /api/users`
+
+Requires the `admin_users` permission.
+
+Lists all users. Currently there's no paging. Returns a JSON object with
+a `users` key with a map of id to username.
+
+#### `GET /api/users/<id>`
 
 Retrieves the user. Requires the `admin_users` permission if the caller is
 not authenticated as the user in question.
@@ -836,7 +847,7 @@ Returns a HTTP status 200 on success with a JSON dict:
     be retrieved.
 *   `permissions`.
 
-### `POST /api/users/<id>`
+#### `POST /api/users/<id>`
 
 Allows updating the given user. Requires the `admin_users` permission if the
 caller is not authenticated as the user in question.
