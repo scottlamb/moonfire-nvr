@@ -44,19 +44,24 @@ impl Service {
             bail_t!(Unauthenticated, "must have admin_users permission");
         }
         let r = extract_json_body(&mut req).await?;
-        let r: json::UserSubset = serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        let mut r: json::UserSubset =
+            serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
         let username = r
             .username
+            .take()
             .ok_or_else(|| format_err_t!(InvalidArgument, "username must be specified"))?;
         let mut change = db::UserChange::add_user(username.to_owned());
-        if let Some(Some(pwd)) = r.password {
+        if let Some(Some(pwd)) = r.password.take() {
             change.set_password(pwd.to_owned());
         }
-        if let Some(preferences) = r.preferences {
+        if let Some(preferences) = r.preferences.take() {
             change.config.preferences = preferences;
         }
-        if let Some(ref permissions) = r.permissions {
+        if let Some(ref permissions) = r.permissions.take() {
             change.permissions = permissions.into();
+        }
+        if r != Default::default() {
+            bail_t!(Unimplemented, "unsupported user fields: {:#?}", r);
         }
         let mut l = self.db.lock();
         let user = l.apply_user_change(change)?;
@@ -145,33 +150,54 @@ impl Service {
             }
             (_, _) => {}
         }
-        if let Some(ref precondition) = r.precondition {
-            if matches!(precondition.preferences, Some(ref p) if p != &user.config.preferences) {
+        if let Some(mut precondition) = r.precondition {
+            if matches!(precondition.username.take(), Some(n) if n != &user.username) {
+                bail_t!(FailedPrecondition, "username mismatch");
+            }
+            if matches!(precondition.preferences.take(), Some(ref p) if p != &user.config.preferences)
+            {
                 bail_t!(FailedPrecondition, "preferences mismatch");
             }
-            if let Some(p) = precondition.password {
+            if let Some(p) = precondition.password.take() {
                 if !user.check_password(p)? {
                     bail_t!(FailedPrecondition, "password mismatch"); // or Unauthenticated?
                 }
             }
-            if let Some(ref p) = precondition.permissions {
-                if user.permissions != db::Permissions::from(p) {
+            if let Some(p) = precondition.permissions.take() {
+                if user.permissions != db::Permissions::from(&p) {
                     bail_t!(FailedPrecondition, "permissions mismatch");
                 }
             }
+
+            // Safety valve in case something is added to UserSubset and forgotten here.
+            if precondition != Default::default() {
+                bail_t!(
+                    Unimplemented,
+                    "preconditions not supported: {:#?}",
+                    &precondition
+                );
+            }
         }
-        if let Some(update) = r.update {
+        if let Some(mut update) = r.update {
             let mut change = user.change();
-            if let Some(preferences) = update.preferences {
+            if let Some(n) = update.username.take() {
+                change.username = n.to_string();
+            }
+            if let Some(preferences) = update.preferences.take() {
                 change.config.preferences = preferences;
             }
-            match update.password {
+            match update.password.take() {
                 None => {}
                 Some(None) => change.clear_password(),
                 Some(Some(p)) => change.set_password(p.to_owned()),
             }
-            if let Some(ref permissions) = update.permissions {
-                change.permissions = permissions.into();
+            if let Some(permissions) = update.permissions.take() {
+                change.permissions = (&permissions).into();
+            }
+
+            // Safety valve in case something is added to UserSubset and forgotten here.
+            if update != Default::default() {
+                bail_t!(Unimplemented, "updates not supported: {:#?}", &update);
             }
             db.apply_user_change(change)?;
         }
