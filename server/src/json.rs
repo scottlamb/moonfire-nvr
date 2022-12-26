@@ -516,14 +516,16 @@ pub struct ToplevelUser {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct PostUser<'a> {
     pub csrf: Option<&'a str>,
     pub update: Option<UserSubset<'a>>,
     pub precondition: Option<UserSubset<'a>>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct UserSubset<'a> {
     #[serde(borrow)]
     pub username: Option<&'a str>,
@@ -551,7 +553,7 @@ where
 }
 
 /// API/config analog of `Permissions` defined in `db/proto/schema.proto`.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Permissions {
     #[serde(default)]
