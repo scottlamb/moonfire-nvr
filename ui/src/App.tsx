@@ -35,6 +35,7 @@ import ListItemText from "@mui/material/ListItemText";
 import ListIcon from "@mui/icons-material/List";
 import Videocam from "@mui/icons-material/Videocam";
 import ListItemIcon from "@mui/material/ListItemIcon";
+import ChangePassword from "./ChangePassword";
 
 export type LoginState =
   | "unknown"
@@ -54,6 +55,7 @@ function App() {
   const [timeZoneName, setTimeZoneName] = useState<string | null>(null);
   const [fetchSeq, setFetchSeq] = useState(0);
   const [loginState, setLoginState] = useState<LoginState>("unknown");
+  const [changePasswordOpen, setChangePasswordOpen] = useState<boolean>(false);
   const [error, setError] = useState<api.FetchError | null>(null);
   const needNewFetch = () => setFetchSeq((seq) => seq + 1);
   const snackbars = useSnackbars();
@@ -125,6 +127,7 @@ function App() {
               setLoginState("user-requested-login");
             }}
             logout={logout}
+            changePassword={() => setChangePasswordOpen(true)}
             menuClick={toggleShowMenu}
             activityMenuPart={activityMenuPart}
           />
@@ -176,6 +179,13 @@ function App() {
             );
           }}
         />
+        {toplevel?.user !== undefined && (
+          <ChangePassword
+            open={changePasswordOpen}
+            user={toplevel?.user}
+            handleClose={() => setChangePasswordOpen(false)}
+          />
+        )}
         {error !== null && (
           <Container>
             <h2>Error querying server</h2>

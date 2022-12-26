@@ -19,6 +19,7 @@ interface Props {
   loginState: LoginState;
   requestLogin: () => void;
   logout: () => void;
+  changePassword: () => void;
   menuClick?: () => void;
   activityMenuPart?: JSX.Element;
 }
@@ -42,6 +43,11 @@ function MoonfireMenu(props: Props) {
     // be unhappy about the anchor element not being part of the layout.
     handleClose();
     props.logout();
+  };
+
+  const handleChangePassword = () => {
+    handleClose();
+    props.changePassword();
   };
 
   return (
@@ -94,6 +100,9 @@ function MoonfireMenu(props: Props) {
               open={Boolean(accountMenuAnchor)}
               onClose={handleClose}
             >
+              <MenuItem onClick={handleChangePassword}>
+                Change password
+              </MenuItem>
               <MenuItem onClick={handleLogout}>Logout</MenuItem>
             </Menu>
           </div>

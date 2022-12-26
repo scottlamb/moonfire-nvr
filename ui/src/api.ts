@@ -217,6 +217,32 @@ export async function logout(req: LogoutRequest, init: RequestInit) {
   });
 }
 
+export interface UpdateUserRequest {
+  csrf?: string;
+  precondition?: UserSubset;
+  update: UserSubset;
+}
+
+export interface UserSubset {
+  password?: String;
+}
+
+/** Updates a user. */
+export async function updateUser(
+  id: number,
+  req: UpdateUserRequest,
+  init: RequestInit
+) {
+  return await myfetch(`/api/users/${id}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(req),
+    ...init,
+  });
+}
+
 /**
  * Represents a range of one or more recordings as in a single array entry of
  * <tt>GET /api/cameras/&lt;uuid>/&lt;stream>/&lt;recordings></tt>.
