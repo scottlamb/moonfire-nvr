@@ -128,19 +128,13 @@ impl Service {
         let user = db
             .get_user_by_id_mut(id)
             .ok_or_else(|| format_err_t!(NotFound, "can't find requested user"))?;
-        if r.update.as_ref().map(|u| u.password).is_some()
-            && r.precondition.as_ref().map(|p| p.password).is_none()
+        if r.update.as_ref().and_then(|u| u.password).is_some()
+            && r.precondition.as_ref().and_then(|p| p.password).is_none()
             && !caller.permissions.admin_users
         {
             bail_t!(
                 Unauthenticated,
                 "to change password, must supply previous password or have admin_users permission"
-            );
-        }
-        if r.update.as_ref().map(|u| &u.permissions).is_some() && !caller.permissions.admin_users {
-            bail_t!(
-                Unauthenticated,
-                "to change permissions, must have admin_users permission"
             );
         }
         match (r.csrf, caller.user.and_then(|u| u.session)) {
@@ -180,9 +174,8 @@ impl Service {
         }
         if let Some(mut update) = r.update {
             let mut change = user.change();
-            if let Some(n) = update.username.take() {
-                change.username = n.to_string();
-            }
+
+            // First, set up updates which non-admins are allowed to perform on themselves.
             if let Some(preferences) = update.preferences.take() {
                 change.config.preferences = preferences;
             }
@@ -190,6 +183,14 @@ impl Service {
                 None => {}
                 Some(None) => change.clear_password(),
                 Some(Some(p)) => change.set_password(p.to_owned()),
+            }
+
+            // Requires admin_users if there's anything else.
+            if update != Default::default() && !caller.permissions.admin_users {
+                bail_t!(Unauthenticated, "must have admin_users permission");
+            }
+            if let Some(n) = update.username.take() {
+                change.username = n.to_string();
             }
             if let Some(permissions) = update.permissions.take() {
                 change.permissions = (&permissions).into();
@@ -199,6 +200,8 @@ impl Service {
             if update != Default::default() {
                 bail_t!(Unimplemented, "updates not supported: {:#?}", &update);
             }
+
+            // Then apply all together.
             db.apply_user_change(change)?;
         }
         Ok(plain_response(StatusCode::NO_CONTENT, &b""[..]))
