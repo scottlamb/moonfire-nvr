@@ -8,6 +8,8 @@ Each release is tagged in Git and on the Docker repository
 
 ## unreleased
 
+*   expect camelCase in `moonfire-nvr.toml` file, for consistency with the JSON
+    API. You'll need to adjust your config file when upgrading.
 *   use Retina 0.4.3, which is newly compatible with rtsp-simple-server v0.19.3
     and some TP-Link cameras. Fixes [#238](https://github.com/scottlamb/moonfire-nvr/issues/238).
 *   expanded API interface for examining and updating users:

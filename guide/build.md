@@ -295,11 +295,11 @@ You'll also need a `/etc/moonfire-nvr.toml`:
 ```toml
 [[binds]]
 ipv4 = "0.0.0.0:8080"
-allow_unauthenticated_permissions = { view_video = true }
+allowUnauthenticatedPermissions = { viewVideo = true }
 
 [[binds]]
 unix = "/var/lib/moonfire-nvr/sock"
-own_uid_is_privileged = true
+ownUidIsPrivileged = true
 ```
 
 Note this configuration is insecure. You can change that via replacing the

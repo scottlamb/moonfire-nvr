@@ -367,7 +367,7 @@ async fn inner(
                 ui_dir: Some(&config.ui_dir),
                 allow_unauthenticated_permissions: b
                     .allow_unauthenticated_permissions
-                    .as_ref()
+                    .clone()
                     .map(db::Permissions::from),
                 trust_forward_hdrs: b.trust_forward_headers,
                 time_zone_name: time_zone_name.clone(),

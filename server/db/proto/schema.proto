@@ -2,6 +2,11 @@
 // Copyright (C) 2018 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.';
 
+// Protobuf portion of the Moonfire NVR schema. In general Moonfire's schema
+// uses a SQLite3 database with some fields in JSON representation. The protobuf
+// stuff is just high-cardinality things that must be compact, e.g. permissions
+// that can be stuffed into every user session.
+
 syntax = "proto3";
 
 // Metadata stored in sample file dirs as `<dir>/meta`. This is checked
@@ -55,25 +60,12 @@ message DirMeta {
   Open in_progress_open = 4;
 }
 
-// Permissions to perform actions, currently all simple bools.
+// Permissions to perform actions. See description in design/api.md.
 //
-// These indicate actions which may be unnecessary in some contexts. Some
-// basic access - like listing the cameras - is currently always allowed.
-// See design/api.md for a description of what requires these permissions.
-//
-// These are used in a few contexts:
-// * a session - affects what can be done when using that session to
-//   authenticate.
-// * a user - when a new session is created, it inherits these permissions.
-// * on the commandline - to specify what permissions are available for
-//   unauthenticated access.
+// This protobuf form is stored in user and session rows.
 message Permissions {
   bool view_video = 1;
   bool read_camera_configs = 2;
-
   bool update_signals = 3;
-
-  // Administrate user accounts: create, delete accounts; modify passwords of
-  // accounts other than the caller's own.
   bool admin_users = 4;
 }

@@ -25,6 +25,8 @@ pub struct TopLevel<'a> {
     #[serde(serialize_with = "TopLevel::serialize_cameras")]
     pub cameras: (&'a db::LockedDatabase, bool, bool),
 
+    pub permissions: Permissions,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<ToplevelUser>,
 
@@ -553,8 +555,9 @@ where
 }
 
 /// API/config analog of `Permissions` defined in `db/proto/schema.proto`.
-#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Permissions {
     #[serde(default)]
     view_video: bool,
@@ -569,8 +572,8 @@ pub struct Permissions {
     admin_users: bool,
 }
 
-impl From<&Permissions> for db::schema::Permissions {
-    fn from(p: &Permissions) -> Self {
+impl From<Permissions> for db::schema::Permissions {
+    fn from(p: Permissions) -> Self {
         Self {
             view_video: p.view_video,
             read_camera_configs: p.read_camera_configs,
@@ -581,8 +584,8 @@ impl From<&Permissions> for db::schema::Permissions {
     }
 }
 
-impl From<&db::schema::Permissions> for Permissions {
-    fn from(p: &db::schema::Permissions) -> Self {
+impl From<db::schema::Permissions> for Permissions {
+    fn from(p: db::schema::Permissions) -> Self {
         Self {
             view_video: p.view_video,
             read_camera_configs: p.read_camera_configs,

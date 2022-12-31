@@ -21,6 +21,7 @@ fn default_ui_dir() -> PathBuf {
 /// Top-level configuration file object.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigFile {
     pub binds: Vec<BindConfig>,
 
@@ -42,6 +43,7 @@ pub struct ConfigFile {
 /// Per-bind configuration.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct BindConfig {
     /// The address to bind to.
     #[serde(flatten)]
@@ -70,8 +72,8 @@ pub struct BindConfig {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub enum AddressConfig {
     /// IPv4 address such as `0.0.0.0:8080` or `127.0.0.1:8080`.
     Ipv4(std::net::SocketAddrV4),

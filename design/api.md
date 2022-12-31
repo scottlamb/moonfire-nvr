@@ -2,8 +2,8 @@
 
 Status: **current**.
 
-* [Objective](#objective)
-* [Detailed design](#detailed-design)
+* [Summary](#summary)
+* [Endpoints](#endpoints)
     * [Authentication](#authentication)
         * [`POST /api/login`](#post-apilogin)
         * [`POST /api/logout`](#post-apilogout)
@@ -28,19 +28,19 @@ Status: **current**.
         * [`GET /api/users/<id>`](#get-apiusersid)
         * [`POST /api/users/<id>`](#post-apiusersid)
         * [`DELETE /api/users/<id>`](#delete-apiusersid)
+* [Types](#types)
+    * [Permissions](#permissions)
 
-## Objective
+## Summary
 
-Allow a JavaScript-based web interface to list cameras and view recordings.
-Support external analytics.
+A JavaScript-based web interface to list cameras and view recordings.
+Supports external analytics.
 
 In the future, this is likely to be expanded:
 
 *   configuration support
 *   commandline tool over a UNIX-domain socket
     (at least for bootstrapping web authentication)
-
-## Detailed design
 
 *Note:* italicized terms in this document are defined in the [glossary](glossary.md).
 
@@ -55,6 +55,8 @@ developed tools.
 
 All requests for JSON data should be sent with the header
 `Accept: application/json` (exactly).
+
+## Endpoints
 
 ### Authentication
 
@@ -184,6 +186,7 @@ The `application/json` response will have a JSON object as follows:
             considered to have motion when this signal is in this state.
         *   `color` (optional): a recommended color to use in UIs to represent
             this state, as in the [HTML specification](https://html.spec.whatwg.org/#colours).
+*   `permissions`: the caller's current `Permissions` object (defined below).
 *   `user`: an object, present only when authenticated:
     *   `name`: a human-readable name
     *   `id`: an integer
@@ -840,12 +843,13 @@ a `users` key with a map of id to username.
 
 Requires the `admin_users` permission.
 
-Adds a user. Expects a JSON dictionary with the parameters for the user:
+Adds a user. Expects a JSON object with the parameters for the user:
 
 *   `username`: a string, which must be unique.
-*   `permissions`: a JSON dictionary of permissions.
+*   `permissions`: see `Permissions` below.
 *   `password` (optional): a string.
-*   `preferences` (optional): a JSON dictionary.
+*   `preferences` (optional): an arbitrary JSON object. Interpretation is
+    up to clients.
 
 Returns status 204 (No Content) on success.
 
@@ -856,11 +860,11 @@ not authenticated as the user in question.
 
 Returns a HTTP status 200 on success with a JSON dict:
 
-*   `preferences`: a JSON dictionary.
+*   `preferences`: a JSON object.
 *   `password`: absent (no password set) or a placeholder string to indicate
     the password is set. Passwords are stored hashed, so the cleartext can not
     be retrieved.
-*   `permissions`.
+*   `permissions`: see `Permissions` below.
 
 #### `POST /api/users/<id>`
 
@@ -876,11 +880,14 @@ Expects a JSON object:
 
 Currently the following fields are supported for `update` and `precondition`:
 
-* `preferences`, a JSON dictionary.
+* `preferences`, a JSON object.
 * `password`, a cleartext string. When updating the password, the previous
   password must be supplied as a precondition, unless the caller has
   `admin_users` permission.
-* `permissions`, which always requires `admin_users` permission to update.
+* `permissions`, a `Permissions` as described below, which always requires
+  `admin_users` permission to update. Note that updating a user's permissions
+  currently neither adds nor limits permissions of existing sessions; it only
+  changes what is available to newly created sessions.
 
 Returns HTTP status 204 (No Content) on success.
 
@@ -889,6 +896,20 @@ Returns HTTP status 204 (No Content) on success.
 Deletes the given user. Requires the `admin_users` permission.
 
 Returns HTTP status 204 (No Content) on success.
+
+## Types
+
+### Permissions
+
+A JSON object of permissions to perform various actions:
+
+*   `adminUsers`: bool
+*   `readCameraConfigs`: bool, read camera configs including credentials
+*   `updateSignals`: bool
+*   `viewVideo`: bool
+
+See endpoints above for more details on the contexts in which these are
+required.
 
 [media-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-media-segments
 [init-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-init-segments

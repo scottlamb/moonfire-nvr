@@ -165,13 +165,13 @@ If you follow the recommended Docker setup, your `/etc/moonfire-nvr.json`
 will contain this line:
 
 ```toml
-allow_unauthenticated_permissions = { view_video = true }
+allowUnauthenticatedPermissions = { viewVideo = true }
 ```
 
 Replace it with the following:
 
 ```toml
-trust_forward_headers = true
+trustForwardHeaders = true
 ```
 
 This change has two effects:

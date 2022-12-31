@@ -57,7 +57,7 @@ impl Service {
         if let Some(preferences) = r.preferences.take() {
             change.config.preferences = preferences;
         }
-        if let Some(ref permissions) = r.permissions.take() {
+        if let Some(permissions) = r.permissions.take() {
             change.permissions = permissions.into();
         }
         if r != Default::default() {
@@ -101,7 +101,7 @@ impl Service {
             } else {
                 None
             }),
-            permissions: Some((&user.permissions).into()),
+            permissions: Some(user.permissions.clone().into()),
         };
         serve_json(&req, &out)
     }
@@ -145,7 +145,7 @@ impl Service {
             (_, _) => {}
         }
         if let Some(mut precondition) = r.precondition {
-            if matches!(precondition.username.take(), Some(n) if n != &user.username) {
+            if matches!(precondition.username.take(), Some(n) if n != user.username) {
                 bail_t!(FailedPrecondition, "username mismatch");
             }
             if matches!(precondition.preferences.take(), Some(ref p) if p != &user.config.preferences)
@@ -158,7 +158,7 @@ impl Service {
                 }
             }
             if let Some(p) = precondition.permissions.take() {
-                if user.permissions != db::Permissions::from(&p) {
+                if user.permissions != db::Permissions::from(p) {
                     bail_t!(FailedPrecondition, "permissions mismatch");
                 }
             }
@@ -193,7 +193,7 @@ impl Service {
                 change.username = n.to_string();
             }
             if let Some(permissions) = update.permissions.take() {
-                change.permissions = (&permissions).into();
+                change.permissions = permissions.into();
             }
 
             // Safety valve in case something is added to UserSubset and forgotten here.

@@ -347,6 +347,7 @@ impl Service {
                 user: caller.user,
                 signals: (&db, days),
                 signal_types: &db,
+                permissions: caller.permissions.into(),
             },
         )
     }
