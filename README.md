@@ -71,6 +71,7 @@ could use to make this possible:
     *   [Building from source](guide/build.md)
     *   [UI Development](guide/developing-ui.md)
     *   [Troubleshooting](guide/troubleshooting.md)
+    *   [Simple Set-up with PI 3](guide/simple-set-up-pi-3.md)
 *   [Design documents](design/)
 *   [Wiki](https://github.com/scottlamb/moonfire-nvr/wiki) has hardware
     recommendations, notes on several camera models, etc. Please add more!
