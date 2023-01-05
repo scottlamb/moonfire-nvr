@@ -5,7 +5,7 @@ authors = ["Scott Lamb <slamb@slamb.org>"]
 edition = "2018"
 resolver = "2"
 license-file = "../LICENSE.txt"
-rust-version = "1.60"
+rust-version = "1.64"
 
 [features]
 
@@ -27,7 +27,7 @@ blake3 = "1.0.0"
 bytes = "1"
 byteorder = "1.0"
 clap = { version = "2.33.3", default-features = false, features = ["color", "wrap_help"] }
-cursive = "0.19.0"
+cursive = "0.20.0"
 db = { package = "moonfire-db", path = "db" }
 failure = "0.1.1"
 futures = "0.3"
@@ -85,3 +85,6 @@ lto = true
 
 [profile.bench]
 debug = 1
+
+[patch.crates-io]
+hashlink = { git = "https://github.com/scottlamb/hashlink", rev = "26715ca0efe3f1773a0a22bbde8e36cafcaaed52" }
