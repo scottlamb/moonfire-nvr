@@ -6,8 +6,15 @@ changes, see Git history.
 Each release is tagged in Git and on the Docker repository
 [`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
 
+Backwards-incompatible database schema changes happen on on major version
+upgrades, e.g. `0.6.x` -> `0.7.x`. The config file format and
+[API](design/api.md) currently have no stability guarantees, so they may change
+even on minor releases, e.g. `0.7.5` -> `0.7.6`.
+
 ## unreleased
 
+*   expect camelCase in `moonfire-nvr.toml` file, for consistency with the JSON
+    API. You'll need to adjust your config file when upgrading.
 *   use Retina 0.4.3, which is newly compatible with rtsp-simple-server v0.19.3
     and some TP-Link cameras. Fixes [#238](https://github.com/scottlamb/moonfire-nvr/issues/238).
 *   expanded API interface for examining and updating users:
@@ -18,6 +25,7 @@ Each release is tagged in Git and on the Docker repository
     *   expanded `POST /users/<id>` endpoint, including password and
         permissions.
     *   `DELETE /users/<id>` endpoint to delete a user
+*   improved API documentation in `design/api.md`.
 
 ## 0.7.5 (2022-05-09)
 

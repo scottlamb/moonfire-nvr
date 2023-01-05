@@ -9,7 +9,6 @@ use db::auth::SessionHash;
 use failure::{format_err, Error};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeMap;
 use std::ops::Not;
 use uuid::Uuid;
 
@@ -24,6 +23,8 @@ pub struct TopLevel<'a> {
     // "days" and "camera_configs" attributes or not, according to the respective bools.
     #[serde(serialize_with = "TopLevel::serialize_cameras")]
     pub cameras: (&'a db::LockedDatabase, bool, bool),
+
+    pub permissions: Permissions,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<ToplevelUser>,
@@ -121,12 +122,15 @@ pub struct LoginRequest<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogoutRequest<'a> {
+    #[serde(borrow)]
     pub csrf: &'a str,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PostSignalsRequest {
+pub struct PostSignalsRequest<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
     pub signal_ids: Vec<u32>,
     pub states: Vec<u16>,
     pub start: PostSignalsTimeBase,
@@ -517,10 +521,28 @@ pub struct ToplevelUser {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
+pub struct PutUsers<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub user: UserSubset<'a>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct PostUser<'a> {
+    #[serde(borrow)]
     pub csrf: Option<&'a str>,
     pub update: Option<UserSubset<'a>>,
     pub precondition: Option<UserSubset<'a>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct DeleteUser<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -553,8 +575,9 @@ where
 }
 
 /// API/config analog of `Permissions` defined in `db/proto/schema.proto`.
-#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Permissions {
     #[serde(default)]
     view_video: bool,
@@ -569,8 +592,8 @@ pub struct Permissions {
     admin_users: bool,
 }
 
-impl From<&Permissions> for db::schema::Permissions {
-    fn from(p: &Permissions) -> Self {
+impl From<Permissions> for db::schema::Permissions {
+    fn from(p: Permissions) -> Self {
         Self {
             view_video: p.view_video,
             read_camera_configs: p.read_camera_configs,
@@ -581,8 +604,8 @@ impl From<&Permissions> for db::schema::Permissions {
     }
 }
 
-impl From<&db::schema::Permissions> for Permissions {
-    fn from(p: &db::schema::Permissions) -> Self {
+impl From<db::schema::Permissions> for Permissions {
+    fn from(p: db::schema::Permissions) -> Self {
         Self {
             view_video: p.view_video,
             read_camera_configs: p.read_camera_configs,
@@ -595,7 +618,13 @@ impl From<&db::schema::Permissions> for Permissions {
 /// Response to `GET /api/users/`.
 #[derive(Serialize)]
 pub struct GetUsersResponse {
-    pub users: BTreeMap<i32, String>,
+    pub users: Vec<UserSummary>,
+}
+
+#[derive(Serialize)]
+pub struct UserSummary {
+    pub id: i32,
+    pub username: String,
 }
 
 /// Response to `PUT /api/users/`.
