@@ -9,7 +9,6 @@ use db::auth::SessionHash;
 use failure::{format_err, Error};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeMap;
 use std::ops::Not;
 use uuid::Uuid;
 
@@ -123,12 +122,15 @@ pub struct LoginRequest<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogoutRequest<'a> {
+    #[serde(borrow)]
     pub csrf: &'a str,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PostSignalsRequest {
+pub struct PostSignalsRequest<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
     pub signal_ids: Vec<u32>,
     pub states: Vec<u16>,
     pub start: PostSignalsTimeBase,
@@ -519,10 +521,28 @@ pub struct ToplevelUser {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
+pub struct PutUsers<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub user: UserSubset<'a>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct PostUser<'a> {
+    #[serde(borrow)]
     pub csrf: Option<&'a str>,
     pub update: Option<UserSubset<'a>>,
     pub precondition: Option<UserSubset<'a>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct DeleteUser<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -598,7 +618,13 @@ impl From<db::schema::Permissions> for Permissions {
 /// Response to `GET /api/users/`.
 #[derive(Serialize)]
 pub struct GetUsersResponse {
-    pub users: BTreeMap<i32, String>,
+    pub users: Vec<UserSummary>,
+}
+
+#[derive(Serialize)]
+pub struct UserSummary {
+    pub id: i32,
+    pub username: String,
 }
 
 /// Response to `PUT /api/users/`.

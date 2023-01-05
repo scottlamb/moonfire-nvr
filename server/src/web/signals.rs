@@ -12,8 +12,8 @@ use url::form_urlencoded;
 use crate::json;
 
 use super::{
-    bad_req, extract_json_body, from_base_error, plain_response, serve_json, Caller,
-    ResponseResult, Service,
+    bad_req, extract_json_body, from_base_error, plain_response, require_csrf_if_session,
+    serve_json, Caller, ResponseResult, Service,
 };
 
 use std::borrow::Borrow;
@@ -42,6 +42,7 @@ impl Service {
         let r = extract_json_body(&mut req).await?;
         let r: json::PostSignalsRequest =
             serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        require_csrf_if_session(&caller, r.csrf)?;
         let now = recording::Time::new(self.db.clocks().realtime());
         let mut l = self.db.lock();
         let start = match r.start {

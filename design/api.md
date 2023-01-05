@@ -23,13 +23,15 @@ Status: **current**.
         * [Request 2](#request-2)
         * [Request 3](#request-3)
     * [User management](#user-management)
-        * [`GET /api/users`](#get-apiusers)
-        * [`PUT /api/users`](#put-apiusers)
+        * [`GET /api/users/`](#get-apiusers)
+        * [`PUT /api/users/`](#put-apiusers)
         * [`GET /api/users/<id>`](#get-apiusersid)
         * [`POST /api/users/<id>`](#post-apiusersid)
         * [`DELETE /api/users/<id>`](#delete-apiusersid)
 * [Types](#types)
+    * [UserSubset](#usersubset)
     * [Permissions](#permissions)
+* [Cross-site request forgery (CSRF) protection](#cross-site-request-forgery-csrf-protection)
 
 ## Summary
 
@@ -91,8 +93,7 @@ request parameters:
     should be included.
 *   `cameraConfigs`: a boolean indicating if the `camera.config` and
     `camera.stream[].config` parameters described below should be included.
-    This requires the `read_camera_configs` permission as described in
-    `schema.proto`.
+    This requires the `readCameraConfigs` permission.
 
 Example request URI (with added whitespace between parameters):
 
@@ -192,8 +193,6 @@ The `application/json` response will have a JSON object as follows:
     *   `id`: an integer
     *   `preferences`: a JSON object
     *   `session`: an object, present only if authenticated via session cookie.
-        (In the future, it will be possible to instead authenticate via uid over
-        a Unix domain socket.)
         *   `csrf`: a cross-site request forgery token for use in `POST` requests.
 
 Example response:
@@ -430,7 +429,7 @@ Example response:
 
 ### `GET /api/cameras/<uuid>/<stream>/view.mp4`
 
-Requires the `view_video` permission.
+Requires the `viewVideo` permission.
 
 Returns a `.mp4` file, with an etag and support for range requests. The MIME
 type will be `video/mp4`, with a `codecs` parameter as specified in
@@ -720,7 +719,7 @@ This represents the following observations:
 
 ### `POST /api/signals`
 
-Requires the `update_signals` permission.
+Requires the `updateSignals` permission.
 
 Alters the state of a signal.
 
@@ -738,6 +737,7 @@ last ran. These will specify beginning and end times.
 The request should have an `application/json` body describing the change to
 make. It should be a JSON object with these attributes:
 
+*   `csrf`: a CSRF token, required when using session authentication.
 *   `signalIds`: a list of signal ids to change. Must be sorted.
 *   `states`: a list (one per `signalIds` entry) of states to set.
 *   `start`: the starting time of the change, as a JSON object of the form
@@ -832,72 +832,79 @@ Response:
 
 ### User management
 
-#### `GET /api/users`
+#### `GET /api/users/`
 
-Requires the `admin_users` permission.
+Requires the `adminUsers` permission.
 
 Lists all users. Currently there's no paging. Returns a JSON object with
-a `users` key with a map of id to username.
+a `users` key with an array of objects, each with the following keys:
 
-#### `PUT /api/users`
+*   `id`: a number.
+*   `username`: a string.
 
-Requires the `admin_users` permission.
+#### `PUT /api/users/`
 
-Adds a user. Expects a JSON object with the parameters for the user:
+Requires the `adminUsers` permission.
 
-*   `username`: a string, which must be unique.
-*   `permissions`: see `Permissions` below.
-*   `password` (optional): a string.
-*   `preferences` (optional): an arbitrary JSON object. Interpretation is
-    up to clients.
+Adds a user. Expects a JSON object as follows:
+
+*   `csrf`: a CSRF token, required when using session authentication.
+*   `user`: a `UserSubset` as defined below.
 
 Returns status 204 (No Content) on success.
 
 #### `GET /api/users/<id>`
 
-Retrieves the user. Requires the `admin_users` permission if the caller is
+Retrieves the user. Requires the `adminUsers` permission if the caller is
 not authenticated as the user in question.
 
-Returns a HTTP status 200 on success with a JSON dict:
-
-*   `preferences`: a JSON object.
-*   `password`: absent (no password set) or a placeholder string to indicate
-    the password is set. Passwords are stored hashed, so the cleartext can not
-    be retrieved.
-*   `permissions`: see `Permissions` below.
+Returns a HTTP status 200 on success with a JSON `UserSubset`. The `password`
+will be absent (for no password) or a placeholder string to indicate the
+password is set. Passwords are stored hashed, so the cleartext can not be
+retrieved.
 
 #### `POST /api/users/<id>`
 
-Allows updating the given user. Requires the `admin_users` permission if the
-caller is not authenticated as the user in question.
+Updates the given user. Requires the `adminUsers` permission if the caller is
+not authenticated as the user in question.
 
 Expects a JSON object:
 
 *   `csrf`: a CSRF token, required when using session authentication.
-*   `update`: sets the provided fields
-*   `precondition`: forces the request to fail with HTTP status 412
-    (Precondition failed) if the provided fields don't have the given value.
-
-Currently the following fields are supported for `update` and `precondition`:
-
-* `preferences`, a JSON object.
-* `password`, a cleartext string. When updating the password, the previous
-  password must be supplied as a precondition, unless the caller has
-  `admin_users` permission.
-* `permissions`, a `Permissions` as described below, which always requires
-  `admin_users` permission to update. Note that updating a user's permissions
-  currently neither adds nor limits permissions of existing sessions; it only
-  changes what is available to newly created sessions.
+*   `update`: `UserSubset`, sets the provided fields. Field-specific notes:
+    *   `password`: when updating the password, the previous password must
+        be supplied as a precondition, unless the caller has `admin_users`
+        permission.
+    *   `permissions`: requires `adminUsers` permission. Note that updating a
+        user's permissions currently neither adds nor limits permissions of
+        existing sessions; it only changes what is available to newly created
+        sessions.
+*   `precondition`: `UserSubset`, forces the request to fail with HTTP status
+    412 (Precondition failed) if the provided fields don't have the given
+    values.
 
 Returns HTTP status 204 (No Content) on success.
 
 #### `DELETE /api/users/<id>`
 
-Deletes the given user. Requires the `admin_users` permission.
+Deletes the given user. Requires the `adminUsers` permission.
+
+Expects a JSON object body with the following parameters:
+
+*   `csrf`: a CSRF token, required when using session authentication.
 
 Returns HTTP status 204 (No Content) on success.
 
 ## Types
+
+### UserSubset
+
+A JSON object with any of the following parameters:
+
+*   `preferences`, a JSON object which the server stores without interpreting.
+    This field is meant for user-level preferences meaningful to the UI.
+*   `password`, a cleartext string.
+*   `permissions`, a `Permissions` as described below.
 
 ### Permissions
 
@@ -911,8 +918,46 @@ A JSON object of permissions to perform various actions:
 See endpoints above for more details on the contexts in which these are
 required.
 
+## Cross-site request forgery (CSRF) protection
+
+The API includes several standard protections against [cross-site request
+forgery](https://en.wikipedia.org/wiki/Cross-site_request_forgery) attacks, in
+which a malicious third-party website convinces the user's browser to send
+requests on its behalf.
+
+The following protections apply regardless of method of authentication (session,
+no authentication + `allowUnauthenticatedPermissions`, or the browser proxying
+to a Unix socket with `ownUidIsPrivileged`):
+
+*   The `GET` method is always "safe". Actions that have significant side
+    effects require another method such as `DELETE`, `POST`, or `PUT`. This
+    prevents simple hyperlinks from causing damage.
+*   Mutations always require some non-default request header (e.g.
+    `Content-Type: application/json`) so that a `<form method="POST">` will be
+    rejected.
+*   The server does *not* override the default
+    [CORS](https://en.wikipedia.org/wiki/Cross-origin_resource_sharing) policy.
+    Thus, cross-domain Ajax requests (via `XMLHTTPRequest` or `fetch`) should
+    fail.
+*   WebSocket upgrade requests are rejected unless the `Origin` and `Host`
+    headers match.
+
+The following additional protections apply only when using session
+authentication:
+
+*   Session cookies are set with the [`SameSite=Lax` attribute](samesite-lax),
+    so that sufficiently modern web browsers will never send the session cookie
+    on subrequests. (Note they still send session cookies when following links
+    and on WebSocket upgrade. In these cases, we rely on the protections
+    described above.)
+*   Mutations use a `csrf` token, requiring the caller to prove it is able
+    to read the `GET /api/` response. (This is subect to change. We may decide
+    to implement these tokens in a way that doesn't require session
+    authentication or decide they're entirely unnecessary.)
+
 [media-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-media-segments
 [init-segment]: https://w3c.github.io/media-source/isobmff-byte-stream-format.html#iso-init-segments
 [rfc-6381]: https://tools.ietf.org/html/rfc6381
 [rfc-6455]: https://tools.ietf.org/html/rfc6455
 [multipart-mixed-js]: https://github.com/scottlamb/multipart-mixed-js
+[samesite-lax]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite#lax

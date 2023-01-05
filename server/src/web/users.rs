@@ -7,11 +7,11 @@
 use base::{bail_t, format_err_t};
 use http::{Method, Request, StatusCode};
 
-use crate::json::{self, PutUsersResponse, UserSubset};
+use crate::json::{self, PutUsersResponse, UserSubset, UserSummary};
 
 use super::{
-    bad_req, csrf_matches, extract_json_body, plain_response, serve_json, Caller, ResponseResult,
-    Service,
+    bad_req, extract_json_body, plain_response, require_csrf_if_session, serve_json, Caller,
+    ResponseResult, Service,
 };
 
 impl Service {
@@ -34,7 +34,10 @@ impl Service {
             .lock()
             .users_by_id()
             .iter()
-            .map(|(&id, user)| (id, user.username.clone()))
+            .map(|(&id, user)| UserSummary {
+                id,
+                username: user.username.clone(),
+            })
             .collect();
         serve_json(&req, &json::GetUsersResponse { users })
     }
@@ -44,23 +47,25 @@ impl Service {
             bail_t!(Unauthenticated, "must have admin_users permission");
         }
         let r = extract_json_body(&mut req).await?;
-        let mut r: json::UserSubset =
+        let mut r: json::PutUsers =
             serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        require_csrf_if_session(&caller, r.csrf)?;
         let username = r
+            .user
             .username
             .take()
             .ok_or_else(|| format_err_t!(InvalidArgument, "username must be specified"))?;
         let mut change = db::UserChange::add_user(username.to_owned());
-        if let Some(Some(pwd)) = r.password.take() {
+        if let Some(Some(pwd)) = r.user.password.take() {
             change.set_password(pwd.to_owned());
         }
-        if let Some(preferences) = r.preferences.take() {
+        if let Some(preferences) = r.user.preferences.take() {
             change.config.preferences = preferences;
         }
-        if let Some(permissions) = r.permissions.take() {
+        if let Some(permissions) = r.user.permissions.take() {
             change.permissions = permissions.into();
         }
-        if r != Default::default() {
+        if r.user != Default::default() {
             bail_t!(Unimplemented, "unsupported user fields: {:#?}", r);
         }
         let mut l = self.db.lock();
@@ -76,7 +81,7 @@ impl Service {
     ) -> ResponseResult {
         match *req.method() {
             Method::GET | Method::HEAD => self.get_user(req, caller, id).await,
-            Method::DELETE => self.delete_user(caller, id).await,
+            Method::DELETE => self.delete_user(req, caller, id).await,
             Method::POST => self.post_user(req, caller, id).await,
             _ => Err(plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
@@ -106,10 +111,18 @@ impl Service {
         serve_json(&req, &out)
     }
 
-    async fn delete_user(&self, caller: Caller, id: i32) -> ResponseResult {
+    async fn delete_user(
+        &self,
+        mut req: Request<hyper::Body>,
+        caller: Caller,
+        id: i32,
+    ) -> ResponseResult {
         if !caller.permissions.admin_users {
             bail_t!(Unauthenticated, "must have admin_users permission");
         }
+        let r = extract_json_body(&mut req).await?;
+        let r: json::DeleteUser = serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        require_csrf_if_session(&caller, r.csrf)?;
         let mut l = self.db.lock();
         l.delete_user(id)?;
         Ok(plain_response(StatusCode::NO_CONTENT, &b""[..]))
@@ -137,13 +150,7 @@ impl Service {
                 "to change password, must supply previous password or have admin_users permission"
             );
         }
-        match (r.csrf, caller.user.and_then(|u| u.session)) {
-            (None, Some(_)) => bail_t!(Unauthenticated, "csrf must be supplied"),
-            (Some(csrf), Some(session)) if !csrf_matches(csrf, session.csrf) => {
-                bail_t!(Unauthenticated, "incorrect csrf");
-            }
-            (_, _) => {}
-        }
+        require_csrf_if_session(&caller, r.csrf)?;
         if let Some(mut precondition) = r.precondition {
             if matches!(precondition.username.take(), Some(n) if n != user.username) {
                 bail_t!(FailedPrecondition, "username mismatch");

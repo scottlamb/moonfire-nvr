@@ -153,6 +153,16 @@ async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, Http
         .map_err(|e| internal_server_err(format_err!("unable to read request body: {}", e)))
 }
 
+fn require_csrf_if_session(caller: &Caller, csrf: Option<&str>) -> Result<(), base::Error> {
+    match (csrf, caller.user.as_ref().and_then(|u| u.session.as_ref())) {
+        (None, Some(_)) => bail_t!(Unauthenticated, "csrf must be supplied"),
+        (Some(csrf), Some(session)) if !csrf_matches(csrf, session.csrf) => {
+            bail_t!(Unauthenticated, "incorrect csrf");
+        }
+        (_, _) => Ok(()),
+    }
+}
+
 pub struct Config<'a> {
     pub db: Arc<db::Database>,
     pub ui_dir: Option<&'a std::path::Path>,
