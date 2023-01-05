@@ -90,7 +90,7 @@ time apt-get install --assume-yes --no-install-recommends "${packages[@]}"
 # https://doc.rust-lang.org/cargo/guide/build-cache.html
 if [[ -n "${rust_target}" ]]; then
     su moonfire-nvr -lc "rustup target install ${rust_target} &&
-                         ln -s target/${rust_target}/release/moonfire-nvr ."
+                         ln -s target/${rust_target}/release-lto/moonfire-nvr ."
     underscore_rust_target="${rust_target//-/_}"
     uppercase_underscore_rust_target="${underscore_rust_target^^}"
     cat >> /var/lib/moonfire-nvr/.buildrc <<EOF
@@ -112,7 +112,7 @@ export CC_${underscore_rust_target}=${gcc_target}-gcc
 export CXX_${underscore_rust_target}=${gcc_target}-g++
 EOF
 else
-    su moonfire-nvr -lc "ln -s target/release/moonfire-nvr ."
+    su moonfire-nvr -lc "ln -s target/release-lto/moonfire-nvr ."
 fi
 
 ls -laFR /var/cache/apt > /docker-build-debug/dev/var-cache-apt-after
