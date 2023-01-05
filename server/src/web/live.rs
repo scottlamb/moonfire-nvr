@@ -162,6 +162,7 @@ impl Service {
         // On the first LiveSegment, send all the data from the previous key frame onward.
         // For LiveSegments, it's okay to send a single non-key frame at a time.
         let mut start_at_key = true;
+        let mut sequence_number = 1;
         loop {
             let next = combo
                 .next()
@@ -169,9 +170,17 @@ impl Service {
                 .unwrap_or_else(|| unreachable!("timer stream never ends"));
             match next {
                 Either::Left(live) => {
-                    self.stream_live_m4s_chunk(open_id, stream_id, &mut ws, live, start_at_key)
-                        .await?;
+                    self.stream_live_m4s_chunk(
+                        open_id,
+                        stream_id,
+                        &mut ws,
+                        live,
+                        start_at_key,
+                        sequence_number,
+                    )
+                    .await?;
                     start_at_key = false;
+                    sequence_number = sequence_number.wrapping_add(1);
                 }
                 Either::Right(_) => {
                     ws.send(tungstenite::Message::Ping(Vec::new())).await?;
@@ -188,8 +197,9 @@ impl Service {
         ws: &mut tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>,
         live: db::LiveSegment,
         start_at_key: bool,
+        sequence_number: u32,
     ) -> Result<(), Error> {
-        let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
+        let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment { sequence_number });
         let mut row = None;
         {
             let db = self.db.lock();

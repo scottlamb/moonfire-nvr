@@ -864,7 +864,7 @@ macro_rules! write_length {
 pub enum Type {
     Normal,
     InitSegment,
-    MediaSegment,
+    MediaSegment { sequence_number: u32 },
 }
 
 impl FileBuilder {
@@ -891,7 +891,7 @@ impl FileBuilder {
     /// Sets if the generated `.mp4` should include a subtitle track with second-level timestamps.
     /// Default is false.
     pub fn include_timestamp_subtitle_track(&mut self, b: bool) -> Result<(), Error> {
-        if b && self.type_ == Type::MediaSegment {
+        if b && matches!(self.type_, Type::MediaSegment { .. }) {
             // There's no support today for timestamp truns or for timestamps without edit lists.
             // The latter would invalidate the code's assumption that desired timespan == actual
             // timespan in the timestamp track.
@@ -992,8 +992,9 @@ impl FileBuilder {
             Type::InitSegment => {
                 etag.update(b":init:");
             }
-            Type::MediaSegment => {
+            Type::MediaSegment { sequence_number } => {
                 etag.update(b":media:");
+                etag.update(&sequence_number.to_be_bytes()[..]);
             }
         };
         for s in &mut self.segments {
@@ -1002,7 +1003,7 @@ impl FileBuilder {
             // Add the media time for this segment. If edit lists are supported (not media
             // segments), this shouldn't include the portion they skip.
             let start = match self.type_ {
-                Type::MediaSegment => s.s.actual_start_90k(),
+                Type::MediaSegment { .. } => s.s.actual_start_90k(),
                 _ => md.start,
             };
             self.media_duration_90k += u64::try_from(md.end - start).unwrap();
@@ -1055,8 +1056,8 @@ impl FileBuilder {
         const EST_BUF_LEN: usize = 2048;
         self.body.buf.reserve(EST_BUF_LEN);
         let initial_sample_byte_pos = match self.type_ {
-            Type::MediaSegment => {
-                self.append_moof()?;
+            Type::MediaSegment { sequence_number } => {
+                self.append_moof(sequence_number)?;
                 let p = self.append_media_mdat()?;
 
                 // If the segment is > 4 GiB, the 32-bit trun data offsets are untrustworthy.
@@ -1240,14 +1241,14 @@ impl FileBuilder {
     }
 
     /// Appends a `MovieFragmentBox` (ISO/IEC 14496-12 section 8.8.4).
-    fn append_moof(&mut self) -> Result<(), Error> {
+    fn append_moof(&mut self, sequence_number: u32) -> Result<(), Error> {
         write_length!(self, {
             self.body.buf.extend_from_slice(b"moof");
 
             // MovieFragmentHeaderBox (ISO/IEC 14496-12 section 8.8.5).
             write_length!(self, {
                 self.body.buf.extend_from_slice(b"mfhd\x00\x00\x00\x00");
-                self.body.append_u32(1); // sequence_number
+                self.body.append_u32(sequence_number);
             })?;
 
             // TrackFragmentBox (ISO/IEC 14496-12 section 8.8.6).
@@ -1908,7 +1909,7 @@ impl http_serve::Entity for File {
         if let Some(cd) = self.0.content_disposition.as_ref() {
             hdrs.insert(http::header::CONTENT_DISPOSITION, cd.clone());
         }
-        if self.0.type_ == Type::MediaSegment {
+        if matches!(self.0.type_, Type::MediaSegment { .. }) {
             if let Some((d, r)) = self.0.prev_media_duration_and_cur_runs {
                 hdrs.insert(
                     "X-Prev-Media-Duration",
@@ -2744,7 +2745,7 @@ mod tests {
         // Time range [2+4+6, 2+4+6+8+1) means the 4th sample and part of the 5th are included.
         // The 3rd gets pulled in also because it's a sync frame and the 4th isn't.
         let mp4 = make_mp4_from_encoders(
-            Type::MediaSegment,
+            Type::MediaSegment { sequence_number: 1 },
             &db,
             vec![r],
             2 + 4 + 6..2 + 4 + 6 + 8 + 1,
@@ -2799,7 +2800,7 @@ mod tests {
         for i in 1..6 {
             let duration_90k = 2 * i;
             let mp4 = make_mp4_from_encoders(
-                Type::MediaSegment,
+                Type::MediaSegment { sequence_number: 1 },
                 &db,
                 vec![r.clone()],
                 pos..pos + duration_90k,

@@ -254,7 +254,14 @@ impl Service {
             ),
             Path::StreamViewMp4Segment(uuid, type_, debug) => (
                 CacheControl::PrivateStatic,
-                self.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::MediaSegment, debug)?,
+                self.stream_view_mp4(
+                    &req,
+                    caller,
+                    uuid,
+                    type_,
+                    mp4::Type::MediaSegment { sequence_number: 1 },
+                    debug,
+                )?,
             ),
             Path::StreamLiveMp4Segments(uuid, type_) => (
                 CacheControl::PrivateDynamic,
