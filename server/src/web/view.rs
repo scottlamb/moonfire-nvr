@@ -230,7 +230,7 @@ fn num<'a, T: FromStr>() -> impl FnMut(&'a str) -> IResult<&'a str, T> {
 }
 
 impl Segments {
-    /// Parses the `s` query parameter to `view.mp4` as described in `design/api.md`.
+    /// Parses the `s` query parameter to `view.mp4` as described in `ref/api.md`.
     /// Doesn't do any validation.
     fn parse(i: &str) -> IResult<&str, Segments> {
         // Parse START_ID[-END_ID] into Range<i32>.

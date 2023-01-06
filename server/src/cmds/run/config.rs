@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 //! Runtime configuration file (`/etc/moonfire-nvr.toml`).
+//! See `ref/config.md` for more description.
 
 use std::path::PathBuf;
 

@@ -8,7 +8,7 @@ Each release is tagged in Git and on the Docker repository
 
 Backwards-incompatible database schema changes happen on on major version
 upgrades, e.g. `0.6.x` -> `0.7.x`. The config file format and
-[API](design/api.md) currently have no stability guarantees, so they may change
+[API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 
 ## unreleased
@@ -28,7 +28,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     *   expanded `POST /users/<id>` endpoint, including password and
         permissions.
     *   `DELETE /users/<id>` endpoint to delete a user
-*   improved API documentation in `design/api.md`.
+*   improved API documentation in [`ref/api.md`](ref/api.md).
 
 ## 0.7.5 (2022-05-09)
 

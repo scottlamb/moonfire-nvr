@@ -66,11 +66,15 @@ could use to make this possible:
     with [GPL-3.0-linking-exception](https://spdx.org/licenses/GPL-3.0-linking-exception.html)
     for OpenSSL.
 *   [Change log](CHANGELOG.md) / release notes.
-*   [Guides](guide/)
+*   [Guides](guide/), including:
     *   [Installing](guide/install.md)
     *   [Building from source](guide/build.md)
+    *   [Securing Moonfire NVR and exposing it to the Internet](guide/secure.md)
     *   [UI Development](guide/developing-ui.md)
     *   [Troubleshooting](guide/troubleshooting.md)
+*   [References](ref/), including:
+    *   [Configuration file](refs/config.md)
+    *   [JSON API](refs/api.md)
 *   [Design documents](design/)
 *   [Wiki](https://github.com/scottlamb/moonfire-nvr/wiki) has hardware
     recommendations, notes on several camera models, etc. Please add more!

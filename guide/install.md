@@ -67,7 +67,7 @@ $ sudo nano /usr/local/bin/nvr
 $ sudo chmod a+rx /usr/local/bin/nvr
 ```
 
-`/etc/moonfire-nvr.toml`:
+`/etc/moonfire-nvr.toml` (see [ref/config.md](../ref/config.md) for more explanation):
 ```toml
 [[binds]]
 ipv4 = "0.0.0.0:8080"

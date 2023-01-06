@@ -5,7 +5,7 @@
 /**
  * @file Convenience wrapper around the Moonfire NVR API layer.
  *
- * See <tt>design/api.md</tt> for a description of the API. Some of the
+ * See <tt>ref/api.md</tt> for a description of the API. Some of the
  * documentation is copied into the docstrings here for convenience, but
  * that doc is authoritative.
  *

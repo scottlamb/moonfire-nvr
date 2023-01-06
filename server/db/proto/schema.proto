@@ -60,7 +60,7 @@ message DirMeta {
   Open in_progress_open = 4;
 }
 
-// Permissions to perform actions. See description in design/api.md.
+// Permissions to perform actions. See description in ref/api.md.
 //
 // This protobuf form is stored in user and session rows.
 message Permissions {

@@ -33,8 +33,9 @@ Source: https://www.best-microcontroller-projects.com/ppm.html
 *recording:* the video from a (typically 1-minute) portion of an RTSP session.
 RTSP sessions are divided into recordings as a detail of the
 storage schema. See [schema.md](schema.md) for details. This concept is exposed
-to the frontend code through the API; see [api.md](api.md). It's not exposed in
-the user interface; videos are reconstructed from segments automatically.
+to the frontend code through the API; see [../ref/api.md](../ref/api.md). It's
+not exposed in the user interface; videos are reconstructed from segments
+automatically.
 
 *run:* all the recordings from a single RTSP session. These are all from the
 same *stream* and could be reassembled into a single video with no gaps. If the
@@ -51,7 +52,8 @@ sample files for one or more streams. Typically there is one directory per disk.
 *segment:* part or all of a recording. An API request might ask for a video of
 recordings 1–4 starting 80 seconds in. If each recording is exactly 60 seconds,
 this would correspond to three segments: recording 2 from 20 seconds in to
-the end, all of recording 3, and all of recording 4. See [api.md](api.md).
+the end, all of recording 3, and all of recording 4. See
+[../ref/api.md](../ref/api.md).
 
 *session:* a set of authenticated Moonfire NVR requests defined by the use of a
 given credential (`s` cookie). Each user may have many credentials and thus
@@ -60,9 +62,10 @@ nothing to do with RTSP sessions; those more closely match a *run*.
 
 *signal:* a timeseries with an enum value. Signals might represent a camera's
 motion detection or day/night status. They could also represent an external
-input such as a burglar alarm system's zone status. See [api.md](api.md).
-Note signals are still under development and not yet exposed in Moonfire NVR's
-UI. See [#28](https://github.com/scottlamb/moonfire-nvr/issues/28) for more
+input such as a burglar alarm system's zone status. See
+[../ref/api.md](../ref/api.md). Note signals are still under development and
+not yet exposed in Moonfire NVR's UI. See
+[#28](https://github.com/scottlamb/moonfire-nvr/issues/28) for more
 information.
 
 *stream:* the "main" or "sub" stream from a given camera. Moonfire NVR expects

@@ -182,6 +182,8 @@ This change has two effects:
      and `X-Forwarded-Proto` headers as added by the webserver configuration
      in the next section.
 
+See also [ref/config.md](../ref/config.md) for more about the configuration file.
+
 If the webserver is running on the same machine as Moonfire NVR, you might
 also change `--publish=8080:8080` to `--publish=127.0.0.1:8080:8080` in your
 `/usr/local/bin/nvr` script, preventing other machines on the network from

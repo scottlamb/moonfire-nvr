@@ -55,7 +55,7 @@ impl Session {
 }
 
 /// JSON serialization wrapper for a single camera when processing `/api/` and
-/// `/api/cameras/<uuid>/`. See `design/api.md` for details.
+/// `/api/cameras/<uuid>/`. See `ref/api.md` for details.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Camera<'a> {

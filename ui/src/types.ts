@@ -4,7 +4,7 @@
 
 /**
  * @file Types from the Moonfire NVR API.
- * See descriptions in <tt>design/api.md</tt>.
+ * See descriptions in <tt>ref/api.md</tt>.
  */
 
 export type StreamType = "main" | "sub";
