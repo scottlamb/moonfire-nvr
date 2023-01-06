@@ -131,8 +131,12 @@ fn read_config(path: &Path) -> Result<ConfigFile, Error> {
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {
-    let config = read_config(&args.config)
-        .with_context(|_| format!("unable to read {}", &args.config.display()))?;
+    let config = read_config(&args.config).with_context(|_| {
+        format!(
+            "Unable to load config file {}. See documentation in ref/config.md.",
+            &args.config.display()
+        )
+    })?;
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
