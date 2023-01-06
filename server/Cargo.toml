@@ -42,7 +42,7 @@ libc = "0.2"
 log = { version = "0.4" }
 memchr = "2.0.2"
 mylog = { git = "https://github.com/scottlamb/mylog" }
-nix = "0.25.0"
+nix = "0.26.1"
 nom = "7.0.0"
 password-hash = "0.4.2"
 protobuf = "3.0"
@@ -58,7 +58,7 @@ sync_wrapper = "0.1.0"
 time = "0.1"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1.5"
-tokio-tungstenite = "0.17.1"
+tokio-tungstenite = "0.18.0"
 toml = "0.5"
 tracing = { version = "0.1", features = ["log"] }
 url = "2.1.1"

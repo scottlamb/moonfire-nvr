@@ -298,6 +298,7 @@ impl ReaderInt {
                 range
             )
         })?;
+        let map_len = std::num::NonZeroUsize::new(map_len).expect("range is non-empty");
 
         let file = crate::fs::openat(self.dir.0, &p, OFlag::O_RDONLY, Mode::empty())
             .err_kind(ErrorKind::Unknown)?;
@@ -306,7 +307,7 @@ impl ReaderInt {
         // for it to be less than the requested read. Check for this now rather than crashing
         // with a SIGBUS or reading bad data at the end of the last page later.
         let metadata = file.metadata().err_kind(ErrorKind::Unknown)?;
-        if metadata.len() < u64::try_from(offset).unwrap() + u64::try_from(map_len).unwrap() {
+        if metadata.len() < u64::try_from(offset).unwrap() + u64::try_from(map_len.get()).unwrap() {
             bail_t!(
                 Internal,
                 "file {}, range {:?}, len {}",
@@ -317,7 +318,7 @@ impl ReaderInt {
         }
         let map_ptr = unsafe {
             nix::sys::mman::mmap(
-                std::ptr::null_mut(),
+                None,
                 map_len,
                 nix::sys::mman::ProtFlags::PROT_READ,
                 nix::sys::mman::MapFlags::MAP_SHARED,
@@ -339,7 +340,7 @@ impl ReaderInt {
         if let Err(e) = unsafe {
             nix::sys::mman::madvise(
                 map_ptr as *mut libc::c_void,
-                map_len,
+                map_len.get(),
                 nix::sys::mman::MmapAdvise::MADV_SEQUENTIAL,
             )
         } {
@@ -357,7 +358,7 @@ impl ReaderInt {
             composite_id,
             map_ptr,
             map_pos: unaligned,
-            map_len,
+            map_len: map_len.get(),
         }))
     }
 
