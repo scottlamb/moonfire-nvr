@@ -75,8 +75,8 @@ const Row = ({
 );
 
 /**
- * Creates a <tt>TableHeader</tt> and <tt>TableBody</tt> with a list of videos
- * for a given <tt>stream</tt> and <tt>range90k</tt>.
+ * Creates a <tt>TableBody</tt> with a list of videos for a given
+ * <tt>stream</tt> and <tt>range90k</tt>.
  *
  * Attempts to minimize reflows while loading. It leaves the existing content
  * (either nothing or a previous range) for a while before displaying a

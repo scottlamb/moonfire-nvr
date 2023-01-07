@@ -29,6 +29,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
         permissions.
     *   `DELETE /users/<id>` endpoint to delete a user
 *   improved API documentation in [`ref/api.md`](ref/api.md).
+*   first draft of a web UI for user administration. Rough edges expected!
 
 ## 0.7.5 (2022-05-09)
 

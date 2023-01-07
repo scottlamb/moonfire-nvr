@@ -26,13 +26,15 @@ import Login from "./Login";
 import { useSnackbars } from "./snackbars";
 import ListActivity from "./List";
 import AppBar from "@mui/material/AppBar";
-import { Routes, Route, Link } from "react-router-dom";
+import { Routes, Route, Link, Navigate } from "react-router-dom";
 import LiveActivity from "./Live";
+import UsersActivity from "./Users";
 import Drawer from "@mui/material/Drawer";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import ListIcon from "@mui/icons-material/List";
+import PeopleIcon from "@mui/icons-material/People";
 import Videocam from "@mui/icons-material/Videocam";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ChangePassword from "./ChangePassword";
@@ -165,6 +167,20 @@ function App() {
               </ListItemIcon>
               <ListItemText primary="Live view (experimental)" />
             </ListItem>
+            {toplevel?.permissions.adminUsers && (
+              <ListItem
+                button
+                key="users"
+                onClick={toggleShowMenu}
+                component={Link}
+                to="/users"
+              >
+                <ListItemIcon>
+                  <PeopleIcon />
+                </ListItemIcon>
+                <ListItemText primary="Users" />
+              </ListItem>
+            )}
           </List>
         </Drawer>
         <Login
@@ -220,6 +236,13 @@ function App() {
         path="live"
         element={<LiveActivity cameras={toplevel.cameras} Frame={Frame} />}
       />
+      <Route
+        path="users"
+        element={
+          <UsersActivity Frame={Frame} csrf={toplevel!.user?.session?.csrf} />
+        }
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

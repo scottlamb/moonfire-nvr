@@ -157,8 +157,19 @@ async function json<T>(
 export interface ToplevelResponse {
   timeZoneName: string;
   cameras: Camera[];
+
+  // This is not part of the wire API; it's synthesized in `toplevel`.
   streams: Map<number, Stream>;
+
+  permissions: Permissions;
   user: ToplevelUser | undefined;
+}
+
+export interface Permissions {
+  adminUsers?: boolean;
+  readCameraConfigs?: boolean;
+  updateSignals?: boolean;
+  viewVideo?: boolean;
 }
 
 export interface ToplevelUser {
@@ -217,6 +228,24 @@ export async function logout(req: LogoutRequest, init: RequestInit) {
   });
 }
 
+export interface UsersResponse {
+  users: UserWithId[];
+}
+
+export interface UserWithId {
+  id: number;
+  user: UserSubset;
+}
+
+export async function users(init: RequestInit) {
+  return await json<UsersResponse>(`/api/users/`, init);
+}
+
+export interface PostUserRequest {
+  csrf?: string;
+  user: UserSubset;
+}
+
 export interface UpdateUserRequest {
   csrf?: string;
   precondition?: UserSubset;
@@ -224,7 +253,21 @@ export interface UpdateUserRequest {
 }
 
 export interface UserSubset {
-  password?: String;
+  password?: String | null;
+  permissions?: Permissions;
+  username?: String;
+}
+
+/** Creates a user. */
+export async function postUser(req: PostUserRequest, init: RequestInit) {
+  return await myfetch("/api/users/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(req),
+    ...init,
+  });
 }
 
 /** Updates a user. */
@@ -234,7 +277,27 @@ export async function updateUser(
   init: RequestInit
 ) {
   return await myfetch(`/api/users/${id}`, {
-    method: "POST",
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(req),
+    ...init,
+  });
+}
+
+export interface DeleteUserRequest {
+  csrf?: string;
+}
+
+/** Deletes a user. */
+export async function deleteUser(
+  id: number,
+  req: DeleteUserRequest,
+  init: RequestInit
+) {
+  return await myfetch(`/api/users/${id}`, {
+    method: "DELETE",
     headers: {
       "Content-Type": "application/json",
     },
