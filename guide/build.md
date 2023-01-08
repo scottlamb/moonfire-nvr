@@ -184,9 +184,6 @@ most non-Rust dependencies:
 ```console
 $ sudo apt-get install \
                build-essential \
-               libavcodec-dev \
-               libavformat-dev \
-               libavutil-dev \
                libncurses-dev \
                libsqlite3-dev \
                pkgconf \

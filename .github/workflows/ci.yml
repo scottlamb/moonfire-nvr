@@ -28,9 +28,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             server/target
-          key: ${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ matrix.rust }}-
+            cargo-
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install libavcodec-dev libavformat-dev libavutil-dev libncurses-dev libsqlite3-dev pkgconf
+        run: sudo apt-get update && sudo apt-get install libncurses-dev libsqlite3-dev pkgconf
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
