@@ -2,6 +2,13 @@
 // Copyright (C) 2022 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
+import { useForm } from "react-hook-form";
+import {
+  FormContainer,
+  PasswordElement,
+  PasswordRepeatElement,
+} from "react-hook-form-mui";
+import Button from "@mui/material/Button";
 import LoadingButton from "@mui/lab/LoadingButton";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
@@ -31,6 +38,11 @@ interface Request {
 // the rule can via API request.
 const MIN_PASSWORD_LENGTH = 8;
 
+interface FormData {
+  currentPassword: string;
+  newPassword: string;
+}
+
 /**
  * Dialog for changing password.
  *
@@ -52,13 +64,9 @@ const MIN_PASSWORD_LENGTH = 8;
  */
 const ChangePassword = ({ user, open, handleClose }: Props) => {
   const snackbars = useSnackbars();
+  const formContext = useForm<FormData>();
+  const setError = formContext.setError;
   const [loading, setLoading] = React.useState<Request | null>(null);
-  const [currentPassword, setCurrentPassword] = React.useState("");
-  const [currentError, setCurrentError] = React.useState(false);
-  const [newPassword, setNewPassword] = React.useState<string>("");
-  const [newError, setNewError] = React.useState(false);
-  const [confirmPassword, setConfirmPassword] = React.useState<string>("");
-  const [confirmError, setConfirmError] = React.useState(false);
   React.useEffect(() => {
     if (loading === null) {
       return;
@@ -83,9 +91,9 @@ const ChangePassword = ({ user, open, handleClose }: Props) => {
           break;
         case "error":
           if (response.httpStatus === 412) {
-            if (currentPassword === loading.currentPassword) {
-              setCurrentError(true);
-            }
+            setError("currentPassword", {
+              message: "Incorrect password.",
+            });
           } else {
             snackbars.enqueue({
               message: response.message,
@@ -107,146 +115,98 @@ const ChangePassword = ({ user, open, handleClose }: Props) => {
     return () => {
       abort.abort();
     };
-  }, [loading, handleClose, snackbars, currentPassword]);
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-
-    if (newPassword.length < MIN_PASSWORD_LENGTH) {
-      setNewError(true);
-      return;
-    } else if (confirmPassword !== newPassword) {
-      setConfirmError(true);
-      return;
-    }
-
+  }, [loading, handleClose, snackbars, setError]);
+  const onSuccess = (data: FormData) => {
     // Suppress concurrent attempts.
+    console.log("onSuccess", data);
     if (loading !== null) {
       return;
     }
     setLoading({
       userId: user.id,
       csrf: user.session!.csrf,
-      currentPassword: currentPassword,
-      newPassword: newPassword,
+      currentPassword: data.currentPassword,
+      newPassword: data.newPassword,
     });
-  };
-
-  const onChangeNewPassword = (
-    e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
-  ) => {
-    setNewPassword(e.target.value);
-    if (e.target.value.length >= MIN_PASSWORD_LENGTH) {
-      setNewError(false);
-    }
-    if (e.target.value === confirmPassword) {
-      setConfirmError(false);
-    }
-  };
-  const onBlurNewPassword = () => {
-    if (newPassword.length < MIN_PASSWORD_LENGTH) {
-      setNewError(true);
-    }
-    if (newPassword !== confirmPassword && confirmPassword !== "") {
-      setConfirmError(true);
-    }
-  };
-  const onChangeConfirmPassword = (
-    e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
-  ) => {
-    setConfirmPassword(e.target.value);
-    if (e.target.value === newPassword) {
-      setConfirmError(false);
-    }
-  };
-  const onBlurConfirmPassword = () => {
-    if (confirmPassword !== newPassword) {
-      setConfirmError(true);
-    }
   };
 
   return (
     <Dialog
-      onClose={handleClose}
       aria-labelledby="change-password-title"
       open={open}
       maxWidth="sm"
       fullWidth={true}
     >
-      <DialogTitle id="change-password-title">
-        Change password for {user.name}
-      </DialogTitle>
+      <DialogTitle id="change-password-title">Change password</DialogTitle>
 
-      <form onSubmit={onSubmit}>
+      <FormContainer formContext={formContext} onSuccess={onSuccess}>
         <DialogContent>
           {/* The username is here in the hopes it will help password managers
            * find the correct entry. It's otherwise unused. */}
-          <input
+          <TextField
             name="username"
-            type="hidden"
+            label="Username"
             value={user.name}
+            InputLabelProps={{ shrink: true }}
+            disabled
             autoComplete="username"
+            variant="filled"
+            fullWidth
+            helperText=" "
           />
 
-          <TextField
-            name="current-password"
+          <PasswordElement
+            name="currentPassword"
             label="Current password"
             variant="filled"
             type="password"
             required
             autoComplete="current-password"
             fullWidth
-            error={currentError}
-            helperText={currentError ? "Current password is incorrect" : " "}
-            value={currentPassword}
-            onChange={(e) => {
-              setCurrentError(false);
-              setCurrentPassword(e.target.value);
-            }}
+            helperText=" "
           />
-          <TextField
-            name="new-password"
+          <PasswordElement
+            name="newPassword"
             label="New password"
             variant="filled"
-            type="password"
             required
             autoComplete="new-password"
-            value={newPassword}
-            inputProps={{ minLength: MIN_PASSWORD_LENGTH }}
-            error={newError}
-            helperText={`Password must be at least ${MIN_PASSWORD_LENGTH} characters`}
+            validation={{
+              minLength: {
+                value: MIN_PASSWORD_LENGTH,
+                message: `Must have at least ${MIN_PASSWORD_LENGTH} characters`,
+              },
+            }}
             fullWidth
-            onChange={onChangeNewPassword}
-            onBlur={onBlurNewPassword}
+            helperText=" "
           />
-          <TextField
-            name="confirm-new-password"
+          <PasswordRepeatElement
+            name="confirmNewPassword"
             label="Confirm new password"
             variant="filled"
             type="password"
+            passwordFieldName="newPassword"
             required
             autoComplete="new-password"
-            value={confirmPassword}
-            inputProps={{ minLength: MIN_PASSWORD_LENGTH }}
             fullWidth
-            error={confirmError}
-            helperText="Passwords must match."
-            onChange={onChangeConfirmPassword}
-            onBlur={onBlurConfirmPassword}
+            helperText=" "
           />
         </DialogContent>
 
         <DialogActions>
+          <Button onClick={handleClose} disabled={loading !== null}>
+            Cancel
+          </Button>
           <LoadingButton
             type="submit"
             variant="contained"
             color="secondary"
             loading={loading !== null}
-            disabled={newError || confirmError}
           >
             Change
           </LoadingButton>
         </DialogActions>
-      </form>
+      </FormContainer>
     </Dialog>
   );
 };
