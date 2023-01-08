@@ -73,8 +73,8 @@ could use to make this possible:
     *   [UI Development](guide/developing-ui.md)
     *   [Troubleshooting](guide/troubleshooting.md)
 *   [References](ref/), including:
-    *   [Configuration file](refs/config.md)
-    *   [JSON API](refs/api.md)
+    *   [Configuration file](ref/config.md)
+    *   [JSON API](ref/api.md)
 *   [Design documents](design/)
 *   [Wiki](https://github.com/scottlamb/moonfire-nvr/wiki) has hardware
     recommendations, notes on several camera models, etc. Please add more!

@@ -7,7 +7,7 @@
 use base::{bail_t, format_err_t};
 use http::{Method, Request, StatusCode};
 
-use crate::json::{self, PutUsersResponse, UserSubset, UserSummary};
+use crate::json::{self, PutUsersResponse, UserSubset, UserWithId};
 
 use super::{
     bad_req, extract_json_body, plain_response, require_csrf_if_session, serve_json, Caller,
@@ -18,10 +18,12 @@ impl Service {
     pub(super) async fn users(&self, req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
         match *req.method() {
             Method::GET | Method::HEAD => self.get_users(req, caller).await,
-            Method::PUT => self.put_users(req, caller).await,
-            _ => Err(
-                plain_response(StatusCode::METHOD_NOT_ALLOWED, "GET, HEAD, or PUT expected").into(),
-            ),
+            Method::POST => self.post_users(req, caller).await,
+            _ => Err(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "GET, HEAD, or POST expected",
+            )
+            .into()),
         }
     }
 
@@ -29,20 +31,19 @@ impl Service {
         if !caller.permissions.admin_users {
             bail_t!(Unauthenticated, "must have admin_users permission");
         }
-        let users = self
-            .db
-            .lock()
+        let l = self.db.lock();
+        let users = l
             .users_by_id()
             .iter()
-            .map(|(&id, user)| UserSummary {
+            .map(|(&id, user)| UserWithId {
                 id,
-                username: user.username.clone(),
+                user: UserSubset::from(user),
             })
             .collect();
         serve_json(&req, &json::GetUsersResponse { users })
     }
 
-    async fn put_users(&self, mut req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
+    async fn post_users(&self, mut req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
         if !caller.permissions.admin_users {
             bail_t!(Unauthenticated, "must have admin_users permission");
         }
@@ -82,10 +83,10 @@ impl Service {
         match *req.method() {
             Method::GET | Method::HEAD => self.get_user(req, caller, id).await,
             Method::DELETE => self.delete_user(req, caller, id).await,
-            Method::POST => self.post_user(req, caller, id).await,
+            Method::PATCH => self.patch_user(req, caller, id).await,
             _ => Err(plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
-                "GET, HEAD, DELETE, or POST expected",
+                "GET, HEAD, DELETE, or PATCH expected",
             )
             .into()),
         }
@@ -98,17 +99,7 @@ impl Service {
             .users_by_id()
             .get(&id)
             .ok_or_else(|| format_err_t!(NotFound, "can't find requested user"))?;
-        let out = UserSubset {
-            username: Some(&user.username),
-            preferences: Some(user.config.preferences.clone()),
-            password: Some(if user.has_password() {
-                Some("(censored)")
-            } else {
-                None
-            }),
-            permissions: Some(user.permissions.clone().into()),
-        };
-        serve_json(&req, &out)
+        serve_json(&req, &UserSubset::from(user))
     }
 
     async fn delete_user(
@@ -128,7 +119,7 @@ impl Service {
         Ok(plain_response(StatusCode::NO_CONTENT, &b""[..]))
     }
 
-    async fn post_user(
+    async fn patch_user(
         &self,
         mut req: Request<hyper::Body>,
         caller: Caller,

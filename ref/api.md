@@ -24,9 +24,9 @@ Status: **current**.
         * [Request 3](#request-3)
     * [User management](#user-management)
         * [`GET /api/users/`](#get-apiusers)
-        * [`PUT /api/users/`](#put-apiusers)
+        * [`POST /api/users/`](#post-apiusers)
         * [`GET /api/users/<id>`](#get-apiusersid)
-        * [`POST /api/users/<id>`](#post-apiusersid)
+        * [`PATCH /api/users/<id>`](#patch-apiusersid)
         * [`DELETE /api/users/<id>`](#delete-apiusersid)
 * [Types](#types)
     * [UserSubset](#usersubset)
@@ -840,9 +840,9 @@ Lists all users. Currently there's no paging. Returns a JSON object with
 a `users` key with an array of objects, each with the following keys:
 
 *   `id`: a number.
-*   `username`: a string.
+*   `user`: a `UserSubset`.
 
-#### `PUT /api/users/`
+#### `POST /api/users/`
 
 Requires the `adminUsers` permission.
 
@@ -858,12 +858,9 @@ Returns status 204 (No Content) on success.
 Retrieves the user. Requires the `adminUsers` permission if the caller is
 not authenticated as the user in question.
 
-Returns a HTTP status 200 on success with a JSON `UserSubset`. The `password`
-will be absent (for no password) or a placeholder string to indicate the
-password is set. Passwords are stored hashed, so the cleartext can not be
-retrieved.
+Returns a HTTP status 200 on success with a JSON `UserSubset`.
 
-#### `POST /api/users/<id>`
+#### `PATCH /api/users/<id>`
 
 Updates the given user. Requires the `adminUsers` permission if the caller is
 not authenticated as the user in question.
@@ -872,8 +869,9 @@ Expects a JSON object:
 
 *   `csrf`: a CSRF token, required when using session authentication.
 *   `update`: `UserSubset`, sets the provided fields. Field-specific notes:
+    *   `username`: requires `adminUsers` permission.
     *   `password`: when updating the password, the previous password must
-        be supplied as a precondition, unless the caller has `admin_users`
+        be supplied as a precondition, unless the caller has `adminUsers`
         permission.
     *   `permissions`: requires `adminUsers` permission. Note that updating a
         user's permissions currently neither adds nor limits permissions of
@@ -901,9 +899,16 @@ Returns HTTP status 204 (No Content) on success.
 
 A JSON object with any of the following parameters:
 
+*   `username`
 *   `preferences`, a JSON object which the server stores without interpreting.
     This field is meant for user-level preferences meaningful to the UI.
-*   `password`, a cleartext string.
+*   `password`
+    *   on retrieval, a placeholder string to indicate a password is set,
+        or null.
+    *   in preconditions, may be left absent to ignore, set to null to require
+        no password, or set to a plaintext string.
+    *   in updates, may be left absent to keep as-is, set to null to disable
+        session creation, or set to a plaintext string.
 *   `permissions`, a `Permissions` as described below.
 
 ### Permissions

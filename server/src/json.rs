@@ -564,6 +564,17 @@ pub struct UserSubset<'a> {
     pub permissions: Option<Permissions>,
 }
 
+impl<'a> From<&'a db::User> for UserSubset<'a> {
+    fn from(u: &'a db::User) -> Self {
+        Self {
+            username: Some(&u.username),
+            preferences: Some(u.config.preferences.clone()),
+            password: Some(u.has_password().then_some("(censored)")),
+            permissions: Some(u.permissions.clone().into()),
+        }
+    }
+}
+
 // Any value that is present is considered Some value, including null.
 // https://github.com/serde-rs/serde/issues/984#issuecomment-314143738
 fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -617,14 +628,14 @@ impl From<db::schema::Permissions> for Permissions {
 
 /// Response to `GET /api/users/`.
 #[derive(Serialize)]
-pub struct GetUsersResponse {
-    pub users: Vec<UserSummary>,
+pub struct GetUsersResponse<'a> {
+    pub users: Vec<UserWithId<'a>>,
 }
 
 #[derive(Serialize)]
-pub struct UserSummary {
+pub struct UserWithId<'a> {
     pub id: i32,
-    pub username: String,
+    pub user: UserSubset<'a>,
 }
 
 /// Response to `PUT /api/users/`.

@@ -23,9 +23,9 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   expanded API interface for examining and updating users:
     *   `admin_users` permission for operating on arbitrary users.
     *   `GET /users/` endpoint to list users
-    *   `PUT /users/` endpoint to add a user
+    *   `POST /users/` endpoint to add a user
     *   `GET /users/<id>` endpoint to examine a user in detail
-    *   expanded `POST /users/<id>` endpoint, including password and
+    *   expanded `PATCH /users/<id>` endpoint, including password and
         permissions.
     *   `DELETE /users/<id>` endpoint to delete a user
 *   improved API documentation in [`ref/api.md`](ref/api.md).

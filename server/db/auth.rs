@@ -478,7 +478,11 @@ impl State {
             .context(ErrorKind::Unknown)?;
         }
         let u = e.into_mut();
-        u.username = change.username;
+        if u.username != change.username {
+            self.users_by_name.remove(&u.username);
+            self.users_by_name.insert(change.username.clone(), u.id);
+            u.username = change.username;
+        }
         if let Some(h) = change.set_password_hash {
             u.password_hash = h;
             u.password_id += 1;
@@ -543,7 +547,9 @@ impl State {
         }
         tx.commit().context(ErrorKind::Unknown)?;
         let name = self.users_by_id.remove(&id).unwrap().username;
-        self.users_by_name.remove(&name).unwrap();
+        self.users_by_name
+            .remove(&name)
+            .expect("users_by_name should be consistent with users_by_id");
         self.sessions.retain(|_k, ref mut v| v.user_id != id);
         Ok(())
     }
@@ -1145,6 +1151,34 @@ mod tests {
             format!("{}", e),
             "Unauthenticated: user \"slamb\" is disabled"
         );
+    }
+
+    #[test]
+    fn change() {
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        let mut state = State::init(&conn).unwrap();
+        let req = Request {
+            when_sec: Some(42),
+            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(
+                127, 0, 0, 1,
+            ))),
+            user_agent: Some(b"some ua".to_vec()),
+        };
+        let uid = {
+            let mut c = UserChange::add_user("slamb".to_owned());
+            c.set_password("hunter2".to_owned());
+            state.apply(&conn, c).unwrap().id
+        };
+
+        let user = state.users_by_id().get(&uid).unwrap();
+        let mut c = user.change();
+        c.username = "foo".to_owned();
+        state.apply(&conn, c).unwrap();
+
+        assert!(state.users_by_name.get("slamb").is_none());
+        assert!(state.users_by_name.get("foo").is_some());
     }
 
     #[test]
