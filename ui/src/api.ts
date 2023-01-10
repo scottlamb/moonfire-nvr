@@ -253,9 +253,9 @@ export interface UpdateUserRequest {
 }
 
 export interface UserSubset {
-  password?: String | null;
+  password?: string | null;
   permissions?: Permissions;
-  username?: String;
+  username?: string;
 }
 
 /** Creates a user. */

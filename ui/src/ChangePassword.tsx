@@ -3,11 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import { useForm } from "react-hook-form";
-import {
-  FormContainer,
-  PasswordElement,
-  PasswordRepeatElement,
-} from "react-hook-form-mui";
+import { FormContainer, PasswordElement } from "react-hook-form-mui";
 import Button from "@mui/material/Button";
 import LoadingButton from "@mui/lab/LoadingButton";
 import Dialog from "@mui/material/Dialog";
@@ -18,6 +14,7 @@ import TextField from "@mui/material/TextField";
 import React from "react";
 import * as api from "./api";
 import { useSnackbars } from "./snackbars";
+import NewPassword from "./NewPassword";
 
 interface Props {
   user: api.ToplevelUser;
@@ -31,12 +28,6 @@ interface Request {
   currentPassword: string;
   newPassword: string;
 }
-
-// Minimum password length, taken from [NIST
-// guidelines](https://pages.nist.gov/800-63-3/sp800-63b.html), section 5.1.1.
-// This is enforced on the frontend for now; a user who really wants to violate
-// the rule can via API request.
-const MIN_PASSWORD_LENGTH = 8;
 
 interface FormData {
   currentPassword: string;
@@ -154,7 +145,6 @@ const ChangePassword = ({ user, open, handleClose }: Props) => {
             fullWidth
             helperText=" "
           />
-
           <PasswordElement
             name="currentPassword"
             label="Current password"
@@ -165,32 +155,7 @@ const ChangePassword = ({ user, open, handleClose }: Props) => {
             fullWidth
             helperText=" "
           />
-          <PasswordElement
-            name="newPassword"
-            label="New password"
-            variant="filled"
-            required
-            autoComplete="new-password"
-            validation={{
-              minLength: {
-                value: MIN_PASSWORD_LENGTH,
-                message: `Must have at least ${MIN_PASSWORD_LENGTH} characters`,
-              },
-            }}
-            fullWidth
-            helperText=" "
-          />
-          <PasswordRepeatElement
-            name="confirmNewPassword"
-            label="Confirm new password"
-            variant="filled"
-            type="password"
-            passwordFieldName="newPassword"
-            required
-            autoComplete="new-password"
-            fullWidth
-            helperText=" "
-          />
+          <NewPassword />
         </DialogContent>
 
         <DialogActions>

@@ -2,6 +2,13 @@
 // Copyright (C) 2023 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
+import { useFormContext } from "react-hook-form";
+import {
+  FormContainer,
+  CheckboxElement,
+  RadioButtonGroup,
+  TextFieldElement,
+} from "react-hook-form-mui";
 import LoadingButton from "@mui/lab/LoadingButton";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
@@ -9,19 +16,16 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import TextField from "@mui/material/TextField";
-import Radio from "@mui/material/Radio";
-import RadioGroup from "@mui/material/RadioGroup";
 import * as api from "../api";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import Stack from "@mui/material/Stack";
+import NewPassword from "../NewPassword";
 import FormLabel from "@mui/material/FormLabel";
 import Box from "@mui/material/Box";
-import Checkbox from "@mui/material/Checkbox";
-import FormGroup from "@mui/material/FormGroup";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Tooltip from "@mui/material/Tooltip";
 import HelpOutline from "@mui/icons-material/HelpOutline";
 import { useSnackbars } from "../snackbars";
+import Collapse from "@mui/material/Collapse";
+import FormGroup from "@mui/material/FormGroup";
 
 interface Props {
   // UserWithId (for edit), null (for add), undefined (for closed).
@@ -30,8 +34,6 @@ interface Props {
   onClose: () => void;
   refetch: () => void;
 }
-
-type PasswordAction = "leave" | "clear" | "set";
 
 interface PermissionCheckboxDefinition {
   propName: keyof api.Permissions;
@@ -57,23 +59,22 @@ const PERMISSION_CHECKBOXES: PermissionCheckboxDefinition[] = [
 
 // A group of form controls that's visually separated from the others.
 interface MyGroupProps {
-  labelId: string;
-  label: React.ReactNode;
+  labelId?: string;
+  label?: React.ReactNode;
   children: React.ReactNode;
 }
 const MyGroup = ({ label, labelId, children }: MyGroupProps) => (
   <Box sx={{ mt: 4, mb: 4 }}>
-    <FormLabel id={labelId}>{label}</FormLabel>
+    {label && <FormLabel id={labelId}>{label}</FormLabel>}
     {children}
   </Box>
 );
 
-const PermissionsCheckboxes = (props: {
-  permissions: api.Permissions;
-  setPermissions: React.Dispatch<React.SetStateAction<api.Permissions>>;
-}) => {
+const PermissionsCheckboxes = () => {
   const checkboxes = PERMISSION_CHECKBOXES.map((def) => (
-    <FormControlLabel
+    <CheckboxElement
+      name={"permissions." + def.propName}
+      key={"permissions." + def.propName}
       label={
         <>
           {def.label}
@@ -84,20 +85,31 @@ const PermissionsCheckboxes = (props: {
           )}
         </>
       }
-      control={
-        <Checkbox
-          checked={props.permissions[def.propName]}
-          onChange={(e) => {
-            props.setPermissions((p) => ({
-              ...p,
-              [def.propName]: e.target.checked,
-            }));
-          }}
-        />
-      }
     />
   ));
   return <>{checkboxes}</>;
+};
+
+interface FormData {
+  username: string;
+  passwordAction: "leave" | "clear" | "set";
+  newPassword?: string;
+  permissions: api.Permissions;
+}
+
+const MaybeNewPassword = () => {
+  const { watch } = useFormContext<FormData>();
+  const shown = watch("passwordAction") === "set";
+
+  // It'd be nice to focus on the newPassword input when shown,
+  // but react-hook-form-mui's <PasswordElement> uses inputRef for its own
+  // purpose rather than plumbing through one we specify here, so I don't
+  // see an easy way to do it without patching/bypassing that library.
+  return (
+    <Collapse in={shown}>
+      <NewPassword required={shown} />
+    </Collapse>
+  );
 };
 
 export default function AddEditDialog({
@@ -108,10 +120,16 @@ export default function AddEditDialog({
 }: Props): JSX.Element {
   const hasPassword =
     prior !== undefined && prior !== null && prior.user.password !== null;
-  const [username, setUsername] = useState(prior?.user.username ?? "");
-  const [passwordAction, setPasswordAction] = useState<PasswordAction>("leave");
-  const [password, setPassword] = useState("");
-  const [permissions, setPermissions] = useState(prior?.user.permissions ?? {});
+  const passwordOpts = hasPassword
+    ? [
+        { id: "leave", label: "Leave set" },
+        { id: "clear", label: "Clear" },
+        { id: "set", label: "Set a new password" },
+      ]
+    : [
+        { id: "leave", label: "Leave unset" },
+        { id: "set", label: "Set a new password" },
+      ];
   const [req, setReq] = useState<api.UserSubset | undefined>();
   const snackbars = useSnackbars();
   useEffect(() => {
@@ -134,7 +152,6 @@ export default function AddEditDialog({
             { signal }
           );
       setReq(undefined);
-      console.log(resp);
       switch (resp.status) {
         case "aborted":
           break;
@@ -156,95 +173,63 @@ export default function AddEditDialog({
       abort.abort();
     };
   }, [prior, req, csrf, snackbars, onClose, refetch]);
+  const onSuccess = (data: FormData) => {
+    setReq({
+      username: data.username,
+      password: (() => {
+        switch (data.passwordAction) {
+          case "clear":
+            return null;
+          case "set":
+            return data.newPassword;
+          case "leave":
+            return undefined;
+        }
+      })(),
+      permissions: data.permissions,
+    });
+  };
   return (
     <Dialog open={true} maxWidth="md" fullWidth>
       <DialogTitle>
         {prior === null ? "Add user" : `Edit user ${prior.user.username}`}
       </DialogTitle>
-      <form
-        onSubmit={() =>
-          setReq({
-            username: username,
-            password:
-              passwordAction === "leave"
-                ? undefined
-                : passwordAction === "set"
-                ? password
-                : null,
-            permissions: permissions,
-          })
-        }
+      <FormContainer<FormData>
+        defaultValues={{
+          username: prior?.user.username,
+          passwordAction: "leave",
+          permissions: { ...prior?.user.permissions },
+        }}
+        onSuccess={onSuccess}
       >
         <DialogContent>
           <TextField
-            id="id"
+            name="id"
             label="id"
             variant="filled"
             disabled
             fullWidth
             value={prior?.id ?? "(new)"}
             InputLabelProps={{ shrink: true }}
+            helperText=" "
           />
-          <TextField
-            id="username"
+          <TextFieldElement
+            name="username"
             label="Username"
+            autoComplete="username"
             variant="filled"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
             required
             fullWidth
+            helperText=" "
           />
-          <MyGroup labelId="password-label" label="Password">
-            <RadioGroup
-              aria-labelledby="password-label"
-              value={passwordAction}
-              onChange={(e) => {
-                setPasswordAction(e.target.value as PasswordAction);
-              }}
-            >
-              {hasPassword && (
-                <>
-                  <FormControlLabel
-                    value="leave"
-                    control={<Radio />}
-                    label="Leave set"
-                  />
-                  <FormControlLabel
-                    value="clear"
-                    control={<Radio />}
-                    label="Clear"
-                  />
-                </>
-              )}
-              {!hasPassword && (
-                <FormControlLabel
-                  value="leave"
-                  control={<Radio />}
-                  label="Leave unset"
-                />
-              )}
-              <Stack direction="row">
-                <FormControlLabel
-                  value="set"
-                  control={<Radio />}
-                  label="Set to"
-                />
-                <TextField
-                  id="set-password"
-                  label="New password"
-                  type="password"
-                  autoComplete="new-password"
-                  variant="filled"
-                  fullWidth
-                  value={password}
-                  // TODO: it'd be nice to allow clicking even when disabled,
-                  // set the password action to "set", and give it focus.
-                  // I tried briefly and couldn't make it work quite right.
-                  disabled={passwordAction !== "set"}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </Stack>
-            </RadioGroup>
+          <MyGroup>
+            <RadioButtonGroup
+              name="passwordAction"
+              label="Password"
+              options={passwordOpts}
+              required
+            />
+            <MaybeNewPassword />
           </MyGroup>
           <MyGroup
             labelId="permissions-label"
@@ -258,17 +243,14 @@ export default function AddEditDialog({
             }
           >
             <FormGroup aria-labelledby="permissions-label">
-              <PermissionsCheckboxes
-                permissions={permissions}
-                setPermissions={setPermissions}
-              />
+              <PermissionsCheckboxes />
             </FormGroup>
           </MyGroup>
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose}>Cancel</Button>
           <LoadingButton
-            loading={false}
+            loading={req !== undefined}
             color="secondary"
             variant="contained"
             type="submit"
@@ -276,7 +258,7 @@ export default function AddEditDialog({
             {prior === null ? "Add" : "Edit"}
           </LoadingButton>
         </DialogActions>
-      </form>
+      </FormContainer>
     </Dialog>
   );
 }
