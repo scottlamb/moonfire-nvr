@@ -14,7 +14,7 @@ exec > >(tee -i /docker-build-debug/dev/output) 2>&1
 
 date
 uname -a
-ls -laFR /var/cache/apt > /docker-build-debug/dev/var-cache-apt-before
+find /var/cache/apt -ls > /docker-build-debug/dev/var-cache-apt-before
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -69,7 +69,6 @@ if [[ "${BUILDARCH}" != "${TARGETARCH}" ]]; then
     packages+=(
         g++-${gcc_target/_/-}
         libc6-dev-${dpkg_arch}-cross
-        pkg-config-${gcc_target}
         qemu-user
     )
 fi
@@ -85,12 +84,12 @@ time apt-get update
 time apt-get install --assume-yes --no-install-recommends "${packages[@]}"
 
 # Set environment variables for cross-compiling.
-# Also set up a symlink that points to the release binary, because the
-# release binary's location varies when cross-compiling, as described here:
+# Also set up a symlink that points to the output platform's target dir, because
+# the target directory layout varies when cross-compiling, as described here:
 # https://doc.rust-lang.org/cargo/guide/build-cache.html
 if [[ -n "${rust_target}" ]]; then
     su moonfire-nvr -lc "rustup target install ${rust_target} &&
-                         ln -s target/${rust_target}/release-lto/moonfire-nvr ."
+                         ln -s target/${rust_target} platform-target"
     underscore_rust_target="${rust_target//-/_}"
     uppercase_underscore_rust_target="${underscore_rust_target^^}"
     cat >> /var/lib/moonfire-nvr/.buildrc <<EOF
@@ -99,6 +98,10 @@ if [[ -n "${rust_target}" ]]; then
 export CARGO_BUILD_TARGET=${rust_target}
 export CARGO_TARGET_${uppercase_underscore_rust_target}_LINKER=${gcc_target}-gcc
 
+# Use a pkg-config wrapper for the target architecture. This wrapper was
+# automatically created on "dpkg --add-architecture"; see
+# /etc/dpkg/dpkg.cfg.d/pkgconf-hook-config.
+#
 # https://github.com/rust-lang/pkg-config-rs uses the "PKG_CONFIG"
 # variable to to select the pkg-config binary to use. As of pkg-config 0.3.19,
 # it unfortunately doesn't understand the <target>_ prefix that the README.md
@@ -112,8 +115,8 @@ export CC_${underscore_rust_target}=${gcc_target}-gcc
 export CXX_${underscore_rust_target}=${gcc_target}-g++
 EOF
 else
-    su moonfire-nvr -lc "ln -s target/release-lto/moonfire-nvr ."
+    su moonfire-nvr -lc "ln -s target platform-target"
 fi
 
-ls -laFR /var/cache/apt > /docker-build-debug/dev/var-cache-apt-after
+find /var/cache/apt -ls > /docker-build-debug/dev/var-cache-apt-after
 date

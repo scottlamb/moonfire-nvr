@@ -114,8 +114,11 @@ caveats:
 On Linux hosts (as opposed to when using Docker Desktop on macOS/Windows),
 you'll likely see errors like the ones below. The solution is to [install
 emulators](https://github.com/tonistiigi/binfmt#installing-emulators).
+You may need to reinstall emulators on each boot of the host.
 
 ```
+Exec format error
+
 Error while loading /usr/sbin/dpkg-split: No such file or directory
 Error while loading /usr/sbin/dpkg-deb: No such file or directory
 ```
@@ -127,7 +130,7 @@ Moonfire NVR's `Dockerfile` has some built-in debugging tools:
     info includes:
     *    output (stdout + stderr) from the build script, running long operations
          through the `time` command.
-    *    `ls -laFR` of cache mounts before and after.
+    *    `find -ls` output on cache mounts before and after.
 *   Each stage accepts a `INVALIDATE_CACHE_<stage>` argument. You can use eg
     `--build-arg=INVALIDATE_CACHE_BUILD_SERVER=$(date +%s)` to force the
     `build-server` stage to be rebuilt rather than use cached Docker layers.
@@ -191,8 +194,9 @@ $ sudo apt-get install \
                tzdata
 ```
 
-Ubuntu 20.04 (the latest LTS as of this writing) bundles node 10, which has
-reached end-of-life (see [node.js: releases](https://nodejs.org/en/about/releases/)).
+Ubuntu 20.04 LTS (still popular, supported by Ubuntu until April 2025) bundles
+node 10, which has reached end-of-life (see
+[node.js: releases](https://nodejs.org/en/about/releases/)).
 So rather than install the `nodejs` and `npm` packages from the built-in
 repository, see [Installing Node.js via package
 manager](https://nodejs.org/en/download/package-manager/#debian-and-ubuntu-based-linux-distributions).

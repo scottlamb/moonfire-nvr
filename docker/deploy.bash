@@ -11,8 +11,7 @@ set -o xtrace
 
 mkdir -p /docker-build-debug/deploy
 exec > >(tee -i /docker-build-debug/deploy/output) 2>&1
-ls -laFR /var/cache/apt \
-    > /docker-build-debug/deploy/var-cache-apt-before
+find /var/cache/apt -ls > /docker-build-debug/deploy/var-cache-apt-before
 
 date
 uname -a
@@ -29,6 +28,5 @@ time apt-get install --assume-yes --no-install-recommends \
 rm -rf /var/lib/apt/lists/*
 ln -s moonfire-nvr /usr/local/bin/nvr
 
-ls -laFR /var/cache/apt \
-    > /docker-build-debug/deploy/var-cache-apt-after
+find /var/cache/apt -ls > /docker-build-debug/deploy/var-cache-apt-after
 date

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 # See documentation here:
-# https://github.com/moby/buildkit/blob/master/frontend/dockerfile/docs/syntax.md
+# https://github.com/moby/buildkit/blob/master/frontend/dockerfile/docs/reference.md
 
 # "dev-common" is the portion of "dev" (see below) which isn't specific to the
 # target arch. It's sufficient for building the non-arch-specific webpack.

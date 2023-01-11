@@ -13,9 +13,8 @@ mkdir /docker-build-debug/build-server
 exec > >(tee -i /docker-build-debug/build-server/output) 2>&1
 date
 uname -a
-ls -laFR /cargo-cache > /docker-build-debug/build-server/cargo-cache-before
-ls -laFR /var/lib/moonfire-nvr/target \
-    > /docker-build-debug/build-server/target-before
+find /cargo-cache -ls > /docker-build-debug/build-server/cargo-cache-before
+find ~/target -ls > /docker-build-debug/build-server/target-before
 
 source ~/.buildrc
 
@@ -26,12 +25,13 @@ sudo chmod 777 /cargo-cache /var/lib/moonfire-nvr/target
 mkdir -p /cargo-cache/{git,registry}
 ln -s /cargo-cache/{git,registry} ~/.cargo
 
+build_profile=release-lto
 cd src/server
 time cargo test
-time cargo build --profile=release-lto
-sudo install -m 755 ~/moonfire-nvr /usr/local/bin/moonfire-nvr
-
-ls -laFR /cargo-cache > /docker-build-debug/build-server/cargo-cache-after
-ls -laFR /var/lib/moonfire-nvr/target \
-    > /docker-build-debug/build-server/target-after
+time cargo build --profile=$build_profile
+find /cargo-cache -ls > /docker-build-debug/build-server/cargo-cache-after
+find ~/target -ls > /docker-build-debug/build-server/target-after
+sudo install -m 755 \
+    ~/platform-target/$build_profile/moonfire-nvr \
+    /usr/local/bin/moonfire-nvr
 date

@@ -15,7 +15,7 @@ exec > >(tee -i /docker-build-debug/dev-common/output) 2>&1
 
 date
 uname -a
-ls -laFR /var/cache/apt > /docker-build-debug/dev-common/var-cache-apt-before
+find /var/cache/apt -ls > /docker-build-debug/dev-common/var-cache-apt-before
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -78,5 +78,5 @@ export CARGO_BUILD_TARGET_DIR=/var/lib/moonfire-nvr/target
 EOF
 chown moonfire-nvr:moonfire-nvr /var/lib/moonfire-nvr/.buildrc
 
-ls -laFR /var/cache/apt > /docker-build-debug/dev-common/var-cache-apt-after
+find /var/cache/apt -ls > /docker-build-debug/dev-common/var-cache-apt-after
 date

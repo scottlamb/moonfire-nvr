@@ -19,6 +19,6 @@ npm --version
 time npm ci
 time npm run build
 
-ls -laFR /var/lib/moonfire-nvr/src/ui/node_modules \
+find /var/lib/moonfire-nvr/src/ui/node_modules -ls \
     > /docker-build-debug/build-ui/node_modules-after
 date
