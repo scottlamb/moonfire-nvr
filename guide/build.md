@@ -304,8 +304,10 @@ ownUidIsPrivileged = true
 ```
 
 Note this configuration is insecure. You can change that via replacing the
-`allow_unauthenticated_permissions` here as described in [Securing Moonfire NVR
+`allowUnauthenticatedPermissions` here as described in [Securing Moonfire NVR
 and exposing it to the Internet](secure.md).
+
+See [ref/config.md](../ref/config.md) for more about `/etc/moonfire-nvr.toml`.
 
 Some handy commands:
 
