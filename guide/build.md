@@ -179,7 +179,7 @@ To build the server, you will need the following C libraries installed:
     the `ncurses` library.
 
 To build the UI, you'll need a [nodejs](https://nodejs.org/en/download/) release
-in "Maintenance LTS" or "Active LTS" status: currently v12 or v14.
+in "Maintenance" or "LTS" status: currently v14, v16, or v18.
 
 On recent Ubuntu or Raspbian Linux, the following command will install
 most non-Rust dependencies:
