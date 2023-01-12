@@ -100,10 +100,10 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
         component="table"
         sx={{
           fontSize: "0.9rem",
-          "& td:first-child": {
+          "& td:first-of-type": {
             paddingRight: "3px",
           },
-          "& td:not(:first-child)": {
+          "& td:not(:first-of-type)": {
             textAlign: "center",
           },
           "& .MuiCheckbox-root": {

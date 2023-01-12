@@ -8,7 +8,7 @@ import StyledEngineProvider from "@mui/material/StyledEngineProvider";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import "@fontsource/roboto";
 import React from "react";
-import ReactDOM from "react-dom";
+import { createRoot } from "react-dom/client";
 import App from "./App";
 import ErrorBoundary from "./ErrorBoundary";
 import { SnackbarProvider } from "./snackbars";
@@ -27,7 +27,9 @@ const theme = createTheme({
   },
 });
 
-ReactDOM.render(
+const container = document.getElementById("root");
+const root = createRoot(container!);
+root.render(
   <React.StrictMode>
     <StyledEngineProvider injectFirst>
       <CssBaseline />
@@ -43,6 +45,5 @@ ReactDOM.render(
         </ErrorBoundary>
       </ThemeProvider>
     </StyledEngineProvider>
-  </React.StrictMode>,
-  document.getElementById("root")
+  </React.StrictMode>
 );

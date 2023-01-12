@@ -6,7 +6,6 @@ import Avatar from "@mui/material/Avatar";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogTitle from "@mui/material/DialogTitle";
-import FormControl from "@mui/material/FormControl";
 import FormHelperText from "@mui/material/FormHelperText";
 import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
@@ -119,41 +118,41 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
       </DialogTitle>
 
       <form onSubmit={onSubmit}>
-        <FormControl error={error != null} fullWidth>
-          <TextField
-            id="username"
-            label="Username"
-            variant="filled"
-            required
-            autoComplete="username"
-            fullWidth
-            inputRef={usernameRef}
-          />
-          <TextField
-            id="password"
-            label="Password"
-            variant="filled"
-            type="password"
-            required
-            autoComplete="current-password"
-            fullWidth
-            inputRef={passwordRef}
-          />
+        <TextField
+          id="username"
+          label="Username"
+          variant="filled"
+          required
+          autoComplete="username"
+          fullWidth
+          error={error != null}
+          inputRef={usernameRef}
+        />
+        <TextField
+          id="password"
+          label="Password"
+          variant="filled"
+          type="password"
+          required
+          autoComplete="current-password"
+          fullWidth
+          error={error != null}
+          inputRef={passwordRef}
+        />
 
-          {/* reserve space for an error; show when there's something to see */}
-          <FormHelperText>{error == null ? " " : error}</FormHelperText>
+        {/* reserve space for an error; show when there's something to see */}
+        <FormHelperText>{error == null ? " " : error}</FormHelperText>
 
-          <DialogActions>
-            <LoadingButton
-              type="submit"
-              variant="contained"
-              color="secondary"
-              loading={loading !== null}
-            >
-              Log in
-            </LoadingButton>
-          </DialogActions>
-        </FormControl>
+        <DialogActions>
+          <LoadingButton
+            type="submit"
+            variant="contained"
+            color="secondary"
+            loading={loading !== null}
+          >
+            Log in
+          </LoadingButton>
+        </DialogActions>
       </form>
     </Dialog>
   );

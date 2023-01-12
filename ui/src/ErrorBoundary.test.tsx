@@ -5,25 +5,9 @@
 import { render, screen } from "@testing-library/react";
 import ErrorBoundary from "./ErrorBoundary";
 
-const BuggyComponent = () => {
-  return [][0]; // return undefined in a way that outsmarts Typescript.
-};
-
 const ThrowsLiteralComponent = () => {
   throw "simple string error"; // eslint-disable-line no-throw-literal
 };
-
-test("renders error", () => {
-  render(
-    <ErrorBoundary>
-      <BuggyComponent />
-    </ErrorBoundary>
-  );
-  const buggyComponentElement = screen.getByText(/BuggyComponent/);
-  expect(buggyComponentElement).toBeInTheDocument();
-  const sorryElement = screen.getByText(/Sorry/);
-  expect(sorryElement).toBeInTheDocument();
-});
 
 test("renders string error", () => {
   render(

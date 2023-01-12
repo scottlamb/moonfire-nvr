@@ -192,7 +192,7 @@ const Multiview = (props: MultiviewProps) => {
               gridTemplateColumns: "repeat(3, calc(100% / 3))",
               gridTemplateRows: "repeat(3, calc(100% / 3))",
             },
-            "&.main-plus-five > div:nth-child(1)": {
+            "&.main-plus-five > div:nth-of-type(1)": {
               gridColumn: "span 2",
               gridRow: "span 2",
             },

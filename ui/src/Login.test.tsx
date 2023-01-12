@@ -13,6 +13,9 @@ import { renderWithCtx } from "./testutil";
 const server = setupServer(
   rest.post("/api/login", (req, res, ctx) => {
     const { username, password } = req.body! as Record<string, string>;
+    console.log(
+      "/api/login post username=" + username + " password=" + password
+    );
     if (username === "slamb" && password === "hunter2") {
       return res(ctx.status(204));
     } else if (username === "delay") {
@@ -39,9 +42,14 @@ afterAll(() => server.close());
 //   (Seems like waitFor's internal advance calls aren't wrapped in act)
 // * react-scripts v5, @testing-library/react v12:
 //   msw requests never complete
+//   https://github.com/mswjs/msw/issues/448#issuecomment-723438099 ?
+//   https://github.com/facebook/jest/issues/11103 ?
+//   https://github.com/facebook/jest/issues/13018 ?
 //
 // Argh!
-// beforeEach(() => jest.useFakeTimers());
+// beforeEach(() => jest.useFakeTimers({
+//   legacyFakeTimers: true,
+// }));
 // afterEach(() => {
 //   act(() => {
 //     jest.runOnlyPendingTimers();
@@ -50,13 +58,14 @@ afterAll(() => server.close());
 // });
 
 test("success", async () => {
+  const user = userEvent.setup();
   const handleClose = jest.fn().mockName("handleClose");
   const onSuccess = jest.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
-  userEvent.type(screen.getByLabelText(/Username/), "slamb");
-  userEvent.type(screen.getByLabelText(/Password/), "hunter2{enter}");
+  await user.type(screen.getByLabelText(/Username/), "slamb");
+  await user.type(screen.getByLabelText(/Password/), "hunter2{enter}");
   await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
 });
 
@@ -92,8 +101,8 @@ xtest("bad credentials", async () => {
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
-  userEvent.type(screen.getByLabelText(/Username/), "slamb");
-  userEvent.type(screen.getByLabelText(/Password/), "wrong{enter}");
+  await userEvent.type(screen.getByLabelText(/Username/), "slamb");
+  await userEvent.type(screen.getByLabelText(/Password/), "wrong{enter}");
   await screen.findByText(/bad credentials/);
   expect(onSuccess).toHaveBeenCalledTimes(0);
 });
@@ -106,8 +115,8 @@ xtest("server error", async () => {
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
-  userEvent.type(screen.getByLabelText(/Username/), "server-error");
-  userEvent.type(screen.getByLabelText(/Password/), "asdf{enter}");
+  await userEvent.type(screen.getByLabelText(/Username/), "server-error");
+  await userEvent.type(screen.getByLabelText(/Password/), "asdf{enter}");
   await screen.findByText(/server error/);
   await waitFor(() =>
     expect(screen.queryByText(/server error/)).not.toBeInTheDocument()
@@ -123,8 +132,8 @@ xtest("network error", async () => {
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
-  userEvent.type(screen.getByLabelText(/Username/), "network-error");
-  userEvent.type(screen.getByLabelText(/Password/), "asdf{enter}");
+  await userEvent.type(screen.getByLabelText(/Username/), "network-error");
+  await userEvent.type(screen.getByLabelText(/Password/), "asdf{enter}");
   await screen.findByText(/network error/);
   await waitFor(() =>
     expect(screen.queryByText(/network error/)).not.toBeInTheDocument()
