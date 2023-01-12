@@ -24,7 +24,7 @@
     "react-hook-form-mui": "^5.12.3",
     "react-router-dom": "^6.2.2",
     "react-scripts": "^5.0.0",
-    "typescript": "^4.8.4"
+    "typescript": "^4.9.4"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -72,7 +72,7 @@
     "@testing-library/react": "^12.1.4",
     "@testing-library/user-event": "^13.5.0",
     "http-proxy-middleware": "^2.0.4",
-    "msw": "^0.47.4",
+    "msw": "^0.49.2",
     "prettier": "^2.6.0"
   }
 }
