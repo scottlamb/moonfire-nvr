@@ -307,7 +307,7 @@ pub struct SessionHash(pub [u8; 24]);
 
 impl SessionHash {
     pub fn encode_base64(&self, output: &mut [u8; 32]) {
-        ::base64::encode_config_slice(&self.0, ::base64::STANDARD_NO_PAD, output);
+        ::base64::encode_config_slice(self.0, ::base64::STANDARD_NO_PAD, output);
     }
 
     pub fn decode_base64(input: &[u8]) -> Result<Self, Error> {
@@ -629,6 +629,7 @@ impl State {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn make_session_int<'s>(
         rand: &SystemRandom,
         conn: &Connection,

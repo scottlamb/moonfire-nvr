@@ -71,7 +71,7 @@ impl RealClocks {
             let mut ts = mem::MaybeUninit::uninit();
             assert_eq!(0, libc::clock_gettime(clock, ts.as_mut_ptr()));
             let ts = ts.assume_init();
-            Timespec::new(ts.tv_sec as i64, ts.tv_nsec as i32)
+            Timespec::new(ts.tv_sec, ts.tv_nsec as i32)
         }
     }
 }

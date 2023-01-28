@@ -380,7 +380,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
     {
         {
             let mut db = self.db.lock();
-            delete_recordings(&mut *db)?;
+            delete_recordings(&mut db)?;
             db.flush("synchronous deletion")?;
         }
         let mut garbage: Vec<_> = {
@@ -618,6 +618,11 @@ pub struct Writer<'a, C: Clocks + Clone, D: DirWriter> {
     state: WriterState<D::File>,
 }
 
+// clippy points out that the `Open` variant is significantly larger and
+// suggests boxing it. There's no benefit to this given that we don't have a lot
+// of `WriterState`s active at once, and they should cycle between `Open` and
+// `Closed`.
+#[allow(clippy::large_enum_variant)]
 enum WriterState<F: FileWriter> {
     Unopened,
     Open(InnerWriter<F>),

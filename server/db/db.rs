@@ -656,7 +656,16 @@ impl ::std::fmt::Display for CompositeId {
 /// structs.
 struct StreamStateChanger {
     sids: [Option<i32>; NUM_STREAM_TYPES],
-    streams: Vec<(i32, Option<(i32, StreamType, StreamChange)>)>,
+
+    /// For each stream to change, a (stream_id, upsert or `None` to delete) tuple.
+    streams: Vec<(i32, Option<StreamStateChangerUpsert>)>,
+}
+
+/// Upsert state used internally within [`StreamStateChanger`].
+struct StreamStateChangerUpsert {
+    camera_id: i32,
+    type_: StreamType,
+    sc: StreamChange,
 }
 
 impl StreamStateChanger {
@@ -722,8 +731,14 @@ impl StreamStateChanger {
                         bail!("missing stream {}", sid);
                     }
                     sids[i] = Some(sid);
-                    let sc = mem::take(*sc);
-                    streams.push((sid, Some((camera_id, type_, sc))));
+                    streams.push((
+                        sid,
+                        Some(StreamStateChangerUpsert {
+                            camera_id,
+                            type_,
+                            sc: mem::take(*sc),
+                        }),
+                    ));
                 }
             } else {
                 if sc.config.is_empty() && sc.sample_file_dir_id.is_none() {
@@ -747,8 +762,14 @@ impl StreamStateChanger {
                 })?;
                 let id = tx.last_insert_rowid() as i32;
                 sids[i] = Some(id);
-                let sc = mem::take(*sc);
-                streams.push((id, Some((camera_id, type_, sc))));
+                streams.push((
+                    id,
+                    Some(StreamStateChangerUpsert {
+                        camera_id,
+                        type_,
+                        sc: mem::take(*sc),
+                    }),
+                ));
             }
         }
         Ok(StreamStateChanger { sids, streams })
@@ -763,7 +784,14 @@ impl StreamStateChanger {
         for (id, stream) in self.streams.drain(..) {
             use ::std::collections::btree_map::Entry;
             match (streams_by_id.entry(id), stream) {
-                (Entry::Vacant(e), Some((camera_id, type_, sc))) => {
+                (
+                    Entry::Vacant(e),
+                    Some(StreamStateChangerUpsert {
+                        camera_id,
+                        type_,
+                        sc,
+                    }),
+                ) => {
                     e.insert(Stream {
                         id,
                         type_,
@@ -789,7 +817,7 @@ impl StreamStateChanger {
                     });
                 }
                 (Entry::Vacant(_), None) => {}
-                (Entry::Occupied(e), Some((_, _, sc))) => {
+                (Entry::Occupied(e), Some(StreamStateChangerUpsert { sc, .. })) => {
                     let e = e.into_mut();
                     e.sample_file_dir_id = sc.sample_file_dir_id;
                     e.config = sc.config;
@@ -1006,7 +1034,7 @@ impl LockedDatabase {
                     // oldest recordings for the stream.
                     let start = CompositeId::new(stream_id, 0);
                     let end = CompositeId(l.id.0 + 1);
-                    let n = raw::delete_recordings(&tx, dir, start..end)? as usize;
+                    let n = raw::delete_recordings(&tx, dir, start..end)?;
                     if n != s.to_delete.len() {
                         bail!(
                             "Found {} rows in {} .. {}, expected {}: {:?}",
@@ -2395,13 +2423,13 @@ impl<'db, C: Clocks + Clone> DatabaseGuard<'db, C> {
 impl<'db, C: Clocks + Clone> ::std::ops::Deref for DatabaseGuard<'db, C> {
     type Target = LockedDatabase;
     fn deref(&self) -> &LockedDatabase {
-        &*self.db
+        &self.db
     }
 }
 
 impl<'db, C: Clocks + Clone> ::std::ops::DerefMut for DatabaseGuard<'db, C> {
     fn deref_mut(&mut self) -> &mut LockedDatabase {
-        &mut *self.db
+        &mut self.db
     }
 }
 

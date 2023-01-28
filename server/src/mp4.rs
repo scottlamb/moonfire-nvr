@@ -1630,7 +1630,7 @@ impl FileBuilder {
             self.body
                 .buf
                 .extend_from_slice(b"stsc\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01");
-            self.body.append_u32(self.num_subtitle_samples as u32);
+            self.body.append_u32(self.num_subtitle_samples);
             self.body.append_u32(1);
         })
     }
@@ -1665,7 +1665,7 @@ impl FileBuilder {
             self.body.buf.extend_from_slice(b"stsz\x00\x00\x00\x00");
             self.body
                 .append_u32((mem::size_of::<u16>() + SUBTITLE_LENGTH) as u32);
-            self.body.append_u32(self.num_subtitle_samples as u32);
+            self.body.append_u32(self.num_subtitle_samples);
         })
     }
 

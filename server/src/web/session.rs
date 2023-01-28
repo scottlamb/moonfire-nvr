@@ -121,7 +121,7 @@ impl Service {
 fn encode_sid(sid: db::RawSessionId, flags: i32) -> String {
     let mut cookie = String::with_capacity(128);
     cookie.push_str("s=");
-    base64::encode_config_buf(&sid, base64::STANDARD_NO_PAD, &mut cookie);
+    base64::encode_config_buf(sid, base64::STANDARD_NO_PAD, &mut cookie);
     use auth::SessionFlag;
     if (flags & SessionFlag::HttpOnly as i32) != 0 {
         cookie.push_str("; HttpOnly");

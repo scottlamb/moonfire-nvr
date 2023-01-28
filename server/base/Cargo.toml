@@ -3,7 +3,7 @@ name = "moonfire-base"
 version = "0.0.1"
 authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
-edition = "2018"
+edition = "2021"
 license-file = "../../LICENSE.txt"
 
 [features]

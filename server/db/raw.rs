@@ -429,7 +429,7 @@ pub(crate) fn list_garbage(
     let mut garbage = FnvHashSet::default();
     let mut stmt =
         conn.prepare_cached("select composite_id from garbage where sample_file_dir_id = ?")?;
-    let mut rows = stmt.query(&[&dir_id])?;
+    let mut rows = stmt.query([&dir_id])?;
     while let Some(row) = rows.next()? {
         garbage.insert(CompositeId(row.get(0)?));
     }

@@ -221,7 +221,7 @@ fn make_listener(addr: &config::AddressConfig) -> Result<Listener, Error> {
 
     // Go through std::net::TcpListener to avoid needing async. That's there for DNS resolution,
     // but it's unnecessary when starting from a SocketAddr.
-    let listener = std::net::TcpListener::bind(&sa)
+    let listener = std::net::TcpListener::bind(sa)
         .with_context(|_| format!("unable to bind TCP socket {}", &sa))?;
     listener.set_nonblocking(true)?;
     Ok(Listener::Tcp(tokio::net::TcpListener::from_std(listener)?))
@@ -375,7 +375,7 @@ async fn inner(
                     .map(db::Permissions::from),
                 trust_forward_hdrs: b.trust_forward_headers,
                 time_zone_name: time_zone_name.clone(),
-                privileged_unix_uid: b.own_uid_is_privileged.then(|| own_euid),
+                privileged_unix_uid: b.own_uid_is_privileged.then_some(own_euid),
             })?);
             let make_svc = make_service_fn(move |conn: &crate::web::accept::Conn| {
                 let conn_data = *conn.data();

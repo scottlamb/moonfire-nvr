@@ -65,7 +65,7 @@ impl hyper::body::Buf for Chunk {
         self.0.len()
     }
     fn chunk(&self) -> &[u8] {
-        &*self.0
+        &self.0
     }
     fn advance(&mut self, cnt: usize) {
         self.0 = ::std::mem::replace(&mut self.0, ARefss::new(&[][..])).map(|b| &b[cnt..]);

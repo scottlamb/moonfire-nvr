@@ -93,7 +93,7 @@ pub struct FileStream {
     reader: Reader,
 }
 
-type ReadReceiver = tokio::sync::oneshot::Receiver<Result<(Option<OpenFile>, Vec<u8>), Error>>;
+type ReadReceiver = tokio::sync::oneshot::Receiver<Result<SuccessfulRead, Error>>;
 
 enum FileStreamState {
     Idle(OpenFile),
@@ -120,11 +120,14 @@ impl FileStream {
                 self.state = FileStreamState::Invalid;
                 Poll::Ready(Some(Err(e)))
             }
-            Poll::Ready(Ok(Ok((Some(file), chunk)))) => {
+            Poll::Ready(Ok(Ok(SuccessfulRead {
+                chunk,
+                file: Some(file),
+            }))) => {
                 self.state = FileStreamState::Idle(file);
                 Poll::Ready(Some(Ok(chunk)))
             }
-            Poll::Ready(Ok(Ok((None, chunk)))) => {
+            Poll::Ready(Ok(Ok(SuccessfulRead { chunk, file: None }))) => {
                 self.state = FileStreamState::Invalid;
                 Poll::Ready(Some(Ok(chunk)))
             }
@@ -207,18 +210,25 @@ impl Drop for OpenFile {
     }
 }
 
+struct SuccessfulRead {
+    chunk: Vec<u8>,
+
+    /// If this is not the final requested chunk, the `OpenFile` for next time.
+    file: Option<OpenFile>,
+}
+
 enum ReaderCommand {
     /// Opens a file and reads the first chunk.
     OpenFile {
         composite_id: CompositeId,
         range: std::ops::Range<u64>,
-        tx: tokio::sync::oneshot::Sender<Result<(Option<OpenFile>, Vec<u8>), Error>>,
+        tx: tokio::sync::oneshot::Sender<Result<SuccessfulRead, Error>>,
     },
 
     /// Reads the next chunk of the file.
     ReadNextChunk {
         file: OpenFile,
-        tx: tokio::sync::oneshot::Sender<Result<(Option<OpenFile>, Vec<u8>), Error>>,
+        tx: tokio::sync::oneshot::Sender<Result<SuccessfulRead, Error>>,
     },
 
     /// Closes the file early, as when the [FileStream] is dropped before completing.
@@ -267,11 +277,7 @@ impl ReaderInt {
         }
     }
 
-    fn open(
-        &self,
-        composite_id: CompositeId,
-        range: Range<u64>,
-    ) -> Result<(Option<OpenFile>, Vec<u8>), Error> {
+    fn open(&self, composite_id: CompositeId, range: Range<u64>) -> Result<SuccessfulRead, Error> {
         let p = super::CompositeIdPath::from(composite_id);
 
         // Reader::open_file checks for an empty range, but check again right
@@ -362,7 +368,7 @@ impl ReaderInt {
         }))
     }
 
-    fn chunk(&self, mut file: OpenFile) -> (Option<OpenFile>, Vec<u8>) {
+    fn chunk(&self, mut file: OpenFile) -> SuccessfulRead {
         // Read a chunk that's large enough to minimize thread handoffs but
         // short enough to keep memory usage under control. It's hopefully
         // unnecessary to worry about disk seeks; the madvise call should cause
@@ -393,7 +399,7 @@ impl ReaderInt {
             file.map_pos = end;
             Some(file)
         };
-        (file, chunk)
+        SuccessfulRead { chunk, file }
     }
 }
 

@@ -52,6 +52,7 @@ impl<'a, C> Streamer<'a, C>
 where
     C: 'a + Clocks + Clone,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new<'tmp>(
         env: &Environment<'a, 'tmp, C>,
         dir: Arc<dir::SampleFileDir>,

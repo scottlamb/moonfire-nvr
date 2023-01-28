@@ -108,7 +108,7 @@ impl SampleIndexIterator {
             true => (self.bytes, self.bytes_other),
             false => (self.bytes_other, self.bytes),
         };
-        self.i_and_is_key = (i2 as u32) | (((raw1 & 1) as u32) << 31);
+        self.i_and_is_key = (i2 as u32) | ((raw1 & 1) << 31);
         let bytes_delta = unzigzag32(raw2);
         if self.is_key() {
             self.bytes = prev_bytes_key + bytes_delta;
@@ -257,7 +257,7 @@ impl Segment {
             recording
         );
         db.with_recording_playback(self_.id, &mut |playback| {
-            let mut begin = Box::new(SampleIndexIterator::default());
+            let mut begin = Box::<SampleIndexIterator>::default();
             let data = &playback.video_index;
             let mut it = SampleIndexIterator::default();
             if !it.next(data)? {

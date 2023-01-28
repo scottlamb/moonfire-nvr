@@ -80,7 +80,7 @@ pub fn run(args: Args) -> Result<i32, Error> {
         permissions,
     )?;
     let mut encoded = [0u8; 64];
-    base64::encode_config_slice(&sid, base64::STANDARD_NO_PAD, &mut encoded);
+    base64::encode_config_slice(sid, base64::STANDARD_NO_PAD, &mut encoded);
     let encoded = std::str::from_utf8(&encoded[..]).expect("base64 is valid UTF-8");
 
     if let Some(ref p) = args.curl_cookie_jar {

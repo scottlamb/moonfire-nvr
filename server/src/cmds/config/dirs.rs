@@ -58,7 +58,7 @@ fn update_limits(model: &Model, siv: &mut Cursive) {
 fn edit_limit(model: &RefCell<Model>, siv: &mut Cursive, id: i32, content: &str) {
     debug!("on_edit called for id {}", id);
     let mut model = model.borrow_mut();
-    let model: &mut Model = &mut *model;
+    let model: &mut Model = &mut model;
     let stream = model.streams.get_mut(&id).unwrap();
     let new_value = decode_size(content).ok();
     let delta = new_value.unwrap_or(0) - stream.retain.unwrap_or(0);
@@ -95,7 +95,7 @@ fn edit_limit(model: &RefCell<Model>, siv: &mut Cursive, id: i32, content: &str)
 
 fn edit_record(model: &RefCell<Model>, id: i32, record: bool) {
     let mut model = model.borrow_mut();
-    let model: &mut Model = &mut *model;
+    let model: &mut Model = &mut model;
     let stream = model.streams.get_mut(&id).unwrap();
     stream.record = record;
 }

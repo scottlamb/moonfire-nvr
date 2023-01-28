@@ -200,7 +200,7 @@ impl Service {
     pub fn new(config: Config) -> Result<Self, Error> {
         let mut ui_dir = None;
         if let Some(d) = config.ui_dir {
-            match FsDir::builder().for_path(&d) {
+            match FsDir::builder().for_path(d) {
                 Err(e) => {
                     warn!(
                         "Unable to load ui dir {}; will serve no static files: {}",
