@@ -1159,13 +1159,6 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
         let mut state = State::init(&conn).unwrap();
-        let req = Request {
-            when_sec: Some(42),
-            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(
-                127, 0, 0, 1,
-            ))),
-            user_agent: Some(b"some ua".to_vec()),
-        };
         let uid = {
             let mut c = UserChange::add_user("slamb".to_owned());
             c.set_password("hunter2".to_owned());
