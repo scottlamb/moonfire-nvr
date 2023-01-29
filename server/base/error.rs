@@ -9,7 +9,7 @@ use std::fmt::{self, Write};
 pub fn prettify_failure(e: &failure::Error) -> String {
     let mut msg = e.to_string();
     for cause in e.iter_causes() {
-        write!(&mut msg, "\ncaused by: {}", cause).unwrap();
+        write!(&mut msg, "\ncaused by: {cause}").unwrap();
     }
     if e.backtrace().is_empty() {
         write!(

@@ -23,10 +23,7 @@ pub use base::time::Time;
 pub fn rescale(from_off_90k: i32, from_duration_90k: i32, to_duration_90k: i32) -> i32 {
     debug_assert!(
         from_off_90k <= from_duration_90k,
-        "from_off_90k={} from_duration_90k={} to_duration_90k={}",
-        from_off_90k,
-        from_duration_90k,
-        to_duration_90k
+        "from_off_90k={from_off_90k} from_duration_90k={from_duration_90k} to_duration_90k={to_duration_90k}"
     );
     if from_duration_90k == 0 {
         return 0; // avoid a divide by zero.
@@ -41,8 +38,7 @@ pub fn rescale(from_off_90k: i32, from_duration_90k: i32, to_duration_90k: i32) 
     )
     .map_err(|_| {
         format!(
-            "rescale overflow: {} * {} / {} > i32::max_value()",
-            from_off_90k, to_duration_90k, from_duration_90k
+            "rescale overflow: {from_off_90k} * {to_duration_90k} / {from_duration_90k} > i32::max_value()"
         )
     })
     .unwrap()

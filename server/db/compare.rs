@@ -22,7 +22,7 @@ struct Column {
 
 impl std::fmt::Display for Column {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -37,7 +37,7 @@ struct Index {
 
 impl std::fmt::Display for Index {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -50,7 +50,7 @@ struct IndexColumn {
 
 impl std::fmt::Display for IndexColumn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -61,18 +61,18 @@ fn diff_slices<T: std::fmt::Display + PartialEq>(
     name2: &str,
     slice2: &[T],
 ) -> Option<String> {
-    let mut diff = format!("--- {}\n+++ {}\n", name1, name2);
+    let mut diff = format!("--- {name1}\n+++ {name2}\n");
     let mut changed = false;
     for item in diff::slice(slice1, slice2) {
         match item {
             diff::Result::Left(i) => {
                 changed = true;
-                writeln!(&mut diff, "-{}", i)
+                writeln!(&mut diff, "-{i}")
             }
-            diff::Result::Both(i, _) => writeln!(&mut diff, " {}", i),
+            diff::Result::Both(i, _) => writeln!(&mut diff, " {i}"),
             diff::Result::Right(i) => {
                 changed = true;
-                writeln!(&mut diff, "+{}", i)
+                writeln!(&mut diff, "+{i}")
             }
         }
         .unwrap();
@@ -109,7 +109,7 @@ fn get_table_columns(
     // Note that placeholders aren't allowed for these pragmas. Just assume sane table names
     // (no escaping). "select * from pragma_..." syntax would be nicer but requires SQLite
     // 3.16.0 (2017-01-02). Ubuntu 16.04 Xenial (still used on Travis CI) has an older SQLite.
-    c.prepare(&format!("pragma table_info(\"{}\")", table))?
+    c.prepare(&format!("pragma table_info(\"{table}\")"))?
         .query_map(params![], |r| {
             Ok(Column {
                 cid: r.get(0)?,
@@ -126,7 +126,7 @@ fn get_table_columns(
 /// Returns a vec of indices associated with the given table.
 fn get_indices(c: &rusqlite::Connection, table: &str) -> Result<Vec<Index>, rusqlite::Error> {
     // See note at get_tables_columns about placeholders.
-    c.prepare(&format!("pragma index_list(\"{}\")", table))?
+    c.prepare(&format!("pragma index_list(\"{table}\")"))?
         .query_map(params![], |r| {
             Ok(Index {
                 seq: r.get(0)?,
@@ -145,7 +145,7 @@ fn get_index_columns(
     index: &str,
 ) -> Result<Vec<IndexColumn>, rusqlite::Error> {
     // See note at get_tables_columns about placeholders.
-    c.prepare(&format!("pragma index_info(\"{}\")", index))?
+    c.prepare(&format!("pragma index_info(\"{index}\")"))?
         .query_map(params![], |r| {
             Ok(IndexColumn {
                 seqno: r.get(0)?,
@@ -168,11 +168,7 @@ pub fn get_diffs(
     let tables1 = get_tables(c1)?;
     let tables2 = get_tables(c2)?;
     if let Some(diff) = diff_slices(n1, &tables1[..], n2, &tables2[..]) {
-        write!(
-            &mut diffs,
-            "table list mismatch, {} vs {}:\n{}",
-            n1, n2, diff
-        )?;
+        write!(&mut diffs, "table list mismatch, {n1} vs {n2}:\n{diff}")?;
     }
 
     // Compare columns and indices for each table.
@@ -180,11 +176,7 @@ pub fn get_diffs(
         let columns1 = get_table_columns(c1, t)?;
         let columns2 = get_table_columns(c2, t)?;
         if let Some(diff) = diff_slices(n1, &columns1[..], n2, &columns2[..]) {
-            write!(
-                &mut diffs,
-                "table {:?} column, {} vs {}:\n{}",
-                t, n1, n2, diff
-            )?;
+            write!(&mut diffs, "table {t:?} column, {n1} vs {n2}:\n{diff}")?;
         }
 
         let mut indices1 = get_indices(c1, t)?;
@@ -192,11 +184,7 @@ pub fn get_diffs(
         indices1.sort_by(|a, b| a.name.cmp(&b.name));
         indices2.sort_by(|a, b| a.name.cmp(&b.name));
         if let Some(diff) = diff_slices(n1, &indices1[..], n2, &indices2[..]) {
-            write!(
-                &mut diffs,
-                "table {:?} indices, {} vs {}:\n{}",
-                t, n1, n2, diff
-            )?;
+            write!(&mut diffs, "table {t:?} indices, {n1} vs {n2}:\n{diff}")?;
         }
 
         for i in &indices1 {
@@ -205,8 +193,7 @@ pub fn get_diffs(
             if let Some(diff) = diff_slices(n1, &ic1[..], n2, &ic2[..]) {
                 write!(
                     &mut diffs,
-                    "table {:?} index {:?} columns {} vs {}:\n{}",
-                    t, i, n1, n2, diff
+                    "table {t:?} index {i:?} columns {n1} vs {n2}:\n{diff}"
                 )?;
             }
         }

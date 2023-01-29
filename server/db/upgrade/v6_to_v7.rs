@@ -259,7 +259,7 @@ fn copy_cameras(tx: &rusqlite::Transaction) -> Result<(), Error> {
                 // of using a SQL NULL, so convert empty to None here.
                 // https://github.com/scottlamb/moonfire-nvr/issues/182
                 .filter(|h| !h.is_empty())
-                .map(|h| Url::parse(&format!("http://{}/", h)))
+                .map(|h| Url::parse(&format!("http://{h}/")))
                 .transpose()
                 .with_context(|_| "bad onvif_host")?,
             username: username.take().unwrap_or_default(),

@@ -1032,7 +1032,7 @@ mod tests {
                     assert_eq!(id, expected_id);
                     f(id)
                 }
-                _ => panic!("got create_file({}), expected something else", id),
+                _ => panic!("got create_file({id}), expected something else"),
             }
         }
         fn sync(&self) -> Result<(), nix::Error> {
@@ -1059,7 +1059,7 @@ mod tests {
                     assert_eq!(id, expected_id);
                     f(id)
                 }
-                _ => panic!("got unlink({}), expected something else", id),
+                _ => panic!("got unlink({id}), expected something else"),
             }
         }
     }
@@ -1114,7 +1114,7 @@ mod tests {
                 .expect("got write with no expectation")
             {
                 MockFileAction::Write(f) => f(buf),
-                _ => panic!("got write({:?}), expected something else", buf),
+                _ => panic!("got write({buf:?}), expected something else"),
             }
         }
     }

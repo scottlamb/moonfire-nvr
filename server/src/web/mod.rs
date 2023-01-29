@@ -366,7 +366,7 @@ impl Service {
         let db = self.db.lock();
         let camera = db
             .get_camera(uuid)
-            .ok_or_else(|| not_found(format!("no such camera {}", uuid)))?;
+            .ok_or_else(|| not_found(format!("no such camera {uuid}")))?;
         serve_json(
             req,
             &json::Camera::wrap(camera, &db, true, false).map_err(internal_server_err)?,
@@ -412,12 +412,12 @@ impl Service {
             video_sample_entries: (&db, Vec::new()),
         };
         let camera = db.get_camera(uuid).ok_or_else(|| {
-            plain_response(StatusCode::NOT_FOUND, format!("no such camera {}", uuid))
+            plain_response(StatusCode::NOT_FOUND, format!("no such camera {uuid}"))
         })?;
         let stream_id = camera.streams[type_.index()].ok_or_else(|| {
             plain_response(
                 StatusCode::NOT_FOUND,
-                format!("no such stream {}/{}", uuid, type_),
+                format!("no such stream {uuid}/{type_}"),
             )
         })?;
         db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
@@ -464,7 +464,7 @@ impl Service {
             .build(self.db.clone(), self.dirs_by_stream_id.clone())
             .map_err(from_base_error)?;
         if debug {
-            Ok(plain_response(StatusCode::OK, format!("{:#?}", mp4)))
+            Ok(plain_response(StatusCode::OK, format!("{mp4:#?}")))
         } else {
             Ok(http_serve::serve(mp4, req))
         }

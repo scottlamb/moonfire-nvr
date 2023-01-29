@@ -106,7 +106,7 @@ impl Value for SignalValue {
             let s = &mut self.states[c.new_state as usize - 1];
             let n = s
                 .checked_add(u64::try_from(c.duration.0).unwrap())
-                .unwrap_or_else(|| panic!("add range violation: s={:?} c={:?}", s, c));
+                .unwrap_or_else(|| panic!("add range violation: s={s:?} c={c:?}"));
             *s = n;
         }
 
@@ -115,14 +115,12 @@ impl Value for SignalValue {
             let i = usize::try_from(c.old_state).unwrap() - 1;
             assert!(
                 self.states.len() > i,
-                "no such old state: s={:?} c={:?}",
-                self,
-                c
+                "no such old state: s={self:?} c={c:?}"
             );
             let s = &mut self.states[c.old_state as usize - 1];
             let n = s
                 .checked_sub(u64::try_from(c.duration.0).unwrap())
-                .unwrap_or_else(|| panic!("sub range violation: s={:?} c={:?}", s, c));
+                .unwrap_or_else(|| panic!("sub range violation: s={s:?} c={c:?}"));
             *s = n;
         }
 

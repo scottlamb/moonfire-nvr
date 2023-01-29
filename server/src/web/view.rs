@@ -46,10 +46,10 @@ impl Service {
             let db = self.db.lock();
             let camera = db
                 .get_camera(uuid)
-                .ok_or_else(|| not_found(format!("no such camera {}", uuid)))?;
+                .ok_or_else(|| not_found(format!("no such camera {uuid}")))?;
             camera_name = camera.short_name.clone();
             stream_id = camera.streams[stream_type.index()]
-                .ok_or_else(|| not_found(format!("no such stream {}/{}", uuid, stream_type)))?;
+                .ok_or_else(|| not_found(format!("no such stream {uuid}/{stream_type}")))?;
         };
         let mut start_time_for_filename = None;
         let mut builder = mp4::FileBuilder::new(mp4_type);
@@ -61,7 +61,7 @@ impl Service {
                         let s = Segments::from_str(value).map_err(|()| {
                             plain_response(
                                 StatusCode::BAD_REQUEST,
-                                format!("invalid s parameter: {}", value),
+                                format!("invalid s parameter: {value}"),
                             )
                         })?;
                         trace!("stream_view_mp4: appending s={:?}", s);
@@ -177,7 +177,7 @@ impl Service {
                     "ts" => builder
                         .include_timestamp_subtitle_track(value == "true")
                         .map_err(from_base_error)?,
-                    _ => return Err(bad_req(format!("parameter {} not understood", key))),
+                    _ => return Err(bad_req(format!("parameter {key} not understood"))),
                 }
             }
         }
@@ -210,7 +210,7 @@ impl Service {
             .build(self.db.clone(), self.dirs_by_stream_id.clone())
             .map_err(from_base_error)?;
         if debug {
-            return Ok(plain_response(StatusCode::OK, format!("{:#?}", mp4)));
+            return Ok(plain_response(StatusCode::OK, format!("{mp4:#?}")));
         }
         Ok(http_serve::serve(mp4, req))
     }

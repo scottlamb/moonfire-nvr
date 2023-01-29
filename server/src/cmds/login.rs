@@ -105,7 +105,7 @@ pub fn run(args: Args) -> Result<i32, Error> {
         f.sync_all()?;
         println!("Wrote cookie to {}", p.display());
     } else {
-        println!("s={}", encoded);
+        println!("s={encoded}");
     }
     Ok(0)
 }

@@ -35,7 +35,7 @@ pub struct Args<'a> {
 fn set_journal_mode(conn: &rusqlite::Connection, requested: &str) -> Result<(), Error> {
     assert!(!requested.contains(';')); // quick check for accidental sql injection.
     let actual = conn.query_row(
-        &format!("pragma journal_mode = {}", requested),
+        &format!("pragma journal_mode = {requested}"),
         params![],
         |row| row.get::<_, String>(0),
     )?;
@@ -191,12 +191,12 @@ mod tests {
         let fresh = new_conn()?;
         fresh.execute_batch(fresh_sql)?;
         if let Some(diffs) = compare::get_diffs(
-            &format!("upgraded to version {}", ver),
-            &c,
-            &format!("fresh version {}", ver),
+            &format!("upgraded to version {ver}"),
+            c,
+            &format!("fresh version {ver}"),
             &fresh,
         )? {
-            panic!("Version {}: differences found:\n{}", ver, diffs);
+            panic!("Version {ver}: differences found:\n{diffs}");
         }
         Ok(())
     }
@@ -284,14 +284,14 @@ mod tests {
         ] {
             upgrade(
                 &Args {
-                    sample_file_dir: Some(&tmpdir.path()),
+                    sample_file_dir: Some(tmpdir.path()),
                     preset_journal: "delete",
                     no_vacuum: false,
                 },
                 *ver,
                 &mut upgraded,
             )
-            .context(format!("upgrading to version {}", ver))?;
+            .context(format!("upgrading to version {ver}"))?;
             if let Some(f) = fresh_sql {
                 compare(&upgraded, *ver, f)?;
             }

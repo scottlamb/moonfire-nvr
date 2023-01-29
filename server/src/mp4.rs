@@ -974,7 +974,7 @@ impl FileBuilder {
 
     pub fn set_filename(&mut self, filename: &str) -> Result<(), Error> {
         self.content_disposition = Some(
-            HeaderValue::try_from(format!("attachment; filename=\"{}\"", filename))
+            HeaderValue::try_from(format!("attachment; filename=\"{filename}\""))
                 .err_kind(ErrorKind::InvalidArgument)?,
         );
         Ok(())
@@ -2073,7 +2073,7 @@ mod tests {
     impl BoxCursor {
         pub fn new(mp4: File) -> BoxCursor {
             BoxCursor {
-                mp4: mp4,
+                mp4,
                 stack: Vec::new(),
             }
         }
@@ -2107,7 +2107,7 @@ mod tests {
             boxtype[..].copy_from_slice(boxtype_slice);
             self.stack.push(Mp4Box {
                 interior: pos + hdr_len as u64..pos + len,
-                boxtype: boxtype,
+                boxtype,
             });
             trace!("positioned at {}", self.path());
             true
@@ -2272,7 +2272,7 @@ mod tests {
         cursor.down().await;
         assert!(cursor.find(b"stbl").await);
         Track {
-            edts_cursor: edts_cursor,
+            edts_cursor,
             stbl_cursor: cursor,
         }
     }
@@ -2353,13 +2353,11 @@ mod tests {
                 let d = r.media_duration_90k;
                 assert!(
                     skip_90k + shorten_90k < d,
-                    "skip_90k={} shorten_90k={} r={:?}",
-                    skip_90k,
-                    shorten_90k,
-                    r
+                    "{}",
+                    "skip_90k={skip_90k} shorten_90k={shorten_90k} r={r:?}"
                 );
                 builder
-                    .append(&*db, r, skip_90k..d - shorten_90k, true)
+                    .append(&db, r, skip_90k..d - shorten_90k, true)
                     .unwrap();
                 Ok(())
             })
@@ -2442,11 +2440,10 @@ mod tests {
             };
             assert_eq!(
                 orig_pkt.pts, new_pkt.pts, /*+ pts_offset*/
-                "pkt {} pts",
-                i
+                "pkt {i} pts"
             );
-            assert_eq!(orig_pkt.data, new_pkt.data, "pkt {} data", i);
-            assert_eq!(orig_pkt.is_key, new_pkt.is_key, "pkt {} key", i);
+            assert_eq!(orig_pkt.data, new_pkt.data, "pkt {i} data");
+            assert_eq!(orig_pkt.is_key, new_pkt.is_key, "pkt {i} key");
             final_durations = Some((i64::from(orig_pkt.duration), i64::from(new_pkt.duration)));
         }
 
@@ -2457,11 +2454,8 @@ mod tests {
             // See <https://github.com/scottlamb/moonfire-nvr/issues/10>.
             assert!(
                 orig_dur - shorten + pts_offset == new_dur || orig_dur - shorten == new_dur,
-                "orig_dur={} new_dur={} shorten={} pts_offset={}",
-                orig_dur,
-                new_dur,
-                shorten,
-                pts_offset
+                "{}",
+                "orig_dur={orig_dur} new_dur={new_dur} shorten={shorten} pts_offset={pts_offset}"
             );
         }
     }
@@ -2845,7 +2839,7 @@ mod tests {
             "64f23b856692702b13d1811cd02dc83395b3d501dead7fd16f175eb26b4d8eee",
             hash.to_hex().as_str()
         );
-        const EXPECTED_ETAG: &'static str =
+        const EXPECTED_ETAG: &str =
             "\"791114c469130970608dd999b0ecf5861d077ec33fad2f0b040996e4aae4e30f\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
@@ -2874,7 +2868,7 @@ mod tests {
             "f9e4ed946187b2dd22ef049c4c1869d0f6c4f377ef08f8f53570850b61a06701",
             hash.to_hex().as_str()
         );
-        const EXPECTED_ETAG: &'static str =
+        const EXPECTED_ETAG: &str =
             "\"85703b9abadd4292e119f2f7b0d6a16e99acf8b3ba98fcb6498e60ac5cb0b0b7\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
@@ -2903,7 +2897,7 @@ mod tests {
             "f913d46d0119a03291e85459455b9a75a84cc9a1a5e3b88ca7e93eb718d73190",
             hash.to_hex().as_str()
         );
-        const EXPECTED_ETAG: &'static str =
+        const EXPECTED_ETAG: &str =
             "\"3d2031124fb995bf2fc4930e7affdcd51add396e062cfab97e1001224c5ee42c\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
@@ -2933,7 +2927,7 @@ mod tests {
             "64cc763fa2533118bc6bf0b01249f02524ae87e0c97815079447b235722c1e2d",
             hash.to_hex().as_str()
         );
-        const EXPECTED_ETAG: &'static str =
+        const EXPECTED_ETAG: &str =
             "\"aa9bb2f63787a7d21227981135326c948db3e0b3dae5d0d39c77df69d0baf504\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
@@ -2962,7 +2956,7 @@ mod tests {
             "6886b36ae6df9ce538f6db7ebd6159e68c2936b9d43307f7728fe75e0b62cad2",
             hash.to_hex().as_str()
         );
-        const EXPECTED_ETAG: &'static str =
+        const EXPECTED_ETAG: &str =
             "\"0a6accaa7b583c94209eba58b00b39a804a5c4a8c99043e58e72fed7acd8dfc6\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),

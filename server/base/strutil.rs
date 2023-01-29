@@ -28,7 +28,7 @@ pub fn encode_size(mut raw: i64) -> String {
         }
     }
     if raw > 0 || encoded.is_empty() {
-        write!(&mut encoded, "{}", raw).unwrap();
+        write!(&mut encoded, "{raw}").unwrap();
     } else {
         encoded.pop(); // remove trailing space.
     }

@@ -293,7 +293,6 @@ mod tests {
     use std::convert::TryFrom;
     use std::sync::Arc;
     use std::sync::Mutex;
-    use time;
 
     struct ProxyingStream {
         clocks: clock::SimulatedClocks,
@@ -412,7 +411,7 @@ mod tests {
         db.with_recording_playback(id, &mut |rec| {
             let mut it = recording::SampleIndexIterator::default();
             let mut frames = Vec::new();
-            while it.next(&rec.video_index).unwrap() {
+            while it.next(rec.video_index).unwrap() {
                 frames.push(Frame {
                     start_90k: it.start_90k,
                     duration_90k: it.duration_90k,
@@ -443,7 +442,7 @@ mod tests {
             streams: Mutex::new(vec![Box::new(stream)]),
             shutdown_tx: Mutex::new(Some(shutdown_tx)),
         };
-        let db = testutil::TestDb::new(clocks.clone());
+        let db = testutil::TestDb::new(clocks);
         let env = super::Environment {
             opener: &opener,
             db: &db.db,

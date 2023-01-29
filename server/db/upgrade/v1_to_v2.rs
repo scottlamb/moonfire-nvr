@@ -419,7 +419,6 @@ fn rfc6381_codec_from_sample_entry(sample_entry: &[u8]) -> Result<String, Error>
     let constraint_flags_byte = sample_entry[104];
     let level_idc = sample_entry[105];
     Ok(format!(
-        "avc1.{:02x}{:02x}{:02x}",
-        profile_idc, constraint_flags_byte, level_idc
+        "avc1.{profile_idc:02x}{constraint_flags_byte:02x}{level_idc:02x}"
     ))
 }

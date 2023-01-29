@@ -157,10 +157,7 @@ pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Er
     let constraint_flags = sample_entry[104];
     let level_idc = sample_entry[105];
 
-    let rfc6381_codec = format!(
-        "avc1.{:02x}{:02x}{:02x}",
-        profile_idc, constraint_flags, level_idc
-    );
+    let rfc6381_codec = format!("avc1.{profile_idc:02x}{constraint_flags:02x}{level_idc:02x}");
     Ok(VideoSampleEntryToInsert {
         data: sample_entry,
         rfc6381_codec,

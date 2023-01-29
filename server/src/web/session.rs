@@ -275,14 +275,11 @@ mod tests {
                     | (SessionFlag::SameSite as i32)
                     | (SessionFlag::SameSiteStrict as i32)
             ),
-            format!(
-                "s={}; HttpOnly; Secure; SameSite=Strict; Max-Age=2147483648; Path=/",
-                s64
-            )
+            format!("s={s64}; HttpOnly; Secure; SameSite=Strict; Max-Age=2147483648; Path=/")
         );
         assert_eq!(
             encode_sid(s, SessionFlag::SameSite as i32),
-            format!("s={}; SameSite=Lax; Max-Age=2147483648; Path=/", s64)
+            format!("s={s64}; SameSite=Lax; Max-Age=2147483648; Path=/")
         );
     }
 

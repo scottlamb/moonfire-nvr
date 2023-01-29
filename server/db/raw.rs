@@ -205,7 +205,7 @@ pub(crate) fn insert_recording(
                                :end_reason)
             "#,
         )
-        .with_context(|e| format!("can't prepare recording insert: {}", e))?;
+        .with_context(|e| format!("can't prepare recording insert: {e}"))?;
     stmt.execute(named_params! {
         ":composite_id": id.0,
         ":stream_id": i64::from(id.stream()),
@@ -223,12 +223,7 @@ pub(crate) fn insert_recording(
         ":video_sample_entry_id": r.video_sample_entry_id,
         ":end_reason": r.end_reason.as_deref(),
     })
-    .with_context(|e| {
-        format!(
-            "unable to insert recording for recording {} {:#?}: {}",
-            id, r, e
-        )
-    })?;
+    .with_context(|e| format!("unable to insert recording for recording {id} {r:#?}: {e}"))?;
 
     let mut stmt = tx
         .prepare_cached(
@@ -239,7 +234,7 @@ pub(crate) fn insert_recording(
                                              :sample_file_blake3)
             "#,
         )
-        .with_context(|e| format!("can't prepare recording_integrity insert: {}", e))?;
+        .with_context(|e| format!("can't prepare recording_integrity insert: {e}"))?;
     let blake3 = r.sample_file_blake3.as_ref().map(|b| &b[..]);
     let delta = match r.run_offset {
         0 => None,
@@ -250,7 +245,7 @@ pub(crate) fn insert_recording(
         ":local_time_delta_90k": delta,
         ":sample_file_blake3": blake3,
     })
-    .with_context(|e| format!("unable to insert recording_integrity for {:#?}: {}", r, e))?;
+    .with_context(|e| format!("unable to insert recording_integrity for {r:#?}: {e}"))?;
 
     let mut stmt = tx
         .prepare_cached(
@@ -259,12 +254,12 @@ pub(crate) fn insert_recording(
                                     values (:composite_id, :video_index)
             "#,
         )
-        .with_context(|e| format!("can't prepare recording_playback insert: {}", e))?;
+        .with_context(|e| format!("can't prepare recording_playback insert: {e}"))?;
     stmt.execute(named_params! {
         ":composite_id": id.0,
         ":video_index": &r.video_index,
     })
-    .with_context(|e| format!("unable to insert recording_playback for {:#?}: {}", r, e))?;
+    .with_context(|e| format!("unable to insert recording_playback for {r:#?}: {e}"))?;
 
     Ok(())
 }
@@ -371,7 +366,7 @@ pub(crate) fn mark_sample_files_deleted(
             // Tempting to just consider logging error and moving on, but this represents a logic
             // flaw, so complain loudly. The freshly deleted file might still be referenced in the
             // recording table.
-            panic!("no garbage row for {}", id);
+            panic!("no garbage row for {id}");
         }
     }
     Ok(())

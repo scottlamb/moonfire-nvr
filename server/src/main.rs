@@ -81,14 +81,14 @@ impl Args {
 fn panic_hook(p: &std::panic::PanicInfo) {
     let mut msg;
     if let Some(l) = p.location() {
-        msg = format!("panic at '{}'", l);
+        msg = format!("panic at '{l}'");
     } else {
         msg = "panic".to_owned();
     }
     if let Some(s) = p.payload().downcast_ref::<&str>() {
-        write!(&mut msg, ": {}", s).unwrap();
+        write!(&mut msg, ": {s}").unwrap();
     } else if let Some(s) = p.payload().downcast_ref::<String>() {
-        write!(&mut msg, ": {}", s).unwrap();
+        write!(&mut msg, ": {s}").unwrap();
     }
     let b = failure::Backtrace::new();
     if b.is_empty() {
@@ -98,7 +98,7 @@ fn panic_hook(p: &std::panic::PanicInfo) {
         )
         .unwrap();
     } else {
-        write!(&mut msg, "\n\nBacktrace:\n{}", b).unwrap();
+        write!(&mut msg, "\n\nBacktrace:\n{b}").unwrap();
     }
     error!("{}", msg);
 }
@@ -106,9 +106,8 @@ fn panic_hook(p: &std::panic::PanicInfo) {
 fn main() {
     if let Err(e) = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC) {
         eprintln!(
-            "clock_gettime failed: {}\n\n\
-                   This indicates a broken environment. See the troubleshooting guide.",
-            e
+            "clock_gettime failed: {e}\n\n\
+                   This indicates a broken environment. See the troubleshooting guide."
         );
         std::process::exit(1);
     }

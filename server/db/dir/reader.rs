@@ -53,7 +53,7 @@ impl Reader {
                 .expect("PAGE_SIZE must be defined"),
         )
         .expect("PAGE_SIZE fits in usize");
-        assert_eq!(page_size.count_ones(), 1, "invalid page size {}", page_size);
+        assert_eq!(page_size.count_ones(), 1, "invalid page size {page_size}");
         std::thread::Builder::new()
             .name(format!("r-{}", path.display()))
             .spawn(move || ReaderInt { dir, page_size }.run(rx))
@@ -258,8 +258,7 @@ impl ReaderInt {
                         // avoid spending effort on expired commands
                         continue;
                     }
-                    let _guard =
-                        TimerGuard::new(&RealClocks {}, || format!("open {}", composite_id));
+                    let _guard = TimerGuard::new(&RealClocks {}, || format!("open {composite_id}"));
                     let _ = tx.send(self.open(composite_id, range));
                 }
                 ReaderCommand::ReadNextChunk { file, tx } => {
@@ -269,7 +268,7 @@ impl ReaderInt {
                     }
                     let composite_id = file.composite_id;
                     let _guard =
-                        TimerGuard::new(&RealClocks {}, || format!("read from {}", composite_id));
+                        TimerGuard::new(&RealClocks {}, || format!("read from {composite_id}"));
                     let _ = tx.send(Ok(self.chunk(file)));
                 }
                 ReaderCommand::CloseFile(_) => {}
@@ -417,7 +416,7 @@ mod tests {
         let fd = std::sync::Arc::new(super::super::Fd::open(tmpdir.path(), false).unwrap());
         let reader = super::Reader::spawn(tmpdir.path(), fd);
         std::fs::write(tmpdir.path().join("0123456789abcdef"), b"blah blah").unwrap();
-        let f = reader.open_file(crate::CompositeId(0x01234567_89abcdef), 1..8);
+        let f = reader.open_file(crate::CompositeId(0x0123_4567_89ab_cdef), 1..8);
         assert_eq!(f.try_concat().await.unwrap(), b"lah bla");
     }
 }

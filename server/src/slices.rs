@@ -220,7 +220,7 @@ mod tests {
         }
 
         fn get_slices(ctx: &&'static Slices<FakeSlice>) -> &'static Slices<Self> {
-            *ctx
+            ctx
         }
     }
 

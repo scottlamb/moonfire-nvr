@@ -91,7 +91,7 @@ impl Service {
                 Some(o) => o.id,
             };
             let camera = db.get_camera(uuid).ok_or_else(|| {
-                plain_response(StatusCode::NOT_FOUND, format!("no such camera {}", uuid))
+                plain_response(StatusCode::NOT_FOUND, format!("no such camera {uuid}"))
             })?;
             stream_id = camera.streams[stream_type.index()].ok_or_else(|| {
                 format_err_t!(NotFound, "no such stream {}/{}", uuid, stream_type)

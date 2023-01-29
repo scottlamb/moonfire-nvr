@@ -2568,8 +2568,7 @@ mod tests {
         assert!(
             e.to_string()
                 .starts_with("Database schema version 6 is too old (expected 7)"),
-            "got: {:?}",
-            e
+            "got: {e:?}"
         );
     }
 
@@ -2583,8 +2582,7 @@ mod tests {
         assert!(
             e.to_string()
                 .starts_with("Database schema version 8 is too new (expected 7)"),
-            "got: {:?}",
-            e
+            "got: {e:?}"
         );
     }
 
@@ -2728,7 +2726,7 @@ mod tests {
                 rfc6381_codec: "avc1.4d0029".to_owned(),
             })
             .unwrap();
-        assert!(vse_id > 0, "vse_id = {}", vse_id);
+        assert!(vse_id > 0, "vse_id = {vse_id}");
 
         // Inserting a recording should succeed and advance the next recording id.
         let start = recording::Time(1430006400 * TIME_UNITS_PER_SEC);
@@ -2818,7 +2816,7 @@ mod tests {
             .unwrap()
             .garbage_needs_unlink
             .iter()
-            .map(|&id| id)
+            .copied()
             .collect();
         assert_eq!(&g, &[id]);
         let g: Vec<_> = db
@@ -2828,7 +2826,7 @@ mod tests {
             .unwrap()
             .garbage_unlinked
             .iter()
-            .map(|&id| id)
+            .copied()
             .collect();
         assert_eq!(&g, &[]);
     }

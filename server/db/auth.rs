@@ -451,7 +451,7 @@ impl State {
             .context(ErrorKind::Unknown)?;
         let e = self.users_by_id.entry(id);
         let e = match e {
-            ::std::collections::btree_map::Entry::Vacant(_) => panic!("missing uid {}!", id),
+            ::std::collections::btree_map::Entry::Vacant(_) => panic!("missing uid {id}!"),
             ::std::collections::btree_map::Entry::Occupied(e) => e,
         };
         {
@@ -519,7 +519,7 @@ impl State {
         let e = self.users_by_id.entry(id);
         let e = match e {
             ::std::collections::btree_map::Entry::Vacant(e) => e,
-            ::std::collections::btree_map::Entry::Occupied(_) => panic!("uid {} conflict!", id),
+            ::std::collections::btree_map::Entry::Occupied(_) => panic!("uid {id} conflict!"),
         };
         Ok(e.insert(User {
             id,
@@ -963,7 +963,7 @@ mod tests {
                 0,
             )
             .unwrap_err();
-        assert_eq!(format!("{}", e), "Unauthenticated: incorrect password");
+        assert_eq!(format!("{e}"), "Unauthenticated: incorrect password");
         c.set_password("hunter2".to_owned());
         state.apply(&conn, c).unwrap();
         let e = state
@@ -976,7 +976,7 @@ mod tests {
                 0,
             )
             .unwrap_err();
-        assert_eq!(format!("{}", e), "Unauthenticated: incorrect password");
+        assert_eq!(format!("{e}"), "Unauthenticated: incorrect password");
         let sid = {
             let (sid, s) = state
                 .login_by_password(
@@ -1011,7 +1011,7 @@ mod tests {
             .authenticate_session(&conn, req.clone(), &sid.hash())
             .unwrap_err();
         assert_eq!(
-            format!("{}", e),
+            format!("{e}"),
             "Unauthenticated: session is no longer valid (reason=1)"
         );
 
@@ -1022,7 +1022,7 @@ mod tests {
             .authenticate_session(&conn, req, &sid.hash())
             .unwrap_err();
         assert_eq!(
-            format!("{}", e),
+            format!("{e}"),
             "Unauthenticated: session is no longer valid (reason=1)"
         );
     }
@@ -1076,7 +1076,7 @@ mod tests {
             .authenticate_session(&conn, req, &sid.hash())
             .unwrap_err();
         assert_eq!(
-            format!("{}", e),
+            format!("{e}"),
             "Unauthenticated: session is no longer valid (reason=1)"
         );
     }
@@ -1131,14 +1131,14 @@ mod tests {
                 0,
             )
             .unwrap_err();
-        assert_eq!(format!("{}", e), "user \"slamb\" is disabled");
+        assert_eq!(format!("{e}"), "user \"slamb\" is disabled");
 
         // Authenticating existing sessions shouldn't work either.
         let e = state
             .authenticate_session(&conn, req.clone(), &sid.hash())
             .unwrap_err();
         assert_eq!(
-            format!("{}", e),
+            format!("{e}"),
             "Unauthenticated: user \"slamb\" is disabled"
         );
 
@@ -1149,7 +1149,7 @@ mod tests {
             .authenticate_session(&conn, req, &sid.hash())
             .unwrap_err();
         assert_eq!(
-            format!("{}", e),
+            format!("{e}"),
             "Unauthenticated: user \"slamb\" is disabled"
         );
     }
@@ -1211,16 +1211,16 @@ mod tests {
         let e = state
             .authenticate_session(&conn, req.clone(), &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "Unauthenticated: no such session");
+        assert_eq!(format!("{e}"), "Unauthenticated: no such session");
 
         // The user should still be deleted after reload.
         drop(state);
         let mut state = State::init(&conn).unwrap();
         assert!(state.users_by_id().get(&uid).is_none());
         let e = state
-            .authenticate_session(&conn, req.clone(), &sid.hash())
+            .authenticate_session(&conn, req, &sid.hash())
             .unwrap_err();
-        assert_eq!(format!("{}", e), "Unauthenticated: no such session");
+        assert_eq!(format!("{e}"), "Unauthenticated: no such session");
     }
 
     #[test]

@@ -296,7 +296,7 @@ impl<'a> Signal<'a> {
         let mut map = serializer.serialize_map(Some(s.config.camera_associations.len()))?;
         for (camera_id, association) in &s.config.camera_associations {
             let c = db.cameras_by_id().get(camera_id).ok_or_else(|| {
-                S::Error::custom(format!("signal has missing camera id {}", camera_id))
+                S::Error::custom(format!("signal has missing camera id {camera_id}"))
             })?;
             map.serialize_key(&c.uuid)?;
             map.serialize_value(association.as_str())?;

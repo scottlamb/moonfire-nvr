@@ -61,7 +61,7 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>, pw: Pa
     };
     if let Err(e) = result {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to apply change: {}", e))
+            views::Dialog::text(format!("Unable to apply change: {e}"))
                 .title("Error")
                 .dismiss_button("Abort"),
         );
@@ -76,7 +76,7 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>, pw: Pa
 
 fn press_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, name: String) {
     siv.add_layer(
-        views::Dialog::text(format!("Delete user {}?", name))
+        views::Dialog::text(format!("Delete user {name}?"))
             .button("Delete", {
                 let db = db.clone();
                 move |s| actually_delete(s, &db, id)
@@ -94,7 +94,7 @@ fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32) {
     };
     if let Err(e) = result {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to delete user: {}", e))
+            views::Dialog::text(format!("Unable to delete user: {e}"))
                 .title("Error")
                 .dismiss_button("Abort"),
         );
@@ -193,7 +193,7 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
     ] {
         let mut checkbox = views::Checkbox::new();
         checkbox.set_checked(*b);
-        perms.add_child(name, checkbox.with_name(format!("perm_{}", name)));
+        perms.add_child(name, checkbox.with_name(format!("perm_{name}")));
     }
     layout.add_child(perms);
 

@@ -783,7 +783,7 @@ impl State {
         let mut expected_prev = BTreeMap::new();
         for (t, p) in self.points_by_time.iter() {
             let cur = p.prev().into_map().expect("in-mem prev is valid");
-            assert_eq!(&expected_prev, &cur, "time {} prev mismatch", t);
+            assert_eq!(&expected_prev, &cur, "time {t} prev mismatch");
             p.changes().update_map(&mut expected_prev);
         }
         assert_eq!(

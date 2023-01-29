@@ -207,7 +207,7 @@ mod tests {
             b"\x80\x80\x80\x80\x80\x00",
         ];
         for (i, encoded) in tests.iter().enumerate() {
-            assert!(decode_varint32(encoded, 0).is_err(), "while on test {}", i);
+            assert!(decode_varint32(encoded, 0).is_err(), "while on test {i}");
         }
     }
 }

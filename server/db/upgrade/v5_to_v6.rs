@@ -268,7 +268,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
                 ":video_sync_samples": video_sync_samples,
                 ":video_sample_entry_id": video_sample_entry_id,
             })
-            .with_context(|_| format!("Unable to insert composite_id {}", composite_id))?;
+            .with_context(|_| format!("Unable to insert composite_id {composite_id}"))?;
         cum_duration_90k += i64::from(wall_duration_90k);
         cum_runs += if run_offset == 0 { 1 } else { 0 };
     }
