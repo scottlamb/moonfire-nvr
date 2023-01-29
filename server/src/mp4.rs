@@ -443,11 +443,20 @@ impl Segment {
         let s = &self.s;
         let lens = self.lens();
         let len = lens.stts + lens.stsz + lens.stss;
-        let mut buf = {
-            let mut v = Vec::with_capacity(len);
-            unsafe { v.set_len(len) };
-            v.into_boxed_slice()
-        };
+
+        // This was a few percent faster when we didn't pre-initialize the
+        // slice (as in the commented-out code below), but it was unsound. See
+        // <https://github.com/scottlamb/moonfire-nvr/issues/185>. It might be
+        // nice to use `MaybeUninit::write_slice` here when it stabilizes,
+        // more ergonomic than dealing with raw pointers. In the meantime, a few
+        // percent difference in speed here probably isn't the biggest unsolved
+        // problem with Moonfire...
+        let mut buf = vec![0; len].into_boxed_slice();
+        // let mut buf = {
+        //     let mut v = Vec::with_capacity(len);
+        //     unsafe { v.set_len(len) };
+        //     v.into_boxed_slice()
+        // };
 
         {
             let (stts, rest) = buf.split_at_mut(lens.stts);
