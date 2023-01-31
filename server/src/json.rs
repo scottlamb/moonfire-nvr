@@ -552,6 +552,8 @@ pub struct UserSubset<'a> {
     #[serde(borrow)]
     pub username: Option<&'a str>,
 
+    pub disabled: Option<bool>,
+
     pub preferences: Option<db::json::UserPreferences>,
 
     /// An optional password value.
@@ -568,6 +570,7 @@ impl<'a> From<&'a db::User> for UserSubset<'a> {
     fn from(u: &'a db::User) -> Self {
         Self {
             username: Some(&u.username),
+            disabled: Some(u.config.disabled),
             preferences: Some(u.config.preferences.clone()),
             password: Some(u.has_password().then_some("(censored)")),
             permissions: Some(u.permissions.clone().into()),

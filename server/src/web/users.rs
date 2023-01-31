@@ -143,6 +143,9 @@ impl Service {
         }
         require_csrf_if_session(&caller, r.csrf)?;
         if let Some(mut precondition) = r.precondition {
+            if matches!(precondition.disabled.take(), Some(d) if d != user.config.disabled) {
+                bail_t!(FailedPrecondition, "disabled mismatch");
+            }
             if matches!(precondition.username.take(), Some(n) if n != user.username) {
                 bail_t!(FailedPrecondition, "username mismatch");
             }
@@ -186,6 +189,9 @@ impl Service {
             // Requires admin_users if there's anything else.
             if update != Default::default() && !caller.permissions.admin_users {
                 bail_t!(Unauthenticated, "must have admin_users permission");
+            }
+            if let Some(d) = update.disabled.take() {
+                change.config.disabled = d;
             }
             if let Some(n) = update.username.take() {
                 change.username = n.to_string();

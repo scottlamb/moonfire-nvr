@@ -869,7 +869,7 @@ Expects a JSON object:
 
 *   `csrf`: a CSRF token, required when using session authentication.
 *   `update`: `UserSubset`, sets the provided fields. Field-specific notes:
-    *   `username`: requires `adminUsers` permission.
+    *   `disabled`: requires `adminUsers` permission.
     *   `password`: when updating the password, the previous password must
         be supplied as a precondition, unless the caller has `adminUsers`
         permission.
@@ -877,6 +877,7 @@ Expects a JSON object:
         user's permissions currently neither adds nor limits permissions of
         existing sessions; it only changes what is available to newly created
         sessions.
+    *   `username`: requires `adminUsers` permission.
 *   `precondition`: `UserSubset`, forces the request to fail with HTTP status
     412 (Precondition failed) if the provided fields don't have the given
     values.
@@ -899,9 +900,7 @@ Returns HTTP status 204 (No Content) on success.
 
 A JSON object with any of the following parameters:
 
-*   `username`
-*   `preferences`, a JSON object which the server stores without interpreting.
-    This field is meant for user-level preferences meaningful to the UI.
+*   `disabled`, boolean indicating if all logins from the user are rejected.
 *   `password`
     *   on retrieval, a placeholder string to indicate a password is set,
         or null.
@@ -910,6 +909,9 @@ A JSON object with any of the following parameters:
     *   in updates, may be left absent to keep as-is, set to null to disable
         session creation, or set to a plaintext string.
 *   `permissions`, a `Permissions` as described below.
+*   `preferences`, a JSON object which the server stores without interpreting.
+    This field is meant for user-level preferences meaningful to the UI.
+*   `username`
 
 ### Permissions
 
