@@ -56,7 +56,7 @@ smallvec = { version = "1.7", features = ["union"] }
 structopt = { version = "0.3.13", default-features = false }
 sync_wrapper = "0.1.0"
 time = "0.1"
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1.5"
 tokio-tungstenite = "0.18.0"
 toml = "0.5"
