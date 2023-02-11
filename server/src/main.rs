@@ -144,17 +144,12 @@ fn main() {
     // TODO: remove this when bpaf adds more direct support for defaulting to `--help`.
     // See discussion: <https://github.com/pacak/bpaf/discussions/165>.
     if std::env::args_os().len() < 2 {
-        match args().run_inner(bpaf::Args::from(&["--help"])) {
-            Ok(a) => panic!("bpaf --help should not return Ok: {a:#?}"),
-            Err(bpaf::ParseFailure::Stdout(msg)) => {
-                print!("{msg}");
-                std::process::exit(0);
-            }
-            Err(bpaf::ParseFailure::Stderr(msg)) => {
-                eprint!("{msg}");
-                std::process::exit(1);
-            }
-        }
+        std::process::exit(
+            args()
+                .run_inner(bpaf::Args::from(&["--help"]))
+                .unwrap_err()
+                .exit_code(),
+        );
     }
 
     let use_panic_hook = ::std::env::var("MOONFIRE_PANIC_HOOK")
