@@ -2,7 +2,7 @@
 name = "moonfire-nvr"
 version = "0.7.5"
 authors = ["Scott Lamb <slamb@slamb.org>"]
-edition = "2018"
+edition = "2021"
 resolver = "2"
 license-file = "../LICENSE.txt"
 rust-version = "1.64"
@@ -24,9 +24,9 @@ members = ["base", "db"]
 base = { package = "moonfire-base", path = "base" }
 base64 = "0.13.0"
 blake3 = "1.0.0"
+bpaf = { version = "0.7.8", features = ["autocomplete", "bright-color", "derive"] }
 bytes = "1"
 byteorder = "1.0"
-clap = { version = "2.33.3", default-features = false, features = ["color", "wrap_help"] }
 cursive = "0.20.0"
 db = { package = "moonfire-db", path = "db" }
 failure = "0.1.1"
@@ -53,7 +53,6 @@ rusqlite = "0.28.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = { version = "1.7", features = ["union"] }
-structopt = { version = "0.3.13", default-features = false }
 sync_wrapper = "0.1.0"
 time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }

@@ -6,6 +6,7 @@ use crate::streamer;
 use crate::web;
 use crate::web::accept::Listener;
 use base::clock;
+use bpaf::Bpaf;
 use db::{dir, writer};
 use failure::{bail, Error, ResultExt};
 use fnv::FnvHashMap;
@@ -18,23 +19,24 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use structopt::StructOpt;
 use tokio::signal::unix::{signal, SignalKind};
 
 use self::config::ConfigFile;
 
 mod config;
 
-#[derive(StructOpt)]
+#[derive(Bpaf, Debug)]
 pub struct Args {
-    #[structopt(short, long, default_value = "/etc/moonfire-nvr.toml")]
+    /// Path to configuration file.
+    ///
+    /// default: `/etc/moonfire-nvr.toml`. See `ref/config.md` for config file documentation.
+    #[bpaf(short, long, argument("PATH"), fallback_with(|| Ok::<_, Error>("/etc/moonfire-nvr.toml".into())))]
     config: PathBuf,
 
-    /// Open the database in read-only mode and disables recording.
+    /// Opens the database in read-only mode and disables recording.
     ///
     /// Note this is incompatible with session authentication; consider adding
-    /// a bind with `allow_unauthenticated_permissions` to your config.
-    #[structopt(long)]
+    /// a bind with `allowUnauthenticatedPermissions` to your config.
     read_only: bool,
 }
 

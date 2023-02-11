@@ -4,45 +4,39 @@
 
 //! Subcommand to check the database and sample file dir for errors.
 
+use bpaf::Bpaf;
 use db::check;
 use failure::Error;
 use std::path::PathBuf;
-use structopt::StructOpt;
 
-#[derive(StructOpt)]
+#[derive(Bpaf, Debug)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(
-        long,
-        default_value = "/var/lib/moonfire-nvr/db",
-        value_name = "path",
-        parse(from_os_str)
-    )]
+    ///
+    /// default: `/var/lib/moonfire-nvr/db`.
+    #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
     db_dir: PathBuf,
 
-    /// Compare sample file lengths on disk to the database.
-    #[structopt(long)]
+    /// Compares sample file lengths on disk to the database.
     compare_lens: bool,
 
-    /// Trash sample files without matching recording rows in the database.
-    /// This addresses "Missing ... row" errors.
+    /// Trashes sample files without matching recording rows in the database.
+    /// This addresses `Missing ... row` errors.
     ///
-    /// The ids are added to the "garbage" table to indicate the files need to
+    /// The ids are added to the `garbage` table to indicate the files need to
     /// be deleted. Garbage is collected on normal startup.
-    #[structopt(long)]
     trash_orphan_sample_files: bool,
 
-    /// Delete recording rows in the database without matching sample files.
-    /// This addresses "Recording ... missing file" errors.
-    #[structopt(long)]
+    /// Deletes recording rows in the database without matching sample files.
+    ///
+    /// This addresses `Recording ... missing file` errors.
     delete_orphan_rows: bool,
 
-    /// Trash recordings when their database rows appear corrupt.
+    /// Trashes recordings when their database rows appear corrupt.
     /// This addresses "bad video_index" errors.
     ///
-    /// The ids are added to the "garbage" table to indicate their files need to
+    /// The ids are added to the `garbage` table to indicate their files need to
     /// be deleted. Garbage is collected on normal startup.
-    #[structopt(long)]
     trash_corrupt_rows: bool,
 }
 

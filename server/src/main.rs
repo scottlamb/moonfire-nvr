@@ -4,10 +4,10 @@
 
 #![cfg_attr(all(feature = "nightly", test), feature(test))]
 
+use bpaf::Bpaf;
 use log::{debug, error};
 use std::fmt::Write;
 use std::str::FromStr;
-use structopt::StructOpt;
 
 mod body;
 mod cmds;
@@ -19,43 +19,50 @@ mod stream;
 mod streamer;
 mod web;
 
-#[derive(StructOpt)]
-#[structopt(
-    name = "moonfire-nvr",
-    about = "security camera network video recorder",
-    global_settings(&[clap::AppSettings::ColoredHelp])
-)]
+/// Moonfire NVR: security camera network video recorder.
+#[derive(Bpaf, Debug)]
+#[bpaf(options, version)]
 enum Args {
     /// Checks database integrity (like fsck).
-    Check(cmds::check::Args),
+    #[bpaf(command)]
+    Check(#[bpaf(external(cmds::check::args))] cmds::check::Args),
 
     /// Interactively edits configuration.
-    Config(cmds::config::Args),
+    #[bpaf(command)]
+    Config(#[bpaf(external(cmds::config::args))] cmds::config::Args),
 
     /// Initializes a database.
-    Init(cmds::init::Args),
+    #[bpaf(command)]
+    Init(#[bpaf(external(cmds::init::args))] cmds::init::Args),
 
     /// Logs in a user, returning the session cookie.
+    ///
     ///
     /// This is a privileged command that directly accesses the database. It doesn't check the
     /// user's password and even can be used to create sessions with permissions the user doesn't
     /// have.
-    Login(cmds::login::Args),
+    #[bpaf(command)]
+    Login(#[bpaf(external(cmds::login::args))] cmds::login::Args),
 
     /// Runs the server, saving recordings and allowing web access.
-    Run(cmds::run::Args),
+    #[bpaf(command)]
+    Run(#[bpaf(external(cmds::run::args))] cmds::run::Args),
 
     /// Runs a SQLite3 shell on Moonfire NVR's index database.
     ///
+    ///
     /// Note this locks the database to prevent simultaneous access with a running server. The
     /// server maintains cached state which could be invalidated otherwise.
-    Sql(cmds::sql::Args),
+    #[bpaf(command)]
+    Sql(#[bpaf(external(cmds::sql::args))] cmds::sql::Args),
 
     /// Translates between integer and human-readable timestamps.
-    Ts(cmds::ts::Args),
+    #[bpaf(command)]
+    Ts(#[bpaf(external(cmds::ts::args))] cmds::ts::Args),
 
     /// Upgrades to the latest database schema.
-    Upgrade(cmds::upgrade::Args),
+    #[bpaf(command)]
+    Upgrade(#[bpaf(external(cmds::upgrade::args))] cmds::upgrade::Args),
 }
 
 impl Args {
@@ -71,6 +78,11 @@ impl Args {
             Args::Upgrade(a) => cmds::upgrade::run(a),
         }
     }
+}
+
+/// Returns the default database dir, for use in argument parsing with `bpaf(fallback_with(...))`.
+fn default_db_dir() -> Result<std::path::PathBuf, std::convert::Infallible> {
+    Ok("/var/lib/moonfire-nvr/db".into())
 }
 
 /// Custom panic hook that logs instead of directly writing to stderr.
@@ -107,12 +119,11 @@ fn main() {
     if let Err(e) = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC) {
         eprintln!(
             "clock_gettime failed: {e}\n\n\
-                   This indicates a broken environment. See the troubleshooting guide."
+             This indicates a broken environment. See the troubleshooting guide."
         );
         std::process::exit(1);
     }
 
-    let args = Args::from_args();
     let mut h = mylog::Builder::new()
         .set_format(
             ::std::env::var("MOONFIRE_FORMAT")
@@ -130,12 +141,31 @@ fn main() {
         .build();
     h.clone().install().unwrap();
 
+    // TODO: remove this when bpaf adds more direct support for defaulting to `--help`.
+    // See discussion: <https://github.com/pacak/bpaf/discussions/165>.
+    if std::env::args_os().len() < 2 {
+        match args().run_inner(bpaf::Args::from(&["--help"])) {
+            Ok(a) => panic!("bpaf --help should not return Ok: {a:#?}"),
+            Err(bpaf::ParseFailure::Stdout(msg)) => {
+                print!("{msg}");
+                std::process::exit(0);
+            }
+            Err(bpaf::ParseFailure::Stderr(msg)) => {
+                eprint!("{msg}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     let use_panic_hook = ::std::env::var("MOONFIRE_PANIC_HOOK")
         .map(|s| s != "false" && s != "0")
         .unwrap_or(true);
     if use_panic_hook {
         std::panic::set_hook(Box::new(&panic_hook));
     }
+
+    let args = args().run();
+    log::trace!("Parsed command-line arguments: {args:#?}");
 
     let r = {
         let _a = h.async_scope();
@@ -150,5 +180,13 @@ fn main() {
             debug!("Exiting with status {}", rv);
             std::process::exit(rv)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bpaf_invariants() {
+        super::args().check_invariants(false);
     }
 }

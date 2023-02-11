@@ -5,51 +5,58 @@
 //! Subcommand to login a user (without requiring a password).
 
 use base::clock::{self, Clocks};
+use bpaf::Bpaf;
 use db::auth::SessionFlag;
 use failure::{format_err, Error};
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::PathBuf;
-use structopt::StructOpt;
+use std::str::FromStr;
 
-#[derive(Debug, Default, StructOpt)]
+fn parse_perms(perms: String) -> Result<db::Permissions, protobuf::text_format::ParseError> {
+    protobuf::text_format::parse_from_str(&perms)
+}
+
+fn parse_flags(flags: String) -> Result<Vec<SessionFlag>, Error> {
+    flags.split(',').map(SessionFlag::from_str).collect()
+}
+
+#[derive(Bpaf, Debug)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(
-        long,
-        default_value = "/var/lib/moonfire-nvr/db",
-        value_name = "path",
-        parse(from_os_str)
-    )]
+    ///
+    /// default: `/var/lib/moonfire-nvr/db`.
+    #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
     db_dir: PathBuf,
 
-    /// Create a session with the given permissions.
+    /// Creates a session with the given permissions.
     ///
     /// If unspecified, uses user's default permissions.
-    #[structopt(long, value_name="perms",
-                parse(try_from_str = protobuf::text_format::parse_from_str))]
+    #[bpaf(argument::<String>("PERMS"), parse(parse_perms), optional)]
     permissions: Option<db::Permissions>,
 
-    /// Restrict this cookie to the given domain.
-    #[structopt(long)]
+    /// Restricts this cookie to the given domain.
+    #[bpaf(argument("DOMAIN"))]
     domain: Option<String>,
 
-    /// Write the cookie to a new curl-compatible cookie-jar file.
+    /// Writes the cookie to a new curl-compatible cookie-jar file.
     ///
-    /// ---domain must be specified. This file can be used later with curl's --cookie flag.
-    #[structopt(long, requires("domain"), value_name = "path")]
+    /// `--domain` must be specified. This file can be used later with curl's `--cookie` flag.
+    #[bpaf(argument("PATH"))]
     curl_cookie_jar: Option<PathBuf>,
 
-    /// Set the given db::auth::SessionFlags.
-    #[structopt(
-        long,
-        default_value = "http-only,secure,same-site,same-site-strict",
-        value_name = "flags",
-        use_delimiter = true
+    /// Sets the given db::auth::SessionFlags.
+    ///
+    /// default: `http-only,secure,same-site,same-site-strict`.
+    #[bpaf(
+        argument::<String>("FLAGS"),
+        fallback_with(|| Ok::<_, std::convert::Infallible>("http-only,secure,same-site,same-site-strict".to_owned())),
+        parse(parse_flags),
     )]
     session_flags: Vec<SessionFlag>,
 
     /// Create the session for this username.
+    #[bpaf(argument("USERNAME"))]
     username: String,
 }
 
@@ -87,7 +94,7 @@ pub fn run(args: Args) -> Result<i32, Error> {
         let d = args
             .domain
             .as_ref()
-            .ok_or_else(|| format_err!("--cookiejar requires --domain"))?;
+            .ok_or_else(|| format_err!("--curl-cookie-jar requires --domain"))?;
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)

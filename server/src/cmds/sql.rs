@@ -5,35 +5,31 @@
 //! Subcommand to run a SQLite shell.
 
 use super::OpenMode;
+use bpaf::Bpaf;
 use failure::Error;
 use std::ffi::OsString;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use structopt::StructOpt;
 
-#[derive(StructOpt)]
+#[derive(Bpaf, Debug, PartialEq, Eq)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(
-        long,
-        default_value = "/var/lib/moonfire-nvr/db",
-        value_name = "path",
-        parse(from_os_str)
-    )]
+    ///
+    /// default: `/var/lib/moonfire-nvr/db`.
+    #[bpaf(fallback_with(crate::default_db_dir))]
     db_dir: PathBuf,
 
     /// Opens the database in read-only mode and locks it only for shared access.
     ///
-    /// This can be run simultaneously with "moonfire-nvr run --read-only".
-    #[structopt(long)]
+    /// This can be run simultaneously with `moonfire-nvr run --read-only`.
     read_only: bool,
 
     /// Arguments to pass to sqlite3.
     ///
-    /// Use the -- separator to pass sqlite3 options, as in
-    /// "moonfire-nvr sql -- -line 'select username from user'".
-    #[structopt(parse(from_os_str))]
+    /// Use the `--` separator to pass sqlite3 options, as in
+    /// `moonfire-nvr sql -- -line 'select username from user'`.
+    #[bpaf(positional)]
     arg: Vec<OsString>,
 }
 
@@ -57,4 +53,33 @@ pub fn run(args: Args) -> Result<i32, Error> {
         .args(&args.arg)
         .exec()
         .into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use bpaf::Parser;
+
+    #[test]
+    fn parse_args() {
+        let args = args()
+            .to_options()
+            .run_inner(bpaf::Args::from(&[
+                "--db-dir",
+                "/foo/bar",
+                "--",
+                "-line",
+                "select username from user",
+            ]))
+            .unwrap();
+        assert_eq!(
+            args,
+            Args {
+                db_dir: "/foo/bar".into(),
+                read_only: false, // default
+                arg: vec!["-line".into(), "select username from user".into()],
+            }
+        );
+    }
 }

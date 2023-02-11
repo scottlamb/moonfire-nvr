@@ -27,6 +27,9 @@ pub struct ConfigFile {
     pub binds: Vec<BindConfig>,
 
     /// Directory holding the SQLite3 index database.
+    ///
+    ///
+    /// default: `/var/lib/moonfire-nvr/db`.
     #[serde(default = "default_db_dir")]
     pub db_dir: PathBuf,
 

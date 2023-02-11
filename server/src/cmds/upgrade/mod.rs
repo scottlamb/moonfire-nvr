@@ -2,41 +2,36 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use bpaf::Bpaf;
 /// Upgrades the database schema.
 ///
 /// See `guide/schema.md` for more information.
 use failure::Error;
-use structopt::StructOpt;
 
-#[derive(StructOpt)]
+#[derive(Bpaf, Debug)]
 pub struct Args {
-    #[structopt(
-        long,
-        help = "Directory holding the SQLite3 index database.",
-        default_value = "/var/lib/moonfire-nvr/db",
-        parse(from_os_str)
-    )]
+    /// Directory holding the SQLite3 index database.
+    ///
+    ///
+    /// default: `/var/lib/moonfire-nvr/db`.
+    #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
     db_dir: std::path::PathBuf,
 
-    #[structopt(
-        help = "When upgrading from schema version 1 to 2, the sample file directory.",
-        long,
-        parse(from_os_str)
-    )]
+    /// When upgrading from schema version 1 to 2, the sample file directory.
+    #[bpaf(argument("PATH"))]
     sample_file_dir: Option<std::path::PathBuf>,
 
-    #[structopt(
-        help = "Resets the SQLite journal_mode to the specified mode prior to \
-               the upgrade. The default, delete, is recommended. off is very \
-               dangerous but may be desirable in some circumstances. See \
-               guide/schema.md for more information. The journal mode will be \
-               reset to wal after the upgrade.",
-        long,
-        default_value = "delete"
-    )]
+    /// Resets the SQLite journal_mode to the specified mode prior to
+    /// the upgrade.
+    ///
+    ///
+    /// default: `delete` (recommended). `off` is very dangerous but may be
+    /// desirable in some circumstances. See `guide/schema.md` for more
+    /// information. The journal mode will be reset to `wal` after the upgrade.
+    #[bpaf(argument("MODE"), fallback_with(|| Ok::<_, std::convert::Infallible>("delete".into())))]
     preset_journal: String,
 
-    #[structopt(help = "Skips the normal post-upgrade vacuum operation.", long)]
+    /// Skips the normal post-upgrade vacuum operation.
     no_vacuum: bool,
 }
 

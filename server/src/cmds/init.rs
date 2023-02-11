@@ -2,20 +2,17 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use bpaf::Bpaf;
 use failure::Error;
 use log::info;
 use std::path::PathBuf;
-use structopt::StructOpt;
 
-#[derive(StructOpt)]
+#[derive(Bpaf, Debug)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(
-        long,
-        default_value = "/var/lib/moonfire-nvr/db",
-        value_name = "path",
-        parse(from_os_str)
-    )]
+    ///
+    /// default: `/var/lib/moonfire-nvr/db`.
+    #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
     db_dir: PathBuf,
 }
 

@@ -2,18 +2,18 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use bpaf::Bpaf;
 use failure::Error;
-use structopt::StructOpt;
 
-#[derive(StructOpt)]
+#[derive(Bpaf, Debug)]
 pub struct Args {
     /// Timestamp(s) to translate.
     ///
     /// May be either an integer or an RFC-3339-like string:
     /// `YYYY-mm-dd[THH:MM[:SS[:FFFFF]]][{Z,{+,-,}HH:MM}]`.
     ///
-    /// Eg: `142913484000000`, `2020-04-26`, `2020-04-26T12:00:00:00000-07:00`.
-    #[structopt(required = true)]
+    /// E.g.: `142913484000000`, `2020-04-26`, `2020-04-26T12:00:00:00000-07:00`.
+    #[bpaf(positional("TS"), some("must specify at least one timestamp"))]
     timestamps: Vec<String>,
 }
 

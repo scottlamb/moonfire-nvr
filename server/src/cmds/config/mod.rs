@@ -8,26 +8,23 @@
 //! configuration will likely be almost entirely done through a web-based UI.
 
 use base::clock;
+use bpaf::Bpaf;
 use cursive::views;
 use cursive::Cursive;
 use failure::Error;
 use std::path::PathBuf;
 use std::sync::Arc;
-use structopt::StructOpt;
 
 mod cameras;
 mod dirs;
 mod users;
 
-#[derive(StructOpt)]
+#[derive(Bpaf, Debug)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
-    #[structopt(
-        long,
-        default_value = "/var/lib/moonfire-nvr/db",
-        value_name = "path",
-        parse(from_os_str)
-    )]
+    ///
+    /// default: `/var/lib/moonfire-nvr/db`.
+    #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
     db_dir: PathBuf,
 }
 
