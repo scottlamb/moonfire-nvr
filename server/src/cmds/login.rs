@@ -126,13 +126,12 @@ pub fn run(args: Args) -> Result<i32, Error> {
 
 fn curl_cookie(cookie: &str, flags: i32, domain: &str) -> String {
     format!(
-        "{httponly}{domain}\t{tailmatch}\t{path}\t{secure}\t{expires}\t{name}\t{value}",
+        "{httponly}{domain}\t{tailmatch}\t{path}\t{secure}\t{expires}\t{name}\t{cookie}",
         httponly = if (flags & SessionFlag::HttpOnly as i32) != 0 {
             "#HttpOnly_"
         } else {
             ""
         },
-        domain = domain,
         tailmatch = "FALSE",
         path = "/",
         secure = if (flags & SessionFlag::Secure as i32) != 0 {
@@ -142,7 +141,6 @@ fn curl_cookie(cookie: &str, flags: i32, domain: &str) -> String {
         },
         expires = "9223372036854775807", // 64-bit CURL_OFF_T_MAX, never expires
         name = "s",
-        value = cookie
     )
 }
 
