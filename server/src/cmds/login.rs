@@ -59,8 +59,8 @@ pub struct Args {
     )]
     session_flags: Vec<SessionFlag>,
 
-    /// Create the session for this username.
-    #[bpaf(argument("USERNAME"))]
+    /// Username to create a session for.
+    #[bpaf(positional("USERNAME"))]
     username: String,
 }
 
@@ -161,7 +161,6 @@ mod tests {
                 "{\"viewVideo\": true}",
                 "--session-flags",
                 "http-only, same-site",
-                "--username",
                 "slamb",
             ]))
             .unwrap();
