@@ -594,16 +594,16 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct Permissions {
     #[serde(default)]
-    view_video: bool,
+    pub view_video: bool,
 
     #[serde(default)]
-    read_camera_configs: bool,
+    pub read_camera_configs: bool,
 
     #[serde(default)]
-    update_signals: bool,
+    pub update_signals: bool,
 
     #[serde(default)]
-    admin_users: bool,
+    pub admin_users: bool,
 }
 
 impl From<Permissions> for db::schema::Permissions {

@@ -13,15 +13,18 @@ use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-fn parse_perms(perms: String) -> Result<db::Permissions, protobuf::text_format::ParseError> {
-    protobuf::text_format::parse_from_str(&perms)
+fn parse_perms(perms: String) -> Result<crate::json::Permissions, serde_json::Error> {
+    serde_json::from_str(&perms)
 }
 
 fn parse_flags(flags: String) -> Result<Vec<SessionFlag>, Error> {
-    flags.split(',').map(SessionFlag::from_str).collect()
+    flags
+        .split(',')
+        .map(|f| SessionFlag::from_str(f.trim()))
+        .collect()
 }
 
-#[derive(Bpaf, Debug)]
+#[derive(Bpaf, Debug, PartialEq, Eq)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
     ///
@@ -29,11 +32,12 @@ pub struct Args {
     #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
     db_dir: PathBuf,
 
-    /// Creates a session with the given permissions.
+    /// Creates a session with the given permissions, as a JSON object.
     ///
+    /// E.g. `{"viewVideo": true}`. See `ref/api.md` for a description of `Permissions`.
     /// If unspecified, uses user's default permissions.
     #[bpaf(argument::<String>("PERMS"), parse(parse_perms), optional)]
-    permissions: Option<db::Permissions>,
+    permissions: Option<crate::json::Permissions>,
 
     /// Restricts this cookie to the given domain.
     #[bpaf(argument("DOMAIN"))]
@@ -68,7 +72,10 @@ pub fn run(args: Args) -> Result<i32, Error> {
     let u = l
         .get_user(&args.username)
         .ok_or_else(|| format_err!("no such user {:?}", &args.username))?;
-    let permissions = args.permissions.as_ref().unwrap_or(&u.permissions).clone();
+    let permissions = args
+        .permissions
+        .map(db::Permissions::from)
+        .unwrap_or_else(|| u.permissions.clone());
     let creation = db::auth::Request {
         when_sec: Some(db.clocks().realtime().sec),
         user_agent: None,
@@ -142,6 +149,37 @@ fn curl_cookie(cookie: &str, flags: i32, domain: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use bpaf::Parser;
+
+    #[test]
+    fn parse_args() {
+        let args = args()
+            .to_options()
+            .run_inner(bpaf::Args::from(&[
+                "--permissions",
+                "{\"viewVideo\": true}",
+                "--session-flags",
+                "http-only, same-site",
+                "--username",
+                "slamb",
+            ]))
+            .unwrap();
+        assert_eq!(
+            args,
+            Args {
+                db_dir: crate::default_db_dir().unwrap(),
+                domain: None,
+                curl_cookie_jar: None,
+                permissions: Some(crate::json::Permissions {
+                    view_video: true,
+                    ..Default::default()
+                }),
+                session_flags: vec![SessionFlag::HttpOnly, SessionFlag::SameSite],
+                username: "slamb".to_owned(),
+            }
+        );
+    }
 
     #[test]
     fn test_curl_cookie() {

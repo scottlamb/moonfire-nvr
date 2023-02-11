@@ -30,6 +30,8 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     *   `DELETE /users/<id>` endpoint to delete a user
 *   improved API documentation in [`ref/api.md`](ref/api.md).
 *   first draft of a web UI for user administration. Rough edges expected!
+*   `moonfire-nvr login --permissions` now accepts the JSON format documented
+    in `ref/api.md`, not an undocumented plaintext protobuf format.
 
 ## 0.7.5 (2022-05-09)
 
