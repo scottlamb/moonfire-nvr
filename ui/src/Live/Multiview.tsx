@@ -214,17 +214,17 @@ interface MonoviewProps {
 
 /** A single pane of a Multiview, including its camera chooser. */
 const Monoview = (props: MonoviewProps) => {
-  const handleChange = (event: SelectChangeEvent<number | null>) => {
+  const handleChange = (event: SelectChangeEvent<string>) => {
     const {
       target: { value },
     } = event;
 
-    props.onSelect(typeof value === "string" ? parseInt(value) : value);
+    props.onSelect(value === "null" ? null : parseInt(value));
   };
 
   const chooser = (
     <Select
-      value={props.cameraIndex == null ? undefined : props.cameraIndex}
+      value={props.cameraIndex === null ? "null" : props.cameraIndex.toString()}
       onChange={handleChange}
       displayEmpty
       size="small"
@@ -236,7 +236,7 @@ const Monoview = (props: MonoviewProps) => {
         },
       }}
     >
-      <MenuItem value={undefined}>(none)</MenuItem>
+      <MenuItem value="null">(none)</MenuItem>
       {props.cameras.map((e, i) => (
         <MenuItem key={i} value={i}>
           {e.shortName}

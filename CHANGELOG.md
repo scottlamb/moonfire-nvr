@@ -32,6 +32,8 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   first draft of a web UI for user administration. Rough edges expected!
 *   `moonfire-nvr login --permissions` now accepts the JSON format documented
     in `ref/api.md`, not an undocumented plaintext protobuf format.
+*   fix [#257](https://github.com/scottlamb/moonfire-nvr/issues/257):
+    Live View: select None Not Possible After Selecting a Camera.
 
 ## 0.7.5 (2022-05-09)
 
