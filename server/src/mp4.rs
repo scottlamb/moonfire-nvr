@@ -2979,11 +2979,10 @@ mod bench {
     use futures::future;
     use http_serve;
     use hyper;
-    use lazy_static::lazy_static;
     use url::Url;
 
     /// An HTTP server for benchmarking.
-    /// It's used as a singleton via `lazy_static!` so that when getting a CPU profile of the
+    /// It's used as a singleton so that when getting a CPU profile of the
     /// benchmark, more of the profile focuses on the HTTP serving rather than the setup.
     ///
     /// Currently this only serves a single `.mp4` file but we could set up variations to benchmark
@@ -3029,9 +3028,8 @@ mod bench {
         }
     }
 
-    lazy_static! {
-        static ref SERVER: BenchServer = BenchServer::new();
-    }
+    static SERVER: once_cell::sync::Lazy<BenchServer> =
+        once_cell::sync::Lazy::new(BenchServer::new);
 
     #[bench]
     fn build_index(b: &mut test::Bencher) {

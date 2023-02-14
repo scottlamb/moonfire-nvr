@@ -9,7 +9,9 @@ use db::check;
 use failure::Error;
 use std::path::PathBuf;
 
+/// Checks database integrity (like fsck).
 #[derive(Bpaf, Debug)]
+#[bpaf(options)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
     ///
@@ -38,6 +40,10 @@ pub struct Args {
     /// The ids are added to the `garbage` table to indicate their files need to
     /// be deleted. Garbage is collected on normal startup.
     trash_corrupt_rows: bool,
+}
+
+pub fn subcommand() -> impl bpaf::Parser<Args> {
+    crate::subcommand(args(), "check")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {

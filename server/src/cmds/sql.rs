@@ -12,7 +12,13 @@ use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Runs a SQLite3 shell on Moonfire NVR's index database.
+///
+///
+/// Note this locks the database to prevent simultaneous access with a running server. The
+/// server maintains cached state which could be invalidated otherwise.
 #[derive(Bpaf, Debug, PartialEq, Eq)]
+#[bpaf(options)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
     ///
@@ -31,6 +37,10 @@ pub struct Args {
     /// `moonfire-nvr sql -- -line 'select username from user'`.
     #[bpaf(positional)]
     arg: Vec<OsString>,
+}
+
+pub fn subcommand() -> impl bpaf::Parser<Args> {
+    crate::subcommand(args(), "sql")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {
@@ -59,12 +69,9 @@ pub fn run(args: Args) -> Result<i32, Error> {
 mod tests {
     use super::*;
 
-    use bpaf::Parser;
-
     #[test]
     fn parse_args() {
         let args = args()
-            .to_options()
             .run_inner(bpaf::Args::from(&[
                 "--db-dir",
                 "/foo/bar",

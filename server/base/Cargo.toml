@@ -15,7 +15,6 @@ path = "lib.rs"
 [dependencies]
 failure = "0.1.1"
 futures = "0.3"
-lazy_static = "1.0"
 libc = "0.2"
 log = "0.4"
 nom = "7.0.0"

@@ -8,7 +8,9 @@ use bpaf::Bpaf;
 /// See `guide/schema.md` for more information.
 use failure::Error;
 
+/// Upgrades to the latest database schema.
 #[derive(Bpaf, Debug)]
+#[bpaf(options)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
     ///
@@ -33,6 +35,10 @@ pub struct Args {
 
     /// Skips the normal post-upgrade vacuum operation.
     no_vacuum: bool,
+}
+
+pub fn subcommand() -> impl bpaf::Parser<Args> {
+    crate::subcommand(args(), "upgrade")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {

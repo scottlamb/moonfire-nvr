@@ -37,7 +37,6 @@ http = "0.2.3"
 http-serve = { version = "0.3.1", features = ["dir"] }
 hyper = { version = "0.14.2", features = ["http1", "server", "stream", "tcp"] }
 itertools = "0.10.0"
-lazy_static = "1.0"
 libc = "0.2"
 log = { version = "0.4" }
 memchr = "2.0.2"
@@ -62,6 +61,7 @@ toml = "0.5"
 tracing = { version = "0.1", features = ["log"] }
 url = "2.1.1"
 uuid = { version = "1.1.2", features = ["serde", "std", "v4"] }
+once_cell = "1.17.0"
 
 [dev-dependencies]
 mp4 = { git = "https://github.com/scottlamb/mp4-rust", branch = "moonfire" }

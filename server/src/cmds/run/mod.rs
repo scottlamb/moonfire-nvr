@@ -25,7 +25,9 @@ use self::config::ConfigFile;
 
 mod config;
 
+/// Runs the server, saving recordings and allowing web access.
 #[derive(Bpaf, Debug)]
+#[bpaf(options)]
 pub struct Args {
     /// Path to configuration file.
     ///
@@ -38,6 +40,10 @@ pub struct Args {
     /// Note this is incompatible with session authentication; consider adding
     /// a bind with `allowUnauthenticatedPermissions` to your config.
     read_only: bool,
+}
+
+pub fn subcommand() -> impl bpaf::Parser<Args> {
+    crate::subcommand(args(), "run")
 }
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).

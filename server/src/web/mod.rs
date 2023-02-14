@@ -728,7 +728,6 @@ mod bench {
 
     use db::testutil::{self, TestDb};
     use hyper;
-    use lazy_static::lazy_static;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -786,9 +785,7 @@ mod bench {
         }
     }
 
-    lazy_static! {
-        static ref SERVER: Server = Server::new();
-    }
+    static SERVER: once_cell::sync::Lazy<Server> = once_cell::sync::Lazy::new(Server::new);
 
     #[bench]
     fn serve_stream_recordings(b: &mut test::Bencher) {

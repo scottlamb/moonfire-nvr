@@ -183,7 +183,6 @@ mod tests {
     use crate::body::BoxedError;
     use db::testutil;
     use futures::stream::{self, Stream, TryStreamExt};
-    use lazy_static::lazy_static;
     use std::ops::Range;
     use std::pin::Pin;
 
@@ -224,18 +223,16 @@ mod tests {
         }
     }
 
-    lazy_static! {
-        #[rustfmt::skip]
-        static ref SLICES: Slices<FakeSlice> = {
-            let mut s = Slices::new();
-            s.append(FakeSlice { end: 5,                    name: "a" }).unwrap();
-            s.append(FakeSlice { end: 5 + 13,               name: "b" }).unwrap();
-            s.append(FakeSlice { end: 5 + 13 + 7,           name: "c" }).unwrap();
-            s.append(FakeSlice { end: 5 + 13 + 7 + 17,      name: "d" }).unwrap();
-            s.append(FakeSlice { end: 5 + 13 + 7 + 17 + 19, name: "e" }).unwrap();
-            s
-        };
-    }
+    #[rustfmt::skip]
+    static SLICES: once_cell::sync::Lazy<Slices<FakeSlice>> = once_cell::sync::Lazy::new(|| {
+        let mut s = Slices::new();
+        s.append(FakeSlice { end: 5,                    name: "a" }).unwrap();
+        s.append(FakeSlice { end: 5 + 13,               name: "b" }).unwrap();
+        s.append(FakeSlice { end: 5 + 13 + 7,           name: "c" }).unwrap();
+        s.append(FakeSlice { end: 5 + 13 + 7 + 17,      name: "d" }).unwrap();
+        s.append(FakeSlice { end: 5 + 13 + 7 + 17 + 19, name: "e" }).unwrap();
+        s
+    });
 
     async fn get_range(r: Range<u64>) -> Vec<FakeChunk> {
         Pin::from(SLICES.get_range(&&*SLICES, r))

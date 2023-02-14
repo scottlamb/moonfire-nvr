@@ -24,7 +24,14 @@ fn parse_flags(flags: String) -> Result<Vec<SessionFlag>, Error> {
         .collect()
 }
 
+/// Logs in a user, returning the session cookie.
+///
+///
+/// This is a privileged command that directly accesses the database. It doesn't check the
+/// user's password and even can be used to create sessions with permissions the user doesn't
+/// have.
 #[derive(Bpaf, Debug, PartialEq, Eq)]
+#[bpaf(options)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
     ///
@@ -62,6 +69,10 @@ pub struct Args {
     /// Username to create a session for.
     #[bpaf(positional("USERNAME"))]
     username: String,
+}
+
+pub fn subcommand() -> impl bpaf::Parser<Args> {
+    crate::subcommand(args(), "login")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {
@@ -148,12 +159,9 @@ fn curl_cookie(cookie: &str, flags: i32, domain: &str) -> String {
 mod tests {
     use super::*;
 
-    use bpaf::Parser;
-
     #[test]
     fn parse_args() {
         let args = args()
-            .to_options()
             .run_inner(bpaf::Args::from(&[
                 "--permissions",
                 "{\"viewVideo\": true}",

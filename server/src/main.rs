@@ -19,50 +19,43 @@ mod stream;
 mod streamer;
 mod web;
 
+/// The program name, taken from the OS-provided arguments if available.
+///
+/// E.g. if invoked as `target/debug/nvr`, should return `nvr`.
+static PROGNAME: once_cell::sync::Lazy<&'static str> = once_cell::sync::Lazy::new(|| {
+    std::env::args_os()
+        .next()
+        .and_then(|p| {
+            let p = std::path::PathBuf::from(p);
+            p.file_name().and_then(|f| {
+                f.to_str()
+                    .map(|s| &*Box::leak(s.to_owned().into_boxed_str()))
+            })
+        })
+        .unwrap_or(env!("CARGO_PKG_NAME"))
+});
+
+fn subcommand<T: 'static>(
+    parser: bpaf::OptionParser<T>,
+    cmd: &'static str,
+) -> impl bpaf::Parser<T> {
+    let usage = format!("Usage: {progname} {cmd} {{usage}}", progname = *PROGNAME);
+    parser.usage(Box::leak(usage.into_boxed_str())).command(cmd)
+}
+
 /// Moonfire NVR: security camera network video recorder.
 #[derive(Bpaf, Debug)]
 #[bpaf(options, version)]
 enum Args {
-    /// Checks database integrity (like fsck).
-    #[bpaf(command)]
-    Check(#[bpaf(external(cmds::check::args))] cmds::check::Args),
-
-    /// Interactively edits configuration.
-    #[bpaf(command)]
-    Config(#[bpaf(external(cmds::config::args))] cmds::config::Args),
-
-    /// Initializes a database.
-    #[bpaf(command)]
-    Init(#[bpaf(external(cmds::init::args))] cmds::init::Args),
-
-    /// Logs in a user, returning the session cookie.
-    ///
-    ///
-    /// This is a privileged command that directly accesses the database. It doesn't check the
-    /// user's password and even can be used to create sessions with permissions the user doesn't
-    /// have.
-    #[bpaf(command)]
-    Login(#[bpaf(external(cmds::login::args))] cmds::login::Args),
-
-    /// Runs the server, saving recordings and allowing web access.
-    #[bpaf(command)]
-    Run(#[bpaf(external(cmds::run::args))] cmds::run::Args),
-
-    /// Runs a SQLite3 shell on Moonfire NVR's index database.
-    ///
-    ///
-    /// Note this locks the database to prevent simultaneous access with a running server. The
-    /// server maintains cached state which could be invalidated otherwise.
-    #[bpaf(command)]
-    Sql(#[bpaf(external(cmds::sql::args))] cmds::sql::Args),
-
-    /// Translates between integer and human-readable timestamps.
-    #[bpaf(command)]
-    Ts(#[bpaf(external(cmds::ts::args))] cmds::ts::Args),
-
-    /// Upgrades to the latest database schema.
-    #[bpaf(command)]
-    Upgrade(#[bpaf(external(cmds::upgrade::args))] cmds::upgrade::Args),
+    // See docstrings of `cmds::*::Args` structs for a description of the respective subcommands.
+    Check(#[bpaf(external(cmds::check::subcommand))] cmds::check::Args),
+    Config(#[bpaf(external(cmds::config::subcommand))] cmds::config::Args),
+    Init(#[bpaf(external(cmds::init::subcommand))] cmds::init::Args),
+    Login(#[bpaf(external(cmds::login::subcommand))] cmds::login::Args),
+    Run(#[bpaf(external(cmds::run::subcommand))] cmds::run::Args),
+    Sql(#[bpaf(external(cmds::sql::subcommand))] cmds::sql::Args),
+    Ts(#[bpaf(external(cmds::ts::subcommand))] cmds::ts::Args),
+    Upgrade(#[bpaf(external(cmds::upgrade::subcommand))] cmds::upgrade::Args),
 }
 
 impl Args {
@@ -141,12 +134,15 @@ fn main() {
         .build();
     h.clone().install().unwrap();
 
+    let args = args().usage(Box::leak(
+        format!("Usage: {progname} {{usage}}", progname = *PROGNAME).into_boxed_str(),
+    ));
+
     // TODO: remove this when bpaf adds more direct support for defaulting to `--help`.
     // See discussion: <https://github.com/pacak/bpaf/discussions/165>.
     if std::env::args_os().len() < 2 {
         std::process::exit(
-            args()
-                .run_inner(bpaf::Args::from(&["--help"]))
+            args.run_inner(bpaf::Args::from(&["--help"]))
                 .unwrap_err()
                 .exit_code(),
         );
@@ -159,7 +155,7 @@ fn main() {
         std::panic::set_hook(Box::new(&panic_hook));
     }
 
-    let args = args().run();
+    let args = args.run();
     log::trace!("Parsed command-line arguments: {args:#?}");
 
     let r = {

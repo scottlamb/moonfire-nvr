@@ -146,8 +146,8 @@ dependencies = [
 
 [[package]]
 name = "bpaf"
-version = "0.7.8"
-source = "git+https://github.com/pacak/bpaf.git?branch=exit_code#77b8efc5d33adcf57901a03514a3ce6183144f8d"
+version = "0.7.9"
+source = "git+https://github.com/pacak/bpaf.git?branch=exit_code#5238a6069abca0d61cf1c000e56bbac946e7ee18"
 dependencies = [
  "bpaf_derive",
  "owo-colors",
@@ -155,8 +155,8 @@ dependencies = [
 
 [[package]]
 name = "bpaf_derive"
-version = "0.3.3"
-source = "git+https://github.com/pacak/bpaf.git?branch=exit_code#77b8efc5d33adcf57901a03514a3ce6183144f8d"
+version = "0.3.4"
+source = "git+https://github.com/pacak/bpaf.git?branch=exit_code#5238a6069abca0d61cf1c000e56bbac946e7ee18"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1101,7 +1101,6 @@ version = "0.0.1"
 dependencies = [
  "failure",
  "futures",
- "lazy_static",
  "libc",
  "log",
  "nom",
@@ -1126,7 +1125,6 @@ dependencies = [
  "h264-reader",
  "hashlink",
  "itertools",
- "lazy_static",
  "libc",
  "log",
  "moonfire-base",
@@ -1134,6 +1132,7 @@ dependencies = [
  "nix",
  "num-rational",
  "odds",
+ "once_cell",
  "pretty-hex",
  "protobuf",
  "protobuf-codegen",
@@ -1168,7 +1167,6 @@ dependencies = [
  "http-serve",
  "hyper",
  "itertools",
- "lazy_static",
  "libc",
  "log",
  "memchr",
@@ -1179,6 +1177,7 @@ dependencies = [
  "nix",
  "nom",
  "num-rational",
+ "once_cell",
  "password-hash",
  "protobuf",
  "reffers",

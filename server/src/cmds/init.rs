@@ -7,13 +7,19 @@ use failure::Error;
 use log::info;
 use std::path::PathBuf;
 
+/// Initializes a database.
 #[derive(Bpaf, Debug)]
+#[bpaf(options)]
 pub struct Args {
     /// Directory holding the SQLite3 index database.
     ///
     /// default: `/var/lib/moonfire-nvr/db`.
     #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
     db_dir: PathBuf,
+}
+
+pub fn subcommand() -> impl bpaf::Parser<Args> {
+    crate::subcommand(args(), "init")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {
