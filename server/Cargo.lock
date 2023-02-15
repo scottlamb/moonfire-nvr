@@ -147,7 +147,8 @@ dependencies = [
 [[package]]
 name = "bpaf"
 version = "0.7.9"
-source = "git+https://github.com/pacak/bpaf.git?branch=exit_code#5238a6069abca0d61cf1c000e56bbac946e7ee18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31f4c9de9c67618395106c81fb9461290a8910af29aa0188daec29001a1181ae"
 dependencies = [
  "bpaf_derive",
  "owo-colors",
@@ -156,7 +157,8 @@ dependencies = [
 [[package]]
 name = "bpaf_derive"
 version = "0.3.4"
-source = "git+https://github.com/pacak/bpaf.git?branch=exit_code#5238a6069abca0d61cf1c000e56bbac946e7ee18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "223f3c9e7034f98c9f315d9945fcc22831b3f03d9f4c42c96a7ab6abd209a195"
 dependencies = [
  "proc-macro2",
  "quote",

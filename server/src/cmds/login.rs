@@ -33,10 +33,7 @@ fn parse_flags(flags: String) -> Result<Vec<SessionFlag>, Error> {
 #[derive(Bpaf, Debug, PartialEq, Eq)]
 #[bpaf(options)]
 pub struct Args {
-    /// Directory holding the SQLite3 index database.
-    ///
-    /// default: `/var/lib/moonfire-nvr/db`.
-    #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
+    #[bpaf(external(crate::parse_db_dir))]
     db_dir: PathBuf,
 
     /// Creates a session with the given permissions, as a JSON object.
@@ -173,7 +170,7 @@ mod tests {
         assert_eq!(
             args,
             Args {
-                db_dir: crate::default_db_dir().unwrap(),
+                db_dir: crate::DEFAULT_DB_DIR.into(),
                 domain: None,
                 curl_cookie_jar: None,
                 permissions: Some(crate::json::Permissions {

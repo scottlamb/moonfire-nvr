@@ -4,7 +4,7 @@
 
 #![cfg_attr(all(feature = "nightly", test), feature(test))]
 
-use bpaf::Bpaf;
+use bpaf::{Bpaf, Parser};
 use log::{debug, error};
 use std::fmt::Write;
 use std::str::FromStr;
@@ -43,6 +43,8 @@ fn subcommand<T: 'static>(
     parser.usage(Box::leak(usage.into_boxed_str())).command(cmd)
 }
 
+const DEFAULT_DB_DIR: &str = "/var/lib/moonfire-nvr/db";
+
 /// Moonfire NVR: security camera network video recorder.
 #[derive(Bpaf, Debug)]
 #[bpaf(options, version)]
@@ -73,9 +75,14 @@ impl Args {
     }
 }
 
-/// Returns the default database dir, for use in argument parsing with `bpaf(fallback_with(...))`.
-fn default_db_dir() -> Result<std::path::PathBuf, std::convert::Infallible> {
-    Ok("/var/lib/moonfire-nvr/db".into())
+fn parse_db_dir() -> impl Parser<std::path::PathBuf> {
+    bpaf::long("db-dir")
+        .help(format!(
+            "Directory holding the SQLite3 index database.\nDefault: `{}`",
+            DEFAULT_DB_DIR
+        ))
+        .argument::<std::path::PathBuf>("PATH")
+        .fallback_with(|| Ok::<_, std::convert::Infallible>(DEFAULT_DB_DIR.into()))
 }
 
 /// Custom panic hook that logs instead of directly writing to stderr.

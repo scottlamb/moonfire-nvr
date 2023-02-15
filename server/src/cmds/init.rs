@@ -11,10 +11,7 @@ use std::path::PathBuf;
 #[derive(Bpaf, Debug)]
 #[bpaf(options)]
 pub struct Args {
-    /// Directory holding the SQLite3 index database.
-    ///
-    /// default: `/var/lib/moonfire-nvr/db`.
-    #[bpaf(argument("PATH"), fallback_with(crate::default_db_dir))]
+    #[bpaf(external(crate::parse_db_dir))]
     db_dir: PathBuf,
 }
 

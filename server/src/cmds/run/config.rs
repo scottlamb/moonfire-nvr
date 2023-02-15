@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::json::Permissions;
 
 fn default_db_dir() -> PathBuf {
-    "/var/lib/moonfire-nvr/db".into()
+    crate::DEFAULT_DB_DIR.into()
 }
 
 fn default_ui_dir() -> PathBuf {
