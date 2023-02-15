@@ -244,7 +244,7 @@ the binaries in the working copy will run via just `nvr`:
 $ sudo mkdir /usr/local/lib/moonfire-nvr
 $ sudo ln -s `pwd`/ui/build /usr/local/lib/moonfire-nvr/ui
 $ sudo mkdir /var/lib/moonfire-nvr
-$ sudo chown $USER:$USER /var/lib/moonfire-nvr
+$ sudo chown $USER: /var/lib/moonfire-nvr
 $ ln -s `pwd`/server/target/release/moonfire-nvr $HOME/bin/moonfire-nvr 
 $ ln -s moonfire-nvr $HOME/bin/nvr
 $ nvr init
