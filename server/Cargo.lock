@@ -147,7 +147,7 @@ dependencies = [
 [[package]]
 name = "bpaf"
 version = "0.7.9"
-source = "git+https://github.com/pacak/bpaf.git?branch=exit_code#5238a6069abca0d61cf1c000e56bbac946e7ee18"
+source = "git+https://github.com/pacak/bpaf.git?rev=a9a63c800845ccfbca0f67b5774009cee015360e#a9a63c800845ccfbca0f67b5774009cee015360e"
 dependencies = [
  "bpaf_derive",
  "owo-colors",
@@ -156,7 +156,7 @@ dependencies = [
 [[package]]
 name = "bpaf_derive"
 version = "0.3.4"
-source = "git+https://github.com/pacak/bpaf.git?branch=exit_code#5238a6069abca0d61cf1c000e56bbac946e7ee18"
+source = "git+https://github.com/pacak/bpaf.git?rev=a9a63c800845ccfbca0f67b5774009cee015360e#a9a63c800845ccfbca0f67b5774009cee015360e"
 dependencies = [
  "proc-macro2",
  "quote",
