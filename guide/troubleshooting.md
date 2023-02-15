@@ -18,8 +18,6 @@ need more help.
         * [Incorrect timestamps](#incorrect-timestamps)
     * [Configuration interface problems](#configuration-interface-problems)
         * [`moonfire-nvr config` displays garbage](#moonfire-nvr-config-displays-garbage)
-    * [Browser user interface problems](#browser-user-interface-problems)
-        * [Live stream always fails with `ws close: 1006`](#live-stream-always-fails-with-ws-close-1006)
     * [Errors in kernel logs](#errors-in-kernel-logs)
         * [UAS errors](#uas-errors)
         * [Filesystem errors](#filesystem-errors)
@@ -356,35 +354,6 @@ This happens if you're not using the premade Docker containers and have
 configured your machine is configured to a non-UTF-8 locale, due to
 gyscos/Cursive#13. As a workaround, try setting the environment variable
 `LC_ALL=C.UTF-8`.
-
-### Browser user interface problems
-
-#### Live stream always fails with `ws close: 1006`
-
-Moonfire NVR's UI uses a
-[WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
-connection to the server for the live view. If you see an alert in the lower
-left corner of a live stream area that says `ws close: 1006`, this means that
-the WebSocket connection failed. Unfortunately this is all the UI knows;
-the WebSocket spec [deliberately withholds](https://html.spec.whatwg.org/multipage/web-sockets.html#closeWebSocket) additional debugging information
-for security reasons.
-
-You might be able to learn more through your browser's Javascript console.
-
-If you consistently see this error when other parts of the UI work properly,
-here are some things to check:
-
-*   If you are using Safari and haven't logged out since Moonfire NVR v0.6.3
-    was released, try logging out and back in. Safari apparently doesn't send
-    [`SameSite=Strict`
-    cookies](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite#strict)
-    on WebSocket requests. Since v0.6.3, Moonfire NVR uses `SameSite=Lax`
-    instead.
-*   If you are using a proxy server, check that it is properly configured for
-    Websockets. In particular, if you followed the [Securing Moonfire NVR
-    guide](schema.md) prior to 29 Feb 2020, look at [this
-    update](https://github.com/scottlamb/moonfire-nvr/commit/92266612b5c9163eb6096c580ba751280a403648#diff-e8bdd96dda101a25a541a6629675ea46bd6eaf670c6417c76662db5397c50c19)
-    to those instructions.
 
 ### Errors in kernel logs
 

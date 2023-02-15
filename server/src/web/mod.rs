@@ -10,6 +10,7 @@ mod signals;
 mod static_file;
 mod users;
 mod view;
+mod websocket;
 
 use self::accept::ConnData;
 use self::path::Path;
@@ -237,15 +238,33 @@ impl Service {
     }
 
     /// Serves an HTTP request.
+    ///
     /// Note that the `serve` wrapper handles responses the same whether they
     /// are `Ok` or `Err`. But returning `Err` here with the `?` operator is
     /// convenient for error paths.
     async fn serve_inner(
         self: Arc<Self>,
         req: Request<::hyper::Body>,
-        p: Path,
-        caller: Caller,
+        conn_data: ConnData,
     ) -> ResponseResult {
+        let p = Path::decode(req.uri().path());
+        let always_allow_unauthenticated = matches!(
+            p,
+            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static
+        );
+        let caller = self.authenticate(&req, &conn_data, always_allow_unauthenticated);
+
+        // WebSocket stuff is handled separately, because most authentication
+        // errors are returned as text messages over the protocol, rather than
+        // HTTP-level errors.
+        if let Path::StreamLiveMp4Segments(uuid, type_) = p {
+            return websocket::upgrade(req, move |ws| {
+                Box::pin(self.stream_live_m4s(ws, caller, uuid, type_))
+            });
+        }
+
+        let caller = caller?;
+        debug!("request on: {}: {:?}", req.uri(), p);
         let (cache, mut response) = match p {
             Path::InitSegment(sha1, debug) => (
                 CacheControl::PrivateStatic,
@@ -266,10 +285,9 @@ impl Service {
                 CacheControl::PrivateStatic,
                 self.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::MediaSegment, debug)?,
             ),
-            Path::StreamLiveMp4Segments(uuid, type_) => (
-                CacheControl::PrivateDynamic,
-                self.stream_live_m4s(req, caller, uuid, type_)?,
-            ),
+            Path::StreamLiveMp4Segments(..) => {
+                unreachable!("StreamLiveMp4Segments should have already been handled")
+            }
             Path::NotFound => return Err(not_found("path not understood")),
             Path::Login => (CacheControl::PrivateDynamic, self.login(req).await?),
             Path::Logout => (CacheControl::PrivateDynamic, self.logout(req).await?),
@@ -313,18 +331,8 @@ impl Service {
         req: Request<::hyper::Body>,
         conn_data: ConnData,
     ) -> Result<Response<Body>, std::convert::Infallible> {
-        let p = Path::decode(req.uri().path());
-        let always_allow_unauthenticated = matches!(
-            p,
-            Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static
-        );
-        debug!("request on: {}: {:?}", req.uri(), p);
-        let caller = match self.authenticate(&req, &conn_data, always_allow_unauthenticated) {
-            Ok(c) => c,
-            Err(e) => return Ok(from_base_error(e)),
-        };
         Ok(self
-            .serve_inner(req, p, caller)
+            .serve_inner(req, conn_data)
             .await
             .unwrap_or_else(|e| e.0))
     }
@@ -575,7 +583,7 @@ impl Service {
                     // Log the specific reason this session is unauthenticated.
                     // Don't let the API client see it, as it may have a
                     // revocation reason that isn't for their eyes.
-                    warn!("Session authentication failed: {:?}", &e);
+                    warn!("Session authentication failed: {e}");
                 }
                 Err(e) => return Err(e),
             };

@@ -167,17 +167,26 @@ macro_rules! bail_t {
 
 /// Like `failure::format_err!`, but the first argument specifies a type as an `ErrorKind`.
 ///
-/// Example:
+/// Example with positional arguments:
 /// ```
 /// use moonfire_base::format_err_t;
 /// let e = format_err_t!(Unauthenticated, "unknown user: {}", "slamb");
 /// assert_eq!(e.kind(), moonfire_base::ErrorKind::Unauthenticated);
 /// assert_eq!(e.to_string(), "Unauthenticated: unknown user: slamb");
 /// ```
+///
+/// Example with named arguments:
+/// ```
+/// use moonfire_base::format_err_t;
+/// let user = "slamb";
+/// let e = format_err_t!(Unauthenticated, "unknown user: {user}");
+/// assert_eq!(e.kind(), moonfire_base::ErrorKind::Unauthenticated);
+/// assert_eq!(e.to_string(), "Unauthenticated: unknown user: slamb");
+/// ```
 #[macro_export]
 macro_rules! format_err_t {
-    ($t:ident, $e:expr) => {
-        Into::<$crate::Error>::into(failure::err_msg($e).context($crate::ErrorKind::$t))
+    ($t:ident, $fmt:expr) => {
+        Into::<$crate::Error>::into(failure::err_msg(format!($fmt)).context($crate::ErrorKind::$t))
     };
     ($t:ident, $fmt:expr, $($arg:tt)+) => {
         Into::<$crate::Error>::into(failure::err_msg(format!($fmt, $($arg)+))

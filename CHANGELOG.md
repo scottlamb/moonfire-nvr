@@ -34,6 +34,9 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     in `ref/api.md`, not an undocumented plaintext protobuf format.
 *   fix [#257](https://github.com/scottlamb/moonfire-nvr/issues/257):
     Live View: select None Not Possible After Selecting a Camera.
+*   get rid of live view's dreaded `ws close: 1006` error altogether. The live
+    view WebSocket protocol now conveys errors in a way that allows the
+    Javscript UI to see them.
 
 ## 0.7.5 (2022-05-09)
 

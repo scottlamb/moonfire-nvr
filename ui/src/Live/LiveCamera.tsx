@@ -110,7 +110,10 @@ class LiveCameraDriver {
   };
 
   onWsClose = (e: CloseEvent) => {
-    this.error(`ws close: ${e.code} ${e.reason}`);
+    // e doesn't say much. code is likely 1006, reason is likely empty.
+    // See the warning here: https://websockets.spec.whatwg.org/#closeWebSocket
+    const cleanly = e.wasClean ? "cleanly" : "uncleanly";
+    this.error(`connection closed ${cleanly}`);
   };
 
   onWsOpen = (e: Event) => {
@@ -118,13 +121,18 @@ class LiveCameraDriver {
   };
 
   onWsError = (e: Event) => {
-    console.error(`${this.camera.shortName}: ws error`);
+    console.error(`${this.camera.shortName}: ws error`, e);
   };
 
-  onWsMessage = async (e: MessageEvent<Blob>) => {
+  onWsMessage = async (e: MessageEvent<any>) => {
+    if (typeof e.data === "string") {
+      // error message.
+      this.error(`server: ${e.data}`);
+      return;
+    }
     let raw;
     try {
-      raw = new Uint8Array(await e.data.arrayBuffer());
+      raw = new Uint8Array(await (e.data as Blob).arrayBuffer());
     } catch (e) {
       if (!(e instanceof DOMException)) {
         throw e;

@@ -568,10 +568,16 @@ Initiate a WebSocket stream for chunks of video. Expects the standard
 WebSocket headers as described in [RFC 6455][rfc-6455] and (if authentication
 is required) the `s` cookie.
 
-The server will send a sequence of binary messages. Each message corresponds
-to one or more frames of video. The first message is guaranteed to start with a
-"key" (IDR) frame; others may not. The message will contain HTTP headers
-followed by by a `.mp4` media segment. The following headers will be included:
+The server will send messages as follows:
+
+*   text: a plaintext error message, followed by the end of stream.
+*   binary: video data, repeatedly, as described below.
+*   ping: every 30 seconds.
+
+Each binary message corresponds to one or more frames of video. The first
+message is guaranteed to start with a "key" (IDR) frame; others may not. The
+message will contain HTTP headers followed by by a `.mp4` media segment. The
+following headers will be included:
 
 *   `X-Video-Sample-Entry-Id`: An id to use when fetching an initialization segment.
 *   `X-Recording-Id`: the open id, a period, and the recording id of the
@@ -585,10 +591,8 @@ followed by by a `.mp4` media segment. The following headers will be included:
 *   `X-Media-Time-Range`: the relative media start and end times of these
     frames within the recording, as a half-open interval.
 
-The server will also send pings, currently at 30-second intervals.
-
-The WebSocket will always open immediately but will receive messages only while the
-backing RTSP stream is connected.
+The WebSocket will always open immediately but will receive messages only while
+the backing RTSP stream is connected.
 
 Example request URI:
 
@@ -946,8 +950,9 @@ to a Unix socket with `ownUidIsPrivileged`):
     [CORS](https://en.wikipedia.org/wiki/Cross-origin_resource_sharing) policy.
     Thus, cross-domain Ajax requests (via `XMLHTTPRequest` or `fetch`) should
     fail.
-*   WebSocket upgrade requests are rejected unless the `Origin` and `Host`
-    headers match.
+*   WebSocket upgrade requests are rejected if the `Origin` header is present
+    and does not match `Host`. This is the sole protection against
+    [Cross-Site WebSocket Hijacting (CSWSH)](https://christian-schneider.net/CrossSiteWebSocketHijacking.html).
 
 The following additional protections apply only when using session
 authentication:
