@@ -41,8 +41,6 @@ use failure::{bail, format_err, Error, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
 use hashlink::LinkedHashMap;
 use itertools::Itertools;
-use log::warn;
-use log::{error, info, trace};
 use rusqlite::{named_params, params};
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -58,6 +56,8 @@ use std::string::String;
 use std::sync::Arc;
 use std::sync::{Mutex, MutexGuard};
 use std::vec::Vec;
+use tracing::warn;
+use tracing::{error, info, trace};
 use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
@@ -986,6 +986,8 @@ impl LockedDatabase {
     ///
     /// The public API is in `DatabaseGuard::flush()`; it supplies the `Clocks` to this function.
     fn flush<C: Clocks>(&mut self, clocks: &C, reason: &str) -> Result<(), Error> {
+        let span = tracing::info_span!("flush", flush_count = self.flush_count, reason);
+        let _enter = span.enter();
         let o = match self.open.as_ref() {
             None => bail!("database is read-only"),
             Some(o) => o,
@@ -1161,7 +1163,7 @@ impl LockedDatabase {
         if log_msg.is_empty() {
             log_msg.push_str(" no recording changes");
         }
-        info!("Flush {} (why: {}):{}", self.flush_count, reason, &log_msg);
+        info!("flush complete: {log_msg}");
         for cb in &self.on_flush {
             cb();
         }

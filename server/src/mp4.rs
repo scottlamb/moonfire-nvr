@@ -65,7 +65,6 @@ use futures::stream::{self, TryStreamExt};
 use futures::Stream;
 use http::header::HeaderValue;
 use hyper::body::Buf;
-use log::{debug, error, trace, warn};
 use reffers::ARefss;
 use smallvec::SmallVec;
 use std::cell::UnsafeCell;
@@ -78,6 +77,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::Once;
 use std::time::SystemTime;
+use tracing::{debug, error, trace, warn};
 
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes or headers to be output for a particular set of `FileBuilder` options. Incrementing this
@@ -2002,12 +2002,12 @@ mod tests {
     use futures::stream::TryStreamExt;
     use http_serve::{self, Entity};
     use hyper::body::Buf;
-    use log::info;
     use std::fs;
     use std::ops::Range;
     use std::path::Path;
     use std::pin::Pin;
     use std::str;
+    use tracing::info;
 
     async fn fill_slice<E: http_serve::Entity>(slice: &mut [u8], e: &E, start: u64)
     where

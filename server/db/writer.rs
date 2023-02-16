@@ -11,7 +11,6 @@ use base::clock::{self, Clocks};
 use base::shutdown::ShutdownError;
 use failure::{bail, format_err, Error};
 use fnv::FnvHashMap;
-use log::{debug, trace, warn};
 use std::cmp::{self, Ordering};
 use std::convert::TryFrom;
 use std::io;
@@ -22,6 +21,7 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration as StdDuration;
 use time::{Duration, Timespec};
+use tracing::{debug, trace, warn};
 
 /// Trait to allow mocking out [crate::dir::SampleFileDir] in syncer tests.
 /// This is public because it's exposed in the [SyncerChannel] type parameters,
@@ -166,21 +166,30 @@ where
 {
     let db2 = db.clone();
     let (mut syncer, path) = Syncer::new(&db.lock(), shutdown_rx, db2, dir_id)?;
-    syncer.initial_rotation()?;
+    let span = tracing::info_span!("syncer", path = %path.display());
+    span.in_scope(|| {
+        tracing::info!("initial rotation");
+        syncer.initial_rotation()
+    })?;
     let (snd, rcv) = mpsc::channel();
     db.lock().on_flush(Box::new({
         let snd = snd.clone();
         move || {
-            if let Err(e) = snd.send(SyncerCommand::DatabaseFlushed) {
-                warn!("Unable to notify syncer for dir {} of flush: {}", dir_id, e);
+            if let Err(err) = snd.send(SyncerCommand::DatabaseFlushed) {
+                warn!(%err, "Unable to notify syncer for dir {}", dir_id);
             }
         }
     }));
     Ok((
         SyncerChannel(snd),
         thread::Builder::new()
-            .name(format!("sync-{}", path.display()))
-            .spawn(move || while syncer.iter(&rcv) {})
+            .name(format!("sync-{dir_id}"))
+            .spawn(move || {
+                span.in_scope(|| {
+                    tracing::info!("starting");
+                    while syncer.iter(&rcv) {}
+                })
+            })
             .unwrap(),
     ))
 }
@@ -812,7 +821,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
                     Ok(w) => w,
                     Err(e) => {
                         // close() will do nothing because unindexed_sample will be None.
-                        log::warn!(
+                        tracing::warn!(
                             "Abandoning incompletely written recording {} on shutdown",
                             w.id
                         );
@@ -983,12 +992,12 @@ mod tests {
     use crate::recording;
     use crate::testutil;
     use base::clock::{Clocks, SimulatedClocks};
-    use log::{trace, warn};
     use std::collections::VecDeque;
     use std::io;
     use std::sync::mpsc;
     use std::sync::Arc;
     use std::sync::Mutex;
+    use tracing::{trace, warn};
 
     #[derive(Clone)]
     struct MockDir(Arc<Mutex<VecDeque<MockDirAction>>>);

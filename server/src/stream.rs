@@ -11,6 +11,7 @@ use retina::client::Demuxed;
 use retina::codec::CodecItem;
 use std::pin::Pin;
 use std::result::Result;
+use tracing::Instrument;
 use url::Url;
 
 static RETINA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -64,10 +65,15 @@ impl Opener for RealOpener {
             .user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
         let rt_handle = tokio::runtime::Handle::current();
         let (inner, first_frame) = rt_handle
-            .block_on(rt_handle.spawn(tokio::time::timeout(
-                RETINA_TIMEOUT,
-                RetinaStreamInner::play(label, url, options),
-            )))
+            .block_on(
+                rt_handle.spawn(
+                    tokio::time::timeout(
+                        RETINA_TIMEOUT,
+                        RetinaStreamInner::play(label, url, options),
+                    )
+                    .in_current_span(),
+                ),
+            )
             .expect("RetinaStream::play task panicked, see earlier error")??;
         Ok(Box::new(RetinaStream {
             inner: Some(inner),
@@ -116,7 +122,7 @@ impl RetinaStreamInner {
         options: Options,
     ) -> Result<(Box<Self>, retina::codec::VideoFrame), Error> {
         let mut session = retina::client::Session::describe(url, options.session).await?;
-        log::debug!("connected to {:?}, tool {:?}", &label, session.tool());
+        tracing::debug!("connected to {:?}, tool {:?}", &label, session.tool());
         let video_i = session
             .streams()
             .iter()
@@ -169,7 +175,7 @@ impl RetinaStreamInner {
                 None => bail!("end of stream"),
                 Some(CodecItem::VideoFrame(v)) => {
                     if v.loss() > 0 {
-                        log::warn!(
+                        tracing::warn!(
                             "{}: lost {} RTP packets @ {}",
                             &self.label,
                             v.loss(),
@@ -210,17 +216,19 @@ impl Stream for RetinaStream {
                 let inner = self.inner.take().unwrap();
                 let (mut inner, frame, new_parameters) = self
                     .rt_handle
-                    .block_on(self.rt_handle.spawn(tokio::time::timeout(
-                        RETINA_TIMEOUT,
-                        inner.fetch_next_frame(),
-                    )))
+                    .block_on(
+                        self.rt_handle.spawn(
+                            tokio::time::timeout(RETINA_TIMEOUT, inner.fetch_next_frame())
+                                .in_current_span(),
+                        ),
+                    )
                     .expect("fetch_next_frame task panicked, see earlier error")
                     .map_err(|_| format_err!("timeout getting next frame"))??;
                 let mut new_video_sample_entry = false;
                 if let Some(p) = new_parameters {
                     let video_sample_entry = h264::parse_extra_data(p.extra_data())?;
                     if video_sample_entry != inner.video_sample_entry {
-                        log::debug!(
+                        tracing::debug!(
                             "{}: parameter change:\nold: {:?}\nnew: {:?}",
                             &inner.label,
                             &inner.video_sample_entry,

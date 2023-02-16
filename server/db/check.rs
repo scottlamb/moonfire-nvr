@@ -13,10 +13,10 @@ use crate::recording;
 use crate::schema;
 use failure::Error;
 use fnv::{FnvHashMap, FnvHashSet};
-use log::{error, info, warn};
 use nix::fcntl::AtFlags;
 use rusqlite::params;
 use std::os::unix::io::AsRawFd;
+use tracing::{error, info, warn};
 
 pub struct Options {
     pub compare_lens: bool,

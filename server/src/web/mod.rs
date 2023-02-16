@@ -28,9 +28,10 @@ use http::header::{self, HeaderValue};
 use http::{status::StatusCode, Request, Response};
 use http_serve::dir::FsDir;
 use hyper::body::Bytes;
-use log::{debug, warn};
 use std::net::IpAddr;
 use std::sync::Arc;
+use tracing::warn;
+use tracing::Instrument;
 use url::form_urlencoded;
 use uuid::Uuid;
 
@@ -245,6 +246,7 @@ impl Service {
     async fn serve_inner(
         self: Arc<Self>,
         req: Request<::hyper::Body>,
+        authreq: auth::Request,
         conn_data: ConnData,
     ) -> ResponseResult {
         let p = Path::decode(req.uri().path());
@@ -252,7 +254,15 @@ impl Service {
             p,
             Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static
         );
-        let caller = self.authenticate(&req, &conn_data, always_allow_unauthenticated);
+        let caller = self.authenticate(&req, &authreq, &conn_data, always_allow_unauthenticated);
+        if let Some(username) = caller
+            .as_ref()
+            .ok()
+            .and_then(|c| c.user.as_ref())
+            .map(|u| &u.name)
+        {
+            tracing::Span::current().record("auth.user", tracing::field::display(username));
+        }
 
         // WebSocket stuff is handled separately, because most authentication
         // errors are returned as text messages over the protocol, rather than
@@ -264,14 +274,16 @@ impl Service {
         }
 
         let caller = caller?;
-        debug!("request on: {}: {:?}", req.uri(), p);
         let (cache, mut response) = match p {
             Path::InitSegment(sha1, debug) => (
                 CacheControl::PrivateStatic,
                 self.init_segment(sha1, debug, &req)?,
             ),
             Path::TopLevel => (CacheControl::PrivateDynamic, self.top_level(&req, caller)?),
-            Path::Request => (CacheControl::PrivateDynamic, self.request(&req, caller)?),
+            Path::Request => (
+                CacheControl::PrivateDynamic,
+                self.request(&req, &authreq, caller)?,
+            ),
             Path::Camera(uuid) => (CacheControl::PrivateDynamic, self.camera(&req, uuid)?),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
@@ -289,8 +301,14 @@ impl Service {
                 unreachable!("StreamLiveMp4Segments should have already been handled")
             }
             Path::NotFound => return Err(not_found("path not understood")),
-            Path::Login => (CacheControl::PrivateDynamic, self.login(req).await?),
-            Path::Logout => (CacheControl::PrivateDynamic, self.logout(req).await?),
+            Path::Login => (
+                CacheControl::PrivateDynamic,
+                self.login(req, authreq).await?,
+            ),
+            Path::Logout => (
+                CacheControl::PrivateDynamic,
+                self.logout(req, authreq).await?,
+            ),
             Path::Signals => (
                 CacheControl::PrivateDynamic,
                 self.signals(req, caller).await?,
@@ -321,6 +339,7 @@ impl Service {
     }
 
     /// Serves an HTTP request.
+    ///
     /// An error return from this method causes hyper to abruptly drop the
     /// HTTP connection rather than respond. That's not terribly useful, so this
     /// method always returns `Ok`. It delegates to a `serve_inner` which is
@@ -331,10 +350,63 @@ impl Service {
         req: Request<::hyper::Body>,
         conn_data: ConnData,
     ) -> Result<Response<Body>, std::convert::Infallible> {
-        Ok(self
-            .serve_inner(req, conn_data)
+        let id = ulid::Ulid::new();
+        let authreq = auth::Request {
+            when_sec: Some(self.db.clocks().realtime().sec),
+            addr: if self.trust_forward_hdrs {
+                req.headers()
+                    .get("X-Real-IP")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| IpAddr::from_str(v).ok())
+            } else {
+                conn_data.client_addr.map(|a| a.ip())
+            },
+            user_agent: req
+                .headers()
+                .get(header::USER_AGENT)
+                .map(|ua| ua.as_bytes().to_vec()),
+        };
+        let start = std::time::Instant::now();
+
+        // https://opentelemetry.io/docs/reference/specification/trace/semantic_conventions/http/
+        let span = tracing::info_span!(
+            "request",
+            %id,
+            net.sock.peer.uid = conn_data.client_unix_uid.map(tracing::field::display),
+            http.client_ip = authreq.addr.map(tracing::field::display),
+            http.method = %req.method(),
+            http.target = %req.uri(),
+            http.status_code = tracing::field::Empty,
+            auth.user = tracing::field::Empty,
+        );
+        tracing::debug!(parent: &span, "received request headers");
+        let response = self
+            .serve_inner(req, authreq, conn_data)
+            .instrument(span.clone())
             .await
-            .unwrap_or_else(|e| e.0))
+            .unwrap_or_else(|e| e.0);
+        span.record("http.status_code", response.status().as_u16());
+        let latency = std::time::Instant::now().duration_since(start);
+        if response.status().is_server_error() {
+            tracing::error!(
+                parent: &span,
+                latency = format_args!("{:.6}s", latency.as_secs_f32()),
+                "sending response headers",
+            );
+        } else if response.status().is_client_error() {
+            tracing::warn!(
+                parent: &span,
+                latency = format_args!("{:.6}s", latency.as_secs_f32()),
+                "sending response headers",
+            );
+        } else {
+            tracing::info!(
+                parent: &span,
+                latency = format_args!("{:.6}s", latency.as_secs_f32()),
+                "sending response headers",
+            );
+        }
+        Ok(response)
     }
 
     fn top_level(&self, req: &Request<::hyper::Body>, caller: Caller) -> ResponseResult {
@@ -478,26 +550,12 @@ impl Service {
         }
     }
 
-    fn authreq(&self, req: &Request<::hyper::Body>) -> auth::Request {
-        auth::Request {
-            when_sec: Some(self.db.clocks().realtime().sec),
-            addr: if self.trust_forward_hdrs {
-                req.headers()
-                    .get("X-Real-IP")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| IpAddr::from_str(v).ok())
-            } else {
-                None
-            },
-            user_agent: req
-                .headers()
-                .get(header::USER_AGENT)
-                .map(|ua| ua.as_bytes().to_vec()),
-        }
-    }
-
-    fn request(&self, req: &Request<::hyper::Body>, caller: Caller) -> ResponseResult {
-        let authreq = self.authreq(req);
+    fn request(
+        &self,
+        req: &Request<::hyper::Body>,
+        authreq: &auth::Request,
+        caller: Caller,
+    ) -> ResponseResult {
         let host = req
             .headers()
             .get(header::HOST)
@@ -561,13 +619,16 @@ impl Service {
     fn authenticate(
         &self,
         req: &Request<hyper::Body>,
+        authreq: &auth::Request,
         conn_data: &ConnData,
         unauth_path: bool,
     ) -> Result<Caller, base::Error> {
         if let Some(sid) = extract_sid(req) {
-            let authreq = self.authreq(req);
-
-            match self.db.lock().authenticate_session(authreq, &sid.hash()) {
+            match self
+                .db
+                .lock()
+                .authenticate_session(authreq.clone(), &sid.hash())
+            {
                 Ok((s, u)) => {
                     return Ok(Caller {
                         permissions: s.permissions.clone(),

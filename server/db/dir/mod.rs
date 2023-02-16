@@ -14,7 +14,6 @@ use crate::db::CompositeId;
 use crate::schema;
 use cstr::cstr;
 use failure::{bail, format_err, Error, Fail};
-use log::warn;
 use nix::sys::statvfs::Statvfs;
 use nix::{
     fcntl::{FlockArg, OFlag},
@@ -29,6 +28,7 @@ use std::ops::Range;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::Arc;
+use tracing::warn;
 
 /// The fixed length of a directory's `meta` file.
 ///

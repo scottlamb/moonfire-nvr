@@ -54,9 +54,13 @@ impl Reader {
         )
         .expect("PAGE_SIZE fits in usize");
         assert_eq!(page_size.count_ones(), 1, "invalid page size {page_size}");
+        let span = tracing::info_span!("reader", path = %path.display());
         std::thread::Builder::new()
             .name(format!("r-{}", path.display()))
-            .spawn(move || ReaderInt { dir, page_size }.run(rx))
+            .spawn(move || {
+                let _guard = span.enter();
+                ReaderInt { dir, page_size }.run(rx)
+            })
             .expect("unable to create reader thread");
         Self(tx)
     }
@@ -70,6 +74,7 @@ impl Reader {
         }
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.send(ReaderCommand::OpenFile {
+            span: tracing::Span::current(),
             composite_id,
             range,
             tx,
@@ -176,6 +181,8 @@ impl Drop for FileStream {
 /// around between it and the [FileStream] to avoid maintaining extra data
 /// structures.
 struct OpenFile {
+    span: tracing::Span,
+
     composite_id: CompositeId,
 
     /// The memory-mapped region backed by the file. Valid up to length `map_len`.
@@ -197,7 +204,7 @@ impl Drop for OpenFile {
     fn drop(&mut self) {
         if let Err(e) = unsafe { nix::sys::mman::munmap(self.map_ptr, self.map_len) } {
             // This should never happen.
-            log::error!(
+            tracing::error!(
                 "unable to munmap {}, {:?} len {}: {}",
                 self.composite_id,
                 self.map_ptr,
@@ -218,6 +225,7 @@ struct SuccessfulRead {
 enum ReaderCommand {
     /// Opens a file and reads the first chunk.
     OpenFile {
+        span: tracing::Span,
         composite_id: CompositeId,
         range: std::ops::Range<u64>,
         tx: tokio::sync::oneshot::Sender<Result<SuccessfulRead, Error>>,
@@ -248,6 +256,7 @@ impl ReaderInt {
             // the CloseFile operation.
             match cmd {
                 ReaderCommand::OpenFile {
+                    span,
                     composite_id,
                     range,
                     tx,
@@ -256,8 +265,11 @@ impl ReaderInt {
                         // avoid spending effort on expired commands
                         continue;
                     }
-                    let _guard = TimerGuard::new(&RealClocks {}, || format!("open {composite_id}"));
-                    let _ = tx.send(self.open(composite_id, range));
+                    let span2 = span.clone();
+                    let _span_enter = span2.enter();
+                    let _timer_guard =
+                        TimerGuard::new(&RealClocks {}, || format!("open {composite_id}"));
+                    let _ = tx.send(self.open(span, composite_id, range));
                 }
                 ReaderCommand::ReadNextChunk { file, tx } => {
                     if tx.is_closed() {
@@ -265,16 +277,30 @@ impl ReaderInt {
                         continue;
                     }
                     let composite_id = file.composite_id;
+                    let span2 = file.span.clone();
+                    let _span_enter = span2.enter();
                     let _guard =
                         TimerGuard::new(&RealClocks {}, || format!("read from {composite_id}"));
                     let _ = tx.send(Ok(self.chunk(file)));
                 }
-                ReaderCommand::CloseFile(_) => {}
+                ReaderCommand::CloseFile(mut file) => {
+                    let composite_id = file.composite_id;
+                    let span = std::mem::replace(&mut file.span, tracing::Span::none());
+                    let _span_enter = span.enter();
+                    let _guard =
+                        TimerGuard::new(&RealClocks {}, || format!("close {composite_id}"));
+                    drop(file);
+                }
             }
         }
     }
 
-    fn open(&self, composite_id: CompositeId, range: Range<u64>) -> Result<SuccessfulRead, Error> {
+    fn open(
+        &self,
+        span: tracing::Span,
+        composite_id: CompositeId,
+        range: Range<u64>,
+    ) -> Result<SuccessfulRead, Error> {
         let p = super::CompositeIdPath::from(composite_id);
 
         // Reader::open_file checks for an empty range, but check again right
@@ -348,7 +374,7 @@ impl ReaderInt {
             )
         } {
             // This shouldn't happen but is "just" a performance problem.
-            log::warn!(
+            tracing::warn!(
                 "madvise(MADV_SEQUENTIAL) failed for {} off={} len={}: {}",
                 composite_id,
                 offset,
@@ -358,6 +384,7 @@ impl ReaderInt {
         }
 
         Ok(self.chunk(OpenFile {
+            span,
             composite_id,
             map_ptr,
             map_pos: unaligned,

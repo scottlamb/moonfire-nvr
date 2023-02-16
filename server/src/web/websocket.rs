@@ -12,6 +12,7 @@ use base::bail_t;
 use futures::{Future, SinkExt};
 use http::{header, Request, Response};
 use tokio_tungstenite::{tungstenite, WebSocketStream};
+use tracing::Instrument;
 
 use super::{bad_req, ResponseResult};
 
@@ -37,26 +38,33 @@ where
         tungstenite::handshake::server::create_response_with_body(&req, hyper::Body::empty)
             .map_err(|e| bad_req(e.to_string()))?;
     let (parts, _) = response.into_parts();
-    tokio::spawn(async move {
-        let upgraded = match hyper::upgrade::on(req).await {
-            Ok(u) => u,
-            Err(e) => {
-                log::error!("WebSocket upgrade failed: {e}");
-                return;
-            }
-        };
-        let mut ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
-            upgraded,
-            tungstenite::protocol::Role::Server,
-            None,
-        )
-        .await;
-        if let Err(e) = handler(&mut ws).await {
-            // TODO: use a nice JSON message format for errors.
-            log::error!("WebSocket stream terminating with error {e}");
-            let _ = ws.send(tungstenite::Message::Text(e.to_string())).await;
+    let span = tracing::info_span!("websocket");
+    tokio::spawn(
+        async move {
+            let upgraded = match hyper::upgrade::on(req).await {
+                Ok(u) => u,
+                Err(err) => {
+                    tracing::error!(%err, "upgrade failed");
+                    return;
+                }
+            };
+            let mut ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+                upgraded,
+                tungstenite::protocol::Role::Server,
+                None,
+            )
+            .await;
+            if let Err(err) = handler(&mut ws).await {
+                // TODO: use a nice JSON message format for errors.
+                tracing::error!(%err, "closing with error");
+                let _ = ws.send(tungstenite::Message::Text(err.to_string())).await;
+            } else {
+                tracing::info!("closing");
+            };
+            let _ = ws.close(None).await;
         }
-    });
+        .instrument(span),
+    );
     Ok(Response::from_parts(parts, Body::from("")))
 }
 

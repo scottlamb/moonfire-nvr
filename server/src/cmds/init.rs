@@ -4,8 +4,8 @@
 
 use bpaf::Bpaf;
 use failure::Error;
-use log::info;
 use std::path::PathBuf;
+use tracing::info;
 
 /// Initializes a database.
 #[derive(Bpaf, Debug)]

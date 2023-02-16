@@ -5,8 +5,8 @@
 use cursive::traits::{Nameable, Resizable};
 use cursive::views;
 use cursive::Cursive;
-use log::info;
 use std::sync::Arc;
+use tracing::info;
 
 /// Builds a `UserChange` from an active `edit_user_dialog`.
 fn get_change(

@@ -11,8 +11,6 @@ use db::{dir, writer};
 use failure::{bail, Error, ResultExt};
 use fnv::FnvHashMap;
 use hyper::service::{make_service_fn, service_fn};
-use log::error;
-use log::{info, warn};
 use retina::client::SessionGroup;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -20,6 +18,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use tokio::signal::unix::{signal, SignalKind};
+use tracing::error;
+use tracing::{info, warn};
 
 use self::config::ConfigFile;
 
@@ -342,15 +342,18 @@ async fn inner(
                 rotate_offset_sec,
                 streamer::ROTATE_INTERVAL_SEC,
             )?;
-            info!("Starting streamer for {}", streamer.short_name());
-            let name = format!("s-{}", streamer.short_name());
+            let span = tracing::info_span!("streamer", stream = streamer.short_name());
+            let thread_name = format!("s-{}", streamer.short_name());
             let handle = handle.clone();
             streamers.push(
                 thread::Builder::new()
-                    .name(name)
+                    .name(thread_name)
                     .spawn(move || {
-                        let _enter = handle.enter();
-                        streamer.run();
+                        span.in_scope(|| {
+                            let _enter_tokio = handle.enter();
+                            info!("starting");
+                            streamer.run();
+                        })
                     })
                     .expect("can't create thread"),
             );
@@ -402,7 +405,7 @@ async fn inner(
         move || {
             for streamer in streamers.drain(..) {
                 if streamer.join().is_err() {
-                    log::error!("streamer panicked; look for previous panic message");
+                    tracing::error!("streamer panicked; look for previous panic message");
                 }
             }
             if let Some(mut ss) = syncers {

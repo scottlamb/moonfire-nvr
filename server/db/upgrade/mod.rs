@@ -8,11 +8,11 @@
 
 use crate::db;
 use failure::{bail, Error};
-use log::info;
 use nix::NixPath;
 use rusqlite::params;
 use std::ffi::CStr;
 use std::io::Write;
+use tracing::info;
 use uuid::Uuid;
 
 mod v0_to_v1;

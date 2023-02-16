@@ -110,7 +110,7 @@ fn get_camera(siv: &mut Cursive) -> Camera {
             sample_file_dir_id,
         };
     }
-    log::trace!("camera is: {:#?}", &camera);
+    tracing::trace!("camera is: {:#?}", &camera);
     camera
 }
 
@@ -521,7 +521,7 @@ fn load_camera_values(
                 v.set_content(s.config.flush_if_sec.to_string())
             });
         }
-        log::debug!("setting {} dir to {}", t.as_str(), selected_dir);
+        tracing::debug!("setting {} dir to {}", t.as_str(), selected_dir);
         dialog.call_on_name(
             &format!("{}_sample_file_dir", t),
             |v: &mut views::SelectView<Option<i32>>| v.set_selection(selected_dir),
