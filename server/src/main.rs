@@ -5,11 +5,9 @@
 #![cfg_attr(all(feature = "nightly", test), feature(test))]
 
 use bpaf::{Bpaf, Parser};
-use log::{debug, error};
 use std::ffi::OsStr;
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use tracing::{debug, error};
 
 mod body;
 mod cmds;
@@ -19,6 +17,7 @@ mod mp4;
 mod slices;
 mod stream;
 mod streamer;
+mod tracing_setup;
 mod web;
 
 const DEFAULT_DB_DIR: &str = "/var/lib/moonfire-nvr/db";
@@ -61,37 +60,9 @@ fn parse_db_dir() -> impl Parser<PathBuf> {
         .debug_fallback()
 }
 
-/// Custom panic hook that logs instead of directly writing to stderr.
-///
-/// This means it includes a timestamp and is more recognizable as a serious
-/// error (including console color coding by default, a format `lnav` will
-/// recognize, etc.).
-fn panic_hook(p: &std::panic::PanicInfo) {
-    let mut msg;
-    if let Some(l) = p.location() {
-        msg = format!("panic at '{l}'");
-    } else {
-        msg = "panic".to_owned();
-    }
-    if let Some(s) = p.payload().downcast_ref::<&str>() {
-        write!(&mut msg, ": {s}").unwrap();
-    } else if let Some(s) = p.payload().downcast_ref::<String>() {
-        write!(&mut msg, ": {s}").unwrap();
-    }
-    let b = failure::Backtrace::new();
-    if b.is_empty() {
-        write!(
-            &mut msg,
-            "\n\n(set environment variable RUST_BACKTRACE=1 to see backtraces)"
-        )
-        .unwrap();
-    } else {
-        write!(&mut msg, "\n\nBacktrace:\n{b}").unwrap();
-    }
-    error!("{}", msg);
-}
-
 fn main() {
+    // If using the clock will fail, find out now *before* trying to log
+    // anything (with timestamps...) so we can print a helpful error.
     if let Err(e) = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC) {
         eprintln!(
             "clock_gettime failed: {e}\n\n\
@@ -100,22 +71,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut h = mylog::Builder::new()
-        .set_format(
-            ::std::env::var("MOONFIRE_FORMAT")
-                .map_err(|_| ())
-                .and_then(|s| mylog::Format::from_str(&s))
-                .unwrap_or(mylog::Format::Google),
-        )
-        .set_color(
-            ::std::env::var("MOONFIRE_COLOR")
-                .map_err(|_| ())
-                .and_then(|s| mylog::ColorMode::from_str(&s))
-                .unwrap_or(mylog::ColorMode::Auto),
-        )
-        .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or_else(|_| "info".to_owned()))
-        .build();
-    h.clone().install().unwrap();
+    tracing_setup::install();
 
     // Get the program name from the OS (e.g. if invoked as `target/debug/nvr`: `nvr`),
     // falling back to the crate name if conversion to a path/UTF-8 string fails.
@@ -127,13 +83,6 @@ fn main() {
         .and_then(OsStr::to_str)
         .unwrap_or(env!("CARGO_PKG_NAME"));
 
-    let use_panic_hook = ::std::env::var("MOONFIRE_PANIC_HOOK")
-        .map(|s| s != "false" && s != "0")
-        .unwrap_or(true);
-    if use_panic_hook {
-        std::panic::set_hook(Box::new(&panic_hook));
-    }
-
     let args = match args()
         .fallback_to_usage()
         .run_inner(bpaf::Args::current_args().set_name(progname))
@@ -141,13 +90,9 @@ fn main() {
         Ok(a) => a,
         Err(e) => std::process::exit(e.exit_code()),
     };
-    log::trace!("Parsed command-line arguments: {args:#?}");
+    tracing::trace!("Parsed command-line arguments: {args:#?}");
 
-    let r = {
-        let _a = h.async_scope();
-        args.run()
-    };
-    match r {
+    match args.run() {
         Err(e) => {
             error!("Exiting due to error: {}", base::prettify_failure(&e));
             ::std::process::exit(1);

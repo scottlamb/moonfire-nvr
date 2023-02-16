@@ -11,12 +11,12 @@ use crate::{recording, SqlUuid};
 use base::bail_t;
 use failure::{bail, format_err, Error};
 use fnv::FnvHashMap;
-use log::debug;
 use rusqlite::{params, Connection, Transaction};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::TryFrom;
 use std::ops::Range;
+use tracing::debug;
 use uuid::Uuid;
 
 /// All state associated with signals. This is the entry point to this module.

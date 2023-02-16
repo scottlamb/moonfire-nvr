@@ -5,9 +5,9 @@
 /// Upgrades a version 6 schema to a version 7 schema.
 use failure::{format_err, Error, ResultExt};
 use fnv::FnvHashMap;
-use log::debug;
 use rusqlite::{named_params, params};
 use std::{convert::TryFrom, path::PathBuf};
+use tracing::debug;
 use url::Url;
 use uuid::Uuid;
 

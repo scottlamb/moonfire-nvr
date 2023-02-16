@@ -4,9 +4,9 @@
 
 use db::dir;
 use failure::{Error, Fail};
-use log::info;
 use nix::fcntl::FlockArg;
 use std::path::Path;
+use tracing::info;
 
 pub mod check;
 pub mod config;

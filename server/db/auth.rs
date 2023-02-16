@@ -9,7 +9,6 @@ use crate::schema::Permissions;
 use base::{bail_t, format_err_t, strutil, ErrorKind, ResultExt as _};
 use failure::{bail, format_err, Error, Fail, ResultExt as _};
 use fnv::FnvHashMap;
-use log::info;
 use protobuf::Message;
 use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::{named_params, params, Connection, Transaction};
@@ -19,6 +18,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Mutex;
+use tracing::info;
 
 static PARAMS: once_cell::sync::Lazy<Mutex<scrypt::Params>> =
     once_cell::sync::Lazy::new(|| Mutex::new(scrypt::Params::recommended()));

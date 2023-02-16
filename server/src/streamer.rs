@@ -6,10 +6,10 @@ use crate::stream;
 use base::clock::{Clocks, TimerGuard};
 use db::{dir, recording, writer, Camera, Database, Stream};
 use failure::{bail, format_err, Error};
-use log::{debug, info, trace, warn};
 use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::{debug, info, trace, warn, Instrument};
 use url::Url;
 
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
@@ -78,7 +78,7 @@ where
             match retina::client::Transport::from_str(&s.config.rtsp_transport) {
                 Ok(t) => Some(t),
                 Err(_) => {
-                    log::warn!(
+                    tracing::warn!(
                         "Unable to parse configured transport {:?} for {}/{}; ignoring.",
                         &s.config.rtsp_transport,
                         &c.short_name,
@@ -116,22 +116,20 @@ where
     /// the context of a multithreaded tokio runtime with IO and time enabled.
     pub fn run(&mut self) {
         while self.shutdown_rx.check().is_ok() {
-            if let Err(e) = self.run_once() {
+            if let Err(err) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
                 warn!(
-                    "{}: sleeping for {} after error: {}",
-                    self.short_name,
-                    sleep_time,
-                    base::prettify_failure(&e)
+                    err = base::prettify_failure(&err),
+                    "sleeping for 1 s after error"
                 );
                 self.db.clocks().sleep(sleep_time);
             }
         }
-        info!("{}: shutting down", self.short_name);
+        info!("shutting down");
     }
 
     fn run_once(&mut self) -> Result<(), Error> {
-        info!("{}: Opening input: {}", self.short_name, self.url.as_str());
+        info!(url = %self.url, "opening input");
         let clocks = self.db.clocks();
 
         let handle = tokio::runtime::Handle::current();
@@ -139,29 +137,31 @@ where
         loop {
             let status = self.session_group.stale_sessions();
             if let Some(max_expires) = status.max_expires {
-                log::info!(
-                    "{}: waiting up to {:?} for TEARDOWN or expiration of {} stale sessions",
-                    &self.short_name,
+                tracing::info!(
+                    "waiting up to {:?} for TEARDOWN or expiration of {} stale sessions",
                     max_expires.saturating_duration_since(tokio::time::Instant::now()),
                     status.num_sessions
                 );
-                handle.block_on(async {
-                    tokio::select! {
-                        _ = self.session_group.await_stale_sessions(&status) => Ok(()),
-                        _ = self.shutdown_rx.as_future() => Err(base::shutdown::ShutdownError),
+                handle.block_on(
+                    async {
+                        tokio::select! {
+                            _ = self.session_group.await_stale_sessions(&status) => Ok(()),
+                            _ = self.shutdown_rx.as_future() => Err(base::shutdown::ShutdownError),
+                        }
                     }
-                })?;
+                    .in_current_span(),
+                )?;
                 waited = true;
             } else {
                 if waited {
-                    log::info!("{}: done waiting; no more stale sessions", &self.short_name);
+                    tracing::info!("done waiting; no more stale sessions");
                 }
                 break;
             }
         }
 
         let mut stream = {
-            let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url.as_str()));
+            let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url));
             let options = stream::Options {
                 session: retina::client::SessionOptions::default()
                     .creds(if self.username.is_empty() {
@@ -208,14 +208,14 @@ where
             if !seen_key_frame && !frame.is_key {
                 continue;
             } else if !seen_key_frame {
-                debug!("{}: have first key frame", self.short_name);
+                debug!("have first key frame");
                 seen_key_frame = true;
             }
             let frame_realtime = clocks.monotonic() + realtime_offset;
             let local_time = recording::Time::new(frame_realtime);
             rotate = if let Some(r) = rotate {
                 if frame_realtime.sec > r && frame.is_key {
-                    trace!("{}: close on normal rotation", self.short_name);
+                    trace!("close on normal rotation");
                     let _t = TimerGuard::new(&clocks, || "closing writer");
                     w.close(Some(frame.pts), None)?;
                     None
@@ -223,7 +223,7 @@ where
                     if !frame.is_key {
                         bail!("parameter change on non-key frame");
                     }
-                    trace!("{}: close on parameter change", self.short_name);
+                    trace!("close on parameter change");
                     video_sample_entry_id = {
                         let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
                         self.db
@@ -288,11 +288,11 @@ mod tests {
     use base::clock::{self, Clocks};
     use db::{recording, testutil, CompositeId};
     use failure::{bail, Error};
-    use log::trace;
     use std::cmp;
     use std::convert::TryFrom;
     use std::sync::Arc;
     use std::sync::Mutex;
+    use tracing::trace;
 
     struct ProxyingStream {
         clocks: clock::SimulatedClocks,

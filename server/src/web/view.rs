@@ -7,7 +7,6 @@
 use base::bail_t;
 use db::recording::{self, rescale};
 use http::{Request, StatusCode};
-use log::trace;
 use nom::bytes::complete::{tag, take_while1};
 use nom::combinator::{all_consuming, map, map_res, opt};
 use nom::sequence::{preceded, tuple};
@@ -17,6 +16,7 @@ use std::cmp;
 use std::convert::TryFrom;
 use std::ops::Range;
 use std::str::FromStr;
+use tracing::trace;
 use url::form_urlencoded;
 use uuid::Uuid;
 

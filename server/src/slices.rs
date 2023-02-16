@@ -4,13 +4,15 @@
 
 //! Tools for implementing a `http_serve::Entity` body composed from many "slices".
 
+use std::fmt;
+use std::ops::Range;
+use std::pin::Pin;
+
 use crate::body::{wrap_error, BoxedError};
 use base::format_err_t;
 use failure::{bail, Error};
 use futures::{stream, stream::StreamExt, Stream};
-use std::fmt;
-use std::ops::Range;
-use std::pin::Pin;
+use tracing_futures::Instrument;
 
 /// Gets a byte range given a context argument.
 /// Each `Slice` instance belongs to a single `Slices`.
@@ -173,7 +175,7 @@ where
                 futures::future::ready(Some((Pin::from(body), (c, i + 1, 0, min_end))))
             },
         );
-        Box::new(bodies.flatten())
+        Box::new(bodies.flatten().in_current_span())
     }
 }
 

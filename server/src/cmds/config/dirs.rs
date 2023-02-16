@@ -9,12 +9,12 @@ use cursive::Cursive;
 use cursive::{views, With};
 use db::writer;
 use failure::Error;
-use log::{debug, trace};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+use tracing::{debug, trace};
 
 use super::tab_complete::TabCompleteEditView;
 

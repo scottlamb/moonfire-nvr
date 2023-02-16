@@ -6,7 +6,6 @@
 
 use base::time::{Duration, Time, TIME_UNITS_PER_SEC};
 use failure::Error;
-use log::{error, trace};
 use smallvec::SmallVec;
 use std::cmp;
 use std::collections::BTreeMap;
@@ -14,6 +13,7 @@ use std::convert::TryFrom;
 use std::io::Write;
 use std::ops::Range;
 use std::str;
+use tracing::{error, trace};
 
 /// A calendar day in `YYYY-mm-dd` format.
 #[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]

@@ -7,9 +7,9 @@
 use crate::coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
 use crate::db;
 use failure::{bail, Error};
-use log::trace;
 use std::convert::TryFrom;
 use std::ops::Range;
+use tracing::trace;
 
 pub use base::time::TIME_UNITS_PER_SEC;
 

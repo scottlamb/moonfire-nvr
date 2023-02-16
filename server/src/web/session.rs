@@ -6,8 +6,8 @@
 
 use db::auth;
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
-use log::{info, warn};
 use memchr::memchr;
+use tracing::{info, warn};
 
 use crate::json;
 
@@ -18,14 +18,17 @@ use super::{
 use std::convert::TryFrom;
 
 impl Service {
-    pub(super) async fn login(&self, mut req: Request<::hyper::Body>) -> ResponseResult {
+    pub(super) async fn login(
+        &self,
+        mut req: Request<::hyper::Body>,
+        authreq: auth::Request,
+    ) -> ResponseResult {
         if *req.method() != Method::POST {
             return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
         }
         let r = extract_json_body(&mut req).await?;
         let r: json::LoginRequest =
             serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
-        let authreq = self.authreq(&req);
         let host = req
             .headers()
             .get(header::HOST)
@@ -69,7 +72,11 @@ impl Service {
             .unwrap())
     }
 
-    pub(super) async fn logout(&self, mut req: Request<hyper::Body>) -> ResponseResult {
+    pub(super) async fn logout(
+        &self,
+        mut req: Request<hyper::Body>,
+        authreq: auth::Request,
+    ) -> ResponseResult {
         if *req.method() != Method::POST {
             return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
         }
@@ -79,7 +86,6 @@ impl Service {
 
         let mut res = Response::new(b""[..].into());
         if let Some(sid) = extract_sid(&req) {
-            let authreq = self.authreq(&req);
             let mut l = self.db.lock();
             let hash = sid.hash();
             let need_revoke = match l.authenticate_session(authreq.clone(), &hash) {
@@ -142,7 +148,7 @@ fn encode_sid(sid: db::RawSessionId, flags: i32) -> String {
 mod tests {
     use db::testutil;
     use fnv::FnvHashMap;
-    use log::info;
+    use tracing::info;
 
     use crate::web::tests::Server;
 

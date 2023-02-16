@@ -6,9 +6,9 @@
 use crate::db;
 use crate::recording;
 use failure::Error;
-use log::warn;
 use rusqlite::{named_params, params};
 use std::collections::HashMap;
+use tracing::warn;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     // These create statements match the schema.sql when version 1 was the latest.

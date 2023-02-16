@@ -38,10 +38,7 @@ pub const TEST_VIDEO_SAMPLE_ENTRY_DATA: &[u8] =
 ///    * use a fast but insecure password hashing format.
 pub fn init() {
     INIT.call_once(|| {
-        let h = mylog::Builder::new()
-            .set_spec(&::std::env::var("MOONFIRE_LOG").unwrap_or_else(|_| "info".to_owned()))
-            .build();
-        h.install().unwrap();
+        // TODO: tracing setup.
         env::set_var("TZ", "America/Los_Angeles");
         time::tzset();
         crate::auth::set_test_config();

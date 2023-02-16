@@ -10,13 +10,13 @@ use crate::db::SqlUuid;
 use crate::{dir, schema};
 use cstr::cstr;
 use failure::{bail, Error, Fail};
-use log::info;
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
 use protobuf::Message;
 use rusqlite::params;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
+use tracing::info;
 use uuid::Uuid;
 
 const FIXED_DIR_META_LEN: usize = 512;

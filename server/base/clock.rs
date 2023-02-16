@@ -5,13 +5,13 @@
 //! Clock interface and implementations for testability.
 
 use failure::Error;
-use log::warn;
 use std::mem;
 use std::sync::Mutex;
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration as StdDuration;
 use time::{Duration, Timespec};
+use tracing::warn;
 
 use crate::shutdown::ShutdownError;
 
@@ -54,9 +54,8 @@ where
         shutdown_rx.check()?;
         let sleep_time = Duration::seconds(1);
         warn!(
-            "sleeping for {} after error: {}",
-            sleep_time,
-            crate::error::prettify_failure(&e)
+            err = crate::error::prettify_failure(&e),
+            "sleeping for 1 s after error"
         );
         clocks.sleep(sleep_time);
     }
