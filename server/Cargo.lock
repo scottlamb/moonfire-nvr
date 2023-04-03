@@ -1109,7 +1109,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slab",
- "time 0.1.45",
+ "time 0.3.17",
 ]
 
 [[package]]
@@ -1145,7 +1145,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "tempfile",
- "time 0.1.45",
+ "time 0.3.17",
  "tokio",
  "url",
  "uuid",
@@ -1192,7 +1192,7 @@ dependencies = [
  "smallvec",
  "sync_wrapper",
  "tempfile",
- "time 0.1.45",
+ "time 0.3.17",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
