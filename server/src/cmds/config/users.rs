@@ -127,9 +127,7 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
         let l = db.lock();
         let u = item.map(|id| l.users_by_id().get(&id).unwrap());
         username = u.map(|u| u.username.clone()).unwrap_or_default();
-        id_str = item
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| "<new>".to_string());
+        id_str = item.map_or_else(|| "<new>".to_string(), |id| id.to_string());
         has_password = u.map(|u| u.has_password()).unwrap_or(false);
         permissions = u.map(|u| u.permissions.clone()).unwrap_or_default();
     }
@@ -138,7 +136,7 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
         .child(
             "username",
             views::EditView::new()
-                .content(username.clone())
+                .content(&username)
                 .with_name("username"),
         );
     let mut layout = views::LinearLayout::vertical()
