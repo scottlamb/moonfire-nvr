@@ -198,7 +198,7 @@ pub struct NewLimit {
 /// This is expected to be performed from `moonfire-nvr config` when no syncer is running.
 /// It potentially flushes the database twice (before and after the actual deletion).
 pub fn lower_retention(
-    db: Arc<db::Database>,
+    db: &Arc<db::Database>,
     dir_id: i32,
     limits: &[NewLimit],
 ) -> Result<(), Error> {
