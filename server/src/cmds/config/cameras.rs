@@ -343,7 +343,10 @@ fn press_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, name: String
         ))
         .button("Delete", {
             let db = db.clone();
-            move |s| actually_delete(s, &db, id)
+            move |s| {
+                s.pop_layer();
+                actually_delete(s, &db, id);
+            }
         })
     }
     .title("Delete camera")
