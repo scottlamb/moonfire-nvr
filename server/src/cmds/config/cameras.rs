@@ -673,7 +673,8 @@ pub fn top_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
                         .iter()
                         .map(|(&id, camera)| (format!("{}: {}", id, camera.short_name), Some(id))),
                 )
-                .full_width(),
+                .full_width()
+                .scrollable(),
         )
         .dismiss_button("Done")
         .title("Edit cameras"),
