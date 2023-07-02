@@ -5,8 +5,8 @@
 use base::strutil::{decode_size, encode_size};
 use cursive::traits::{Nameable, Resizable};
 use cursive::view::Scrollable;
-use cursive::views;
 use cursive::Cursive;
+use cursive::{views, With};
 use db::writer;
 use failure::Error;
 use log::{debug, trace};
@@ -15,6 +15,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use super::tab_complete::TabCompleteEditView;
 
 struct Stream {
     label: String,
@@ -217,19 +219,47 @@ pub fn top_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
     );
 }
 
+fn tab_completer(content: &str) -> Box<[String]> {
+    let (parent, final_segment) = content.split_at(content.rfind('/').map(|i| i + 1).unwrap_or(0));
+    Path::new(parent)
+        .read_dir()
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if entry.file_type().ok()?.is_dir()
+                && entry.file_name().to_str()?.starts_with(final_segment)
+            {
+                Some(entry.path().as_os_str().to_str()?.to_owned() + "/")
+            } else {
+                None
+            }
+        })
+        .collect::<Box<[String]>>()
+        .with(|completions| {
+            // Sort ignoring initial dot
+            completions.sort_by(|a, b| {
+                a.strip_prefix('.')
+                    .unwrap_or(a)
+                    .cmp(b.strip_prefix('.').unwrap_or(b))
+            })
+        })
+}
+
 fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
     siv.add_layer(
         views::Dialog::around(
             views::LinearLayout::vertical()
                 .child(views::TextView::new("path"))
                 .child(
-                    views::EditView::new()
-                        .on_submit({
-                            let db = db.clone();
-                            move |siv, path| add_dir(&db, siv, path.as_ref())
-                        })
-                        .with_name("path")
-                        .fixed_width(60),
+                    TabCompleteEditView::new(views::EditView::new().on_submit({
+                        let db = db.clone();
+                        move |siv, path| add_dir(&db, siv, path.as_ref())
+                    }))
+                    .on_tab_complete(tab_completer)
+                    .with_name("path")
+                    .fixed_width(60),
                 ),
         )
         .button("Add", {

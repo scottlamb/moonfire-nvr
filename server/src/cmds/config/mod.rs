@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 mod cameras;
 mod dirs;
+mod tab_complete;
 mod users;
 
 /// Interactively edits configuration.
