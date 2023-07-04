@@ -14,7 +14,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 ## unreleased
 
 *   new log formats using `tracing`. This will allow richer context information.
-*   bump minimum Rust version to 1.65.
+*   bump minimum Rust version to 1.70.
 *   expect camelCase in `moonfire-nvr.toml` file, for consistency with the JSON
     API. You'll need to adjust your config file when upgrading.
 *   use Retina 0.4.5.
