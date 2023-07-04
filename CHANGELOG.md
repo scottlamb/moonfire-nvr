@@ -13,7 +13,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 
 ## unreleased
 
-*   bump minimum Rust version to 1.64.
+*   bump minimum Rust version to 1.65.
 *   expect camelCase in `moonfire-nvr.toml` file, for consistency with the JSON
     API. You'll need to adjust your config file when upgrading.
 *   use Retina 0.4.4.
