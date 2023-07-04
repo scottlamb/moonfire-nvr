@@ -195,9 +195,7 @@ unsafe impl Sync for OpenFile {}
 
 impl Drop for OpenFile {
     fn drop(&mut self) {
-        if let Err(e) =
-            unsafe { nix::sys::mman::munmap(self.map_ptr as *mut std::ffi::c_void, self.map_len) }
-        {
+        if let Err(e) = unsafe { nix::sys::mman::munmap(self.map_ptr, self.map_len) } {
             // This should never happen.
             log::error!(
                 "unable to munmap {}, {:?} len {}: {}",
@@ -344,7 +342,7 @@ impl ReaderInt {
 
         if let Err(e) = unsafe {
             nix::sys::mman::madvise(
-                map_ptr as *mut libc::c_void,
+                map_ptr,
                 map_len.get(),
                 nix::sys::mman::MmapAdvise::MADV_SEQUENTIAL,
             )
