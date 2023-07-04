@@ -219,7 +219,7 @@ pub fn top_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
     );
 }
 
-fn tab_completer(content: &str) -> Box<[String]> {
+fn tab_completer(content: &str) -> Vec<String> {
     let (parent, final_segment) = content.split_at(content.rfind('/').map(|i| i + 1).unwrap_or(0));
     Path::new(parent)
         .read_dir()
@@ -236,7 +236,7 @@ fn tab_completer(content: &str) -> Box<[String]> {
                 None
             }
         })
-        .collect::<Box<[String]>>()
+        .collect::<Vec<_>>()
         .with(|completions| {
             // Sort ignoring initial dot
             completions.sort_by(|a, b| {
