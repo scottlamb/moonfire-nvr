@@ -6,10 +6,10 @@ use cursive::{
     menu,
     view::CannotFocus,
     views::{self, EditView, MenuPopup},
-    Printer, Rect, Vec2, View,
+    Printer, Rect, Vec2, View, With,
 };
 
-type TabCompleteFn = Rc<dyn Fn(&str) -> Box<[String]>>;
+type TabCompleteFn = Rc<dyn Fn(&str) -> Vec<String>>;
 
 pub struct TabCompleteEditView {
     edit_view: Rc<RefCell<EditView>>,
@@ -24,7 +24,7 @@ impl TabCompleteEditView {
         }
     }
 
-    pub fn on_tab_complete(mut self, handler: impl Fn(&str) -> Box<[String]> + 'static) -> Self {
+    pub fn on_tab_complete(mut self, handler: impl Fn(&str) -> Vec<String> + 'static) -> Self {
         self.tab_completer = Some(Rc::new(handler));
         self
     }
@@ -76,14 +76,14 @@ fn tab_complete(
         [..] => {
             siv.add_layer(TabCompletePopup {
                 popup: views::MenuPopup::new(Rc::new({
-                    let mut tree = menu::Tree::new();
-                    for completion in Vec::from(completions) {
-                        let edit_view = edit_view.clone();
-                        tree.add_leaf(&completion.clone(), move |siv| {
-                            edit_view.borrow_mut().set_content(&completion)(siv)
-                        })
-                    }
-                    tree
+                    menu::Tree::new().with(|tree| {
+                        for completion in completions {
+                            let edit_view = edit_view.clone();
+                            tree.add_leaf(&completion.clone(), move |siv| 
+                                edit_view.borrow_mut().set_content(&completion)(siv)
+                            )
+                        }
+                    })
                 })),
                 edit_view,
                 tab_completer,
