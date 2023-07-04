@@ -368,7 +368,7 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
             for (&stream_id, stream) in l.streams_by_id() {
                 if stream.camera_id == id {
                     let Some(dir_id) = stream.sample_file_dir_id else {
-                        continue
+                        continue;
                     };
                     let l = zero_limits
                         .entry(dir_id)

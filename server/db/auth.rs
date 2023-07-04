@@ -17,17 +17,41 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::OnceLock;
 use tracing::info;
 
-static PARAMS: once_cell::sync::Lazy<Mutex<scrypt::Params>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(scrypt::Params::recommended()));
+/// Wrapper around [`scrypt::Params`].
+///
+/// `scrypt::Params` does not implement `PartialEq`; so for the benefit of `set_test_config`
+/// error handling, keep track of whether these params are the recommended
+/// production ones or the cheap test ones.
+struct Params {
+    actual: scrypt::Params,
+    is_test: bool,
+}
+
+static PARAMS: OnceLock<Params> = OnceLock::new();
+
+fn params() -> &'static Params {
+    PARAMS.get_or_init(|| Params {
+        actual: scrypt::Params::recommended(),
+        is_test: false,
+    })
+}
 
 /// For testing only: use fast but insecure hashes.
 /// Call via `testutil::init()`.
 pub(crate) fn set_test_config() {
-    let params = scrypt::Params::new(8, 8, 1).unwrap();
-    *PARAMS.lock().unwrap() = params;
+    let test_params = scrypt::Params::new(8, 8, 1).expect("test params should be valid");
+    if let Err(existing_params) = PARAMS.set(Params {
+        actual: test_params,
+        is_test: true,
+    }) {
+        assert!(
+            existing_params.is_test,
+            "set_test_config must be called before any use of the parameters"
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -126,9 +150,9 @@ impl UserChange {
 
     pub fn set_password(&mut self, pwd: String) {
         let salt = SaltString::generate(&mut scrypt::password_hash::rand_core::OsRng);
-        let params = *PARAMS.lock().unwrap();
+        let params = params();
         let hash = scrypt::Scrypt
-            .hash_password_customized(pwd.as_bytes(), None, None, params, &salt)
+            .hash_password_customized(pwd.as_bytes(), None, None, params.actual, &salt)
             .unwrap();
         self.set_password_hash = Some(Some(hash.to_string()));
     }

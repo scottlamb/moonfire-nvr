@@ -3028,8 +3028,7 @@ mod bench {
         }
     }
 
-    static SERVER: once_cell::sync::Lazy<BenchServer> =
-        once_cell::sync::Lazy::new(BenchServer::new);
+    static SERVER: std::sync::OnceLock<BenchServer> = std::sync::OnceLock::new();
 
     #[bench]
     fn build_index(b: &mut test::Bencher) {
@@ -3063,7 +3062,7 @@ mod bench {
     #[bench]
     fn serve_generated_bytes(b: &mut test::Bencher) {
         testutil::init();
-        let server = &*SERVER;
+        let server = server.get_or_init(BenchServer::new);
         let p = server.generated_len;
         b.bytes = p;
         let client = reqwest::Client::new();
