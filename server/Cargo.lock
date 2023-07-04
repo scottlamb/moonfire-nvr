@@ -1690,9 +1690,9 @@ dependencies = [
 
 [[package]]
 name = "retina"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5c9340b86c0e462a124be2c32a96b102d8b06f8dd9e107b5ab5d25730b61b09"
+checksum = "1b8c5ef4eec9b0c6178ac107e1a533bbc5d2ff6a90f8aabd000d71e119c42d96"
 dependencies = [
  "base64",
  "bitstream-io",
@@ -1744,9 +1744,9 @@ dependencies = [
 
 [[package]]
 name = "rtsp-types"
-version = "0.0.3"
+version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b668122d4d00c479c08fb2a0a253669832606ccca80832a6b99bb5288ab4f75"
+checksum = "2a1aec90dc5d8dec85c14032885770801439acb1651b2f166745ce482a2ddeaf"
 dependencies = [
  "cookie-factory",
  "nom",

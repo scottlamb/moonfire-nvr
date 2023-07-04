@@ -16,10 +16,12 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   bump minimum Rust version to 1.64.
 *   expect camelCase in `moonfire-nvr.toml` file, for consistency with the JSON
     API. You'll need to adjust your config file when upgrading.
-*   use Retina 0.4.4.
+*   use Retina 0.4.5.
     * This version is newly compatible with rtsp-simple-server v0.19.3 and some
       TP-Link cameras. Fixes [#238](https://github.com/scottlamb/moonfire-nvr/issues/238).
     * Fixes problems connecting to cameras that use RTP extensions.
+    * Fixes problems with Longse cameras
+      [scottlamb/retina#77](https://github.com/scottlamb/retina/pull/77).
 *   expanded API interface for examining and updating users:
     *   `admin_users` permission for operating on arbitrary users.
     *   `GET /users/` endpoint to list users
