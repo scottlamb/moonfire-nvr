@@ -21,14 +21,10 @@ mod users;
 
 /// Interactively edits configuration.
 #[derive(Bpaf, Debug)]
-#[bpaf(options)]
+#[bpaf(command("config"))]
 pub struct Args {
     #[bpaf(external(crate::parse_db_dir))]
     db_dir: PathBuf,
-}
-
-pub fn subcommand() -> impl bpaf::Parser<Args> {
-    crate::subcommand(args(), "config")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {

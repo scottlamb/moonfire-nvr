@@ -6,7 +6,9 @@
 
 use bpaf::{Bpaf, Parser};
 use log::{debug, error};
+use std::ffi::OsStr;
 use std::fmt::Write;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 mod body;
@@ -19,30 +21,6 @@ mod stream;
 mod streamer;
 mod web;
 
-/// The program name, taken from the OS-provided arguments if available.
-///
-/// E.g. if invoked as `target/debug/nvr`, should return `nvr`.
-static PROGNAME: once_cell::sync::Lazy<&'static str> = once_cell::sync::Lazy::new(|| {
-    std::env::args_os()
-        .next()
-        .and_then(|p| {
-            let p = std::path::PathBuf::from(p);
-            p.file_name().and_then(|f| {
-                f.to_str()
-                    .map(|s| &*Box::leak(s.to_owned().into_boxed_str()))
-            })
-        })
-        .unwrap_or(env!("CARGO_PKG_NAME"))
-});
-
-fn subcommand<T: 'static>(
-    parser: bpaf::OptionParser<T>,
-    cmd: &'static str,
-) -> impl bpaf::Parser<T> {
-    let usage = format!("Usage: {progname} {cmd} {{usage}}", progname = *PROGNAME);
-    parser.usage(Box::leak(usage.into_boxed_str())).command(cmd)
-}
-
 const DEFAULT_DB_DIR: &str = "/var/lib/moonfire-nvr/db";
 
 /// Moonfire NVR: security camera network video recorder.
@@ -50,14 +28,14 @@ const DEFAULT_DB_DIR: &str = "/var/lib/moonfire-nvr/db";
 #[bpaf(options, version)]
 enum Args {
     // See docstrings of `cmds::*::Args` structs for a description of the respective subcommands.
-    Check(#[bpaf(external(cmds::check::subcommand))] cmds::check::Args),
-    Config(#[bpaf(external(cmds::config::subcommand))] cmds::config::Args),
-    Init(#[bpaf(external(cmds::init::subcommand))] cmds::init::Args),
-    Login(#[bpaf(external(cmds::login::subcommand))] cmds::login::Args),
-    Run(#[bpaf(external(cmds::run::subcommand))] cmds::run::Args),
-    Sql(#[bpaf(external(cmds::sql::subcommand))] cmds::sql::Args),
-    Ts(#[bpaf(external(cmds::ts::subcommand))] cmds::ts::Args),
-    Upgrade(#[bpaf(external(cmds::upgrade::subcommand))] cmds::upgrade::Args),
+    Check(#[bpaf(external(cmds::check::args))] cmds::check::Args),
+    Config(#[bpaf(external(cmds::config::args))] cmds::config::Args),
+    Init(#[bpaf(external(cmds::init::args))] cmds::init::Args),
+    Login(#[bpaf(external(cmds::login::args))] cmds::login::Args),
+    Run(#[bpaf(external(cmds::run::args))] cmds::run::Args),
+    Sql(#[bpaf(external(cmds::sql::args))] cmds::sql::Args),
+    Ts(#[bpaf(external(cmds::ts::args))] cmds::ts::Args),
+    Upgrade(#[bpaf(external(cmds::upgrade::args))] cmds::upgrade::Args),
 }
 
 impl Args {
@@ -75,14 +53,12 @@ impl Args {
     }
 }
 
-fn parse_db_dir() -> impl Parser<std::path::PathBuf> {
+fn parse_db_dir() -> impl Parser<PathBuf> {
     bpaf::long("db-dir")
-        .help(format!(
-            "Directory holding the SQLite3 index database.\nDefault: `{}`",
-            DEFAULT_DB_DIR
-        ))
-        .argument::<std::path::PathBuf>("PATH")
-        .fallback_with(|| Ok::<_, std::convert::Infallible>(DEFAULT_DB_DIR.into()))
+        .help("Directory holding the SQLite3 index database.")
+        .argument::<PathBuf>("PATH")
+        .fallback(DEFAULT_DB_DIR.into())
+        .debug_fallback()
 }
 
 /// Custom panic hook that logs instead of directly writing to stderr.
@@ -141,19 +117,15 @@ fn main() {
         .build();
     h.clone().install().unwrap();
 
-    let args = args().usage(Box::leak(
-        format!("Usage: {progname} {{usage}}", progname = *PROGNAME).into_boxed_str(),
-    ));
-
-    // TODO: remove this when bpaf adds more direct support for defaulting to `--help`.
-    // See discussion: <https://github.com/pacak/bpaf/discussions/165>.
-    if std::env::args_os().len() < 2 {
-        std::process::exit(
-            args.run_inner(bpaf::Args::from(&["--help"]))
-                .unwrap_err()
-                .exit_code(),
-        );
-    }
+    // Get the program name from the OS (e.g. if invoked as `target/debug/nvr`: `nvr`),
+    // falling back to the crate name if conversion to a path/UTF-8 string fails.
+    // `bpaf`'s default logic is similar but doesn't have the fallback.
+    let progname = std::env::args_os().next().map(PathBuf::from);
+    let progname = progname
+        .as_deref()
+        .and_then(Path::file_name)
+        .and_then(OsStr::to_str)
+        .unwrap_or(env!("CARGO_PKG_NAME"));
 
     let use_panic_hook = ::std::env::var("MOONFIRE_PANIC_HOOK")
         .map(|s| s != "false" && s != "0")
@@ -162,7 +134,13 @@ fn main() {
         std::panic::set_hook(Box::new(&panic_hook));
     }
 
-    let args = args.run();
+    let args = match args()
+        .fallback_to_usage()
+        .run_inner(bpaf::Args::current_args().set_name(progname))
+    {
+        Ok(a) => a,
+        Err(e) => std::process::exit(e.exit_code()),
+    };
     log::trace!("Parsed command-line arguments: {args:#?}");
 
     let r = {

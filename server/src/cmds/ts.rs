@@ -7,7 +7,7 @@ use failure::Error;
 
 /// Translates between integer and human-readable timestamps.
 #[derive(Bpaf, Debug)]
-#[bpaf(options)]
+#[bpaf(command("config"))]
 pub struct Args {
     /// Timestamp(s) to translate.
     ///
@@ -17,10 +17,6 @@ pub struct Args {
     /// E.g.: `142913484000000`, `2020-04-26`, `2020-04-26T12:00:00:00000-07:00`.
     #[bpaf(positional("TS"), some("must specify at least one timestamp"))]
     timestamps: Vec<String>,
-}
-
-pub fn subcommand() -> impl bpaf::Parser<Args> {
-    crate::subcommand(args(), "ts")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {

@@ -9,14 +9,10 @@ use std::path::PathBuf;
 
 /// Initializes a database.
 #[derive(Bpaf, Debug)]
-#[bpaf(options)]
+#[bpaf(command("init"))]
 pub struct Args {
     #[bpaf(external(crate::parse_db_dir))]
     db_dir: PathBuf,
-}
-
-pub fn subcommand() -> impl bpaf::Parser<Args> {
-    crate::subcommand(args(), "init")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 /// Checks database integrity (like fsck).
 #[derive(Bpaf, Debug)]
-#[bpaf(options)]
+#[bpaf(command("check"))]
 pub struct Args {
     #[bpaf(external(crate::parse_db_dir))]
     db_dir: PathBuf,
@@ -20,27 +20,20 @@ pub struct Args {
     compare_lens: bool,
 
     /// Trashes sample files without matching recording rows in the database.
-    /// This addresses `Missing ... row` errors.
-    ///
-    /// The ids are added to the `garbage` table to indicate the files need to
-    /// be deleted. Garbage is collected on normal startup.
+    /// This addresses `Missing ... row` errors. The ids are added to the
+    /// `garbage` table to indicate the files need to be deleted. Garbage is
+    /// collected on normal startup.
     trash_orphan_sample_files: bool,
 
     /// Deletes recording rows in the database without matching sample files.
-    ///
     /// This addresses `Recording ... missing file` errors.
     delete_orphan_rows: bool,
 
     /// Trashes recordings when their database rows appear corrupt.
-    /// This addresses "bad video_index" errors.
-    ///
-    /// The ids are added to the `garbage` table to indicate their files need to
-    /// be deleted. Garbage is collected on normal startup.
+    /// This addresses "bad video_index" errors. The ids are added to the
+    /// `garbage` table to indicate their files need to be deleted. Garbage is
+    /// collected on normal startup.
     trash_corrupt_rows: bool,
-}
-
-pub fn subcommand() -> impl bpaf::Parser<Args> {
-    crate::subcommand(args(), "check")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {
