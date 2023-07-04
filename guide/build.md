@@ -208,7 +208,7 @@ following command:
 $ brew install node
 ```
 
-Next, you need Rust 1.64+ and Cargo. The easiest way to install them is by
+Next, you need Rust 1.65+ and Cargo. The easiest way to install them is by
 following the instructions at [rustup.rs](https://www.rustup.rs/). Avoid
 your Linux distribution's Rust packages, which tend to be too old.
 (At least on Debian-based systems; Arch and Gentoo might be okay.)
