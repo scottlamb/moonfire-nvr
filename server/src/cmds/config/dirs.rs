@@ -4,6 +4,7 @@
 
 use base::strutil::{decode_size, encode_size};
 use cursive::traits::{Nameable, Resizable};
+use cursive::view::Scrollable;
 use cursive::views;
 use cursive::Cursive;
 use db::writer;
@@ -423,7 +424,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
     siv.add_layer(
         views::Dialog::around(
             views::LinearLayout::vertical()
-                .child(list)
+                .child(list.scrollable())
                 .child(views::DummyView)
                 .child(buttons),
         )
