@@ -27,23 +27,16 @@ mod config;
 
 /// Runs the server, saving recordings and allowing web access.
 #[derive(Bpaf, Debug)]
-#[bpaf(options)]
+#[bpaf(command("run"))]
 pub struct Args {
-    /// Path to configuration file.
-    ///
-    /// default: `/etc/moonfire-nvr.toml`. See `ref/config.md` for config file documentation.
-    #[bpaf(short, long, argument("PATH"), fallback_with(|| Ok::<_, Error>("/etc/moonfire-nvr.toml".into())))]
+    /// Path to configuration file. See `ref/config.md` for config file documentation.
+    #[bpaf(short, long, argument("PATH"), fallback("/etc/moonfire-nvr.toml".into()), debug_fallback)]
     config: PathBuf,
 
     /// Opens the database in read-only mode and disables recording.
-    ///
     /// Note this is incompatible with session authentication; consider adding
     /// a bind with `allowUnauthenticatedPermissions` to your config.
     read_only: bool,
-}
-
-pub fn subcommand() -> impl bpaf::Parser<Args> {
-    crate::subcommand(args(), "run")
 }
 
 // These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).

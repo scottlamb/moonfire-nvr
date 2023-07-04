@@ -10,7 +10,7 @@ use failure::Error;
 
 /// Upgrades to the latest database schema.
 #[derive(Bpaf, Debug)]
-#[bpaf(options)]
+#[bpaf(command("upgrade"))]
 pub struct Args {
     #[bpaf(external(crate::parse_db_dir))]
     db_dir: std::path::PathBuf,
@@ -20,21 +20,14 @@ pub struct Args {
     sample_file_dir: Option<std::path::PathBuf>,
 
     /// Resets the SQLite journal_mode to the specified mode prior to
-    /// the upgrade.
-    ///
-    ///
-    /// default: `delete` (recommended). `off` is very dangerous but may be
-    /// desirable in some circumstances. See `guide/schema.md` for more
-    /// information. The journal mode will be reset to `wal` after the upgrade.
-    #[bpaf(argument("MODE"), fallback_with(|| Ok::<_, std::convert::Infallible>("delete".into())))]
+    /// the upgrade. `off` is very dangerous but may be desirable in some
+    /// circumstances. See `guide/schema.md` for more information. The journal
+    /// mode will be reset to `wal` after the upgrade.
+    #[bpaf(argument("MODE"), fallback("delete".to_owned()), debug_fallback)]
     preset_journal: String,
 
     /// Skips the normal post-upgrade vacuum operation.
     no_vacuum: bool,
-}
-
-pub fn subcommand() -> impl bpaf::Parser<Args> {
-    crate::subcommand(args(), "upgrade")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {

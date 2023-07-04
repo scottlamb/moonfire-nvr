@@ -14,7 +14,6 @@ use crate::json::Permissions;
 fn default_db_dir() -> PathBuf {
     crate::DEFAULT_DB_DIR.into()
 }
-
 fn default_ui_dir() -> PathBuf {
     "/usr/local/lib/moonfire-nvr/ui".into()
 }
@@ -27,7 +26,6 @@ pub struct ConfigFile {
     pub binds: Vec<BindConfig>,
 
     /// Directory holding the SQLite3 index database.
-    ///
     ///
     /// default: `/var/lib/moonfire-nvr/db`.
     #[serde(default = "default_db_dir")]

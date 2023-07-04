@@ -25,19 +25,16 @@ fn parse_flags(flags: String) -> Result<Vec<SessionFlag>, Error> {
 }
 
 /// Logs in a user, returning the session cookie.
-///
-///
 /// This is a privileged command that directly accesses the database. It doesn't check the
 /// user's password and even can be used to create sessions with permissions the user doesn't
 /// have.
 #[derive(Bpaf, Debug, PartialEq, Eq)]
-#[bpaf(options)]
+#[bpaf(command("login"))]
 pub struct Args {
     #[bpaf(external(crate::parse_db_dir))]
     db_dir: PathBuf,
 
     /// Creates a session with the given permissions, as a JSON object.
-    ///
     /// E.g. `{"viewVideo": true}`. See `ref/api.md` for a description of `Permissions`.
     /// If unspecified, uses user's default permissions.
     #[bpaf(argument::<String>("PERMS"), parse(parse_perms), optional)]
@@ -47,29 +44,24 @@ pub struct Args {
     #[bpaf(argument("DOMAIN"))]
     domain: Option<String>,
 
-    /// Writes the cookie to a new curl-compatible cookie-jar file.
-    ///
-    /// `--domain` must be specified. This file can be used later with curl's `--cookie` flag.
+    /// Writes the cookie to a new curl-compatible cookie-jar file. `--domain`
+    /// must be specified. This file can be used later with curl's `--cookie`
+    /// flag.
     #[bpaf(argument("PATH"))]
     curl_cookie_jar: Option<PathBuf>,
 
     /// Sets the given db::auth::SessionFlags.
-    ///
-    /// default: `http-only,secure,same-site,same-site-strict`.
     #[bpaf(
         argument::<String>("FLAGS"),
-        fallback_with(|| Ok::<_, std::convert::Infallible>("http-only,secure,same-site,same-site-strict".to_owned())),
-        parse(parse_flags),
+        fallback("http-only,secure,same-site,same-site-strict".to_string()),
+        debug_fallback,
+        parse(parse_flags)
     )]
     session_flags: Vec<SessionFlag>,
 
     /// Username to create a session for.
     #[bpaf(positional("USERNAME"))]
     username: String,
-}
-
-pub fn subcommand() -> impl bpaf::Parser<Args> {
-    crate::subcommand(args(), "login")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {
@@ -155,11 +147,14 @@ fn curl_cookie(cookie: &str, flags: i32, domain: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bpaf::Parser;
 
     #[test]
     fn parse_args() {
         let args = args()
+            .to_options()
             .run_inner(bpaf::Args::from(&[
+                "login",
                 "--permissions",
                 "{\"viewVideo\": true}",
                 "--session-flags",

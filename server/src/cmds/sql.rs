@@ -18,26 +18,20 @@ use std::process::Command;
 /// Note this locks the database to prevent simultaneous access with a running server. The
 /// server maintains cached state which could be invalidated otherwise.
 #[derive(Bpaf, Debug, PartialEq, Eq)]
-#[bpaf(options)]
+#[bpaf(command("sql"))]
 pub struct Args {
     #[bpaf(external(crate::parse_db_dir))]
     db_dir: PathBuf,
 
     /// Opens the database in read-only mode and locks it only for shared access.
-    ///
     /// This can be run simultaneously with `moonfire-nvr run --read-only`.
     read_only: bool,
 
     /// Arguments to pass to sqlite3.
-    ///
     /// Use the `--` separator to pass sqlite3 options, as in
     /// `moonfire-nvr sql -- -line 'select username from user'`.
     #[bpaf(positional)]
     arg: Vec<OsString>,
-}
-
-pub fn subcommand() -> impl bpaf::Parser<Args> {
-    crate::subcommand(args(), "sql")
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {
@@ -65,11 +59,14 @@ pub fn run(args: Args) -> Result<i32, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bpaf::Parser;
 
     #[test]
     fn parse_args() {
         let args = args()
+            .to_options()
             .run_inner(bpaf::Args::from(&[
+                "sql",
                 "--db-dir",
                 "/foo/bar",
                 "--",
