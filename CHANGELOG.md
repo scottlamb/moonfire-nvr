@@ -40,6 +40,8 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   get rid of live view's dreaded `ws close: 1006` error altogether. The live
     view WebSocket protocol now conveys errors in a way that allows the
     Javscript UI to see them.
+*   fix [#282](https://github.com/scottlamb/moonfire-nvr/issues/282):
+    sessions' last use information wasn't getting persisted.
 
 ## 0.7.5 (2022-05-09)
 

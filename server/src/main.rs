@@ -17,7 +17,6 @@ mod mp4;
 mod slices;
 mod stream;
 mod streamer;
-mod tracing_setup;
 mod web;
 
 const DEFAULT_DB_DIR: &str = "/var/lib/moonfire-nvr/db";
@@ -71,7 +70,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    tracing_setup::install();
+    base::tracing_setup::install();
 
     // Get the program name from the OS (e.g. if invoked as `target/debug/nvr`: `nvr`),
     // falling back to the crate name if conversion to a path/UTF-8 string fails.
