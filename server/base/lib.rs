@@ -7,5 +7,6 @@ mod error;
 pub mod shutdown;
 pub mod strutil;
 pub mod time;
+pub mod tracing_setup;
 
 pub use crate::error::{prettify_failure, Error, ErrorKind, ResultExt};

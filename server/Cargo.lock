@@ -1081,6 +1081,7 @@ dependencies = [
 name = "moonfire-base"
 version = "0.0.1"
 dependencies = [
+ "chrono",
  "failure",
  "futures",
  "libc",
@@ -1090,6 +1091,9 @@ dependencies = [
  "slab",
  "time 0.1.45",
  "tracing",
+ "tracing-core",
+ "tracing-log",
+ "tracing-subscriber",
 ]
 
 [[package]]

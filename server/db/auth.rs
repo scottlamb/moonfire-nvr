@@ -831,18 +831,20 @@ impl State {
                 ":id": &id,
             })?;
         }
-        for s in self.sessions.values() {
+        for (sh, s) in &self.sessions {
             if !s.dirty {
                 continue;
             }
             let addr = s.last_use.addr_buf();
             let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
-            s_stmt.execute(named_params! {
+            let cnt = s_stmt.execute(named_params! {
                 ":last_use_time_sec": &s.last_use.when_sec,
                 ":last_use_user_agent": &s.last_use.user_agent,
                 ":last_use_peer_addr": &addr,
                 ":use_count": &s.use_count,
+                ":hash": &sh.0[..],
             })?;
+            debug_assert_eq!(cnt, 1);
         }
         Ok(())
     }
@@ -1047,6 +1049,53 @@ mod tests {
             format!("{e}"),
             "Unauthenticated: session is no longer valid (reason=1)"
         );
+    }
+
+    /// Tests that flush works, including updating dirty sessions.
+    #[test]
+    fn flush() {
+        testutil::init();
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init(&mut conn).unwrap();
+        let mut state = State::init(&conn).unwrap();
+        let req = Request {
+            when_sec: Some(42),
+            addr: Some(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(
+                127, 0, 0, 1,
+            ))),
+            user_agent: Some(b"some ua".to_vec()),
+        };
+        {
+            let mut c = UserChange::add_user("slamb".to_owned());
+            c.set_password("hunter2".to_owned());
+            state.apply(&conn, c).unwrap();
+        }
+        let (sid, _) = state
+            .login_by_password(
+                &conn,
+                req.clone(),
+                "slamb",
+                "hunter2".to_owned(),
+                Some(b"nvr.example.com".to_vec()),
+                0,
+            )
+            .unwrap();
+
+        let (s, _u) = state
+            .authenticate_session(&conn, req.clone(), &sid.hash())
+            .unwrap();
+        assert_eq!(s.use_count, 1);
+
+        let mut tx = conn.transaction().unwrap();
+        state.flush(&mut tx).unwrap();
+        tx.commit().unwrap();
+        state.post_flush();
+
+        // Everything should persist across reload.
+        drop(state);
+        let mut state = State::init(&conn).unwrap();
+        let (s, _u) = state.authenticate_session(&conn, req, &sid.hash()).unwrap();
+        assert_eq!(s.use_count, 2);
     }
 
     #[test]
