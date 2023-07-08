@@ -24,7 +24,7 @@ members = ["base", "db"]
 base = { package = "moonfire-base", path = "base" }
 base64 = "0.13.0"
 blake3 = "1.0.0"
-bpaf = { git = "https://github.com/pacak/bpaf.git", rev = "905ab7166dd59e89bebbd3364e14b203ee57dba4", features = ["autocomplete", "bright-color", "derive"]}
+bpaf = { version = "0.9.1", features = ["autocomplete", "bright-color", "derive"]}
 bytes = "1"
 byteorder = "1.0"
 chrono = "0.4.23"
