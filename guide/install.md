@@ -14,7 +14,7 @@ instructions](build.md).
 
 First, make sure you are viewing instructions that match the release you intend
 to install. When viewing this page on Github, look for a pull-down in the upper
-left, and pick the latest tagged version:
+left, and pick the [latest tagged version](https://github.com/scottlamb/moonfire-nvr/releases/latest):
 
 ![Selecting a version of install instructions](install-version.png)
 
