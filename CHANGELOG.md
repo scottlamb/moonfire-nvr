@@ -11,7 +11,7 @@ upgrades, e.g. `0.6.x` -> `0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 
-## unreleased
+## 0.7.6 (2023-07-08)
 
 *   new log formats using `tracing`. This will allow richer context information.
 *   bump minimum Rust version to 1.70.
@@ -42,6 +42,8 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     Javscript UI to see them.
 *   fix [#282](https://github.com/scottlamb/moonfire-nvr/issues/282):
     sessions' last use information wasn't getting persisted.
+*   improvements to `moonfire-nvr config`,
+    thanks to [@sky1e](https://github.com/sky1e).
 
 ## 0.7.5 (2022-05-09)
 

@@ -1,11 +1,12 @@
 [package]
 name = "moonfire-db"
-version = "0.7.5"
+version = "0.7.6"
 authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
 edition = "2021"
 license-file = "../../LICENSE.txt"
 rust-version = "1.70"
+publish = false
 
 [features]
 nightly = []

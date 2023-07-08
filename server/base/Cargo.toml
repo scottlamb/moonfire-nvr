@@ -5,6 +5,7 @@ authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
 edition = "2021"
 license-file = "../../LICENSE.txt"
+publish = false
 
 [features]
 nightly = []

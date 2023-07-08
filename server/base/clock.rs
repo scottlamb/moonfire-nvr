@@ -70,7 +70,13 @@ impl RealClocks {
             let mut ts = mem::MaybeUninit::uninit();
             assert_eq!(0, libc::clock_gettime(clock, ts.as_mut_ptr()));
             let ts = ts.assume_init();
-            Timespec::new(ts.tv_sec, ts.tv_nsec as i32)
+            Timespec::new(
+                // On 32-bit arm builds, `tv_sec` is an `i32` and requires conversion.
+                // On other platforms, the `.into()` is a no-op.
+                #[allow(clippy::useless_conversion)]
+                ts.tv_sec.into(),
+                ts.tv_nsec as i32,
+            )
         }
     }
 }
