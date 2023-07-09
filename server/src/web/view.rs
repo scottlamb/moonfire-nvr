@@ -4,7 +4,7 @@
 
 //! `/view.mp4` and `/view.m4s` handling.
 
-use base::bail_t;
+use base::{bail_t, format_err_t};
 use db::recording::{self, rescale};
 use http::{Request, StatusCode};
 use nom::bytes::complete::{tag, take_while1};
@@ -20,11 +20,8 @@ use tracing::trace;
 use url::form_urlencoded;
 use uuid::Uuid;
 
-use crate::web::{bad_req, from_base_error};
-use crate::{
-    mp4,
-    web::{not_found, plain_response},
-};
+use crate::mp4;
+use crate::web::plain_response;
 
 use super::{Caller, ResponseResult, Service};
 
@@ -46,10 +43,10 @@ impl Service {
             let db = self.db.lock();
             let camera = db
                 .get_camera(uuid)
-                .ok_or_else(|| not_found(format!("no such camera {uuid}")))?;
+                .ok_or_else(|| format_err_t!(NotFound, "no such camera {uuid}"))?;
             camera_name = camera.short_name.clone();
             stream_id = camera.streams[stream_type.index()]
-                .ok_or_else(|| not_found(format!("no such stream {uuid}/{stream_type}")))?;
+                .ok_or_else(|| format_err_t!(NotFound, "no such stream {uuid}/{stream_type}"))?;
         };
         let mut start_time_for_filename = None;
         let mut builder = mp4::FileBuilder::new(mp4_type);
@@ -59,10 +56,7 @@ impl Service {
                 match key {
                     "s" => {
                         let s = Segments::from_str(value).map_err(|()| {
-                            plain_response(
-                                StatusCode::BAD_REQUEST,
-                                format!("invalid s parameter: {value}"),
-                            )
+                            format_err_t!(InvalidArgument, "invalid s parameter: {value}")
                         })?;
                         trace!("stream_view_mp4: appending s={:?}", s);
                         let mut est_segments = usize::try_from(s.ids.end - s.ids.start).unwrap();
@@ -150,17 +144,20 @@ impl Service {
                         // Check for missing recordings.
                         match prev {
                             Some(id) if s.ids.end != id + 1 => {
-                                return Err(not_found(format!(
+                                bail_t!(
+                                    NotFound,
                                     "no such recording {}/{}",
                                     stream_id,
                                     s.ids.end - 1
-                                )));
+                                );
                             }
                             None => {
-                                return Err(not_found(format!(
+                                bail_t!(
+                                    NotFound,
                                     "no such recording {}/{}",
-                                    stream_id, s.ids.start
-                                )));
+                                    stream_id,
+                                    s.ids.start
+                                );
                             }
                             _ => {}
                         };
@@ -174,10 +171,8 @@ impl Service {
                             }
                         }
                     }
-                    "ts" => builder
-                        .include_timestamp_subtitle_track(value == "true")
-                        .map_err(from_base_error)?,
-                    _ => return Err(bad_req(format!("parameter {key} not understood"))),
+                    "ts" => builder.include_timestamp_subtitle_track(value == "true")?,
+                    _ => bail_t!(InvalidArgument, "parameter {key} not understood"),
                 }
             }
         }
@@ -196,19 +191,15 @@ impl Service {
             } else {
                 "m4s"
             };
-            builder
-                .set_filename(&format!(
-                    "{}-{}-{}.{}",
-                    tm.strftime("%Y%m%d%H%M%S").unwrap(),
-                    camera_name,
-                    stream_abbrev,
-                    suffix
-                ))
-                .map_err(from_base_error)?;
+            builder.set_filename(&format!(
+                "{}-{}-{}.{}",
+                tm.strftime("%Y%m%d%H%M%S").unwrap(),
+                camera_name,
+                stream_abbrev,
+                suffix
+            ))?;
         }
-        let mp4 = builder
-            .build(self.db.clone(), self.dirs_by_stream_id.clone())
-            .map_err(from_base_error)?;
+        let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
         if debug {
             return Ok(plain_response(StatusCode::OK, format!("{mp4:#?}")));
         }

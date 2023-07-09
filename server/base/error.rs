@@ -29,6 +29,12 @@ pub struct Error {
 }
 
 impl Error {
+    pub fn wrap<E: Into<failure::Error>>(kind: ErrorKind, e: E) -> Self {
+        Self {
+            inner: e.into().context(kind),
+        }
+    }
+
     pub fn kind(&self) -> ErrorKind {
         *self.inner.get_context()
     }
@@ -146,7 +152,7 @@ where
 
 /// Like `failure::bail!`, but the first argument specifies a type as an `ErrorKind`.
 ///
-/// Example:
+/// Example with positional arguments:
 /// ```
 /// use moonfire_base::bail_t;
 /// let e = || -> Result<(), moonfire_base::Error> {
@@ -155,10 +161,21 @@ where
 /// assert_eq!(e.kind(), moonfire_base::ErrorKind::Unauthenticated);
 /// assert_eq!(e.to_string(), "Unauthenticated: unknown user: slamb");
 /// ```
+///
+/// Example with named arguments:
+/// ```
+/// use moonfire_base::bail_t;
+/// let e = || -> Result<(), moonfire_base::Error> {
+///     let user = "slamb";
+///     bail_t!(Unauthenticated, "unknown user: {user}");
+/// }().unwrap_err();
+/// assert_eq!(e.kind(), moonfire_base::ErrorKind::Unauthenticated);
+/// assert_eq!(e.to_string(), "Unauthenticated: unknown user: slamb");
+/// ```
 #[macro_export]
 macro_rules! bail_t {
-    ($t:ident, $e:expr) => {
-        return Err($crate::Error::from(failure::err_msg($e).context($crate::ErrorKind::$t)).into());
+    ($t:ident, $fmt:expr) => {
+        return Err($crate::Error::from(failure::err_msg(format!($fmt)).context($crate::ErrorKind::$t)).into());
     };
     ($t:ident, $fmt:expr, $($arg:tt)+) => {
         return Err($crate::Error::from(failure::err_msg(format!($fmt, $($arg)+)).context($crate::ErrorKind::$t)).into());

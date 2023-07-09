@@ -4,26 +4,26 @@
 
 //! Static file serving.
 
+use base::{bail_t, format_err_t, Error, ErrorKind, ResultExt};
 use http::{header, HeaderValue, Request};
 
-use super::{internal_server_err, not_found, ResponseResult, Service};
+use super::{ResponseResult, Service};
 
 impl Service {
     /// Serves a static file if possible.
     pub(super) async fn static_file(&self, req: Request<hyper::Body>) -> ResponseResult {
-        let dir = self.ui_dir.clone().ok_or_else(|| {
-            not_found("ui dir not configured or missing; no static files available.")
-        })?;
-        let static_req = match StaticFileRequest::parse(req.uri().path()) {
-            None => return Err(not_found("static file not found")),
-            Some(r) => r,
+        let Some(dir) = self.ui_dir.clone() else {
+            bail_t!(NotFound, "ui dir not configured or missing; no static files available.")
+        };
+        let Some(static_req) = StaticFileRequest::parse(req.uri().path()) else {
+            bail_t!(NotFound, "static file not found");
         };
         let f = dir.get(static_req.path, req.headers());
         let node = f.await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                not_found("no such static file")
+                format_err_t!(NotFound, "no such static file")
             } else {
-                internal_server_err(e)
+                Error::wrap(ErrorKind::Internal, e)
             }
         })?;
         let mut hdrs = http::HeaderMap::new();
@@ -41,7 +41,7 @@ impl Service {
             header::CONTENT_TYPE,
             HeaderValue::from_static(static_req.mime),
         );
-        let e = node.into_file_entity(hdrs).map_err(internal_server_err)?;
+        let e = node.into_file_entity(hdrs).err_kind(ErrorKind::Internal)?;
         Ok(http_serve::serve(e, &req))
     }
 }

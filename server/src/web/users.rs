@@ -10,8 +10,8 @@ use http::{Method, Request, StatusCode};
 use crate::json::{self, PutUsersResponse, UserSubset, UserWithId};
 
 use super::{
-    bad_req, extract_json_body, plain_response, require_csrf_if_session, serve_json, Caller,
-    ResponseResult, Service,
+    extract_json_body, parse_json_body, plain_response, require_csrf_if_session, serve_json,
+    Caller, ResponseResult, Service,
 };
 
 impl Service {
@@ -19,11 +19,10 @@ impl Service {
         match *req.method() {
             Method::GET | Method::HEAD => self.get_users(req, caller).await,
             Method::POST => self.post_users(req, caller).await,
-            _ => Err(plain_response(
+            _ => Ok(plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
                 "GET, HEAD, or POST expected",
-            )
-            .into()),
+            )),
         }
     }
 
@@ -48,8 +47,7 @@ impl Service {
             bail_t!(Unauthenticated, "must have admin_users permission");
         }
         let r = extract_json_body(&mut req).await?;
-        let mut r: json::PutUsers =
-            serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        let mut r: json::PutUsers = parse_json_body(&r)?;
         require_csrf_if_session(&caller, r.csrf)?;
         let username = r
             .user
@@ -84,11 +82,10 @@ impl Service {
             Method::GET | Method::HEAD => self.get_user(req, caller, id).await,
             Method::DELETE => self.delete_user(req, caller, id).await,
             Method::PATCH => self.patch_user(req, caller, id).await,
-            _ => Err(plain_response(
+            _ => Ok(plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
                 "GET, HEAD, DELETE, or PATCH expected",
-            )
-            .into()),
+            )),
         }
     }
 
@@ -112,7 +109,7 @@ impl Service {
             bail_t!(Unauthenticated, "must have admin_users permission");
         }
         let r = extract_json_body(&mut req).await?;
-        let r: json::DeleteUser = serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        let r: json::DeleteUser = parse_json_body(&r)?;
         require_csrf_if_session(&caller, r.csrf)?;
         let mut l = self.db.lock();
         l.delete_user(id)?;
@@ -127,7 +124,7 @@ impl Service {
     ) -> ResponseResult {
         require_same_or_admin(&caller, id)?;
         let r = extract_json_body(&mut req).await?;
-        let r: json::PostUser = serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        let r: json::PostUser = parse_json_body(&r)?;
         let mut db = self.db.lock();
         let user = db
             .get_user_by_id_mut(id)

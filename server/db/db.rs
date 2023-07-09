@@ -36,6 +36,7 @@ use crate::schema;
 use crate::signal;
 use base::bail_t;
 use base::clock::{self, Clocks};
+use base::format_err_t;
 use base::strutil::encode_size;
 use failure::{bail, format_err, Error, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -338,11 +339,13 @@ impl SampleFileDir {
     /// Returns a cloned copy of the directory, or Err if closed.
     ///
     /// Use `LockedDatabase::open_sample_file_dirs` prior to calling this method.
-    pub fn get(&self) -> Result<Arc<dir::SampleFileDir>, Error> {
+    pub fn get(&self) -> Result<Arc<dir::SampleFileDir>, base::Error> {
         Ok(self
             .dir
             .as_ref()
-            .ok_or_else(|| format_err!("sample file dir {} is closed", self.id))?
+            .ok_or_else(|| {
+                format_err_t!(FailedPrecondition, "sample file dir {} is closed", self.id)
+            })?
             .clone())
     }
 
@@ -2087,7 +2090,7 @@ impl LockedDatabase {
         password: String,
         domain: Option<Vec<u8>>,
         session_flags: i32,
-    ) -> Result<(RawSessionId, &Session), Error> {
+    ) -> Result<(RawSessionId, &Session), base::Error> {
         self.auth
             .login_by_password(&self.conn, req, username, password, domain, session_flags)
     }
@@ -2099,7 +2102,7 @@ impl LockedDatabase {
         domain: Option<Vec<u8>>,
         flags: i32,
         permissions: schema::Permissions,
-    ) -> Result<(RawSessionId, &Session), Error> {
+    ) -> Result<(RawSessionId, &Session), base::Error> {
         self.auth
             .make_session(&self.conn, creation, uid, domain, flags, permissions)
     }
@@ -2118,7 +2121,7 @@ impl LockedDatabase {
         detail: Option<String>,
         req: auth::Request,
         hash: &auth::SessionHash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), base::Error> {
         self.auth
             .revoke_session(&self.conn, reason, detail, req, hash)
     }

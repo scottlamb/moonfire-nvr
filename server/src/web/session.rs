@@ -4,16 +4,16 @@
 
 //! Session management: `/api/login` and `/api/logout`.
 
+use base::{bail_t, ErrorKind, ResultExt};
 use db::auth;
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
 use memchr::memchr;
 use tracing::{info, warn};
 
-use crate::json;
+use crate::{json, web::parse_json_body};
 
 use super::{
-    bad_req, csrf_matches, extract_json_body, extract_sid, internal_server_err, plain_response,
-    ResponseResult, Service,
+    csrf_matches, extract_json_body, extract_sid, plain_response, ResponseResult, Service,
 };
 use std::convert::TryFrom;
 
@@ -24,15 +24,16 @@ impl Service {
         authreq: auth::Request,
     ) -> ResponseResult {
         if *req.method() != Method::POST {
-            return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
+            return Ok(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "POST expected",
+            ));
         }
         let r = extract_json_body(&mut req).await?;
-        let r: json::LoginRequest =
-            serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
-        let host = req
-            .headers()
-            .get(header::HOST)
-            .ok_or_else(|| bad_req("missing Host header!"))?;
+        let r: json::LoginRequest = parse_json_body(&r)?;
+        let Some(host) = req.headers().get(header::HOST) else {
+            bail_t!(InvalidArgument, "missing Host header");
+        };
         let host = host.as_bytes();
         let domain = match memchr(b':', host) {
             Some(colon) => &host[0..colon],
@@ -60,7 +61,7 @@ impl Service {
             };
         let (sid, _) = l
             .login_by_password(authreq, r.username, r.password, Some(domain), flags)
-            .map_err(|e| plain_response(StatusCode::UNAUTHORIZED, e.to_string()))?;
+            .err_kind(ErrorKind::Unauthenticated)?;
         let cookie = encode_sid(sid, flags);
         Ok(Response::builder()
             .header(
@@ -78,37 +79,33 @@ impl Service {
         authreq: auth::Request,
     ) -> ResponseResult {
         if *req.method() != Method::POST {
-            return Err(plain_response(StatusCode::METHOD_NOT_ALLOWED, "POST expected").into());
+            return Ok(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "POST expected",
+            ));
         }
         let r = extract_json_body(&mut req).await?;
-        let r: json::LogoutRequest =
-            serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        let r: json::LogoutRequest = parse_json_body(&r)?;
 
         let mut res = Response::new(b""[..].into());
         if let Some(sid) = extract_sid(&req) {
             let mut l = self.db.lock();
             let hash = sid.hash();
-            let need_revoke = match l.authenticate_session(authreq.clone(), &hash) {
+            match l.authenticate_session(authreq.clone(), &hash) {
                 Ok((s, _)) => {
                     if !csrf_matches(r.csrf, s.csrf()) {
-                        warn!("logout request with missing/incorrect csrf");
-                        return Err(bad_req("logout with incorrect csrf token"));
+                        bail_t!(InvalidArgument, "logout with incorret csrf token");
                     }
                     info!("revoking session");
-                    true
+                    l.revoke_session(auth::RevocationReason::LoggedOut, None, authreq, &hash)
+                        .err_kind(ErrorKind::Internal)?;
                 }
                 Err(e) => {
                     // TODO: distinguish "no such session", "session is no longer valid", and
                     // "user ... is disabled" (which are all client error / bad state) from database
                     // errors.
                     warn!("logout failed: {}", e);
-                    false
                 }
-            };
-            if need_revoke {
-                // TODO: inline this above with non-lexical lifetimes.
-                l.revoke_session(auth::RevocationReason::LoggedOut, None, authreq, &hash)
-                    .map_err(internal_server_err)?;
             }
 
             // By now the session is invalid (whether it was valid to start with or not).

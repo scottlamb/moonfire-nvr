@@ -6,8 +6,7 @@
 
 use crate::json::UserConfig;
 use crate::schema::Permissions;
-use base::{bail_t, format_err_t, strutil, ErrorKind, ResultExt as _};
-use failure::{bail, format_err, Error, Fail, ResultExt as _};
+use base::{bail_t, format_err_t, strutil, Error, ErrorKind, ResultExt as _};
 use fnv::FnvHashMap;
 use protobuf::Message;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -96,14 +95,14 @@ impl User {
             (Some(p), Some(h)) => (p, h),
             _ => return Ok(false),
         };
-        let hash = PasswordHash::new(hash)
-            .with_context(|_| {
-                format!(
-                    "bad stored password hash for user {:?}: {:?}",
-                    self.username, hash
-                )
-            })
-            .context(ErrorKind::DataLoss)?;
+        let hash = PasswordHash::new(hash).map_err(|e| {
+            format_err_t!(
+                DataLoss,
+                "bad stored password hash for user {:?}: {}",
+                self.username,
+                e,
+            )
+        })?;
         match scrypt::Scrypt.verify_password(password.as_bytes(), &hash) {
             Ok(()) => Ok(true),
             Err(scrypt::password_hash::errors::Error::Password) => {
@@ -111,13 +110,12 @@ impl User {
                 self.password_failure_count += 1;
                 Ok(false)
             }
-            Err(e) => Err(e
-                .context(format!(
-                    "unable to verify password for user {:?}",
-                    self.username
-                ))
-                .context(ErrorKind::Internal)
-                .into()),
+            Err(e) => Err(format_err_t!(
+                Internal,
+                "unable to verify password for user {:?}: {}",
+                self.username,
+                e
+            )),
         }
     }
 }
@@ -236,7 +234,7 @@ impl FromStr for SessionFlag {
             "secure" => Ok(Self::Secure),
             "same-site" => Ok(Self::SameSite),
             "same-site-strict" => Ok(Self::SameSiteStrict),
-            _ => bail!("No such session flag {:?}", s),
+            _ => bail_t!(InvalidArgument, "No such session flag {:?}", s),
         }
     }
 }
@@ -286,9 +284,10 @@ pub struct RawSessionId([u8; 48]);
 impl RawSessionId {
     pub fn decode_base64(input: &[u8]) -> Result<Self, Error> {
         let mut s = RawSessionId([0u8; 48]);
-        let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut s.0[..])?;
+        let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut s.0[..])
+            .map_err(|e| format_err_t!(InvalidArgument, "bad session id: {e}"))?;
         if l != 48 {
-            bail!("session id must be 48 bytes");
+            bail_t!(InvalidArgument, "session id must be 48 bytes");
         }
         Ok(s)
     }
@@ -334,9 +333,10 @@ impl SessionHash {
 
     pub fn decode_base64(input: &[u8]) -> Result<Self, Error> {
         let mut h = SessionHash([0u8; 24]);
-        let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut h.0[..])?;
+        let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut h.0[..])
+            .map_err(|e| format_err_t!(InvalidArgument, "invalid session hash: {e}"))?;
         if l != 24 {
-            bail!("session hash must be 24 bytes");
+            bail_t!(InvalidArgument, "session hash must be 24 bytes");
         }
         Ok(h)
     }
@@ -362,7 +362,7 @@ impl rusqlite::types::FromSql for Seed {
         let b = value.as_blob()?;
         if b.len() != 32 {
             return Err(rusqlite::types::FromSqlError::Other(Box::new(
-                format_err!("expected a 32-byte seed").compat(),
+                format_err_t!(Internal, "expected a 32-byte seed").compat(),
             )));
         }
         let mut s = Seed::default();
@@ -395,8 +395,9 @@ impl State {
             sessions: FnvHashMap::default(),
             rand: ring::rand::SystemRandom::new(),
         };
-        let mut stmt = conn.prepare(
-            r#"
+        let mut stmt = conn
+            .prepare(
+                r#"
             select
                 id,
                 username,
@@ -408,22 +409,30 @@ impl State {
             from
                 user
             "#,
-        )?;
-        let mut rows = stmt.query(params![])?;
-        while let Some(row) = rows.next()? {
-            let id = row.get(0)?;
-            let name: String = row.get(1)?;
+            )
+            .err_kind(ErrorKind::Unknown)?;
+        let mut rows = stmt.query(params![]).err_kind(ErrorKind::Unknown)?;
+        while let Some(row) = rows.next().err_kind(ErrorKind::Unknown)? {
+            let id = row.get(0).err_kind(ErrorKind::Unknown)?;
+            let name: String = row.get(1).err_kind(ErrorKind::Unknown)?;
             let mut permissions = Permissions::new();
-            permissions.merge_from_bytes(row.get_ref(6)?.as_blob()?)?;
+            permissions
+                .merge_from_bytes(
+                    row.get_ref(6)
+                        .err_kind(ErrorKind::Unknown)?
+                        .as_blob()
+                        .err_kind(ErrorKind::Unknown)?,
+                )
+                .err_kind(ErrorKind::Unknown)?;
             state.users_by_id.insert(
                 id,
                 User {
                     id,
                     username: name.clone(),
-                    config: row.get(2)?,
-                    password_hash: row.get(3)?,
-                    password_id: row.get(4)?,
-                    password_failure_count: row.get(5)?,
+                    config: row.get(2).err_kind(ErrorKind::Unknown)?,
+                    password_hash: row.get(3).err_kind(ErrorKind::Unknown)?,
+                    password_id: row.get(4).err_kind(ErrorKind::Unknown)?,
+                    password_failure_count: row.get(5).err_kind(ErrorKind::Unknown)?,
                     dirty: false,
                     permissions,
                 },
@@ -470,7 +479,7 @@ impl State {
                 id = :id
             "#,
             )
-            .context(ErrorKind::Unknown)?;
+            .err_kind(ErrorKind::Unknown)?;
         let e = self.users_by_id.entry(id);
         let e = match e {
             ::std::collections::btree_map::Entry::Vacant(_) => panic!("missing uid {id}!"),
@@ -497,7 +506,7 @@ impl State {
                 ":id": &id,
                 ":permissions": &permissions,
             })
-            .context(ErrorKind::Unknown)?;
+            .err_kind(ErrorKind::Unknown)?;
         }
         let u = e.into_mut();
         if u.username != change.username {
@@ -523,7 +532,7 @@ impl State {
                       values (:username, :password_hash, :config, :permissions)
             "#,
             )
-            .context(ErrorKind::Unknown)?;
+            .err_kind(ErrorKind::Unknown)?;
         let password_hash = change.set_password_hash.unwrap_or(None);
         let permissions = change
             .permissions
@@ -535,7 +544,7 @@ impl State {
             ":config": &change.config,
             ":permissions": &permissions,
         })
-        .context(ErrorKind::Unknown)?;
+        .err_kind(ErrorKind::Unknown)?;
         let id = conn.last_insert_rowid() as i32;
         self.users_by_name.insert(change.username.clone(), id);
         let e = self.users_by_id.entry(id);
@@ -556,18 +565,22 @@ impl State {
     }
 
     pub fn delete_user(&mut self, conn: &mut Connection, id: i32) -> Result<(), base::Error> {
-        let tx = conn.transaction().context(ErrorKind::Unknown)?;
+        let tx = conn.transaction().err_kind(ErrorKind::Unknown)?;
         tx.execute("delete from user_session where user_id = ?", params![id])
-            .context(ErrorKind::Unknown)?;
+            .err_kind(ErrorKind::Unknown)?;
         {
             let mut user_stmt = tx
                 .prepare_cached("delete from user where id = ?")
-                .context(ErrorKind::Unknown)?;
-            if user_stmt.execute(params![id]).context(ErrorKind::Unknown)? != 1 {
+                .err_kind(ErrorKind::Unknown)?;
+            if user_stmt
+                .execute(params![id])
+                .err_kind(ErrorKind::Unknown)?
+                != 1
+            {
                 bail_t!(NotFound, "user {} not found", id);
             }
         }
-        tx.commit().context(ErrorKind::Unknown)?;
+        tx.commit().err_kind(ErrorKind::Unknown)?;
         let name = self.users_by_id.remove(&id).unwrap().username;
         self.users_by_name
             .remove(&name)
@@ -592,17 +605,17 @@ impl State {
         password: String,
         domain: Option<Vec<u8>>,
         session_flags: i32,
-    ) -> Result<(RawSessionId, &Session), Error> {
+    ) -> Result<(RawSessionId, &Session), base::Error> {
         let id = self
             .users_by_name
             .get(username)
-            .ok_or_else(|| format_err!("no such user {:?}", username))?;
+            .ok_or_else(|| format_err_t!(Unauthenticated, "no such user {username:?}"))?;
         let u = self
             .users_by_id
             .get_mut(id)
             .expect("users_by_name implies users_by_id");
         if u.config.disabled {
-            bail!("user {:?} is disabled", username);
+            bail_t!(Unauthenticated, "user {username:?} is disabled");
         }
         if !u.check_password(Some(&password))? {
             bail_t!(Unauthenticated, "incorrect password");
@@ -630,13 +643,13 @@ impl State {
         domain: Option<Vec<u8>>,
         flags: i32,
         permissions: Permissions,
-    ) -> Result<(RawSessionId, &'s Session), Error> {
+    ) -> Result<(RawSessionId, &'s Session), base::Error> {
         let u = self
             .users_by_id
             .get_mut(&uid)
-            .ok_or_else(|| format_err!("no such uid {:?}", uid))?;
+            .ok_or_else(|| format_err_t!(NotFound, "no such uid {:?}", uid))?;
         if u.config.disabled {
-            bail!("user is disabled");
+            bail_t!(FailedPrecondition, "user is disabled");
         }
         State::make_session_int(
             &self.rand,
@@ -662,14 +675,15 @@ impl State {
         flags: i32,
         sessions: &'s mut FnvHashMap<SessionHash, Session>,
         permissions: Permissions,
-    ) -> Result<(RawSessionId, &'s Session), Error> {
+    ) -> Result<(RawSessionId, &'s Session), base::Error> {
         let mut session_id = RawSessionId([0u8; 48]);
         rand.fill(&mut session_id.0).unwrap();
         let mut seed = [0u8; 32];
         rand.fill(&mut seed).unwrap();
         let hash = session_id.hash();
-        let mut stmt = conn.prepare_cached(
-            r#"
+        let mut stmt = conn
+            .prepare_cached(
+                r#"
             insert into user_session (session_id_hash,  user_id,  seed,  flags,  domain,
                                       creation_password_id,  creation_time_sec,
                                       creation_user_agent,  creation_peer_addr,
@@ -679,7 +693,8 @@ impl State {
                                       :creation_user_agent, :creation_peer_addr,
                                       :permissions)
             "#,
-        )?;
+            )
+            .err_kind(ErrorKind::Unknown)?;
         let addr = creation.addr_buf();
         let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
         let permissions_blob = permissions
@@ -696,7 +711,8 @@ impl State {
             ":creation_user_agent": &creation.user_agent,
             ":creation_peer_addr": &addr,
             ":permissions": &permissions_blob,
-        })?;
+        })
+        .err_kind(ErrorKind::Unknown)?;
         let e = match sessions.entry(hash) {
             ::std::collections::hash_map::Entry::Occupied(_) => panic!("duplicate session hash!"),
             ::std::collections::hash_map::Entry::Vacant(e) => e,
@@ -761,8 +777,9 @@ impl State {
             ::std::collections::hash_map::Entry::Vacant(e) => e.insert(lookup_session(conn, hash)?),
         };
         if s.revocation_reason.is_none() {
-            let mut stmt = conn.prepare(
-                r#"
+            let mut stmt = conn
+                .prepare(
+                    r#"
                 update user_session
                 set
                     revocation_time_sec = ?,
@@ -773,7 +790,8 @@ impl State {
                 where
                     session_id_hash = ?
                 "#,
-            )?;
+                )
+                .err_kind(ErrorKind::Unknown)?;
             let addr = req.addr_buf();
             let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
             stmt.execute(params![
@@ -783,7 +801,8 @@ impl State {
                 reason as i32,
                 detail,
                 &hash.0[..],
-            ])?;
+            ])
+            .err_kind(ErrorKind::Unknown)?;
             s.revocation = req;
             s.revocation_reason = Some(reason as i32);
         }
@@ -795,8 +814,9 @@ impl State {
     /// The caller is expected to call `post_flush` afterward if the transaction is
     /// successfully committed.
     pub fn flush(&self, tx: &Transaction) -> Result<(), Error> {
-        let mut u_stmt = tx.prepare(
-            r#"
+        let mut u_stmt = tx
+            .prepare(
+                r#"
             update user
             set
                 password_failure_count = :password_failure_count,
@@ -804,9 +824,11 @@ impl State {
             where
                 id = :id
             "#,
-        )?;
-        let mut s_stmt = tx.prepare(
-            r#"
+            )
+            .err_kind(ErrorKind::Unknown)?;
+        let mut s_stmt = tx
+            .prepare(
+                r#"
             update user_session
             set
                 last_use_time_sec = :last_use_time_sec,
@@ -816,7 +838,8 @@ impl State {
             where
                 session_id_hash = :hash
             "#,
-        )?;
+            )
+            .err_kind(ErrorKind::Unknown)?;
         for (&id, u) in &self.users_by_id {
             if !u.dirty {
                 continue;
@@ -825,11 +848,13 @@ impl State {
                 "flushing user with hash: {}",
                 u.password_hash.as_ref().unwrap()
             );
-            u_stmt.execute(named_params! {
-                ":password_failure_count": &u.password_failure_count,
-                ":password_hash": &u.password_hash,
-                ":id": &id,
-            })?;
+            u_stmt
+                .execute(named_params! {
+                    ":password_failure_count": &u.password_failure_count,
+                    ":password_hash": &u.password_hash,
+                    ":id": &id,
+                })
+                .err_kind(ErrorKind::Unknown)?;
         }
         for (sh, s) in &self.sessions {
             if !s.dirty {
@@ -837,13 +862,15 @@ impl State {
             }
             let addr = s.last_use.addr_buf();
             let addr: Option<&[u8]> = addr.as_ref().map(|a| a.as_ref());
-            let cnt = s_stmt.execute(named_params! {
-                ":last_use_time_sec": &s.last_use.when_sec,
-                ":last_use_user_agent": &s.last_use.user_agent,
-                ":last_use_peer_addr": &addr,
-                ":use_count": &s.use_count,
-                ":hash": &sh.0[..],
-            })?;
+            let cnt = s_stmt
+                .execute(named_params! {
+                    ":last_use_time_sec": &s.last_use.when_sec,
+                    ":last_use_user_agent": &s.last_use.user_agent,
+                    ":last_use_peer_addr": &addr,
+                    ":use_count": &s.use_count,
+                    ":hash": &sh.0[..],
+                })
+                .err_kind(ErrorKind::Unknown)?;
             debug_assert_eq!(cnt, 1);
         }
         Ok(())
@@ -892,51 +919,51 @@ fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, base
             session_id_hash = ?
         "#,
         )
-        .err_kind(ErrorKind::Internal)?;
+        .err_kind(ErrorKind::Unknown)?;
     let mut rows = stmt
         .query(params![&hash.0[..]])
-        .err_kind(ErrorKind::Internal)?;
+        .err_kind(ErrorKind::Unknown)?;
     let row = rows
         .next()
-        .err_kind(ErrorKind::Internal)?
+        .err_kind(ErrorKind::Unknown)?
         .ok_or_else(|| format_err_t!(NotFound, "no such session"))?;
-    let creation_addr: FromSqlIpAddr = row.get(8).err_kind(ErrorKind::Internal)?;
-    let revocation_addr: FromSqlIpAddr = row.get(11).err_kind(ErrorKind::Internal)?;
-    let last_use_addr: FromSqlIpAddr = row.get(16).err_kind(ErrorKind::Internal)?;
+    let creation_addr: FromSqlIpAddr = row.get(8).err_kind(ErrorKind::Unknown)?;
+    let revocation_addr: FromSqlIpAddr = row.get(11).err_kind(ErrorKind::Unknown)?;
+    let last_use_addr: FromSqlIpAddr = row.get(16).err_kind(ErrorKind::Unknown)?;
     let mut permissions = Permissions::new();
     permissions
         .merge_from_bytes(
             row.get_ref(18)
-                .err_kind(ErrorKind::Internal)?
+                .err_kind(ErrorKind::Unknown)?
                 .as_blob()
-                .err_kind(ErrorKind::Internal)?,
+                .err_kind(ErrorKind::Unknown)?,
         )
         .err_kind(ErrorKind::Internal)?;
     Ok(Session {
-        user_id: row.get(0).err_kind(ErrorKind::Internal)?,
-        seed: row.get(1).err_kind(ErrorKind::Internal)?,
-        flags: row.get(2).err_kind(ErrorKind::Internal)?,
-        domain: row.get(3).err_kind(ErrorKind::Internal)?,
-        description: row.get(4).err_kind(ErrorKind::Internal)?,
-        creation_password_id: row.get(5).err_kind(ErrorKind::Internal)?,
+        user_id: row.get(0).err_kind(ErrorKind::Unknown)?,
+        seed: row.get(1).err_kind(ErrorKind::Unknown)?,
+        flags: row.get(2).err_kind(ErrorKind::Unknown)?,
+        domain: row.get(3).err_kind(ErrorKind::Unknown)?,
+        description: row.get(4).err_kind(ErrorKind::Unknown)?,
+        creation_password_id: row.get(5).err_kind(ErrorKind::Unknown)?,
         creation: Request {
-            when_sec: row.get(6).err_kind(ErrorKind::Internal)?,
-            user_agent: row.get(7).err_kind(ErrorKind::Internal)?,
+            when_sec: row.get(6).err_kind(ErrorKind::Unknown)?,
+            user_agent: row.get(7).err_kind(ErrorKind::Unknown)?,
             addr: creation_addr.0,
         },
         revocation: Request {
-            when_sec: row.get(9).err_kind(ErrorKind::Internal)?,
-            user_agent: row.get(10).err_kind(ErrorKind::Internal)?,
+            when_sec: row.get(9).err_kind(ErrorKind::Unknown)?,
+            user_agent: row.get(10).err_kind(ErrorKind::Unknown)?,
             addr: revocation_addr.0,
         },
-        revocation_reason: row.get(12).err_kind(ErrorKind::Internal)?,
-        revocation_reason_detail: row.get(13).err_kind(ErrorKind::Internal)?,
+        revocation_reason: row.get(12).err_kind(ErrorKind::Unknown)?,
+        revocation_reason_detail: row.get(13).err_kind(ErrorKind::Unknown)?,
         last_use: Request {
-            when_sec: row.get(14).err_kind(ErrorKind::Internal)?,
-            user_agent: row.get(15).err_kind(ErrorKind::Internal)?,
+            when_sec: row.get(14).err_kind(ErrorKind::Unknown)?,
+            user_agent: row.get(15).err_kind(ErrorKind::Unknown)?,
             addr: last_use_addr.0,
         },
-        use_count: row.get(17).err_kind(ErrorKind::Internal)?,
+        use_count: row.get(17).err_kind(ErrorKind::Unknown)?,
         dirty: false,
         permissions,
     })
@@ -1202,7 +1229,7 @@ mod tests {
                 0,
             )
             .unwrap_err();
-        assert_eq!(format!("{e}"), "user \"slamb\" is disabled");
+        assert_eq!(e.to_string(), "Unauthenticated: user \"slamb\" is disabled");
 
         // Authenticating existing sessions shouldn't work either.
         let e = state

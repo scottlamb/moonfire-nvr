@@ -17,12 +17,14 @@ use self::path::Path;
 use crate::body::Body;
 use crate::json;
 use crate::mp4;
+use base::format_err_t;
+use base::Error;
+use base::ResultExt;
 use base::{bail_t, clock::Clocks, ErrorKind};
 use core::borrow::Borrow;
 use core::str::FromStr;
 use db::dir::SampleFileDir;
 use db::{auth, recording};
-use failure::{format_err, Error};
 use fnv::FnvHashMap;
 use http::header::{self, HeaderValue};
 use http::{status::StatusCode, Request, Response};
@@ -51,7 +53,7 @@ impl From<Response<Body>> for HttpError {
 
 impl From<base::Error> for HttpError {
     fn from(err: base::Error) -> Self {
-        HttpError(from_base_error(err))
+        HttpError(from_base_error(&err))
     }
 }
 
@@ -63,22 +65,7 @@ fn plain_response<B: Into<Body>>(status: http::StatusCode, body: B) -> Response<
         .expect("hardcoded head should be valid")
 }
 
-fn not_found<B: Into<Body>>(body: B) -> HttpError {
-    HttpError(plain_response(StatusCode::NOT_FOUND, body))
-}
-
-fn bad_req<B: Into<Body>>(body: B) -> HttpError {
-    HttpError(plain_response(StatusCode::BAD_REQUEST, body))
-}
-
-fn internal_server_err<E: Into<Error>>(err: E) -> HttpError {
-    HttpError(plain_response(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        err.into().to_string(),
-    ))
-}
-
-fn from_base_error(err: base::Error) -> Response<Body> {
+fn from_base_error(err: &base::Error) -> Response<Body> {
     use ErrorKind::*;
     let status_code = match err.kind() {
         Unauthenticated => StatusCode::UNAUTHORIZED,
@@ -97,7 +84,7 @@ struct Caller {
     user: Option<json::ToplevelUser>,
 }
 
-type ResponseResult = Result<Response<Body>, HttpError>;
+type ResponseResult = Result<Response<Body>, base::Error>;
 
 fn serve_json<T: serde::ser::Serialize>(req: &Request<hyper::Body>, out: &T) -> ResponseResult {
     let (mut resp, writer) = http_serve::streaming_body(req).build();
@@ -106,7 +93,7 @@ fn serve_json<T: serde::ser::Serialize>(req: &Request<hyper::Body>, out: &T) -> 
         HeaderValue::from_static("application/json"),
     );
     if let Some(mut w) = writer {
-        serde_json::to_writer(&mut w, out).map_err(internal_server_err)?;
+        serde_json::to_writer(&mut w, out).err_kind(ErrorKind::Internal)?;
     }
     Ok(resp)
 }
@@ -140,19 +127,24 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
 /// This returns the request body as bytes rather than performing
 /// deserialization. Keeping the bytes allows the caller to use a `Deserialize`
 /// that borrows from the bytes.
-async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, HttpError> {
+async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, base::Error> {
     let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(t) if t == "application/json" => true,
         Some(t) if t == "application/json; charset=UTF-8" => true,
         _ => false,
     };
     if !correct_mime_type {
-        return Err(bad_req("expected application/json request body"));
+        bail_t!(InvalidArgument, "expected application/json request body");
     }
     let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
     hyper::body::to_bytes(b)
         .await
-        .map_err(|e| internal_server_err(format_err!("unable to read request body: {}", e)))
+        .map_err(|e| format_err_t!(Unavailable, "unable to read request body: {}", e))
+}
+
+fn parse_json_body<'a, T: serde::Deserialize<'a>>(body: &'a [u8]) -> Result<T, base::Error> {
+    serde_json::from_slice(body)
+        .map_err(|e| format_err_t!(InvalidArgument, "bad request body: {e}"))
 }
 
 fn require_csrf_if_session(caller: &Caller, csrf: Option<&str>) -> Result<(), base::Error> {
@@ -240,18 +232,18 @@ impl Service {
 
     /// Serves an HTTP request.
     ///
-    /// Note that the `serve` wrapper handles responses the same whether they
-    /// are `Ok` or `Err`. But returning `Err` here with the `?` operator is
-    /// convenient for error paths.
+    /// The `Err` return path will cause the `serve` wrapper to log the error,
+    /// as well as returning it to the HTTP client.
     async fn serve_inner(
         self: Arc<Self>,
         req: Request<::hyper::Body>,
         authreq: auth::Request,
         conn_data: ConnData,
     ) -> ResponseResult {
-        let p = Path::decode(req.uri().path());
+        let path = Path::decode(req.uri().path());
+        tracing::trace!(?path, "path");
         let always_allow_unauthenticated = matches!(
-            p,
+            path,
             Path::NotFound | Path::Request | Path::Login | Path::Logout | Path::Static
         );
         let caller = self.authenticate(&req, &authreq, &conn_data, always_allow_unauthenticated);
@@ -261,20 +253,20 @@ impl Service {
             .and_then(|c| c.user.as_ref())
             .map(|u| &u.name)
         {
-            tracing::Span::current().record("auth.user", tracing::field::display(username));
+            tracing::Span::current().record("enduser.id", tracing::field::display(username));
         }
 
         // WebSocket stuff is handled separately, because most authentication
         // errors are returned as text messages over the protocol, rather than
         // HTTP-level errors.
-        if let Path::StreamLiveMp4Segments(uuid, type_) = p {
+        if let Path::StreamLiveMp4Segments(uuid, type_) = path {
             return websocket::upgrade(req, move |ws| {
                 Box::pin(self.stream_live_m4s(ws, caller, uuid, type_))
             });
         }
 
         let caller = caller?;
-        let (cache, mut response) = match p {
+        let (cache, mut response) = match path {
             Path::InitSegment(sha1, debug) => (
                 CacheControl::PrivateStatic,
                 self.init_segment(sha1, debug, &req)?,
@@ -300,7 +292,7 @@ impl Service {
             Path::StreamLiveMp4Segments(..) => {
                 unreachable!("StreamLiveMp4Segments should have already been handled")
             }
-            Path::NotFound => return Err(not_found("path not understood")),
+            Path::NotFound => return Err(format_err_t!(NotFound, "path not understood")),
             Path::Login => (
                 CacheControl::PrivateDynamic,
                 self.login(req, authreq).await?,
@@ -350,7 +342,7 @@ impl Service {
         req: Request<::hyper::Body>,
         conn_data: ConnData,
     ) -> Result<Response<Body>, std::convert::Infallible> {
-        let id = ulid::Ulid::new();
+        let request_id = ulid::Ulid::new();
         let authreq = auth::Request {
             when_sec: Some(self.db.clocks().realtime().sec),
             addr: if self.trust_forward_hdrs {
@@ -371,38 +363,44 @@ impl Service {
         // https://opentelemetry.io/docs/reference/specification/trace/semantic_conventions/http/
         let span = tracing::info_span!(
             "request",
-            %id,
+            %request_id,
             net.sock.peer.uid = conn_data.client_unix_uid.map(tracing::field::display),
             http.client_ip = authreq.addr.map(tracing::field::display),
             http.method = %req.method(),
             http.target = %req.uri(),
             http.status_code = tracing::field::Empty,
-            auth.user = tracing::field::Empty,
+            enduser.id = tracing::field::Empty,
         );
         tracing::debug!(parent: &span, "received request headers");
         let response = self
             .serve_inner(req, authreq, conn_data)
             .instrument(span.clone())
-            .await
-            .unwrap_or_else(|e| e.0);
+            .await;
+        let (response, error) = match response {
+            Ok(r) => (r, None),
+            Err(e) => (from_base_error(&e), Some(e)),
+        };
         span.record("http.status_code", response.status().as_u16());
         let latency = std::time::Instant::now().duration_since(start);
         if response.status().is_server_error() {
             tracing::error!(
                 parent: &span,
-                latency = format_args!("{:.6}s", latency.as_secs_f32()),
+                latency = latency.as_secs_f32(),
+                error = error.map(tracing::field::display),
                 "sending response headers",
             );
         } else if response.status().is_client_error() {
             tracing::warn!(
                 parent: &span,
-                latency = format_args!("{:.6}s", latency.as_secs_f32()),
+                latency = latency.as_secs_f32(),
+                error = error.map(tracing::field::display),
                 "sending response headers",
             );
         } else {
             tracing::info!(
                 parent: &span,
-                latency = format_args!("{:.6}s", latency.as_secs_f32()),
+                latency = latency.as_secs_f32(),
+                error = error.map(tracing::field::display),
                 "sending response headers",
             );
         }
@@ -446,10 +444,10 @@ impl Service {
         let db = self.db.lock();
         let camera = db
             .get_camera(uuid)
-            .ok_or_else(|| not_found(format!("no such camera {uuid}")))?;
+            .ok_or_else(|| format_err_t!(NotFound, "no such camera {uuid}"))?;
         serve_json(
             req,
-            &json::Camera::wrap(camera, &db, true, false).map_err(internal_server_err)?,
+            &json::Camera::wrap(camera, &db, true, false).err_kind(ErrorKind::Internal)?,
         )
     }
 
@@ -467,18 +465,19 @@ impl Service {
                     let (key, value) = (key.borrow(), value.borrow());
                     match key {
                         "startTime90k" => {
-                            time.start = recording::Time::parse(value)
-                                .map_err(|_| bad_req("unparseable startTime90k"))?
+                            time.start = recording::Time::parse(value).map_err(|_| {
+                                format_err_t!(InvalidArgument, "unparseable startTime90k")
+                            })?
                         }
                         "endTime90k" => {
-                            time.end = recording::Time::parse(value)
-                                .map_err(|_| bad_req("unparseable endTime90k"))?
+                            time.end = recording::Time::parse(value).map_err(|_| {
+                                format_err_t!(InvalidArgument, "unparseable endTime90k")
+                            })?
                         }
                         "split90k" => {
-                            split = recording::Duration(
-                                i64::from_str(value)
-                                    .map_err(|_| bad_req("unparseable split90k"))?,
-                            )
+                            split = recording::Duration(i64::from_str(value).map_err(|_| {
+                                format_err_t!(InvalidArgument, "unparseable split90k")
+                            })?)
                         }
                         _ => {}
                     }
@@ -491,15 +490,12 @@ impl Service {
             recordings: Vec::new(),
             video_sample_entries: (&db, Vec::new()),
         };
-        let camera = db.get_camera(uuid).ok_or_else(|| {
-            plain_response(StatusCode::NOT_FOUND, format!("no such camera {uuid}"))
-        })?;
-        let stream_id = camera.streams[type_.index()].ok_or_else(|| {
-            plain_response(
-                StatusCode::NOT_FOUND,
-                format!("no such stream {uuid}/{type_}"),
-            )
-        })?;
+        let Some(camera) = db.get_camera(uuid) else {
+            bail_t!(NotFound, "no such camera {uuid}");
+        };
+        let Some(stream_id) = camera.streams[type_.index()] else {
+            bail_t!(NotFound, "no such stream {uuid}/{type_}");
+        };
         db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
             let end = row.ids.end - 1; // in api, ids are inclusive.
             out.recordings.push(json::Recording {
@@ -528,21 +524,20 @@ impl Service {
             }
             Ok(())
         })
-        .map_err(internal_server_err)?;
+        .err_kind(ErrorKind::Internal)?;
         serve_json(req, &out)
     }
 
     fn init_segment(&self, id: i32, debug: bool, req: &Request<::hyper::Body>) -> ResponseResult {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
         let db = self.db.lock();
-        let ent = db
-            .video_sample_entries_by_id()
-            .get(&id)
-            .ok_or_else(|| not_found("not such init segment"))?;
+        let Some(ent) = db.video_sample_entries_by_id().get(&id) else {
+            bail_t!(NotFound, "no such init segment");
+        };
         builder.append_video_sample_entry(ent.clone());
         let mp4 = builder
             .build(self.db.clone(), self.dirs_by_stream_id.clone())
-            .map_err(from_base_error)?;
+            .err_kind(ErrorKind::Internal)?;
         if debug {
             Ok(plain_response(StatusCode::OK, format!("{mp4:#?}")))
         } else {

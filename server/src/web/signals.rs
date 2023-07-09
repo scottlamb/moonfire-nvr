@@ -4,7 +4,7 @@
 
 //! `/api/signals` handling.
 
-use base::{bail_t, clock::Clocks};
+use base::{bail_t, clock::Clocks, format_err_t};
 use db::recording;
 use http::{Method, Request, StatusCode};
 use url::form_urlencoded;
@@ -12,8 +12,8 @@ use url::form_urlencoded;
 use crate::json;
 
 use super::{
-    bad_req, extract_json_body, from_base_error, plain_response, require_csrf_if_session,
-    serve_json, Caller, ResponseResult, Service,
+    extract_json_body, parse_json_body, plain_response, require_csrf_if_session, serve_json,
+    Caller, ResponseResult, Service,
 };
 
 use std::borrow::Borrow;
@@ -27,11 +27,10 @@ impl Service {
         match *req.method() {
             Method::POST => self.post_signals(req, caller).await,
             Method::GET | Method::HEAD => self.get_signals(&req),
-            _ => Err(plain_response(
+            _ => Ok(plain_response(
                 StatusCode::METHOD_NOT_ALLOWED,
                 "POST, GET, or HEAD expected",
-            )
-            .into()),
+            )),
         }
     }
 
@@ -40,8 +39,7 @@ impl Service {
             bail_t!(PermissionDenied, "update_signals required");
         }
         let r = extract_json_body(&mut req).await?;
-        let r: json::PostSignalsRequest =
-            serde_json::from_slice(&r).map_err(|e| bad_req(e.to_string()))?;
+        let r: json::PostSignalsRequest = parse_json_body(&r)?;
         require_csrf_if_session(&caller, r.csrf)?;
         let now = recording::Time::new(self.db.clocks().realtime());
         let mut l = self.db.lock();
@@ -53,8 +51,7 @@ impl Service {
             json::PostSignalsTimeBase::Epoch(t) => t,
             json::PostSignalsTimeBase::Now(d) => now + d,
         };
-        l.update_signals(start..end, &r.signal_ids, &r.states)
-            .map_err(from_base_error)?;
+        l.update_signals(start..end, &r.signal_ids, &r.states)?;
         serve_json(&req, &json::PostSignalsResponse { time_90k: now })
     }
 
@@ -65,12 +62,13 @@ impl Service {
                 let (key, value) = (key.borrow(), value.borrow());
                 match key {
                     "startTime90k" => {
-                        time.start = recording::Time::parse(value)
-                            .map_err(|_| bad_req("unparseable startTime90k"))?
+                        time.start = recording::Time::parse(value).map_err(|_| {
+                            format_err_t!(InvalidArgument, "unparseable startTime90k")
+                        })?
                     }
                     "endTime90k" => {
                         time.end = recording::Time::parse(value)
-                            .map_err(|_| bad_req("unparseable endTime90k"))?
+                            .map_err(|_| format_err_t!(InvalidArgument, "unparseable endTime90k"))?
                     }
                     _ => {}
                 }

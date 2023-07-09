@@ -8,19 +8,20 @@
 use std::pin::Pin;
 
 use crate::body::Body;
-use base::bail_t;
+use base::{bail_t, format_err_t};
 use futures::{Future, SinkExt};
 use http::{header, Request, Response};
 use tokio_tungstenite::{tungstenite, WebSocketStream};
 use tracing::Instrument;
 
-use super::{bad_req, ResponseResult};
-
 /// Upgrades to WebSocket and runs the supplied stream handler in a separate tokio task.
 ///
 /// Fails on `Origin` mismatch with an HTTP-level error. If the handler returns
 /// an error, tries to send it to the client before dropping the stream.
-pub(super) fn upgrade<H>(req: Request<::hyper::Body>, handler: H) -> ResponseResult
+pub(super) fn upgrade<H>(
+    req: Request<::hyper::Body>,
+    handler: H,
+) -> Result<Response<Body>, base::Error>
 where
     for<'a> H: FnOnce(
             &'a mut WebSocketStream<hyper::upgrade::Upgraded>,
@@ -36,7 +37,7 @@ where
     // Otherwise, upgrade and handle the rest in a separate task.
     let response =
         tungstenite::handshake::server::create_response_with_body(&req, hyper::Body::empty)
-            .map_err(|e| bad_req(e.to_string()))?;
+            .map_err(|e| format_err_t!(InvalidArgument, "{}", e.to_string()))?;
     let (parts, _) = response.into_parts();
     let span = tracing::info_span!("websocket");
     tokio::spawn(
@@ -77,15 +78,17 @@ where
 /// If present, verify it. Chrome doesn't honor the `s=` cookie's
 /// `SameSite=Lax` setting for WebSocket requests, so this is the sole
 /// protection against [CSWSH](https://christian-schneider.net/CrossSiteWebSocketHijacking.html).
-fn check_origin(headers: &header::HeaderMap) -> Result<(), super::HttpError> {
+fn check_origin(headers: &header::HeaderMap) -> Result<(), base::Error> {
     let origin_hdr = match headers.get(http::header::ORIGIN) {
         None => return Ok(()),
         Some(o) => o,
     };
-    let host_hdr = headers
-        .get(header::HOST)
-        .ok_or_else(|| bad_req("missing Host header"))?;
-    let host_str = host_hdr.to_str().map_err(|_| bad_req("bad Host header"))?;
+    let Some(host_hdr) = headers.get(header::HOST) else {
+        bail_t!(InvalidArgument, "missing Host header");
+    };
+    let host_str = host_hdr
+        .to_str()
+        .map_err(|_| format_err_t!(InvalidArgument, "bad Host header"))?;
 
     // Currently this ignores the port number. This is easiest and I think matches the browser's
     // rules for when it sends a cookie, so it probably doesn't cause great security problems.
@@ -97,10 +100,10 @@ fn check_origin(headers: &header::HeaderMap) -> Result<(), super::HttpError> {
         .to_str()
         .ok()
         .and_then(|o| url::Url::parse(o).ok())
-        .ok_or_else(|| bad_req("bad Origin header"))?;
+        .ok_or_else(|| format_err_t!(InvalidArgument, "bad Origin header"))?;
     let origin_host = origin_url
         .host_str()
-        .ok_or_else(|| bad_req("bad Origin header"))?;
+        .ok_or_else(|| format_err_t!(InvalidArgument, "bad Origin header"))?;
     if host != origin_host {
         bail_t!(
             PermissionDenied,

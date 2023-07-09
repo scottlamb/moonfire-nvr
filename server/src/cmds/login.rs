@@ -17,7 +17,7 @@ fn parse_perms(perms: String) -> Result<crate::json::Permissions, serde_json::Er
     serde_json::from_str(&perms)
 }
 
-fn parse_flags(flags: String) -> Result<Vec<SessionFlag>, Error> {
+fn parse_flags(flags: String) -> Result<Vec<SessionFlag>, base::Error> {
     flags
         .split(',')
         .map(|f| SessionFlag::from_str(f.trim()))
