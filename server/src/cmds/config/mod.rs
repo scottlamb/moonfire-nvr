@@ -8,10 +8,10 @@
 //! configuration will likely be almost entirely done through a web-based UI.
 
 use base::clock;
+use base::Error;
 use bpaf::Bpaf;
 use cursive::views;
 use cursive::Cursive;
-use failure::Error;
 use std::path::PathBuf;
 use std::sync::Arc;
 

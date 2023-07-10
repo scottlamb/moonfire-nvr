@@ -4,7 +4,7 @@
 
 //! Static file serving.
 
-use base::{bail_t, format_err_t, Error, ErrorKind, ResultExt};
+use base::{bail, err, Error, ErrorKind, ResultExt};
 use http::{header, HeaderValue, Request};
 
 use super::{ResponseResult, Service};
@@ -13,15 +13,15 @@ impl Service {
     /// Serves a static file if possible.
     pub(super) async fn static_file(&self, req: Request<hyper::Body>) -> ResponseResult {
         let Some(dir) = self.ui_dir.clone() else {
-            bail_t!(NotFound, "ui dir not configured or missing; no static files available.")
+            bail!(NotFound, msg("ui dir not configured or missing; no static files available"))
         };
         let Some(static_req) = StaticFileRequest::parse(req.uri().path()) else {
-            bail_t!(NotFound, "static file not found");
+            bail!(NotFound, msg("static file not found"));
         };
         let f = dir.get(static_req.path, req.headers());
         let node = f.await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                format_err_t!(NotFound, "no such static file")
+                err!(NotFound, msg("no such static file"))
             } else {
                 Error::wrap(ErrorKind::Internal, e)
             }

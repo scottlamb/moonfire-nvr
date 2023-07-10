@@ -3,9 +3,8 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use crate::h264;
+use base::{bail, err, Error};
 use bytes::Bytes;
-use failure::format_err;
-use failure::{bail, Error};
 use futures::StreamExt;
 use retina::client::Demuxed;
 use retina::codec::CodecItem;
@@ -74,7 +73,8 @@ impl Opener for RealOpener {
                     .in_current_span(),
                 ),
             )
-            .expect("RetinaStream::play task panicked, see earlier error")??;
+            .expect("RetinaStream::play task panicked, see earlier error")
+            .map_err(|e| err!(Unknown, source(e)))??;
         Ok(Box::new(RetinaStream {
             inner: Some(inner),
             rt_handle,
@@ -121,22 +121,30 @@ impl RetinaStreamInner {
         url: Url,
         options: Options,
     ) -> Result<(Box<Self>, retina::codec::VideoFrame), Error> {
-        let mut session = retina::client::Session::describe(url, options.session).await?;
+        let mut session = retina::client::Session::describe(url, options.session)
+            .await
+            .map_err(|e| err!(Unknown, source(e)))?;
         tracing::debug!("connected to {:?}, tool {:?}", &label, session.tool());
         let video_i = session
             .streams()
             .iter()
             .position(|s| s.media() == "video" && s.encoding_name() == "h264")
-            .ok_or_else(|| format_err!("couldn't find H.264 video stream"))?;
-        session.setup(video_i, options.setup).await?;
-        let session = session.play(retina::client::PlayOptions::default()).await?;
-        let mut session = session.demuxed()?;
+            .ok_or_else(|| err!(FailedPrecondition, msg("couldn't find H.264 video stream")))?;
+        session
+            .setup(video_i, options.setup)
+            .await
+            .map_err(|e| err!(Unknown, source(e)))?;
+        let session = session
+            .play(retina::client::PlayOptions::default())
+            .await
+            .map_err(|e| err!(Unknown, source(e)))?;
+        let mut session = session.demuxed().map_err(|e| err!(Unknown, source(e)))?;
 
         // First frame.
         let first_frame = loop {
             match Pin::new(&mut session).next().await {
-                None => bail!("stream closed before first frame"),
-                Some(Err(e)) => return Err(e.into()),
+                None => bail!(Unavailable, msg("stream closed before first frame")),
+                Some(Err(e)) => bail!(Unknown, msg("unable to get first frame"), source(e)),
                 Some(Ok(CodecItem::VideoFrame(v))) => {
                     if v.is_random_access_point() {
                         break v;
@@ -148,7 +156,7 @@ impl RetinaStreamInner {
         let video_params = match session.streams()[video_i].parameters() {
             Some(retina::codec::ParametersRef::Video(v)) => v.clone(),
             Some(_) => unreachable!(),
-            None => bail!("couldn't find H.264 parameters"),
+            None => bail!(Unknown, msg("couldn't find H.264 parameters")),
         };
         let video_sample_entry = h264::parse_extra_data(video_params.extra_data())?;
         let self_ = Box::new(Self {
@@ -171,8 +179,13 @@ impl RetinaStreamInner {
         Error,
     > {
         loop {
-            match Pin::new(&mut self.session).next().await.transpose()? {
-                None => bail!("end of stream"),
+            match Pin::new(&mut self.session)
+                .next()
+                .await
+                .transpose()
+                .map_err(|e| err!(Unknown, source(e)))?
+            {
+                None => bail!(Unavailable, msg("end of stream")),
                 Some(CodecItem::VideoFrame(v)) => {
                     if v.loss() > 0 {
                         tracing::warn!(
@@ -223,7 +236,13 @@ impl Stream for RetinaStream {
                         ),
                     )
                     .expect("fetch_next_frame task panicked, see earlier error")
-                    .map_err(|_| format_err!("timeout getting next frame"))??;
+                    .map_err(|e| {
+                        err!(
+                            DeadlineExceeded,
+                            msg("timeout getting next frame"),
+                            source(e)
+                        )
+                    })??;
                 let mut new_video_sample_entry = false;
                 if let Some(p) = new_parameters {
                     let video_sample_entry = h264::parse_extra_data(p.extra_data())?;
@@ -239,7 +258,7 @@ impl Stream for RetinaStream {
                     }
                 };
                 self.inner = Some(inner);
-                Ok::<_, failure::Error>((frame, new_video_sample_entry))
+                Ok::<_, Error>((frame, new_video_sample_entry))
             })?;
         Ok(VideoFrame {
             pts: frame.timestamp().elapsed(),
@@ -269,16 +288,24 @@ pub mod testutil {
         pub fn open(path: &str) -> Result<Self, Error> {
             let f = std::fs::read(path)?;
             let len = f.len();
-            let reader = mp4::Mp4Reader::read_header(Cursor::new(f), u64::try_from(len)?)?;
+            let reader = mp4::Mp4Reader::read_header(
+                Cursor::new(f),
+                u64::try_from(len).expect("len should be in u64 range"),
+            )
+            .map_err(|e| err!(Unknown, source(e)))?;
             let h264_track = match reader
                 .tracks()
                 .values()
                 .find(|t| matches!(t.media_type(), Ok(mp4::MediaType::H264)))
             {
-                None => bail!("expected a H.264 track"),
+                None => bail!(InvalidArgument, msg("expected a H.264 track")),
                 Some(t) => t,
             };
-            let video_sample_entry = h264::parse_extra_data(&h264_track.extra_data()?[..])?;
+            let video_sample_entry = h264::parse_extra_data(
+                &h264_track
+                    .extra_data()
+                    .map_err(|e| err!(Unknown, source(e)))?[..],
+            )?;
             let h264_track_id = h264_track.track_id();
             let stream = Mp4Stream {
                 reader,
@@ -312,8 +339,9 @@ pub mod testutil {
         fn next(&mut self) -> Result<VideoFrame, Error> {
             let sample = self
                 .reader
-                .read_sample(self.h264_track_id, self.next_sample_id)?
-                .ok_or_else(|| format_err!("End of file"))?;
+                .read_sample(self.h264_track_id, self.next_sample_id)
+                .map_err(|e| err!(Unknown, source(e)))?
+                .ok_or_else(|| err!(OutOfRange, msg("end of file")))?;
             self.next_sample_id += 1;
             Ok(VideoFrame {
                 pts: sample.start_time as i64,

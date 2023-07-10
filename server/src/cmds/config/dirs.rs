@@ -3,12 +3,12 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use base::strutil::{decode_size, encode_size};
+use base::Error;
 use cursive::traits::{Nameable, Resizable};
 use cursive::view::Scrollable;
 use cursive::Cursive;
 use cursive::{views, With};
 use db::writer;
-use failure::Error;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;

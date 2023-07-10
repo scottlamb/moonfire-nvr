@@ -2,8 +2,8 @@
 // Copyright (C) 2016 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use base::{err, Error};
 use db::dir;
-use failure::{Error, Fail};
 use nix::fcntl::FlockArg;
 use std::path::Path;
 use tracing::info;
@@ -28,16 +28,19 @@ enum OpenMode {
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
 fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
     let dir = dir::Fd::open(db_dir, mode == OpenMode::Create).map_err(|e| {
-        e.context(if mode == OpenMode::Create {
-            format!("unable to create db dir {}", db_dir.display())
+        if mode == OpenMode::Create {
+            err!(e, msg("unable to create db dir {}", db_dir.display()))
         } else if e == nix::Error::ENOENT {
-            format!(
-                "db dir {} not found; try running moonfire-nvr init",
-                db_dir.display()
+            err!(
+                NotFound,
+                msg(
+                    "db dir {} not found; try running moonfire-nvr init",
+                    db_dir.display(),
+                ),
             )
         } else {
-            format!("unable to open db dir {}", db_dir.display())
-        })
+            err!(e, msg("unable to open db dir {}", db_dir.display()))
+        }
     })?;
     let ro = mode == OpenMode::ReadOnly;
     dir.lock(if ro {
@@ -46,11 +49,14 @@ fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
         FlockArg::LockExclusiveNonblock
     })
     .map_err(|e| {
-        e.context(format!(
-            "unable to get {} lock on db dir {} ",
-            if ro { "shared" } else { "exclusive" },
-            db_dir.display()
-        ))
+        err!(
+            e,
+            msg(
+                "unable to get {} lock on db dir {} ",
+                if ro { "shared" } else { "exclusive" },
+                db_dir.display(),
+            ),
+        )
     })?;
     Ok(dir)
 }

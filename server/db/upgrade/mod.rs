@@ -6,8 +6,8 @@
 //!
 //! See `guide/schema.md` for more information.
 
-use crate::db;
-use failure::{bail, Error};
+use crate::db::{self, EXPECTED_VERSION};
+use base::{bail, Error};
 use nix::NixPath;
 use rusqlite::params;
 use std::ffi::CStr;
@@ -60,14 +60,16 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
     {
         assert_eq!(upgraders.len(), db::EXPECTED_VERSION as usize);
         let old_ver = conn.query_row("select max(id) from version", params![], |row| row.get(0))?;
-        if old_ver > db::EXPECTED_VERSION {
+        if old_ver > EXPECTED_VERSION {
             bail!(
-                "Database is at version {}, later than expected {}",
-                old_ver,
-                db::EXPECTED_VERSION
+                FailedPrecondition,
+                msg("database is at version {old_ver}, later than expected {EXPECTED_VERSION}"),
             );
         } else if old_ver < 0 {
-            bail!("Database is at negative version {}!", old_ver);
+            bail!(
+                FailedPrecondition,
+                msg("Database is at negative version {old_ver}!")
+            );
         }
         info!(
             "Upgrading database from version {} to version {}...",
@@ -95,7 +97,7 @@ pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     db::check_sqlite_version()?;
     db::set_integrity_pragmas(conn)?;
     set_journal_mode(conn, args.preset_journal)?;
-    upgrade(args, db::EXPECTED_VERSION, conn)?;
+    upgrade(args, EXPECTED_VERSION, conn)?;
 
     // As in "moonfire-nvr init": try for page_size=16384 and wal for the reasons explained there.
     //
@@ -154,7 +156,7 @@ mod tests {
     use super::*;
     use crate::compare;
     use crate::testutil;
-    use failure::ResultExt;
+    use base::err;
     use fnv::FnvHashMap;
 
     const BAD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY: &[u8] = b"\x00\x00\x00\x84\x61\x76\x63\x31\x00\x00\
@@ -209,7 +211,7 @@ mod tests {
         let tmpdir = tempfile::Builder::new()
             .prefix("moonfire-nvr-test")
             .tempdir()?;
-        //let path = tmpdir.path().to_str().ok_or_else(|| format_err!("invalid UTF-8"))?.to_owned();
+        //let path = tmpdir.path().to_str().ok_or_else(|| err!("invalid UTF-8"))?.to_owned();
         let mut upgraded = new_conn()?;
         upgraded.execute_batch(include_str!("v0.sql"))?;
         upgraded.execute_batch(
@@ -291,7 +293,7 @@ mod tests {
                 *ver,
                 &mut upgraded,
             )
-            .context(format!("upgrading to version {ver}"))?;
+            .map_err(|e| err!(e, msg("upgrade to version {ver} failed")))?;
             if let Some(f) = fresh_sql {
                 compare(&upgraded, *ver, f)?;
             }

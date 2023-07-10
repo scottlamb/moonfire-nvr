@@ -5,8 +5,8 @@
 //! JSON/TOML-compatible serde types for use in the web API and `moonfire-nvr.toml`.
 
 use base::time::{Duration, Time};
+use base::{err, Error};
 use db::auth::SessionHash;
-use failure::{format_err, Error};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::ops::Not;
@@ -230,7 +230,7 @@ impl<'a> Stream<'a> {
         let s = db
             .streams_by_id()
             .get(&id)
-            .ok_or_else(|| format_err!("missing stream {}", id))?;
+            .ok_or_else(|| err!(Internal, msg("missing stream {id}")))?;
         Ok(Some(Stream {
             id: s.id,
             retain_bytes: s.config.retain_bytes,

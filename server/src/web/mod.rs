@@ -17,10 +17,10 @@ use self::path::Path;
 use crate::body::Body;
 use crate::json;
 use crate::mp4;
-use base::format_err_t;
+use base::err;
 use base::Error;
 use base::ResultExt;
-use base::{bail_t, clock::Clocks, ErrorKind};
+use base::{bail, clock::Clocks, ErrorKind};
 use core::borrow::Borrow;
 use core::str::FromStr;
 use db::dir::SampleFileDir;
@@ -134,24 +134,27 @@ async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, base
         _ => false,
     };
     if !correct_mime_type {
-        bail_t!(InvalidArgument, "expected application/json request body");
+        bail!(
+            InvalidArgument,
+            msg("expected application/json request body")
+        );
     }
     let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
     hyper::body::to_bytes(b)
         .await
-        .map_err(|e| format_err_t!(Unavailable, "unable to read request body: {}", e))
+        .map_err(|e| err!(Unavailable, msg("unable to read request body"), source(e)))
 }
 
 fn parse_json_body<'a, T: serde::Deserialize<'a>>(body: &'a [u8]) -> Result<T, base::Error> {
     serde_json::from_slice(body)
-        .map_err(|e| format_err_t!(InvalidArgument, "bad request body: {e}"))
+        .map_err(|e| err!(InvalidArgument, msg("bad request body"), source(e)))
 }
 
 fn require_csrf_if_session(caller: &Caller, csrf: Option<&str>) -> Result<(), base::Error> {
     match (csrf, caller.user.as_ref().and_then(|u| u.session.as_ref())) {
-        (None, Some(_)) => bail_t!(Unauthenticated, "csrf must be supplied"),
+        (None, Some(_)) => bail!(Unauthenticated, msg("csrf must be supplied")),
         (Some(csrf), Some(session)) if !csrf_matches(csrf, session.csrf) => {
-            bail_t!(Unauthenticated, "incorrect csrf");
+            bail!(Unauthenticated, msg("incorrect csrf"));
         }
         (_, _) => Ok(()),
     }
@@ -292,7 +295,7 @@ impl Service {
             Path::StreamLiveMp4Segments(..) => {
                 unreachable!("StreamLiveMp4Segments should have already been handled")
             }
-            Path::NotFound => return Err(format_err_t!(NotFound, "path not understood")),
+            Path::NotFound => return Err(err!(NotFound, msg("path not understood"))),
             Path::Login => (
                 CacheControl::PrivateDynamic,
                 self.login(req, authreq).await?,
@@ -422,7 +425,7 @@ impl Service {
         }
 
         if camera_configs && !caller.permissions.read_camera_configs {
-            bail_t!(PermissionDenied, "read_camera_configs required");
+            bail!(PermissionDenied, msg("read_camera_configs required"));
         }
 
         let db = self.db.lock();
@@ -444,7 +447,7 @@ impl Service {
         let db = self.db.lock();
         let camera = db
             .get_camera(uuid)
-            .ok_or_else(|| format_err_t!(NotFound, "no such camera {uuid}"))?;
+            .ok_or_else(|| err!(NotFound, msg("no such camera {uuid}")))?;
         serve_json(
             req,
             &json::Camera::wrap(camera, &db, true, false).err_kind(ErrorKind::Internal)?,
@@ -466,18 +469,18 @@ impl Service {
                     match key {
                         "startTime90k" => {
                             time.start = recording::Time::parse(value).map_err(|_| {
-                                format_err_t!(InvalidArgument, "unparseable startTime90k")
+                                err!(InvalidArgument, msg("unparseable startTime90k"))
                             })?
                         }
                         "endTime90k" => {
-                            time.end = recording::Time::parse(value).map_err(|_| {
-                                format_err_t!(InvalidArgument, "unparseable endTime90k")
-                            })?
+                            time.end = recording::Time::parse(value)
+                                .map_err(|_| err!(InvalidArgument, msg("unparseable endTime90k")))?
                         }
                         "split90k" => {
-                            split = recording::Duration(i64::from_str(value).map_err(|_| {
-                                format_err_t!(InvalidArgument, "unparseable split90k")
-                            })?)
+                            split =
+                                recording::Duration(i64::from_str(value).map_err(|_| {
+                                    err!(InvalidArgument, msg("unparseable split90k"))
+                                })?)
                         }
                         _ => {}
                     }
@@ -491,10 +494,10 @@ impl Service {
             video_sample_entries: (&db, Vec::new()),
         };
         let Some(camera) = db.get_camera(uuid) else {
-            bail_t!(NotFound, "no such camera {uuid}");
+            bail!(NotFound, msg("no such camera {uuid}"));
         };
         let Some(stream_id) = camera.streams[type_.index()] else {
-            bail_t!(NotFound, "no such stream {uuid}/{type_}");
+            bail!(NotFound, msg("no such stream {uuid}/{type_}"));
         };
         db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
             let end = row.ids.end - 1; // in api, ids are inclusive.
@@ -532,7 +535,7 @@ impl Service {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
         let db = self.db.lock();
         let Some(ent) = db.video_sample_entries_by_id().get(&id) else {
-            bail_t!(NotFound, "no such init segment");
+            bail!(NotFound, msg("no such init segment"));
         };
         builder.append_video_sample_entry(ent.clone());
         let mp4 = builder
@@ -672,7 +675,7 @@ impl Service {
             });
         }
 
-        bail_t!(Unauthenticated, "unauthenticated");
+        bail!(Unauthenticated);
     }
 }
 

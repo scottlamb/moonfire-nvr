@@ -4,11 +4,11 @@
 
 use crate::stream::{self, Opener};
 use base::strutil::{decode_size, encode_size};
+use base::{bail, err, Error};
 use cursive::traits::{Finder, Nameable, Resizable, Scrollable};
 use cursive::views::{self, Dialog, ViewRef};
 use cursive::Cursive;
 use db::writer;
-use failure::{bail, format_err, Error, ResultExt};
 use itertools::Itertools;
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -123,21 +123,31 @@ fn parse_url(
     if raw.is_empty() {
         return Ok(None);
     }
-    let url = url::Url::parse(raw)
-        .with_context(|_| format!("can't parse {} {:?} as URL", field_name, &raw))?;
+    let url = url::Url::parse(raw).map_err(|_| {
+        err!(
+            InvalidArgument,
+            msg("can't parse {field_name} {raw:?} as URL")
+        )
+    })?;
     if !allowed_schemes.iter().any(|scheme| *scheme == url.scheme()) {
         bail!(
-            "Unexpected scheme in {} {:?}; should be one of: {}",
-            field_name,
-            url.as_str(),
-            allowed_schemes.iter().join(", ")
+            InvalidArgument,
+            msg(
+                "unexpected scheme in {} {:?}; should be one of: {}",
+                field_name,
+                url.as_str(),
+                allowed_schemes.iter().join(", "),
+            ),
         );
     }
     if !url.username().is_empty() || url.password().is_some() {
         bail!(
-            "Unexpected credentials in {} {:?}; use the username and password fields instead",
-            field_name,
-            url.as_str()
+            InvalidArgument,
+            msg(
+                "unexpected credentials in {} {:?}; use the username and password fields instead",
+                field_name,
+                url.as_str(),
+            ),
         );
     }
     Ok(Some(url))
@@ -166,8 +176,8 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
             let type_ = db::StreamType::from_index(i).unwrap();
             if stream.record && (stream.url.is_empty() || stream.sample_file_dir_id.is_none()) {
                 bail!(
-                    "Can't record {} stream without RTSP URL and sample file directory",
-                    type_.as_str()
+                    InvalidArgument,
+                    msg("can't record {type_} stream without RTSP URL and sample file directory"),
                 );
             }
             let stream_change = &mut change.streams[i];
@@ -184,9 +194,9 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
                 0
             } else {
                 stream.flush_if_sec.parse().map_err(|_| {
-                    format_err!(
-                        "flush_if_sec for {} must be a non-negative integer",
-                        type_.as_str()
+                    err!(
+                        InvalidArgument,
+                        msg("flush_if_sec for {type_} must be a non-negative integer"),
                     )
                 })?
             };

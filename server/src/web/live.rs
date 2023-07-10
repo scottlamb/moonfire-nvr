@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use base::{bail_t, format_err_t, Error};
+use base::{bail, err, Error};
 use futures::{future::Either, SinkExt, StreamExt};
 use http::header;
 use tokio_tungstenite::{tungstenite, WebSocketStream};
@@ -26,7 +26,7 @@ impl Service {
     ) -> Result<(), Error> {
         let caller = caller?;
         if !caller.permissions.view_video {
-            bail_t!(PermissionDenied, "view_video required");
+            bail!(PermissionDenied, msg("view_video required"));
         }
 
         let stream_id;
@@ -36,18 +36,18 @@ impl Service {
             let mut db = self.db.lock();
             open_id = match db.open {
                 None => {
-                    bail_t!(
+                    bail!(
                         FailedPrecondition,
-                        "database is read-only; there are no live streams"
+                        msg("database is read-only; there are no live streams"),
                     );
                 }
                 Some(o) => o.id,
             };
             let camera = db
                 .get_camera(uuid)
-                .ok_or_else(|| format_err_t!(NotFound, "no such camera {uuid}"))?;
+                .ok_or_else(|| err!(NotFound, msg("no such camera {uuid}")))?;
             stream_id = camera.streams[stream_type.index()]
-                .ok_or_else(|| format_err_t!(NotFound, "no such stream {uuid}/{stream_type}"))?;
+                .ok_or_else(|| err!(NotFound, msg("no such stream {uuid}/{stream_type}")))?;
             db.watch_live(
                 stream_id,
                 Box::new(move |l| sub_tx.unbounded_send(l).is_ok()),
@@ -116,7 +116,7 @@ impl Service {
                 Ok(())
             })?;
         }
-        let row = row.ok_or_else(|| format_err_t!(Internal, "unable to find {:?}", live))?;
+        let row = row.ok_or_else(|| err!(Internal, msg("unable to find {live:?}")))?;
         use http_serve::Entity;
         let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
         let mut hdrs = header::HeaderMap::new();

@@ -5,7 +5,7 @@
 /// Upgrades a version 0 schema to a version 1 schema.
 use crate::db;
 use crate::recording;
-use failure::Error;
+use base::Error;
 use rusqlite::{named_params, params};
 use std::collections::HashMap;
 use tracing::warn;

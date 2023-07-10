@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 /// Upgrades a version 3 schema to a version 4 schema.
-use failure::Error;
+use base::Error;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
     // These create statements match the schema.sql when version 4 was the latest.

@@ -7,8 +7,7 @@
 use crate::db::{self, CompositeId, SqlUuid};
 use crate::json::GlobalConfig;
 use crate::recording;
-use base::{ErrorKind, ResultExt as _};
-use failure::{bail, Error, ResultExt as _};
+use base::{bail, err, Error, ErrorKind, ResultExt as _};
 use fnv::FnvHashSet;
 use rusqlite::{named_params, params};
 use std::ops::Range;
@@ -190,9 +189,8 @@ pub(crate) fn insert_recording(
     id: CompositeId,
     r: &db::RecordingToInsert,
 ) -> Result<(), Error> {
-    let mut stmt = tx
-        .prepare_cached(
-            r#"
+    let mut stmt = tx.prepare_cached(
+        r#"
             insert into recording (composite_id, stream_id, open_id, run_offset, flags,
                                sample_file_bytes, start_time_90k, prev_media_duration_90k,
                                prev_runs, wall_duration_90k, media_duration_delta_90k,
@@ -204,8 +202,7 @@ pub(crate) fn insert_recording(
                                :video_samples, :video_sync_samples, :video_sample_entry_id,
                                :end_reason)
             "#,
-        )
-        .with_context(|e| format!("can't prepare recording insert: {e}"))?;
+    )?;
     stmt.execute(named_params! {
         ":composite_id": id.0,
         ":stream_id": i64::from(id.stream()),
@@ -223,18 +220,21 @@ pub(crate) fn insert_recording(
         ":video_sample_entry_id": r.video_sample_entry_id,
         ":end_reason": r.end_reason.as_deref(),
     })
-    .with_context(|e| format!("unable to insert recording for recording {id} {r:#?}: {e}"))?;
+    .map_err(|e| {
+        err!(
+            e,
+            msg("unable to insert recording for recording {id} {r:#?}")
+        )
+    })?;
 
-    let mut stmt = tx
-        .prepare_cached(
-            r#"
+    let mut stmt = tx.prepare_cached(
+        r#"
             insert into recording_integrity (composite_id,  local_time_delta_90k,
                                              sample_file_blake3)
                                      values (:composite_id, :local_time_delta_90k,
                                              :sample_file_blake3)
             "#,
-        )
-        .with_context(|e| format!("can't prepare recording_integrity insert: {e}"))?;
+    )?;
     let blake3 = r.sample_file_blake3.as_ref().map(|b| &b[..]);
     let delta = match r.run_offset {
         0 => None,
@@ -245,21 +245,19 @@ pub(crate) fn insert_recording(
         ":local_time_delta_90k": delta,
         ":sample_file_blake3": blake3,
     })
-    .with_context(|e| format!("unable to insert recording_integrity for {r:#?}: {e}"))?;
+    .map_err(|e| err!(e, msg("unable to insert recording_integrity for {r:#?}")))?;
 
-    let mut stmt = tx
-        .prepare_cached(
-            r#"
+    let mut stmt = tx.prepare_cached(
+        r#"
             insert into recording_playback (composite_id,  video_index)
                                     values (:composite_id, :video_index)
             "#,
-        )
-        .with_context(|e| format!("can't prepare recording_playback insert: {e}"))?;
+    )?;
     stmt.execute(named_params! {
         ":composite_id": id.0,
         ":video_index": &r.video_index,
     })
-    .with_context(|e| format!("unable to insert recording_playback for {r:#?}: {e}"))?;
+    .map_err(|e| err!(e, msg("unable to insert recording_playback for {r:#?}")))?;
 
     Ok(())
 }
@@ -322,26 +320,31 @@ pub(crate) fn delete_recordings(
     let n_playback = del_playback.execute(p)?;
     if n_playback != n {
         bail!(
-            "inserted {} garbage rows but deleted {} recording_playback rows!",
-            n,
-            n_playback
+            Internal,
+            msg(
+                "inserted {} garbage rows but deleted {} recording_playback rows!",
+                n,
+                n_playback
+            ),
         );
     }
     let n_integrity = del_integrity.execute(p)?;
     if n_integrity > n {
         // fewer is okay; recording_integrity is optional.
         bail!(
-            "inserted {} garbage rows but deleted {} recording_integrity rows!",
-            n,
-            n_integrity
+            Internal,
+            msg(
+                "inserted {} garbage rows but deleted {} recording_integrity rows!",
+                n,
+                n_integrity
+            ),
         );
     }
     let n_main = del_main.execute(p)?;
     if n_main != n {
         bail!(
-            "inserted {} garbage rows but deleted {} recording rows!",
-            n,
-            n_main
+            Internal,
+            msg("inserted {n} garbage rows but deleted {n_main} recording rows!"),
         );
     }
     Ok(n)
@@ -408,9 +411,8 @@ pub(crate) fn get_range(
     let max_end = match maxes_opt {
         Some(Range { start: _, end: e }) => e,
         None => bail!(
-            "missing max for stream {} which had min {}",
-            stream_id,
-            min_start
+            Internal,
+            msg("missing max for stream {stream_id} which had min {min_start}"),
         ),
     };
     Ok(Some(min_start..max_end))

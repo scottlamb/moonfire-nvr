@@ -4,9 +4,9 @@
 
 //! Subcommand to check the database and sample file dir for errors.
 
+use base::Error;
 use bpaf::Bpaf;
 use db::check;
-use failure::Error;
 use std::path::PathBuf;
 
 /// Checks database integrity (like fsck).

@@ -6,9 +6,10 @@ use crate::streamer;
 use crate::web;
 use crate::web::accept::Listener;
 use base::clock;
+use base::err;
+use base::{bail, Error};
 use bpaf::Bpaf;
 use db::{dir, writer};
-use failure::{bail, Error, ResultExt};
 use fnv::FnvHashMap;
 use hyper::service::{make_service_fn, service_fn};
 use retina::client::SessionGroup;
@@ -76,7 +77,10 @@ fn resolve_zone() -> Result<String, Error> {
         }
 
         if p != LOCALTIME_PATH {
-            bail!("Unable to resolve env TZ={} to a timezone.", &tz);
+            bail!(
+                FailedPrecondition,
+                msg("unable to resolve env TZ={tz} to a timezone")
+            );
         }
     }
 
@@ -86,21 +90,23 @@ fn resolve_zone() -> Result<String, Error> {
         Ok(localtime_dest) => {
             let localtime_dest = match localtime_dest.to_str() {
                 Some(d) => d,
-                None => bail!("{} symlink destination is invalid UTF-8", LOCALTIME_PATH),
+                None => bail!(
+                    FailedPrecondition,
+                    msg("{LOCALTIME_PATH} symlink destination is invalid UTF-8")
+                ),
             };
             if let Some(p) = zoneinfo_name(localtime_dest) {
                 return Ok(p.to_owned());
             }
             bail!(
-                "Unable to resolve {} symlink destination {} to a timezone.",
-                LOCALTIME_PATH,
-                &localtime_dest
+                FailedPrecondition,
+                msg("unable to resolve {LOCALTIME_PATH} symlink destination {localtime_dest} to a timezone"),
             );
         }
         Err(e) => {
             use ::std::io::ErrorKind;
             if e.kind() != ErrorKind::NotFound && e.kind() != ErrorKind::InvalidInput {
-                bail!("Unable to read {} symlink: {}", LOCALTIME_PATH, e);
+                bail!(e, msg("unable to read {LOCALTIME_PATH} symlink"));
             }
         }
     };
@@ -110,10 +116,8 @@ fn resolve_zone() -> Result<String, Error> {
         Ok(z) => Ok(z.trim().to_owned()),
         Err(e) => {
             bail!(
-                "Unable to resolve timezone from TZ env, {}, or {}. Last error: {}",
-                LOCALTIME_PATH,
-                TIMEZONE_PATH,
-                e
+                e,
+                msg("unable to resolve timezone from TZ env, {LOCALTIME_PATH}, or {TIMEZONE_PATH}"),
             );
         }
     }
@@ -127,15 +131,18 @@ struct Syncer {
 
 fn read_config(path: &Path) -> Result<ConfigFile, Error> {
     let config = std::fs::read(path)?;
-    let config = toml::from_slice(&config)?;
+    let config = toml::from_slice(&config).map_err(|e| err!(InvalidArgument, source(e)))?;
     Ok(config)
 }
 
 pub fn run(args: Args) -> Result<i32, Error> {
-    let config = read_config(&args.config).with_context(|_| {
-        format!(
-            "Unable to load config file {}. See documentation in ref/config.md.",
-            &args.config.display()
+    let config = read_config(&args.config).map_err(|e| {
+        err!(
+            e,
+            msg(
+                "unable to load config file {}; see documentation in ref/config.md",
+                &args.config.display(),
+            ),
         )
     })?;
 
@@ -180,8 +187,8 @@ async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
     }
 
     tokio::select! {
-        _ = int.recv() => bail!("immediate shutdown due to second signal (SIGINT)"),
-        _ = term.recv() => bail!("immediate shutdown due to second singal (SIGTERM)"),
+        _ = int.recv() => bail!(Cancelled, msg("immediate shutdown due to second signal (SIGINT)")),
+        _ = term.recv() => bail!(Cancelled, msg("immediate shutdown due to second singal (SIGTERM)")),
         result = &mut inner => result,
     }
 }
@@ -213,17 +220,16 @@ fn make_listener(addr: &config::AddressConfig) -> Result<Listener, Error> {
         config::AddressConfig::Ipv6(a) => (*a).into(),
         config::AddressConfig::Unix(p) => {
             prepare_unix_socket(p);
-            return Ok(Listener::Unix(
-                tokio::net::UnixListener::bind(p)
-                    .with_context(|_| format!("unable bind Unix socket {}", p.display()))?,
-            ));
+            return Ok(Listener::Unix(tokio::net::UnixListener::bind(p).map_err(
+                |e| err!(e, msg("unable bind Unix socket {}", p.display())),
+            )?));
         }
     };
 
     // Go through std::net::TcpListener to avoid needing async. That's there for DNS resolution,
     // but it's unnecessary when starting from a SocketAddr.
     let listener = std::net::TcpListener::bind(sa)
-        .with_context(|_| format!("unable to bind TCP socket {}", &sa))?;
+        .map_err(|e| err!(e, msg("unable to bind TCP socket {sa}")))?;
     listener.set_nonblocking(true)?;
     Ok(Listener::Tcp(tokio::net::TcpListener::from_std(listener)?))
 }
@@ -419,13 +425,16 @@ async fn inner(
             }
         }
     })
-    .await?;
+    .await
+    .map_err(|e| err!(Unknown, source(e)))?;
 
     db.lock().clear_watches();
 
     info!("Waiting for HTTP requests to finish.");
     for h in web_handles {
-        h.await??;
+        h.await
+            .map_err(|e| err!(Unknown, source(e)))?
+            .map_err(|e| err!(Unknown, source(e)))?;
     }
 
     info!("Waiting for TEARDOWN requests to complete.");

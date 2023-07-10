@@ -5,8 +5,8 @@
 //! Subcommand to run a SQLite shell.
 
 use super::OpenMode;
+use base::Error;
 use bpaf::Bpaf;
-use failure::Error;
 use std::ffi::OsString;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;

@@ -11,7 +11,7 @@ use crate::json::SampleFileDirConfig;
 use crate::raw;
 use crate::recording;
 use crate::schema;
-use failure::Error;
+use base::{err, Error};
 use fnv::{FnvHashMap, FnvHashSet};
 use nix::fcntl::AtFlags;
 use rusqlite::params;
@@ -104,7 +104,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
 
             // Open the directory (checking its metadata) and hold it open (for the lock).
             let dir = dir::SampleFileDir::open(&config.path, &meta)
-                .map_err(|e| e.context(format!("unable to open dir {}", config.path.display())))?;
+                .map_err(|e| err!(e, msg("unable to open dir {}", config.path.display())))?;
             let mut streams = read_dir(&dir, opts)?;
             let mut rows = garbage_stmt.query(params![dir_id])?;
             while let Some(row) = rows.next()? {

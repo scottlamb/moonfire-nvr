@@ -12,8 +12,8 @@ mod reader;
 use crate::coding;
 use crate::db::CompositeId;
 use crate::schema;
+use base::{bail, err, Error};
 use cstr::cstr;
-use failure::{bail, format_err, Error, Fail};
 use nix::sys::statvfs::Statvfs;
 use nix::{
     fcntl::{FlockArg, OFlag},
@@ -145,20 +145,23 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     let mut data = Vec::new();
     f.read_to_end(&mut data)?;
     let (len, pos) = coding::decode_varint32(&data, 0)
-        .map_err(|_| format_err!("Unable to decode varint length in meta file"))?;
+        .map_err(|_| err!(DataLoss, msg("Unable to decode varint length in meta file")))?;
     if data.len() != FIXED_DIR_META_LEN || len as usize + pos > FIXED_DIR_META_LEN {
         bail!(
-            "Expected a {}-byte file with a varint length of a DirMeta message; got \
-            a {}-byte file with length {}",
-            FIXED_DIR_META_LEN,
-            data.len(),
-            len
+            DataLoss,
+            msg(
+                "Expected a {}-byte file with a varint length of a DirMeta message; got \
+                a {}-byte file with length {}",
+                FIXED_DIR_META_LEN,
+                data.len(),
+                len,
+            ),
         );
     }
     let data = &data[pos..pos + len as usize];
     let mut s = protobuf::CodedInputStream::from_bytes(data);
     meta.merge_from(&mut s)
-        .map_err(|e| e.context("Unable to parse metadata proto"))?;
+        .map_err(|e| err!(DataLoss, msg("Unable to parse metadata proto"), source(e)))?;
     Ok(meta)
 }
 
@@ -169,9 +172,12 @@ pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Err
         .expect("proto3->vec is infallible");
     if data.len() > FIXED_DIR_META_LEN {
         bail!(
-            "Length-delimited DirMeta message requires {} bytes, over limit of {}",
-            data.len(),
-            FIXED_DIR_META_LEN
+            Internal,
+            msg(
+                "length-delimited DirMeta message requires {} bytes, over limit of {}",
+                data.len(),
+                FIXED_DIR_META_LEN,
+            ),
         );
     }
     data.resize(FIXED_DIR_META_LEN, 0); // pad to required length.
@@ -181,28 +187,31 @@ pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Err
         OFlag::O_CREAT | OFlag::O_WRONLY,
         Mode::S_IRUSR | Mode::S_IWUSR,
     )
-    .map_err(|e| e.context("Unable to open meta file"))?;
+    .map_err(|e| err!(e, msg("unable to open meta file")))?;
     let stat = f
         .metadata()
-        .map_err(|e| e.context("Unable to stat meta file"))?;
+        .map_err(|e| err!(e, msg("unable to stat meta file")))?;
     if stat.len() == 0 {
         // Need to sync not only the data but also the file metadata and dirent.
         f.write_all(&data)
-            .map_err(|e| e.context("Unable to write to meta file"))?;
+            .map_err(|e| err!(e, msg("unable to write to meta file")))?;
         f.sync_all()
-            .map_err(|e| e.context("Unable to sync meta file"))?;
-        nix::unistd::fsync(dirfd).map_err(|e| e.context("Unable to sync dir"))?;
+            .map_err(|e| err!(e, msg("unable to sync meta file")))?;
+        nix::unistd::fsync(dirfd).map_err(|e| err!(e, msg("unable to sync dir")))?;
     } else if stat.len() == FIXED_DIR_META_LEN as u64 {
         // Just syncing the data will suffice; existing metadata and dirent are fine.
         f.write_all(&data)
-            .map_err(|e| e.context("Unable to write to meta file"))?;
+            .map_err(|e| err!(e, msg("unable to write to meta file")))?;
         f.sync_data()
-            .map_err(|e| e.context("Unable to sync meta file"))?;
+            .map_err(|e| err!(e, msg("unable to sync meta file")))?;
     } else {
         bail!(
-            "Existing meta file is {}-byte; expected {}",
-            stat.len(),
-            FIXED_DIR_META_LEN
+            DataLoss,
+            msg(
+                "existing meta file is {}-byte; expected {}",
+                stat.len(),
+                FIXED_DIR_META_LEN,
+            ),
         );
     }
     Ok(())
@@ -221,14 +230,15 @@ impl SampleFileDir {
         } else {
             FlockArg::LockSharedNonblock
         })
-        .map_err(|e| e.context(format!("unable to lock dir {}", path.display())))?;
-        let dir_meta = read_meta(&s.fd).map_err(|e| e.context("unable to read meta file"))?;
+        .map_err(|e| err!(e, msg("unable to lock dir {}", path.display())))?;
+        let dir_meta = read_meta(&s.fd).map_err(|e| err!(e, msg("unable to read meta file")))?;
         if let Err(e) = SampleFileDir::check_consistent(expected_meta, &dir_meta) {
             bail!(
-                "metadata mismatch: {}.\nexpected:\n{:#?}\n\nactual:\n{:#?}",
-                e,
-                expected_meta,
-                &dir_meta
+                Internal,
+                msg(
+                    "metadata mismatch: {e}.\nexpected:\n{expected_meta:#?}\n\nactual:\n\
+                    {dir_meta:#?}",
+                ),
             );
         }
         if expected_meta.in_progress_open.is_some() {
@@ -275,22 +285,28 @@ impl SampleFileDir {
     ) -> Result<Arc<SampleFileDir>, Error> {
         let s = SampleFileDir::open_self(path, true)?;
         s.fd.lock(FlockArg::LockExclusiveNonblock)
-            .map_err(|e| e.context(format!("unable to lock dir {}", path.display())))?;
+            .map_err(|e| err!(e, msg("unable to lock dir {}", path.display())))?;
         let old_meta = read_meta(&s.fd)?;
 
         // Verify metadata. We only care that it hasn't been completely opened.
         // Partial opening by this or another database is fine; we won't overwrite anything.
         if old_meta.last_complete_open.is_some() {
             bail!(
-                "Can't create dir at path {}: is already in use:\n{:?}",
-                path.display(),
-                old_meta
+                FailedPrecondition,
+                msg(
+                    "can't create dir at path {}: is already in use:\n{:?}",
+                    path.display(),
+                    old_meta,
+                ),
             );
         }
         if !s.is_empty()? {
             bail!(
-                "Can't create dir at path {} with existing files",
-                path.display()
+                FailedPrecondition,
+                msg(
+                    "can't create dir at path {} with existing files",
+                    path.display(),
+                ),
             );
         }
         s.write_meta(db_meta)?;

@@ -5,9 +5,9 @@
 //! Subcommand to login a user (without requiring a password).
 
 use base::clock::{self, Clocks};
+use base::{bail, err, Error};
 use bpaf::Bpaf;
 use db::auth::SessionFlag;
-use failure::{format_err, Error};
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::PathBuf;
@@ -69,9 +69,9 @@ pub fn run(args: Args) -> Result<i32, Error> {
     let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     let db = std::sync::Arc::new(db::Database::new(clocks, conn, true).unwrap());
     let mut l = db.lock();
-    let u = l
-        .get_user(&args.username)
-        .ok_or_else(|| format_err!("no such user {:?}", &args.username))?;
+    let Some(u) = l.get_user(&args.username) else {
+        bail!(NotFound, msg("no such user {:?}", &args.username));
+    };
     let permissions = args
         .permissions
         .map(db::Permissions::from)
@@ -101,13 +101,13 @@ pub fn run(args: Args) -> Result<i32, Error> {
         let d = args
             .domain
             .as_ref()
-            .ok_or_else(|| format_err!("--curl-cookie-jar requires --domain"))?;
+            .ok_or_else(|| err!(InvalidArgument, msg("--curl-cookie-jar requires --domain")))?;
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(p)
-            .map_err(|e| format_err!("Unable to open {}: {}", p.display(), e))?;
+            .map_err(|e| err!(e, msg("unable to open {}", p.display())))?;
         write!(
             &mut f,
             "# Netscape HTTP Cookie File\n\

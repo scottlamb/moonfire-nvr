@@ -8,9 +8,8 @@
 use crate::db::{self, SqlUuid};
 use crate::dir;
 use crate::schema;
-use failure::Error;
+use base::Error;
 use rusqlite::params;
-use std::convert::TryFrom;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,7 +49,7 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
         open.id = o_id as u32;
         open.uuid.extend_from_slice(&o_uuid.0.as_bytes()[..]);
     }
-    let p = PathBuf::try_from(p)?;
+    let p = PathBuf::from(p);
     dir::SampleFileDir::open(&p, &meta)
 }
 

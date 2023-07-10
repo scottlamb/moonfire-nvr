@@ -4,7 +4,7 @@
 
 //! `/api/signals` handling.
 
-use base::{bail_t, clock::Clocks, format_err_t};
+use base::{bail, clock::Clocks, err};
 use db::recording;
 use http::{Method, Request, StatusCode};
 use url::form_urlencoded;
@@ -36,7 +36,7 @@ impl Service {
 
     async fn post_signals(&self, mut req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
         if !caller.permissions.update_signals {
-            bail_t!(PermissionDenied, "update_signals required");
+            bail!(PermissionDenied, msg("update_signals required"));
         }
         let r = extract_json_body(&mut req).await?;
         let r: json::PostSignalsRequest = parse_json_body(&r)?;
@@ -62,13 +62,12 @@ impl Service {
                 let (key, value) = (key.borrow(), value.borrow());
                 match key {
                     "startTime90k" => {
-                        time.start = recording::Time::parse(value).map_err(|_| {
-                            format_err_t!(InvalidArgument, "unparseable startTime90k")
-                        })?
+                        time.start = recording::Time::parse(value)
+                            .map_err(|_| err!(InvalidArgument, msg("unparseable startTime90k")))?
                     }
                     "endTime90k" => {
                         time.end = recording::Time::parse(value)
-                            .map_err(|_| format_err_t!(InvalidArgument, "unparseable endTime90k"))?
+                            .map_err(|_| err!(InvalidArgument, msg("unparseable endTime90k")))?
                     }
                     _ => {}
                 }

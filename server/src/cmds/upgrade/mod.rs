@@ -2,11 +2,11 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-use bpaf::Bpaf;
 /// Upgrades the database schema.
 ///
 /// See `guide/schema.md` for more information.
-use failure::Error;
+use base::Error;
+use bpaf::Bpaf;
 
 /// Upgrades to the latest database schema.
 #[derive(Bpaf, Debug)]

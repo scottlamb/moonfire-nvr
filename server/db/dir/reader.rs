@@ -31,9 +31,9 @@ use std::{
     task::{Context, Poll},
 };
 
-use base::bail_t;
+use base::bail;
 use base::clock::{RealClocks, TimerGuard};
-use base::{format_err_t, Error, ErrorKind, ResultExt};
+use base::{err, Error, ErrorKind, ResultExt};
 use nix::{fcntl::OFlag, sys::stat::Mode};
 
 use crate::CompositeId;
@@ -116,9 +116,9 @@ impl FileStream {
         match Pin::new(&mut rx).poll(cx) {
             Poll::Ready(Err(_)) => {
                 self.state = FileStreamState::Invalid;
-                Poll::Ready(Some(Err(format_err_t!(
+                Poll::Ready(Some(Err(err!(
                     Internal,
-                    "reader thread panicked; see logs"
+                    msg("reader thread panicked; see logs")
                 ))))
             }
             Poll::Ready(Ok(Err(e))) => {
@@ -319,12 +319,11 @@ impl ReaderInt {
         let map_len = usize::try_from(
             range.end - range.start + u64::try_from(unaligned).expect("usize fits in u64"),
         )
-        .map_err(|_| {
-            format_err_t!(
+        .map_err(|e| {
+            err!(
                 OutOfRange,
-                "file {}'s range {:?} len exceeds usize::MAX",
-                composite_id,
-                range
+                msg("file {composite_id}'s range {range:?} len exceeds usize::MAX"),
+                source(e),
             )
         })?;
         let map_len = std::num::NonZeroUsize::new(map_len).expect("range is non-empty");
@@ -337,12 +336,14 @@ impl ReaderInt {
         // with a SIGBUS or reading bad data at the end of the last page later.
         let metadata = file.metadata().err_kind(ErrorKind::Unknown)?;
         if metadata.len() < u64::try_from(offset).unwrap() + u64::try_from(map_len.get()).unwrap() {
-            bail_t!(
-                Internal,
-                "file {}, range {:?}, len {}",
-                composite_id,
-                range,
-                metadata.len()
+            bail!(
+                OutOfRange,
+                msg(
+                    "file {}, range {:?}, len {}",
+                    composite_id,
+                    range,
+                    metadata.len()
+                ),
             );
         }
         let map_ptr = unsafe {
@@ -356,17 +357,13 @@ impl ReaderInt {
             )
         }
         .map_err(|e| {
-            format_err_t!(
-                Internal,
-                "mmap failed for {} off={} len={}: {}",
-                composite_id,
-                offset,
-                map_len,
-                e
+            err!(
+                e,
+                msg("mmap failed for {composite_id} off={offset} len={map_len}")
             )
         })?;
 
-        if let Err(e) = unsafe {
+        if let Err(err) = unsafe {
             nix::sys::mman::madvise(
                 map_ptr,
                 map_len.get(),
@@ -375,11 +372,11 @@ impl ReaderInt {
         } {
             // This shouldn't happen but is "just" a performance problem.
             tracing::warn!(
-                "madvise(MADV_SEQUENTIAL) failed for {} off={} len={}: {}",
-                composite_id,
+                %err,
+                %composite_id,
                 offset,
                 map_len,
-                e
+                "madvise(MADV_SEQUENTIAL) failed",
             );
         }
 

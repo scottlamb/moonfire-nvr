@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 /// Upgrades a version 6 schema to a version 7 schema.
-use failure::{format_err, Error, ResultExt};
+use base::{err, Error};
 use fnv::FnvHashMap;
 use rusqlite::{named_params, params};
 use std::{convert::TryFrom, path::PathBuf};
@@ -28,7 +28,13 @@ fn copy_meta(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let config = GlobalConfig {
             max_signal_changes: max_signal_changes
                 .map(|s| {
-                    u32::try_from(s).map_err(|_| format_err!("max_signal_changes out of range"))
+                    u32::try_from(s).map_err(|e| {
+                        err!(
+                            OutOfRange,
+                            msg("max_signal_changes out of range"),
+                            source(e)
+                        )
+                    })
                 })
                 .transpose()?,
             ..Default::default()
@@ -57,7 +63,7 @@ fn copy_sample_file_dir(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let path: String = row.get(2)?;
         let uuid: SqlUuid = row.get(1)?;
         let config = SampleFileDirConfig {
-            path: PathBuf::try_from(path)?,
+            path: PathBuf::from(path),
             ..Default::default()
         };
         let last_complete_open_id: Option<i64> = row.get(3)?;
@@ -107,7 +113,10 @@ fn copy_users(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let permissions: Vec<u8> = row.get(7)?;
         let config = UserConfig {
             disabled: (flags & 1) != 0,
-            unix_uid: unix_uid.map(u64::try_from).transpose()?,
+            unix_uid: unix_uid
+                .map(u64::try_from)
+                .transpose()
+                .map_err(|_| err!(OutOfRange, msg("bad unix_uid")))?,
             ..Default::default()
         };
         insert.execute(named_params! {
@@ -134,7 +143,8 @@ fn copy_signal_types(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let type_ = types_
             .entry(type_uuid.0)
             .or_insert_with(SignalTypeConfig::default);
-        let value = u8::try_from(value).map_err(|_| format_err!("bad signal type value"))?;
+        let value =
+            u8::try_from(value).map_err(|_| err!(OutOfRange, msg("bad signal type value")))?;
         let value_config = type_.values.entry(value).or_insert_with(Default::default);
         if let Some(n) = name {
             value_config.name = n;
@@ -163,7 +173,8 @@ fn copy_signals(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id: i32 = row.get(0)?;
-            let id = u32::try_from(id)?;
+            let id =
+                u32::try_from(id).map_err(|e| err!(OutOfRange, msg("bad signal id"), source(e)))?;
             let source_uuid: SqlUuid = row.get(1)?;
             let type_uuid: SqlUuid = row.get(2)?;
             let short_name: String = row.get(3)?;
@@ -187,7 +198,8 @@ fn copy_signals(tx: &rusqlite::Transaction) -> Result<(), Error> {
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let signal_id: i32 = row.get(0)?;
-            let signal_id = u32::try_from(signal_id)?;
+            let signal_id = u32::try_from(signal_id)
+                .map_err(|e| err!(OutOfRange, msg("bad signal_id"), source(e)))?;
             let camera_id: i32 = row.get(1)?;
             let type_: i32 = row.get(2)?;
             let signal = signals.get_mut(&signal_id).unwrap();
@@ -261,7 +273,13 @@ fn copy_cameras(tx: &rusqlite::Transaction) -> Result<(), Error> {
                 .filter(|h| !h.is_empty())
                 .map(|h| Url::parse(&format!("http://{h}/")))
                 .transpose()
-                .with_context(|_| "bad onvif_host")?,
+                .map_err(|e| {
+                    err!(
+                        InvalidArgument,
+                        msg("bad onvif_host for camera id {id}"),
+                        source(e)
+                    )
+                })?,
             username: username.take().unwrap_or_default(),
             password: password.take().unwrap_or_default(),
             ..Default::default()
@@ -324,7 +342,13 @@ fn copy_streams(tx: &rusqlite::Transaction) -> Result<(), Error> {
                 ""
             })
             .to_owned(),
-            url: Some(Url::parse(&rtsp_url)?),
+            url: Some(Url::parse(&rtsp_url).map_err(|e| {
+                err!(
+                    InvalidArgument,
+                    msg("bad rtsp_url for stream id {id}"),
+                    source(e)
+                )
+            })?),
             retain_bytes,
             flush_if_sec,
             ..Default::default()

@@ -6,7 +6,7 @@
 //! This is used as part of the `moonfire-nvr check` database integrity checking
 //! and for tests of `moonfire-nvr upgrade`.
 
-use failure::Error;
+use base::Error;
 use rusqlite::params;
 use std::fmt::Write;
 
@@ -168,7 +168,8 @@ pub fn get_diffs(
     let tables1 = get_tables(c1)?;
     let tables2 = get_tables(c2)?;
     if let Some(diff) = diff_slices(n1, &tables1[..], n2, &tables2[..]) {
-        write!(&mut diffs, "table list mismatch, {n1} vs {n2}:\n{diff}")?;
+        write!(&mut diffs, "table list mismatch, {n1} vs {n2}:\n{diff}")
+            .expect("write to String shouldn't fail");
     }
 
     // Compare columns and indices for each table.
@@ -176,7 +177,8 @@ pub fn get_diffs(
         let columns1 = get_table_columns(c1, t)?;
         let columns2 = get_table_columns(c2, t)?;
         if let Some(diff) = diff_slices(n1, &columns1[..], n2, &columns2[..]) {
-            write!(&mut diffs, "table {t:?} column, {n1} vs {n2}:\n{diff}")?;
+            write!(&mut diffs, "table {t:?} column, {n1} vs {n2}:\n{diff}")
+                .expect("write to String shouldn't fail");
         }
 
         let mut indices1 = get_indices(c1, t)?;
@@ -184,7 +186,8 @@ pub fn get_diffs(
         indices1.sort_by(|a, b| a.name.cmp(&b.name));
         indices2.sort_by(|a, b| a.name.cmp(&b.name));
         if let Some(diff) = diff_slices(n1, &indices1[..], n2, &indices2[..]) {
-            write!(&mut diffs, "table {t:?} indices, {n1} vs {n2}:\n{diff}")?;
+            write!(&mut diffs, "table {t:?} indices, {n1} vs {n2}:\n{diff}")
+                .expect("write to String shouldn't fail");
         }
 
         for i in &indices1 {
@@ -194,7 +197,8 @@ pub fn get_diffs(
                 write!(
                     &mut diffs,
                     "table {t:?} index {i:?} columns {n1} vs {n2}:\n{diff}"
-                )?;
+                )
+                .expect("write to String shouldn't fail");
             }
         }
     }

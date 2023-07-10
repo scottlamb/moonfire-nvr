@@ -27,7 +27,7 @@ pub type BoxedError = Box<dyn StdError + Send + Sync>;
 pub type BodyStream = Box<dyn Stream<Item = Result<Chunk, BoxedError>> + Send>;
 
 pub fn wrap_error(e: Error) -> BoxedError {
-    Box::new(e.compat())
+    Box::new(e)
 }
 
 impl From<ARefss<'static, [u8]>> for Chunk {

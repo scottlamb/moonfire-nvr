@@ -56,7 +56,7 @@
 
 use crate::body::{wrap_error, BoxedError, Chunk};
 use crate::slices::{self, Slices};
-use base::{bail_t, format_err_t, Error, ErrorKind, ResultExt};
+use base::{bail, err, Error, ErrorKind, ResultExt};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use bytes::BytesMut;
 use db::dir;
@@ -410,14 +410,14 @@ impl Segment {
             *index = db
                 .lock()
                 .with_recording_playback(self.s.id, &mut |playback| self.build_index(playback))
-                .map_err(|e| {
-                    error!("Unable to build index for segment: {:?}", e);
+                .map_err(|err| {
+                    error!(%err, recording_id = %self.s.id, "unable to build index for segment");
                 });
         });
         let index: &'a _ = unsafe { &*self.index.get() };
         match *index {
             Ok(ref b) => Ok(f(&b[..], self.lens())),
-            Err(()) => bail_t!(Unknown, "Unable to build index; see previous error."),
+            Err(()) => bail!(Unknown, msg("unable to build index; see logs")),
         }
     }
 
@@ -439,7 +439,7 @@ impl Segment {
         &buf[lens.stts + lens.stsz..]
     }
 
-    fn build_index(&self, playback: &db::RecordingPlayback) -> Result<Box<[u8]>, failure::Error> {
+    fn build_index(&self, playback: &db::RecordingPlayback) -> Result<Box<[u8]>, Error> {
         let s = &self.s;
         let lens = self.lens();
         let len = lens.stts + lens.stsz + lens.stss;
@@ -511,7 +511,7 @@ impl Segment {
         playback: &db::RecordingPlayback,
         initial_pos: u64,
         len: usize,
-    ) -> Result<Vec<u8>, failure::Error> {
+    ) -> Result<Vec<u8>, Error> {
         let mut v = Vec::with_capacity(len);
 
         struct RunInfo {
@@ -623,12 +623,14 @@ impl Segment {
             );
         }
         if len != v.len() {
-            bail_t!(
+            bail!(
                 Internal,
-                "truns on {:?} expected len {} got len {}",
-                self,
-                len,
-                v.len()
+                msg(
+                    "truns on {:?} expected len {} got len {}",
+                    self,
+                    len,
+                    v.len(),
+                ),
             );
         }
         Ok(v)
@@ -698,12 +700,9 @@ enum SliceType {
 impl Slice {
     fn new(end: u64, t: SliceType, p: usize) -> Result<Self, Error> {
         if end >= (1 << 40) || p >= (1 << 20) {
-            bail_t!(
-                InvalidArgument,
-                "end={} p={} too large for {:?} Slice",
-                end,
-                p,
-                t
+            bail!(
+                OutOfRange,
+                msg("end={} p={} too large for {:?} Slice", end, p, t,),
             );
         }
 
@@ -730,7 +729,7 @@ impl Slice {
             .try_map(|mp4| {
                 let i = mp4.segments[p].get_index(&mp4.db, f)?;
                 if u64::try_from(i.len()).unwrap() != len {
-                    bail_t!(Internal, "expected len {} got {}", len, i.len());
+                    bail!(Internal, msg("expected len {} got {}", len, i.len()));
                 }
                 Ok::<_, Error>(&i[r])
             })?
@@ -760,7 +759,7 @@ impl Slice {
             .try_map(|mp4| {
                 let data = &mp4.video_sample_entries[self.p()].data;
                 if u64::try_from(data.len()).unwrap() != len {
-                    bail_t!(Internal, "expected len {} got len {}", len, data.len());
+                    bail!(Internal, msg("expected len {} got len {}", len, data.len()));
                 }
                 Ok::<_, Error>(&data[r.start as usize..r.end as usize])
             })?
@@ -787,11 +786,9 @@ impl slices::Slice for Slice {
             SliceType::Static => {
                 let s = STATIC_BYTESTRINGS[p];
                 if u64::try_from(s.len()).unwrap() != len {
-                    Err(format_err_t!(
+                    Err(err!(
                         Internal,
-                        "expected len {} got len {}",
-                        len,
-                        s.len()
+                        msg("expected len {} got len {}", len, s.len())
                     ))
                 } else {
                     let part = &s[range.start as usize..range.end as usize];
@@ -817,12 +814,14 @@ impl slices::Slice for Slice {
         Box::new(stream::once(futures::future::ready(
             res.map_err(wrap_error).and_then(move |c| {
                 if c.remaining() != (range.end - range.start) as usize {
-                    return Err(wrap_error(format_err_t!(
+                    return Err(wrap_error(err!(
                         Internal,
-                        "Error producing {:?}: range {:?} produced incorrect len {}.",
-                        self,
-                        range,
-                        c.remaining()
+                        msg(
+                            "{:?} range {:?} produced incorrect len {}",
+                            self,
+                            range,
+                            c.remaining()
+                        )
                     )));
                 }
                 Ok(c)
@@ -904,9 +903,9 @@ impl FileBuilder {
             // There's no support today for timestamp truns or for timestamps without edit lists.
             // The latter would invalidate the code's assumption that desired timespan == actual
             // timespan in the timestamp track.
-            bail_t!(
+            bail!(
                 InvalidArgument,
-                "timestamp subtitles aren't supported on media segments"
+                msg("timestamp subtitles aren't supported on media segments")
             );
         }
         self.include_timestamp_subtitle_track = b;
@@ -934,11 +933,13 @@ impl FileBuilder {
     ) -> Result<(), Error> {
         if let Some(prev) = self.segments.last() {
             if prev.s.have_trailing_zero() {
-                bail_t!(
+                bail!(
                     InvalidArgument,
-                    "unable to append recording {} after recording {} with trailing zero",
-                    row.id,
-                    prev.s.id
+                    msg(
+                        "unable to append recording {} after recording {} with trailing zero",
+                        row.id,
+                        prev.s.id,
+                    ),
                 );
             }
         } else {
@@ -1071,10 +1072,12 @@ impl FileBuilder {
                 // If the segment is > 4 GiB, the 32-bit trun data offsets are untrustworthy.
                 // We'd need multiple moof+mdat sequences to support large media segments properly.
                 if self.body.slices.len() > u32::max_value() as u64 {
-                    bail_t!(
-                        InvalidArgument,
-                        "media segment has length {}, greater than allowed 4 GiB",
-                        self.body.slices.len()
+                    bail!(
+                        OutOfRange,
+                        msg(
+                            "media segment has length {}, greater than allowed 4 GiB",
+                            self.body.slices.len(),
+                        ),
                     );
                 }
 
@@ -1355,7 +1358,7 @@ impl FileBuilder {
                     None => Some((e.width, e.height)),
                     Some((w, h)) => Some((cmp::max(w, e.width), cmp::max(h, e.height))),
                 })
-                .ok_or_else(|| format_err_t!(InvalidArgument, "no video_sample_entries"))?;
+                .ok_or_else(|| err!(InvalidArgument, msg("no video_sample_entries")))?;
             self.body.append_u32((width as u32) << 16);
             self.body.append_u32((height as u32) << 16);
         })
@@ -1396,7 +1399,10 @@ impl FileBuilder {
             let skip = md.start - actual_start_90k;
             let keep = md.end - md.start;
             if skip < 0 || keep < 0 {
-                bail_t!(Internal, "skip={} keep={} on segment {:#?}", skip, keep, s);
+                bail!(
+                    Internal,
+                    msg("skip={} keep={} on segment {:#?}", skip, keep, s)
+                );
             }
             cur_media_time += skip as u64;
             if unflushed.segment_duration + unflushed.media_time == cur_media_time {
@@ -1817,9 +1823,10 @@ impl FileInner {
         let sr = s.s.sample_file_range();
         let f = match self.dirs_by_stream_id.get(&s.s.id.stream()) {
             None => {
-                return Box::new(stream::iter(std::iter::once(Err(wrap_error(
-                    format_err_t!(NotFound, "{}: stream not found", s.s.id),
-                )))))
+                return Box::new(stream::iter(std::iter::once(Err(wrap_error(err!(
+                    NotFound,
+                    msg("{}: stream not found", s.s.id)
+                ))))))
             }
             Some(d) => d.open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start)),
         };
@@ -1865,10 +1872,12 @@ impl File {
     pub async fn append_into_vec(self, v: &mut Vec<u8>) -> Result<(), Error> {
         use http_serve::Entity;
         v.reserve(usize::try_from(self.len()).map_err(|_| {
-            format_err_t!(
+            err!(
                 InvalidArgument,
-                "{}-byte mp4 is too big to send over WebSockets!",
-                self.len()
+                msg(
+                    "{}-byte mp4 is too big to send over WebSockets!",
+                    self.len()
+                ),
             )
         })?);
         let mut b = std::pin::Pin::from(self.get_range(0..self.len()));
@@ -1876,9 +1885,7 @@ impl File {
             use futures::stream::StreamExt;
             match b.next().await {
                 Some(r) => {
-                    let mut chunk = r
-                        .map_err(failure::Error::from_boxed_compat)
-                        .err_kind(ErrorKind::Unknown)?;
+                    let mut chunk = r.map_err(|e| err!(Unknown, source(e)))?;
                     while chunk.has_remaining() {
                         let c = chunk.chunk();
                         v.extend_from_slice(c);
@@ -2312,7 +2319,7 @@ mod tests {
         loop {
             let pkt = match input.next() {
                 Ok(p) => p,
-                Err(e) if e.to_string().contains("End of file") => {
+                Err(e) if e.kind() == ErrorKind::OutOfRange => {
                     break;
                 }
                 Err(e) => {
@@ -2419,14 +2426,14 @@ mod tests {
         for i in 0.. {
             let orig_pkt = match orig.next() {
                 Ok(p) => Some(p),
-                Err(e) if e.to_string() == "End of file" => None,
+                Err(e) if e.msg().unwrap() == "end of file" => None,
                 Err(e) => {
                     panic!("unexpected input error: {}", e);
                 }
             };
             let new_pkt = match new.next() {
                 Ok(p) => Some(p),
-                Err(e) if e.to_string() == "End of file" => {
+                Err(e) if e.msg().unwrap() == "end of file" => {
                     break;
                 }
                 Err(e) => {
@@ -2634,7 +2641,8 @@ mod tests {
         let e = make_mp4_from_encoders(Type::Normal, &db, vec![], 0..0, true)
             .err()
             .unwrap();
-        assert_eq!(e.to_string(), "Invalid argument: no video_sample_entries");
+        assert_eq!(e.kind(), ErrorKind::InvalidArgument);
+        assert_eq!(e.msg().unwrap(), "no video_sample_entries");
     }
 
     #[tokio::test]

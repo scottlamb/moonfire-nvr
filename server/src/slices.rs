@@ -9,8 +9,7 @@ use std::ops::Range;
 use std::pin::Pin;
 
 use crate::body::{wrap_error, BoxedError};
-use base::format_err_t;
-use failure::{bail, Error};
+use base::{bail, err, Error};
 use futures::{stream, stream::StreamExt, Stream};
 use tracing_futures::Instrument;
 
@@ -102,11 +101,14 @@ where
     pub fn append(&mut self, slice: S) -> Result<(), Error> {
         if slice.end() <= self.len {
             bail!(
-                "end {} <= len {} while adding slice {:?} to slices:\n{:?}",
-                slice.end(),
-                self.len,
-                slice,
-                self
+                Internal,
+                msg(
+                    "end {} <= len {} while adding slice {:?} to slices:\n{:?}",
+                    slice.end(),
+                    self.len,
+                    slice,
+                    self
+                ),
             );
         }
         self.len = slice.end();
@@ -133,14 +135,10 @@ where
     ) -> Box<dyn Stream<Item = Result<S::Chunk, BoxedError>> + Sync + Send> {
         #[allow(clippy::suspicious_operation_groupings)]
         if range.start > range.end || range.end > self.len {
-            return Box::new(stream::once(futures::future::err(wrap_error(
-                format_err_t!(
-                    Internal,
-                    "Bad range {:?} for slice of length {}",
-                    range,
-                    self.len
-                ),
-            ))));
+            return Box::new(stream::once(futures::future::err(wrap_error(err!(
+                Internal,
+                msg("bad range {:?} for slice of length {}", range, self.len),
+            )))));
         }
 
         // Binary search for the first slice of the range to write, determining its index and

@@ -34,11 +34,10 @@ use crate::raw;
 use crate::recording;
 use crate::schema;
 use crate::signal;
-use base::bail_t;
 use base::clock::{self, Clocks};
-use base::format_err_t;
 use base::strutil::encode_size;
-use failure::{bail, format_err, Error, ResultExt};
+use base::{bail, err, Error};
+// use failure::{bail, err, Error, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
 use hashlink::LinkedHashMap;
 use itertools::Itertools;
@@ -47,7 +46,6 @@ use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::cmp;
 use std::collections::{BTreeMap, VecDeque};
-use std::convert::TryInto;
 use std::fmt::Write as _;
 use std::mem;
 use std::ops::Range;
@@ -344,7 +342,10 @@ impl SampleFileDir {
             .dir
             .as_ref()
             .ok_or_else(|| {
-                format_err_t!(FailedPrecondition, "sample file dir {} is closed", self.id)
+                err!(
+                    FailedPrecondition,
+                    msg("sample file dir {} is closed", self.id)
+                )
             })?
             .clone())
     }
@@ -696,10 +697,13 @@ impl StreamStateChanger {
                         s.sample_file_dir_id == sc.sample_file_dir_id,
                     ) {
                         bail!(
-                            "can't change sample_file_dir_id {:?}->{:?} for non-empty stream {}",
-                            d,
-                            sc.sample_file_dir_id,
-                            sid
+                            FailedPrecondition,
+                            msg(
+                                "can't change sample_file_dir_id {:?}->{:?} for non-empty stream {}",
+                                d,
+                                sc.sample_file_dir_id,
+                                sid,
+                            ),
                         );
                     }
                 }
@@ -711,7 +715,7 @@ impl StreamStateChanger {
                         "#,
                     )?;
                     if stmt.execute(params![sid])? != 1 {
-                        bail!("missing stream {}", sid);
+                        bail!(Internal, msg("missing stream {sid}"));
                     }
                     streams.push((sid, None));
                 } else {
@@ -731,7 +735,7 @@ impl StreamStateChanger {
                         ":id": sid,
                     })?;
                     if rows != 1 {
-                        bail!("missing stream {}", sid);
+                        bail!(Internal, msg("missing stream {sid}"));
                     }
                     sids[i] = Some(sid);
                     streams.push((
@@ -872,7 +876,7 @@ impl LockedDatabase {
         mut r: RecordingToInsert,
     ) -> Result<(CompositeId, Arc<Mutex<RecordingToInsert>>), Error> {
         let stream = match self.streams_by_id.get_mut(&stream_id) {
-            None => bail!("no such stream {}", stream_id),
+            None => bail!(FailedPrecondition, msg("no such stream {stream_id}")),
             Some(s) => s,
         };
         let id = CompositeId::new(
@@ -900,20 +904,26 @@ impl LockedDatabase {
     /// This must be the next unsynced recording.
     pub(crate) fn mark_synced(&mut self, id: CompositeId) -> Result<(), Error> {
         let stream = match self.streams_by_id.get_mut(&id.stream()) {
-            None => bail!("no stream for recording {}", id),
+            None => bail!(FailedPrecondition, msg("no stream for recording {id}")),
             Some(s) => s,
         };
         let next_unsynced = stream.cum_recordings + (stream.synced_recordings as i32);
         if id.recording() != next_unsynced {
             bail!(
-                "can't sync {} when next unsynced recording is {} (next unflushed is {})",
-                id,
-                next_unsynced,
-                stream.cum_recordings
+                FailedPrecondition,
+                msg(
+                    "can't sync {} when next unsynced recording is {} (next unflushed is {})",
+                    id,
+                    next_unsynced,
+                    stream.cum_recordings,
+                ),
             );
         }
         if stream.synced_recordings == stream.uncommitted.len() {
-            bail!("can't sync un-added recording {}", id);
+            bail!(
+                FailedPrecondition,
+                msg("can't sync un-added recording {id}")
+            );
         }
         let l = stream.uncommitted[stream.synced_recordings].lock().unwrap();
         let bytes = i64::from(l.sample_file_bytes);
@@ -929,7 +939,7 @@ impl LockedDatabase {
         ids: &mut Vec<CompositeId>,
     ) -> Result<(), Error> {
         let dir = match self.sample_file_dirs_by_id.get_mut(&dir_id) {
-            None => bail!("no such dir {}", dir_id),
+            None => bail!(FailedPrecondition, msg("no such dir {dir_id}")),
             Some(d) => d,
         };
         dir.garbage_unlinked.reserve(ids.len());
@@ -941,7 +951,10 @@ impl LockedDatabase {
             false
         });
         if !ids.is_empty() {
-            bail!("delete_garbage with non-garbage ids {:?}", &ids[..]);
+            bail!(
+                FailedPrecondition,
+                msg("delete_garbage with non-garbage ids {:?}", &ids[..])
+            );
         }
         Ok(())
     }
@@ -955,7 +968,7 @@ impl LockedDatabase {
         cb: Box<dyn FnMut(LiveSegment) -> bool + Send>,
     ) -> Result<(), Error> {
         let s = match self.streams_by_id.get_mut(&stream_id) {
-            None => bail!("no such stream {}", stream_id),
+            None => bail!(NotFound, msg("no such stream {stream_id}")),
             Some(s) => s,
         };
         s.on_live_segment.push(cb);
@@ -975,7 +988,7 @@ impl LockedDatabase {
 
     pub(crate) fn send_live_segment(&mut self, stream: i32, l: LiveSegment) -> Result<(), Error> {
         let s = match self.streams_by_id.get_mut(&stream) {
-            None => bail!("no such stream {}", stream),
+            None => bail!(Internal, msg("no such stream {stream}")),
             Some(s) => s,
         };
 
@@ -992,7 +1005,7 @@ impl LockedDatabase {
         let span = tracing::info_span!("flush", flush_count = self.flush_count, reason);
         let _enter = span.enter();
         let o = match self.open.as_ref() {
-            None => bail!("database is read-only"),
+            None => bail!(Internal, msg("database is read-only")),
             Some(o) => o,
         };
         let tx = self.conn.transaction()?;
@@ -1029,7 +1042,7 @@ impl LockedDatabase {
                 if let Some(l) = s.to_delete.last() {
                     new_ranges.entry(stream_id).or_insert(None);
                     let dir = match s.sample_file_dir_id {
-                        None => bail!("stream {} has no directory!", stream_id),
+                        None => bail!(Internal, msg("stream {stream_id} has no directory!")),
                         Some(d) => d,
                     };
 
@@ -1042,12 +1055,15 @@ impl LockedDatabase {
                     let n = raw::delete_recordings(&tx, dir, start..end)?;
                     if n != s.to_delete.len() {
                         bail!(
-                            "Found {} rows in {} .. {}, expected {}: {:?}",
-                            n,
-                            start,
-                            end,
-                            s.to_delete.len(),
-                            &s.to_delete
+                            Internal,
+                            msg(
+                                "Found {} rows in {} .. {}, expected {}: {:?}",
+                                n,
+                                start,
+                                end,
+                                s.to_delete.len(),
+                                &s.to_delete,
+                            ),
                         );
                     }
                 }
@@ -1069,7 +1085,7 @@ impl LockedDatabase {
                 o.id,
             ])?;
             if rows != 1 {
-                bail!("unable to find current open {}", o.id);
+                bail!(Internal, msg("unable to find current open {}", o.id));
             }
         }
         self.auth.flush(&tx)?;
@@ -1209,7 +1225,7 @@ impl LockedDatabase {
             let dir = self
                 .sample_file_dirs_by_id
                 .get_mut(&id)
-                .ok_or_else(|| format_err!("no such dir {}", id))?;
+                .ok_or_else(|| err!(NotFound, msg("no such dir {id}")))?;
             if dir.dir.is_some() {
                 continue;
             }
@@ -1220,7 +1236,7 @@ impl LockedDatabase {
                 open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
             }
             let d = dir::SampleFileDir::open(&dir.path, &expected_meta)
-                .map_err(|e| e.context(format!("Failed to open dir {}", dir.path.display())))?;
+                .map_err(|e| err!(e, msg("Failed to open dir {}", dir.path.display())))?;
             if self.open.is_none() {
                 // read-only mode; it's already fully opened.
                 dir.dir = Some(d);
@@ -1244,7 +1260,7 @@ impl LockedDatabase {
             )?;
             for &id in in_progress.keys() {
                 if stmt.execute(params![o.id, id])? != 1 {
-                    bail!("unable to update dir {}", id);
+                    bail!(Internal, msg("unable to update dir {id}"));
                 }
             }
         }
@@ -1290,7 +1306,7 @@ impl LockedDatabase {
         f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), base::Error>,
     ) -> Result<(), base::Error> {
         let s = match self.streams_by_id.get(&stream_id) {
-            None => bail_t!(NotFound, "no such stream {}", stream_id),
+            None => bail!(NotFound, msg("no such stream {stream_id}")),
             Some(s) => s,
         };
         raw::list_recordings_by_time(&self.conn, stream_id, desired_time.clone(), f)?;
@@ -1323,7 +1339,7 @@ impl LockedDatabase {
         f: &mut dyn FnMut(ListRecordingsRow) -> Result<(), base::Error>,
     ) -> Result<(), base::Error> {
         let s = match self.streams_by_id.get(&stream_id) {
-            None => bail_t!(NotFound, "no such stream {}", stream_id),
+            None => bail!(NotFound, msg("no such stream {stream_id}")),
             Some(s) => s,
         };
         if desired_ids.start < s.cum_recordings {
@@ -1400,25 +1416,29 @@ impl LockedDatabase {
                     } else {
                         // append.
                         if a.time.end != row.start {
-                            bail_t!(
+                            bail!(
                                 Internal,
-                                "stream {} recording {} ends at {} but {} starts at {}",
-                                stream_id,
-                                a.ids.end - 1,
-                                a.time.end,
-                                row.id,
-                                row.start
+                                msg(
+                                    "stream {} recording {} ends at {} but {} starts at {}",
+                                    stream_id,
+                                    a.ids.end - 1,
+                                    a.time.end,
+                                    row.id,
+                                    row.start,
+                                ),
                             );
                         }
                         if a.open_id != row.open_id {
-                            bail_t!(
+                            bail!(
                                 Internal,
-                                "stream {} recording {} has open id {} but {} has {}",
-                                stream_id,
-                                a.ids.end - 1,
-                                a.open_id,
-                                row.id,
-                                row.open_id
+                                msg(
+                                    "stream {} recording {} has open id {} but {} has {}",
+                                    stream_id,
+                                    a.ids.end - 1,
+                                    a.open_id,
+                                    row.id,
+                                    row.open_id,
+                                ),
                             );
                         }
                         a.time.end.0 += row.wall_duration_90k as i64;
@@ -1457,15 +1477,18 @@ impl LockedDatabase {
         let s = self
             .streams_by_id
             .get(&id.stream())
-            .ok_or_else(|| format_err!("no stream for {}", id))?;
+            .ok_or_else(|| err!(Internal, msg("no stream for {}", id)))?;
         if s.cum_recordings <= id.recording() {
             let i = id.recording() - s.cum_recordings;
             if i as usize >= s.uncommitted.len() {
                 bail!(
-                    "no such recording {}; latest committed is {}, latest is {}",
-                    id,
-                    s.cum_recordings,
-                    s.cum_recordings + s.uncommitted.len() as i32
+                    Internal,
+                    msg(
+                        "no such recording {}; latest committed is {}, latest is {}",
+                        id,
+                        s.cum_recordings,
+                        s.cum_recordings + s.uncommitted.len() as i32,
+                    ),
                 );
             }
             let l = s.uncommitted[i as usize].lock().unwrap();
@@ -1499,7 +1522,7 @@ impl LockedDatabase {
                     }
                     return result;
                 }
-                Err(format_err!("no such recording {}", id))
+                Err(err!(Internal, msg("no such recording {id}")))
             }
         }
     }
@@ -1512,7 +1535,7 @@ impl LockedDatabase {
         f: &mut dyn FnMut(&ListOldestRecordingsRow) -> bool,
     ) -> Result<(), Error> {
         let s = match self.streams_by_id.get_mut(&stream_id) {
-            None => bail!("no stream {}", stream_id),
+            None => bail!(Internal, msg("no stream {stream_id}")),
             Some(s) => s,
         };
         let end = match s.to_delete.last() {
@@ -1552,15 +1575,18 @@ impl LockedDatabase {
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let data: Vec<u8> = row.get(6)?;
-
+            let get_and_cvt = |i: usize| {
+                let raw = row.get::<_, i32>(i)?;
+                u16::try_from(raw).map_err(|e| err!(OutOfRange, source(e)))
+            };
             self.video_sample_entries_by_id.insert(
                 id,
                 Arc::new(VideoSampleEntry {
                     id,
-                    width: row.get::<_, i32>(1)?.try_into()?,
-                    height: row.get::<_, i32>(2)?.try_into()?,
-                    pasp_h_spacing: row.get::<_, i32>(3)?.try_into()?,
-                    pasp_v_spacing: row.get::<_, i32>(4)?.try_into()?,
+                    width: get_and_cvt(1)?,
+                    height: get_and_cvt(2)?,
+                    pasp_h_spacing: get_and_cvt(3)?,
+                    pasp_v_spacing: get_and_cvt(4)?,
                     data,
                     rfc6381_codec: row.get(5)?,
                 }),
@@ -1599,7 +1625,7 @@ impl LockedDatabase {
             let last_complete_open = match (open_id, open_uuid) {
                 (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0 }),
                 (None, None) => None,
-                _ => bail!("open table missing id {}", id),
+                _ => bail!(Internal, msg("open table missing id {id}")),
             };
             self.sample_file_dirs_by_id.insert(
                 id,
@@ -1680,12 +1706,12 @@ impl LockedDatabase {
             let id = row.get(0)?;
             let type_: String = row.get(1)?;
             let type_ = StreamType::parse(&type_)
-                .ok_or_else(|| format_err!("no such stream type {}", type_))?;
+                .ok_or_else(|| err!(DataLoss, msg("no such stream type {type_}")))?;
             let camera_id = row.get(2)?;
             let c = self
                 .cameras_by_id
                 .get_mut(&camera_id)
-                .ok_or_else(|| format_err!("missing camera {} for stream {}", camera_id, id))?;
+                .ok_or_else(|| err!(DataLoss, msg("missing camera {camera_id} for stream {id}")))?;
             self.streams_by_id.insert(
                 id,
                 Stream {
@@ -1735,10 +1761,8 @@ impl LockedDatabase {
                     || v.pasp_v_spacing != entry.pasp_v_spacing
                 {
                     bail!(
-                        "video_sample_entry id {}: existing entry {:?}, new {:?}",
-                        id,
-                        v,
-                        &entry
+                        Internal,
+                        msg("video_sample_entry id {id}: existing entry {v:?}, new {entry:?}"),
                     );
                 }
                 return Ok(id);
@@ -1754,7 +1778,7 @@ impl LockedDatabase {
             ":rfc6381_codec": &entry.rfc6381_codec,
             ":data": &entry.data,
         })
-        .map_err(|e| Error::from(e).context(format!("Unable to insert {:#?}", &entry)))?;
+        .map_err(|e| err!(e, msg("Unable to insert {entry:#?}")))?;
 
         let id = self.conn.last_insert_rowid() as i32;
         self.video_sample_entries_by_id.insert(
@@ -1780,7 +1804,7 @@ impl LockedDatabase {
         let o = self
             .open
             .as_ref()
-            .ok_or_else(|| format_err!("database is read-only"))?;
+            .ok_or_else(|| err!(FailedPrecondition, msg("database is read-only")))?;
 
         // Populate meta.
         {
@@ -1816,7 +1840,7 @@ impl LockedDatabase {
                 garbage_needs_unlink: FnvHashSet::default(),
                 garbage_unlinked: Vec::new(),
             }),
-            Entry::Occupied(_) => bail!("duplicate sample file dir id {}", id),
+            Entry::Occupied(_) => bail!(Internal, msg("duplicate sample file dir id {id}")),
         };
         meta.last_complete_open = meta.in_progress_open.take().into();
         d.dir.as_ref().unwrap().write_meta(&meta)?;
@@ -1826,17 +1850,23 @@ impl LockedDatabase {
     pub fn delete_sample_file_dir(&mut self, dir_id: i32) -> Result<(), Error> {
         for (&id, s) in self.streams_by_id.iter() {
             if s.sample_file_dir_id == Some(dir_id) {
-                bail!("can't delete dir referenced by stream {}", id);
+                bail!(
+                    FailedPrecondition,
+                    msg("can't delete dir referenced by stream {id}")
+                );
             }
         }
         let mut d = match self.sample_file_dirs_by_id.entry(dir_id) {
             ::std::collections::btree_map::Entry::Occupied(e) => e,
-            _ => bail!("no such dir {} to remove", dir_id),
+            _ => bail!(NotFound, msg("no such dir {dir_id} to remove")),
         };
         if !d.get().garbage_needs_unlink.is_empty() || !d.get().garbage_unlinked.is_empty() {
             bail!(
-                "must collect garbage before deleting directory {}",
-                d.get().path.display()
+                FailedPrecondition,
+                msg(
+                    "must collect garbage before deleting directory {}",
+                    d.get().path.display(),
+                ),
             );
         }
         let dir = match d.get_mut().dir.take() {
@@ -1847,17 +1877,19 @@ impl LockedDatabase {
                     // a writer::Syncer also has a reference.
                     d.get_mut().dir = Some(arc); // put it back.
                     bail!(
-                        "can't delete directory {} with active syncer (refcnt {}",
-                        dir_id,
-                        c
+                        FailedPrecondition,
+                        msg("can't delete directory {dir_id} with active syncer (refcnt {c})"),
                     );
                 }
             },
         };
         if !dir.is_empty()? {
             bail!(
-                "Can't delete sample file directory {} which still has files",
-                &d.get().path.display()
+                FailedPrecondition,
+                msg(
+                    "can't delete sample file directory {} which still has files",
+                    &d.get().path.display(),
+                ),
             );
         }
         let mut meta = d.get().expected_meta(&self.uuid);
@@ -1868,7 +1900,7 @@ impl LockedDatabase {
             .execute("delete from sample_file_dir where id = ?", params![dir_id])?
             != 1
         {
-            bail!("missing database row for dir {}", dir_id);
+            bail!(Internal, msg("missing database row for dir {dir_id}"));
         }
         d.remove_entry();
         Ok(())
@@ -1919,10 +1951,9 @@ impl LockedDatabase {
     /// TODO: consider renaming this to `update_camera` and creating a bulk
     /// `apply_camera_changes`.
     pub fn null_camera_change(&mut self, camera_id: i32) -> Result<CameraChange, Error> {
-        let camera = self
-            .cameras_by_id
-            .get(&camera_id)
-            .ok_or_else(|| format_err!("no such camera {}", camera_id))?;
+        let Some(camera) = self.cameras_by_id.get(&camera_id) else {
+            bail!(Internal, msg("no such camera {camera_id}"));
+        };
         let mut change = CameraChange {
             short_name: camera.short_name.clone(),
             config: camera.config.clone(),
@@ -1947,10 +1978,9 @@ impl LockedDatabase {
     pub fn update_camera(&mut self, camera_id: i32, mut camera: CameraChange) -> Result<(), Error> {
         let tx = self.conn.transaction()?;
         let streams;
-        let c = self
-            .cameras_by_id
-            .get_mut(&camera_id)
-            .ok_or_else(|| format_err!("no such camera {}", camera_id))?;
+        let Some(c) = self.cameras_by_id.get_mut(&camera_id) else {
+            bail!(Internal, msg("no such camera {camera_id}"));
+        };
         {
             streams =
                 StreamStateChanger::new(&tx, camera_id, Some(c), &self.streams_by_id, &mut camera)?;
@@ -1969,7 +1999,7 @@ impl LockedDatabase {
                 ":config": &camera.config,
             })?;
             if rows != 1 {
-                bail!("Camera {} missing from database", camera_id);
+                bail!(Internal, msg("camera {camera_id} missing from database"));
             }
         }
         tx.commit()?;
@@ -1982,11 +2012,9 @@ impl LockedDatabase {
     /// Deletes a camera and its streams. The camera must have no recordings.
     pub fn delete_camera(&mut self, id: i32) -> Result<(), Error> {
         // TODO: also verify there are no uncommitted recordings.
-        let uuid = self
-            .cameras_by_id
-            .get(&id)
-            .map(|c| c.uuid)
-            .ok_or_else(|| format_err!("No such camera {} to remove", id))?;
+        let Some(uuid) = self.cameras_by_id.get(&id).map(|c| c.uuid) else {
+            bail!(NotFound, msg("no such camera {id}"));
+        };
         let mut streams_to_delete = Vec::new();
         let tx = self.conn.transaction()?;
         {
@@ -1996,18 +2024,21 @@ impl LockedDatabase {
                     continue;
                 };
                 if stream.range.is_some() {
-                    bail!("Can't remove camera {}; has recordings.", id);
+                    bail!(
+                        FailedPrecondition,
+                        msg("can't remove camera {id}; has recordings")
+                    );
                 }
                 let rows = stream_stmt.execute(named_params! {":id": stream_id})?;
                 if rows != 1 {
-                    bail!("Stream {} missing from database", id);
+                    bail!(Internal, msg("stream {id} missing from database"));
                 }
                 streams_to_delete.push(*stream_id);
             }
             let mut cam_stmt = tx.prepare_cached(r"delete from camera where id = :id")?;
             let rows = cam_stmt.execute(named_params! {":id": id})?;
             if rows != 1 {
-                bail!("Camera {} missing from database", id);
+                bail!(Internal, msg("camera {id} missing from database"));
             }
         }
         tx.commit()?;
@@ -2035,10 +2066,9 @@ impl LockedDatabase {
                 "#,
             )?;
             for c in changes {
-                let stream = self
-                    .streams_by_id
-                    .get(&c.stream_id)
-                    .ok_or_else(|| format_err!("no such stream id {}", c.stream_id))?;
+                let Some(stream) = self.streams_by_id.get(&c.stream_id) else {
+                    bail!(Internal, msg("no such stream {}", c.stream_id));
+                };
                 let mut new_config = stream.config.clone();
                 new_config.mode = (if c.new_record { "record" } else { "" }).into();
                 new_config.retain_bytes = c.new_limit;
@@ -2179,8 +2209,11 @@ pub(crate) fn check_sqlite_version() -> Result<(), Error> {
     // https://www.sqlite.org/withoutrowid.html
     if rusqlite::version_number() < 3008002 {
         bail!(
-            "SQLite version {} is too old; need at least 3.8.2",
-            rusqlite::version()
+            FailedPrecondition,
+            msg(
+                "SQLite version {} is too old; need at least 3.8.2",
+                rusqlite::version()
+            ),
         );
     }
     Ok(())
@@ -2194,7 +2227,7 @@ pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
     set_integrity_pragmas(conn)?;
     let tx = conn.transaction()?;
     tx.execute_batch(include_str!("schema.sql"))
-        .context("unable to create database schema")?;
+        .map_err(|e| err!(e, msg("unable to create database schema")))?;
     {
         let uuid = ::uuid::Uuid::new_v4();
         let uuid_bytes = &uuid.as_bytes()[..];
@@ -2228,7 +2261,9 @@ pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Er
 fn get_boot_uuid() -> Result<Option<Uuid>, Error> {
     if cfg!(target_os = "linux") {
         let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")?;
-        Ok(Some(Uuid::parse_str(boot_id.trim_end())?))
+        Ok(Some(Uuid::parse_str(boot_id.trim_end()).map_err(|e| {
+            err!(Internal, msg("boot_id is not a valid uuid"), source(e))
+        })?))
     } else {
         Ok(None) // don't complain about lack of platform support; just return None.
     }
@@ -2236,30 +2271,33 @@ fn get_boot_uuid() -> Result<Option<Uuid>, Error> {
 
 /// Checks that the schema version in the given database is as expected.
 pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Error> {
-    let ver = get_schema_version(conn)?.ok_or_else(|| {
-        format_err!(
-            "no such table: version.\n\n\
-            If you have created an empty database by hand, delete it and use `nvr init` \
-            instead, as noted in the installation instructions: \
-            <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/install.md>\n\n\
-            If you are starting from a database that predates schema versioning, see \
-            <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/schema.md>."
+    let Some(ver) = get_schema_version(conn)? else {
+        bail!(
+            FailedPrecondition,
+            msg(
+                "no such table: version.\n\n\
+                If you have created an empty database by hand, delete it and use `nvr init` \
+                instead, as noted in the installation instructions: \
+                <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/install.md>\n\n\
+                If you are starting from a database that predates schema versioning, see \
+                <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/schema.md>."),
         )
-    })?;
+    };
     match ver.cmp(&EXPECTED_VERSION) {
         std::cmp::Ordering::Less => bail!(
-            "Database schema version {} is too old (expected {}); \
-            see upgrade instructions in \
-            <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/upgrade.md>.",
-            ver,
-            EXPECTED_VERSION
+            FailedPrecondition,
+            msg(
+                "database schema version {ver} is too old (expected {EXPECTED_VERSION}); \
+                see upgrade instructions in guide/upgrade.md"
+            ),
         ),
         std::cmp::Ordering::Equal => Ok(()),
         std::cmp::Ordering::Greater => bail!(
-            "Database schema version {} is too new (expected {}); \
-            must use a newer binary to match.",
-            ver,
-            EXPECTED_VERSION
+            FailedPrecondition,
+            msg(
+                "database schema version {ver} is too new (expected {EXPECTED_VERSION}); \
+                must use a newer binary to match"
+            ),
         ),
     }
 }
@@ -2560,7 +2598,7 @@ mod tests {
         )
         .err()
         .unwrap();
-        assert!(e.to_string().starts_with("no such table"), "{}", e);
+        assert!(e.msg().unwrap().starts_with("no such table"), "{}", e);
     }
 
     #[test]
@@ -2571,8 +2609,9 @@ mod tests {
             .unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(
-            e.to_string()
-                .starts_with("Database schema version 6 is too old (expected 7)"),
+            e.msg()
+                .unwrap()
+                .starts_with("database schema version 6 is too old (expected 7)"),
             "got: {e:?}"
         );
     }
@@ -2585,8 +2624,9 @@ mod tests {
             .unwrap();
         let e = Database::new(clock::RealClocks {}, c, false).err().unwrap();
         assert!(
-            e.to_string()
-                .starts_with("Database schema version 8 is too new (expected 7)"),
+            e.msg()
+                .unwrap()
+                .starts_with("database schema version 8 is too new (expected 7)"),
             "got: {e:?}"
         );
     }

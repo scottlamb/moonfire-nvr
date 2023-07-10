@@ -4,7 +4,7 @@
 
 //! `/view.mp4` and `/view.m4s` handling.
 
-use base::{bail_t, format_err_t};
+use base::{bail, err};
 use db::recording::{self, rescale};
 use http::{Request, StatusCode};
 use nom::bytes::complete::{tag, take_while1};
@@ -36,17 +36,17 @@ impl Service {
         debug: bool,
     ) -> ResponseResult {
         if !caller.permissions.view_video {
-            bail_t!(PermissionDenied, "view_video required");
+            bail!(PermissionDenied, msg("view_video required"));
         }
         let (stream_id, camera_name);
         {
             let db = self.db.lock();
             let camera = db
                 .get_camera(uuid)
-                .ok_or_else(|| format_err_t!(NotFound, "no such camera {uuid}"))?;
+                .ok_or_else(|| err!(NotFound, msg("no such camera {uuid}")))?;
             camera_name = camera.short_name.clone();
             stream_id = camera.streams[stream_type.index()]
-                .ok_or_else(|| format_err_t!(NotFound, "no such stream {uuid}/{stream_type}"))?;
+                .ok_or_else(|| err!(NotFound, msg("no such stream {uuid}/{stream_type}")))?;
         };
         let mut start_time_for_filename = None;
         let mut builder = mp4::FileBuilder::new(mp4_type);
@@ -56,7 +56,7 @@ impl Service {
                 match key {
                     "s" => {
                         let s = Segments::from_str(value).map_err(|()| {
-                            format_err_t!(InvalidArgument, "invalid s parameter: {value}")
+                            err!(InvalidArgument, msg("invalid s parameter: {value}"))
                         })?;
                         trace!("stream_view_mp4: appending s={:?}", s);
                         let mut est_segments = usize::try_from(s.ids.end - s.ids.start).unwrap();
@@ -81,12 +81,14 @@ impl Service {
 
                             if let Some(o) = s.open_id {
                                 if r.open_id != o {
-                                    bail_t!(
+                                    bail!(
                                         NotFound,
-                                        "recording {} has open id {}, requested {}",
-                                        r.id,
-                                        r.open_id,
-                                        o
+                                        msg(
+                                            "recording {} has open id {}, requested {}",
+                                            r.id,
+                                            r.open_id,
+                                            o,
+                                        ),
                                     );
                                 }
                             }
@@ -94,14 +96,15 @@ impl Service {
                             // Check for missing recordings.
                             match prev {
                                 None if recording_id == s.ids.start => {}
-                                None => bail_t!(
+                                None => bail!(
                                     NotFound,
-                                    "no such recording {}/{}",
-                                    stream_id,
-                                    s.ids.start
+                                    msg("no such recording {}/{}", stream_id, s.ids.start),
                                 ),
                                 Some(id) if r.id.recording() != id + 1 => {
-                                    bail_t!(NotFound, "no such recording {}/{}", stream_id, id + 1);
+                                    bail!(
+                                        NotFound,
+                                        msg("no such recording {}/{}", stream_id, id + 1)
+                                    );
                                 }
                                 _ => {}
                             };
@@ -144,35 +147,30 @@ impl Service {
                         // Check for missing recordings.
                         match prev {
                             Some(id) if s.ids.end != id + 1 => {
-                                bail_t!(
+                                bail!(
                                     NotFound,
-                                    "no such recording {}/{}",
-                                    stream_id,
-                                    s.ids.end - 1
+                                    msg("no such recording {}/{}", stream_id, s.ids.end - 1),
                                 );
                             }
                             None => {
-                                bail_t!(
+                                bail!(
                                     NotFound,
-                                    "no such recording {}/{}",
-                                    stream_id,
-                                    s.ids.start
+                                    msg("no such recording {}/{}", stream_id, s.ids.start),
                                 );
                             }
                             _ => {}
                         };
                         if let Some(end) = s.end_time {
                             if end > cur_off {
-                                bail_t!(
+                                bail!(
                                     InvalidArgument,
-                                    "end time {} is beyond specified recordings",
-                                    end
+                                    msg("end time {end} is beyond specified recordings"),
                                 );
                             }
                         }
                     }
                     "ts" => builder.include_timestamp_subtitle_track(value == "true")?,
-                    _ => bail_t!(InvalidArgument, "parameter {key} not understood"),
+                    _ => bail!(InvalidArgument, msg("parameter {key} not understood")),
                 }
             }
         }

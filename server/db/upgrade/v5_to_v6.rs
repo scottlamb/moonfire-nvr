@@ -2,9 +2,9 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use base::{bail, err, Error};
 /// Upgrades a version 4 schema to a version 5 schema.
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use failure::{bail, format_err, Error, ResultExt};
 use h264_reader::avcc::AvcDecoderConfigurationRecord;
 use rusqlite::{named_params, params};
 use std::convert::{TryFrom, TryInto};
@@ -29,22 +29,31 @@ fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
 
 fn parse(data: &[u8]) -> Result<AvcDecoderConfigurationRecord, Error> {
     if data.len() < 94 || &data[4..8] != b"avc1" || &data[90..94] != b"avcC" {
-        bail!("data of len {} doesn't have an avcC", data.len());
+        bail!(
+            DataLoss,
+            msg("data of len {} doesn't have an avcC", data.len())
+        );
     }
     let avcc_len = BigEndian::read_u32(&data[86..90]);
     if avcc_len < 8 {
         // length and type.
-        bail!("invalid avcc len {}", avcc_len);
+        bail!(DataLoss, msg("invalid avcc len {avcc_len}"));
     }
-    let end_pos = 86 + usize::try_from(avcc_len)?;
-    if end_pos != data.len() {
+    let end_pos = usize::try_from(avcc_len)
+        .ok()
+        .and_then(|l| l.checked_add(86));
+    if end_pos != Some(data.len()) {
         bail!(
-            "expected avcC to be end of extradata; there are {} more bytes.",
-            data.len() - end_pos
+            DataLoss,
+            msg(
+                "avcC end pos {:?} and total data len {} should match",
+                end_pos,
+                data.len(),
+            ),
         );
     }
-    AvcDecoderConfigurationRecord::try_from(&data[94..end_pos])
-        .map_err(|e| format_err!("Bad AvcDecoderConfigurationRecord: {:?}", e))
+    AvcDecoderConfigurationRecord::try_from(&data[94..])
+        .map_err(|e| err!(DataLoss, msg("Bad AvcDecoderConfigurationRecord: {:?}", e)))
 }
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
@@ -100,24 +109,37 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let id: i32 = row.get(0)?;
-        let width: u16 = row.get::<_, i32>(1)?.try_into()?;
-        let height: u16 = row.get::<_, i32>(2)?.try_into()?;
-        let rfc6381_codec: &str = row.get_ref(3)?.as_str()?;
+        let width: u16 = row
+            .get::<_, i32>(1)?
+            .try_into()
+            .map_err(|_| err!(OutOfRange))?;
+        let height: u16 = row
+            .get::<_, i32>(2)?
+            .try_into()
+            .map_err(|_| err!(OutOfRange))?;
+        let rfc6381_codec: &str = row
+            .get_ref(3)?
+            .as_str()
+            .map_err(|_| err!(InvalidArgument))?;
         let mut data: Vec<u8> = row.get(4)?;
         let avcc = parse(&data)?;
         if avcc.num_of_sequence_parameter_sets() != 1 {
-            bail!("Multiple SPSs!");
+            bail!(Unimplemented, msg("multiple SPSs!"));
         }
         let ctx = avcc.create_context().map_err(|e| {
-            format_err!(
-                "Can't load SPS+PPS for video_sample_entry_id {}: {:?}",
-                id,
-                e
+            err!(
+                Unknown,
+                msg("can't load SPS+PPS for video_sample_entry_id {id}: {e:?}"),
             )
         })?;
         let sps = ctx
             .sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())
-            .ok_or_else(|| format_err!("No SPS 0 for video_sample_entry_id {}", id))?;
+            .ok_or_else(|| {
+                err!(
+                    Unimplemented,
+                    msg("no SPS 0 for video_sample_entry_id {id}")
+                )
+            })?;
         let pasp = sps
             .vui_parameters
             .as_ref()
@@ -129,7 +151,10 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             data.write_u32::<BigEndian>(pasp.0.into())?;
             data.write_u32::<BigEndian>(pasp.1.into())?;
             let len = data.len();
-            BigEndian::write_u32(&mut data[0..4], u32::try_from(len)?);
+            BigEndian::write_u32(
+                &mut data[0..4],
+                u32::try_from(len).map_err(|_| err!(OutOfRange))?,
+            );
         }
 
         insert.execute(named_params! {
@@ -268,7 +293,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
                 ":video_sync_samples": video_sync_samples,
                 ":video_sample_entry_id": video_sample_entry_id,
             })
-            .with_context(|_| format!("Unable to insert composite_id {composite_id}"))?;
+            .map_err(|e| err!(e, msg("unable to insert composite_id {composite_id}")))?;
         cum_duration_90k += i64::from(wall_duration_90k);
         cum_runs += if run_offset == 0 { 1 } else { 0 };
     }

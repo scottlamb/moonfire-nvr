@@ -18,9 +18,9 @@
 //! through ffmpeg's own generated `.mp4` file. Extracting just this part of their `.mp4` files
 //! would be more trouble than it's worth.
 
+use base::{bail, err, Error};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db::VideoSampleEntryToInsert;
-use failure::{bail, format_err, Error};
 use std::convert::TryFrom;
 
 // For certain common sub stream anamorphic resolutions, add a pixel aspect ratio box.
@@ -62,34 +62,31 @@ fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
 
 /// Parses the `AvcDecoderConfigurationRecord` in the "extra data".
 pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Error> {
-    let avcc = h264_reader::avcc::AvcDecoderConfigurationRecord::try_from(extradata)
-        .map_err(|e| format_err!("Bad AvcDecoderConfigurationRecord: {:?}", e))?;
+    let avcc =
+        h264_reader::avcc::AvcDecoderConfigurationRecord::try_from(extradata).map_err(|e| {
+            err!(
+                InvalidArgument,
+                msg("bad AvcDecoderConfigurationRecord: {:?}", e)
+            )
+        })?;
     if avcc.num_of_sequence_parameter_sets() != 1 {
-        bail!("Multiple SPSs!");
+        bail!(Unimplemented, msg("multiple SPSs!"));
     }
     let ctx = avcc
         .create_context()
-        .map_err(|e| format_err!("Can't load SPS+PPS: {:?}", e))?;
+        .map_err(|e| err!(Unknown, msg("can't load SPS+PPS: {:?}", e)))?;
     let sps = ctx
         .sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())
-        .ok_or_else(|| format_err!("No SPS 0"))?;
-    let pixel_dimensions = sps
-        .pixel_dimensions()
-        .map_err(|e| format_err!("SPS has invalid pixel dimensions: {:?}", e))?;
-    let width = u16::try_from(pixel_dimensions.0).map_err(|_| {
-        format_err!(
-            "bad dimensions {}x{}",
-            pixel_dimensions.0,
-            pixel_dimensions.1
+        .ok_or_else(|| err!(Unimplemented, msg("no SPS 0")))?;
+    let pixel_dimensions = sps.pixel_dimensions().map_err(|e| {
+        err!(
+            InvalidArgument,
+            msg("SPS has invalid pixel dimensions: {:?}", e)
         )
     })?;
-    let height = u16::try_from(pixel_dimensions.1).map_err(|_| {
-        format_err!(
-            "bad dimensions {}x{}",
-            pixel_dimensions.0,
-            pixel_dimensions.1
-        )
-    })?;
+    let (Ok(width), Ok(height)) = (u16::try_from(pixel_dimensions.0), u16::try_from(pixel_dimensions.1)) else {
+        bail!(InvalidArgument, msg("bad dimensions {}x{}", pixel_dimensions.0, pixel_dimensions.1));
+    };
 
     let mut sample_entry = Vec::with_capacity(256);
 
@@ -130,7 +127,7 @@ pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Er
     let cur_pos = sample_entry.len();
     BigEndian::write_u32(
         &mut sample_entry[avcc_len_pos..avcc_len_pos + 4],
-        u32::try_from(cur_pos - avcc_len_pos)?,
+        u32::try_from(cur_pos - avcc_len_pos).map_err(|_| err!(OutOfRange))?,
     );
 
     // PixelAspectRatioBox, ISO/IEC 14496-12 section 12.1.4.2.
@@ -150,7 +147,7 @@ pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Er
     let cur_pos = sample_entry.len();
     BigEndian::write_u32(
         &mut sample_entry[avc1_len_pos..avc1_len_pos + 4],
-        u32::try_from(cur_pos - avc1_len_pos)?,
+        u32::try_from(cur_pos - avc1_len_pos).map_err(|_| err!(OutOfRange))?,
     );
 
     let profile_idc = sample_entry[103];

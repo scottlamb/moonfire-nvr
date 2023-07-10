@@ -8,8 +8,7 @@
 use crate::json::{SignalConfig, SignalTypeConfig};
 use crate::{coding, days};
 use crate::{recording, SqlUuid};
-use base::bail_t;
-use failure::{bail, format_err, Error};
+use base::{bail, err, Error};
 use fnv::FnvHashMap;
 use rusqlite::{params, Connection, Transaction};
 use std::collections::btree_map::Entry;
@@ -149,19 +148,29 @@ impl<'a> PointDataIterator<'a> {
             return Ok(None);
         }
         let (signal_delta, p) = coding::decode_varint32(self.data, self.cur_pos).map_err(|()| {
-            format_err!(
-                "varint32 decode failure; data={:?} pos={}",
-                self.data,
-                self.cur_pos
+            err!(
+                DataLoss,
+                msg(
+                    "varint32 decode failure; data={:?} pos={}",
+                    self.data,
+                    self.cur_pos
+                ),
             )
         })?;
-        let (state, p) = coding::decode_varint32(self.data, p)
-            .map_err(|()| format_err!("varint32 decode failure; data={:?} pos={}", self.data, p))?;
+        let (state, p) = coding::decode_varint32(self.data, p).map_err(|()| {
+            err!(
+                DataLoss,
+                msg("varint32 decode failure; data={:?} pos={}", self.data, p)
+            )
+        })?;
         let signal = self.cur_signal.checked_add(signal_delta).ok_or_else(|| {
-            format_err!("signal overflow: {} + {}", self.cur_signal, signal_delta)
+            err!(
+                OutOfRange,
+                msg("signal overflow: {} + {}", self.cur_signal, signal_delta)
+            )
         })?;
         if state > u16::max_value() as u32 {
-            bail!("state overflow: {}", state);
+            bail!(OutOfRange, msg("state overflow: {state}"));
         }
         self.cur_pos = p;
         self.cur_signal = signal + 1;
@@ -335,15 +344,21 @@ impl State {
     /// Helper for `update_signals` to do validation.
     fn update_signals_validate(&self, signals: &[u32], states: &[u16]) -> Result<(), base::Error> {
         if signals.len() != states.len() {
-            bail_t!(InvalidArgument, "signals and states must have same length");
+            bail!(
+                InvalidArgument,
+                msg("signals and states must have same length")
+            );
         }
         let mut next_allowed = 0u32;
         for (&signal, &state) in signals.iter().zip(states) {
             if signal < next_allowed {
-                bail_t!(InvalidArgument, "signals must be monotonically increasing");
+                bail!(
+                    InvalidArgument,
+                    msg("signals must be monotonically increasing")
+                );
             }
             match self.signals_by_id.get(&signal) {
-                None => bail_t!(InvalidArgument, "unknown signal {}", signal),
+                None => bail!(InvalidArgument, msg("unknown signal {signal}")),
                 Some(s) => {
                     let states = self
                         .types_by_uuid
@@ -351,11 +366,9 @@ impl State {
                         .map(|t| t.valid_states)
                         .unwrap_or(0);
                     if state >= 16 || (states & (1 << state)) == 0 {
-                        bail_t!(
+                        bail!(
                             FailedPrecondition,
-                            "signal {} specifies unknown state {}",
-                            signal,
-                            state
+                            msg("signal {signal} specifies unknown state {state}"),
                         );
                     }
                 }
@@ -659,7 +672,8 @@ impl State {
         let mut rows = stmt.query(params![])?;
         while let Some(row) = rows.next()? {
             let id: i32 = row.get(0)?;
-            let id = u32::try_from(id)?;
+            let id = u32::try_from(id)
+                .map_err(|e| err!(Internal, msg("signal id out of range"), source(e)))?;
             let uuid: SqlUuid = row.get(1)?;
             let type_: SqlUuid = row.get(2)?;
             let config: SignalConfig = row.get(3)?;
@@ -698,9 +712,12 @@ impl State {
             for &value in type_.config.values.keys() {
                 if value == 0 || value >= 16 {
                     bail!(
-                        "signal type {} value {} out of accepted range [0, 16)",
-                        uuid.0,
-                        value
+                        OutOfRange,
+                        msg(
+                            "signal type {} value {} out of accepted range [0, 16)",
+                            uuid.0,
+                            value,
+                        ),
                     );
                 }
                 type_.valid_states |= 1 << value;
@@ -741,9 +758,9 @@ impl State {
                 let e = sig_last_state.entry(signal);
                 if let Entry::Occupied(ref e) = e {
                     let (prev_time, prev_state) = *e.get();
-                    let s = signals_by_id.get_mut(&signal).ok_or_else(|| {
-                        format_err!("time {} references invalid signal {}", time_90k, signal)
-                    })?;
+                    let Some(s) = signals_by_id.get_mut(&signal) else {
+                        bail!(DataLoss, msg("time {time_90k} references invalid signal {signal}"));
+                    };
                     s.days.adjust(prev_time..time_90k, 0, prev_state);
                 }
                 if state == 0 {
@@ -760,8 +777,8 @@ impl State {
         }
         if !cur.is_empty() {
             bail!(
-                "far future state should be unknown for all signals; is: {:?}",
-                cur
+                Internal,
+                msg("far future state should be unknown for all signals; is: {cur:?}")
             );
         }
         Ok(())

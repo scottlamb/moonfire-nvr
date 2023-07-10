@@ -5,7 +5,7 @@
 /// Upgrades a version 1 schema to a version 2 schema.
 use crate::dir;
 use crate::schema::DirMeta;
-use failure::{bail, format_err, Error};
+use base::{bail, Error};
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
 use rusqlite::{named_params, params};
@@ -13,9 +13,12 @@ use std::os::unix::io::AsRawFd;
 use uuid::Uuid;
 
 pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let sample_file_path = args.sample_file_dir.ok_or_else(|| {
-        format_err!("--sample-file-dir required when upgrading from schema version 1 to 2.")
-    })?;
+    let Some(sample_file_path) = args.sample_file_dir else {
+        bail!(
+            InvalidArgument,
+            msg("--sample-file-dir required when upgrading from schema version 1 to 2."),
+        );
+    };
 
     let mut d = nix::dir::Dir::open(
         sample_file_path,
@@ -101,12 +104,12 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
     }
     dir::write_meta(d.as_raw_fd(), &meta)?;
 
-    let sample_file_path = sample_file_path.to_str().ok_or_else(|| {
-        format_err!(
-            "sample file dir {} is not a valid string",
-            sample_file_path.display()
-        )
-    })?;
+    let Some(sample_file_path) = sample_file_path.to_str() else {
+        bail!(
+            InvalidArgument,
+            msg("sample file dir {} is not a valid string", sample_file_path.display()),
+        );
+    };
     tx.execute(
         r#"
         insert into sample_file_dir (path,  uuid, last_complete_open_id)
@@ -317,15 +320,24 @@ fn verify_dir_contents(
         };
         let s = match f.to_str() {
             Ok(s) => s,
-            Err(_) => bail!("unexpected file {:?} in {:?}", f, sample_file_path),
+            Err(_) => bail!(
+                FailedPrecondition,
+                msg("unexpected file {f:?} in {sample_file_path:?}")
+            ),
         };
         let uuid = match Uuid::parse_str(s) {
             Ok(u) => u,
-            Err(_) => bail!("unexpected file {:?} in {:?}", f, sample_file_path),
+            Err(_) => bail!(
+                FailedPrecondition,
+                msg("unexpected file {f:?} in {sample_file_path:?}")
+            ),
         };
         if s != uuid.as_hyphenated().to_string() {
             // non-canonical form.
-            bail!("unexpected file {:?} in {:?}", f, sample_file_path);
+            bail!(
+                FailedPrecondition,
+                msg("unexpected file {f:?} in {sample_file_path:?}")
+            );
         }
         files.insert(uuid);
     }
@@ -338,9 +350,12 @@ fn verify_dir_contents(
             let uuid: crate::db::SqlUuid = row.get(0)?;
             if !files.remove(&uuid.0) {
                 bail!(
-                    "{} is missing from dir {}!",
-                    uuid.0,
-                    sample_file_path.display()
+                    FailedPrecondition,
+                    msg(
+                        "{} is missing from dir {}!",
+                        uuid.0,
+                        sample_file_path.display()
+                    ),
                 );
             }
         }
@@ -367,10 +382,13 @@ fn verify_dir_contents(
 
     if !files.is_empty() {
         bail!(
-            "{} unexpected sample file uuids in dir {}: {:?}!",
-            files.len(),
-            sample_file_path.display(),
-            files
+            FailedPrecondition,
+            msg(
+                "{} unexpected sample file uuids in dir {}: {:?}!",
+                files.len(),
+                sample_file_path.display(),
+                files,
+            ),
         );
     }
     Ok(())
@@ -413,7 +431,7 @@ fn fix_video_sample_entry(tx: &rusqlite::Transaction) -> Result<(), Error> {
 fn rfc6381_codec_from_sample_entry(sample_entry: &[u8]) -> Result<String, Error> {
     if sample_entry.len() < 99 || &sample_entry[4..8] != b"avc1" || &sample_entry[90..94] != b"avcC"
     {
-        bail!("not a valid AVCSampleEntry");
+        bail!(InvalidArgument, msg("not a valid AVCSampleEntry"));
     }
     let profile_idc = sample_entry[103];
     let constraint_flags_byte = sample_entry[104];

@@ -15,15 +15,17 @@ path = "lib.rs"
 
 [dependencies]
 chrono = "0.4.23"
-failure = "0.1.1"
+coded = { git = "https://github.com/scottlamb/coded", rev = "2c97994974a73243d5dd12134831814f42cdb0e8"}
 futures = "0.3"
 libc = "0.2"
+nix = { workspace = true }
 nom = "7.0.0"
+rusqlite = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 slab = "0.4"
 time = "0.1"
-tracing = "0.1.37"
+tracing = { workspace = true }
 tracing-core = "0.1.30"
 tracing-log = "0.1.3"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }

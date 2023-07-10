@@ -4,6 +4,7 @@
 
 #![cfg_attr(all(feature = "nightly", test), feature(test))]
 
+use base::Error;
 use bpaf::{Bpaf, Parser};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -37,7 +38,7 @@ enum Args {
 }
 
 impl Args {
-    fn run(self) -> Result<i32, failure::Error> {
+    fn run(self) -> Result<i32, Error> {
         match self {
             Args::Check(a) => cmds::check::run(a),
             Args::Config(a) => cmds::config::run(a),
@@ -93,11 +94,11 @@ fn main() {
 
     match args.run() {
         Err(e) => {
-            error!("Exiting due to error: {}", base::prettify_failure(&e));
+            error!("exiting due to error: {}", e.chain());
             ::std::process::exit(1);
         }
         Ok(rv) => {
-            debug!("Exiting with status {}", rv);
+            debug!("exiting with status {}", rv);
             std::process::exit(rv)
         }
     }

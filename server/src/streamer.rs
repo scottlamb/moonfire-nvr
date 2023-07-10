@@ -4,8 +4,8 @@
 
 use crate::stream;
 use base::clock::{Clocks, TimerGuard};
+use base::{bail, err, Error};
 use db::{dir, recording, writer, Camera, Database, Stream};
-use failure::{bail, format_err, Error};
 use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -68,9 +68,12 @@ where
             .config
             .url
             .as_ref()
-            .ok_or_else(|| format_err!("Stream has no RTSP URL"))?;
+            .ok_or_else(|| err!(InvalidArgument, msg("stream has no RTSP URL")))?;
         if !url.username().is_empty() || url.password().is_some() {
-            bail!("RTSP URL shouldn't include credentials");
+            bail!(
+                InvalidArgument,
+                msg("RTSP URL shouldn't include credentials")
+            );
         }
         let stream_transport = if s.config.rtsp_transport.is_empty() {
             None
@@ -119,7 +122,7 @@ where
             if let Err(err) = self.run_once() {
                 let sleep_time = time::Duration::seconds(1);
                 warn!(
-                    err = base::prettify_failure(&err),
+                    err = %err.chain(),
                     "sleeping for 1 s after error"
                 );
                 self.db.clocks().sleep(sleep_time);
@@ -150,7 +153,7 @@ where
                         }
                     }
                     .in_current_span(),
-                )?;
+                ).map_err(|e| err!(Unknown, source(e)))?;
                 waited = true;
             } else {
                 if waited {
@@ -221,7 +224,7 @@ where
                     None
                 } else if frame.new_video_sample_entry {
                     if !frame.is_key {
-                        bail!("parameter change on non-key frame");
+                        bail!(Unavailable, msg("parameter change on non-key frame"));
                     }
                     trace!("close on parameter change");
                     video_sample_entry_id = {
@@ -286,8 +289,8 @@ where
 mod tests {
     use crate::stream::{self, Stream};
     use base::clock::{self, Clocks};
+    use base::{bail, Error};
     use db::{recording, testutil, CompositeId};
-    use failure::{bail, Error};
     use std::cmp;
     use std::convert::TryFrom;
     use std::sync::Arc;
@@ -334,7 +337,7 @@ mod tests {
 
         fn next(&mut self) -> Result<stream::VideoFrame, Error> {
             if self.pkts_left == 0 {
-                bail!("end of stream");
+                bail!(OutOfRange, msg("end of stream"));
             }
             self.pkts_left -= 1;
 
@@ -394,7 +397,7 @@ mod tests {
                 None => {
                     trace!("MockOpener shutting down");
                     self.shutdown_tx.lock().unwrap().take();
-                    bail!("done")
+                    bail!(Cancelled, msg("done"))
                 }
             }
         }

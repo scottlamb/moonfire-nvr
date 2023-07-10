@@ -4,7 +4,7 @@
 
 //! Session management: `/api/login` and `/api/logout`.
 
-use base::{bail_t, ErrorKind, ResultExt};
+use base::{bail, ErrorKind, ResultExt};
 use db::auth;
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
 use memchr::memchr;
@@ -32,7 +32,7 @@ impl Service {
         let r = extract_json_body(&mut req).await?;
         let r: json::LoginRequest = parse_json_body(&r)?;
         let Some(host) = req.headers().get(header::HOST) else {
-            bail_t!(InvalidArgument, "missing Host header");
+            bail!(InvalidArgument, msg("missing Host header"));
         };
         let host = host.as_bytes();
         let domain = match memchr(b':', host) {
@@ -94,17 +94,17 @@ impl Service {
             match l.authenticate_session(authreq.clone(), &hash) {
                 Ok((s, _)) => {
                     if !csrf_matches(r.csrf, s.csrf()) {
-                        bail_t!(InvalidArgument, "logout with incorret csrf token");
+                        bail!(InvalidArgument, msg("logout with incorrect csrf token"));
                     }
                     info!("revoking session");
                     l.revoke_session(auth::RevocationReason::LoggedOut, None, authreq, &hash)
                         .err_kind(ErrorKind::Internal)?;
                 }
-                Err(e) => {
+                Err(err) => {
                     // TODO: distinguish "no such session", "session is no longer valid", and
                     // "user ... is disabled" (which are all client error / bad state) from database
                     // errors.
-                    warn!("logout failed: {}", e);
+                    warn!(err = %err.chain(), "logout failed");
                 }
             }
 

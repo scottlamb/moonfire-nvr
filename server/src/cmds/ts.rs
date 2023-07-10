@@ -2,8 +2,8 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use base::Error;
 use bpaf::Bpaf;
-use failure::Error;
 
 /// Translates between integer and human-readable timestamps.
 #[derive(Bpaf, Debug)]

@@ -4,7 +4,7 @@
 
 //! Time and durations for Moonfire NVR's internal format.
 
-use failure::{bail, format_err, Error};
+use crate::{bail, err, Error};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while_m_n};
 use nom::combinator::{map, map_res, opt};
@@ -106,13 +106,16 @@ impl Time {
             opt(parse_zone),
         ))(input)
         .map_err(|e| match e {
-            nom::Err::Incomplete(_) => format_err!("incomplete"),
+            nom::Err::Incomplete(_) => err!(InvalidArgument, msg("incomplete")),
             nom::Err::Error(e) | nom::Err::Failure(e) => {
-                format_err!("{}", nom::error::convert_error(input, e))
+                err!(InvalidArgument, source(nom::error::convert_error(input, e)))
             }
         })?;
         if !remaining.is_empty() {
-            bail!("unexpected suffix {:?} following time string", remaining);
+            bail!(
+                InvalidArgument,
+                msg("unexpected suffix {remaining:?} following time string")
+            );
         }
         let (tm_hour, tm_min, tm_sec, subsec) = opt_time.unwrap_or((0, 0, 0, 0));
         let mut tm = time::Tm {
@@ -129,11 +132,11 @@ impl Time {
             tm_nsec: 0,
         };
         if tm.tm_mon == 0 {
-            bail!("time {:?} has month 0", input);
+            bail!(InvalidArgument, msg("time {input:?} has month 0"));
         }
         tm.tm_mon -= 1;
         if tm.tm_year < 1900 {
-            bail!("time {:?} has year before 1900", input);
+            bail!(InvalidArgument, msg("time {input:?} has year before 1900"));
         }
         tm.tm_year -= 1900;
 

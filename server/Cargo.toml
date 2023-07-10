@@ -21,6 +21,11 @@ bundled = ["rusqlite/bundled"]
 [workspace]
 members = ["base", "db"]
 
+[workspace.dependencies]
+nix = "0.26.1"
+tracing = { version = "0.1", features = ["log"] }
+rusqlite = "0.28.0"
+
 [dependencies]
 base = { package = "moonfire-base", path = "base" }
 base64 = "0.13.0"
@@ -31,7 +36,6 @@ byteorder = "1.0"
 chrono = "0.4.23"
 cursive = "0.20.0"
 db = { package = "moonfire-db", path = "db" }
-failure = "0.1.1"
 futures = "0.3"
 fnv = "1.0"
 h264-reader = "0.6.0"
@@ -42,14 +46,14 @@ itertools = "0.10.0"
 libc = "0.2"
 log = { version = "0.4" }
 memchr = "2.0.2"
-nix = "0.26.1"
+nix = { workspace = true}
 nom = "7.0.0"
 password-hash = "0.4.2"
 protobuf = "3.0"
 reffers = "0.7.0"
 retina = "0.4.0"
 ring = "0.16.2"
-rusqlite = "0.28.0"
+rusqlite = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = { version = "1.7", features = ["union"] }
@@ -59,7 +63,7 @@ tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "
 tokio-stream = "0.1.5"
 tokio-tungstenite = "0.18.0"
 toml = "0.5"
-tracing = { version = "0.1", features = ["log"] }
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
 tracing-core = "0.1.30"
 tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }

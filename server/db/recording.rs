@@ -6,7 +6,7 @@
 
 use crate::coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
 use crate::db;
-use failure::{bail, Error};
+use base::{bail, Error};
 use std::convert::TryFrom;
 use std::ops::Range;
 use tracing::trace;
@@ -79,25 +79,31 @@ impl SampleIndexIterator {
         }
         let (raw1, i1) = match decode_varint32(data, i) {
             Ok(tuple) => tuple,
-            Err(()) => bail!("bad varint 1 at offset {}", i),
+            Err(()) => bail!(DataLoss, msg("bad varint 1 at offset {i}")),
         };
         let (raw2, i2) = match decode_varint32(data, i1) {
             Ok(tuple) => tuple,
-            Err(()) => bail!("bad varint 2 at offset {}", i1),
+            Err(()) => bail!(DataLoss, msg("bad varint 2 at offset {i1}")),
         };
         let duration_90k_delta = unzigzag32(raw1 >> 1);
         self.duration_90k += duration_90k_delta;
         if self.duration_90k < 0 {
             bail!(
-                "negative duration {} after applying delta {}",
-                self.duration_90k,
-                duration_90k_delta
+                DataLoss,
+                msg(
+                    "negative duration {} after applying delta {}",
+                    self.duration_90k,
+                    duration_90k_delta,
+                ),
             );
         }
         if self.duration_90k == 0 && data.len() > i2 {
             bail!(
-                "zero duration only allowed at end; have {} bytes left",
-                data.len() - i2
+                DataLoss,
+                msg(
+                    "zero duration only allowed at end; have {} bytes left",
+                    data.len() - i2
+                ),
             );
         }
         let (prev_bytes_key, prev_bytes_nonkey) = match self.is_key() {
@@ -115,11 +121,14 @@ impl SampleIndexIterator {
         }
         if self.bytes <= 0 {
             bail!(
-                "non-positive bytes {} after applying delta {} to key={} frame at ts {}",
-                self.bytes,
-                bytes_delta,
-                self.is_key(),
-                self.start_90k
+                DataLoss,
+                msg(
+                    "non-positive bytes {} after applying delta {} to key={} frame at ts {}",
+                    self.bytes,
+                    bytes_delta,
+                    self.is_key(),
+                    self.start_90k,
+                ),
             );
         }
         Ok(true)
@@ -228,10 +237,13 @@ impl Segment {
             || desired_media_range_90k.end > recording.media_duration_90k
         {
             bail!(
-                "desired media range [{}, {}) invalid for recording of length {}",
-                desired_media_range_90k.start,
-                desired_media_range_90k.end,
-                recording.media_duration_90k
+                OutOfRange,
+                msg(
+                    "desired media range [{}, {}) invalid for recording of length {}",
+                    desired_media_range_90k.start,
+                    desired_media_range_90k.end,
+                    recording.media_duration_90k,
+                ),
             );
         }
 
@@ -257,10 +269,10 @@ impl Segment {
             let data = &playback.video_index;
             let mut it = SampleIndexIterator::default();
             if !it.next(data)? {
-                bail!("no index");
+                bail!(Internal, msg("no index"));
             }
             if !it.is_key() {
-                bail!("not key frame");
+                bail!(Internal, msg("not key frame"));
             }
 
             // Stop when hitting a frame with this start time.
@@ -336,10 +348,13 @@ impl Segment {
             None => {
                 let mut it = SampleIndexIterator::default();
                 if !it.next(data)? {
-                    bail!("recording {} has no frames", self.id);
+                    bail!(Internal, msg("recording {} has no frames", self.id));
                 }
                 if !it.is_key() {
-                    bail!("recording {} doesn't start with key frame", self.id);
+                    bail!(
+                        Internal,
+                        msg("recording {} doesn't start with key frame", self.id)
+                    );
                 }
                 it
             }
@@ -350,19 +365,25 @@ impl Segment {
         for i in 0..self.frames {
             if !have_frame {
                 bail!(
-                    "recording {}: expected {} frames, found only {}",
-                    self.id,
-                    self.frames,
-                    i + 1
+                    Internal,
+                    msg(
+                        "recording {}: expected {} frames, found only {}",
+                        self.id,
+                        self.frames,
+                        i + 1,
+                    ),
                 );
             }
             if it.is_key() {
                 key_frame += 1;
                 if key_frame > self.key_frames {
                     bail!(
-                        "recording {}: more than expected {} key frames",
-                        self.id,
-                        self.key_frames
+                        Internal,
+                        msg(
+                            "recording {}: more than expected {} key frames",
+                            self.id,
+                            self.key_frames,
+                        ),
                     );
                 }
             }
@@ -381,10 +402,13 @@ impl Segment {
         }
         if key_frame < self.key_frames {
             bail!(
-                "recording {}: expected {} key frames, found only {}",
-                self.id,
-                self.key_frames,
-                key_frame
+                Internal,
+                msg(
+                    "recording {}: expected {} key frames, found only {}",
+                    self.id,
+                    self.key_frames,
+                    key_frame,
+                ),
             );
         }
         Ok(())
@@ -499,7 +523,7 @@ mod tests {
         ];
         for test in &tests {
             let mut it = SampleIndexIterator::default();
-            assert_eq!(it.next(test.encoded).unwrap_err().to_string(), test.err);
+            assert_eq!(it.next(test.encoded).unwrap_err().msg().unwrap(), test.err);
         }
     }
 

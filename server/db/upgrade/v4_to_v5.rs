@@ -8,8 +8,8 @@
 /// Otherwise, verify they are consistent with the database then upgrade them.
 use crate::db::SqlUuid;
 use crate::{dir, schema};
+use base::{bail, err, Error};
 use cstr::cstr;
-use failure::{bail, Error, Fail};
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
 use protobuf::Message;
@@ -34,15 +34,17 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
 
     let mut s = protobuf::CodedInputStream::from_bytes(&data);
     let mut dir_meta = schema::DirMeta::new();
-    dir_meta
-        .merge_from(&mut s)
-        .map_err(|e| e.context("Unable to parse metadata proto: {}"))?;
+    dir_meta.merge_from(&mut s).map_err(|e| {
+        err!(
+            FailedPrecondition,
+            msg("unable to parse metadata proto"),
+            source(e)
+        )
+    })?;
     if let Err(e) = dir::SampleFileDir::check_consistent(db_meta, &dir_meta) {
         bail!(
-            "Inconsistent db_meta={:?} dir_meta={:?}: {}",
-            &db_meta,
-            &dir_meta,
-            e
+            FailedPrecondition,
+            msg("inconsistent db_meta={db_meta:?} dir_meta={dir_meta:?}: {e}"),
         );
     }
     let mut f = crate::fs::openat(
@@ -56,9 +58,12 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
         .expect("proto3->vec is infallible");
     if data.len() > FIXED_DIR_META_LEN {
         bail!(
-            "Length-delimited DirMeta message requires {} bytes, over limit of {}",
-            data.len(),
-            FIXED_DIR_META_LEN
+            Internal,
+            msg(
+                "length-delimited DirMeta message requires {} bytes, over limit of {}",
+                data.len(),
+                FIXED_DIR_META_LEN,
+            ),
         );
     }
     data.resize(FIXED_DIR_META_LEN, 0); // pad to required length.
@@ -144,12 +149,12 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
                 o.uuid.extend_from_slice(&uuid.0.as_bytes()[..]);
             }
             (None, None) => {}
-            _ => bail!("open table missing id"),
+            _ => bail!(Internal, msg("open table missing id")),
         }
 
         let dir = dir::Fd::open(path, false)?;
         dir.lock(FlockArg::LockExclusiveNonblock)
-            .map_err(|e| e.context(format!("unable to lock dir {path}")))?;
+            .map_err(|e| err!(e, msg("unable to lock dir {path}")))?;
 
         let mut need_sync = maybe_upgrade_meta(&dir, &db_meta)?;
         if maybe_cleanup_garbage_uuids(&dir)? {

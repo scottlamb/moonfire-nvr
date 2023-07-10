@@ -5,7 +5,7 @@
 //! In-memory indexes by calendar day.
 
 use base::time::{Duration, Time, TIME_UNITS_PER_SEC};
-use failure::Error;
+use base::{err, Error};
 use smallvec::SmallVec;
 use std::cmp;
 use std::collections::BTreeMap;
@@ -22,7 +22,12 @@ pub struct Key(pub(crate) [u8; 10]);
 impl Key {
     fn new(tm: time::Tm) -> Result<Self, Error> {
         let mut s = Key([0u8; 10]);
-        write!(&mut s.0[..], "{}", tm.strftime("%Y-%m-%d")?)?;
+        write!(
+            &mut s.0[..],
+            "{}",
+            tm.strftime("%Y-%m-%d")
+                .map_err(|e| err!(Internal, source(e)))?
+        )?;
         Ok(s)
     }
 
