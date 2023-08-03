@@ -94,7 +94,7 @@ fn main() {
 
     match args.run() {
         Err(e) => {
-            error!("exiting due to error: {}", e.chain());
+            error!(err = %e.chain(), "exiting due to error");
             ::std::process::exit(1);
         }
         Ok(rv) => {

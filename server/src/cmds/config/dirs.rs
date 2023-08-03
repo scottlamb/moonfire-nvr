@@ -51,7 +51,7 @@ fn update_limits_inner(model: &Model) -> Result<(), Error> {
 fn update_limits(model: &Model, siv: &mut Cursive) {
     if let Err(e) = update_limits_inner(model) {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to update limits: {e}"))
+            views::Dialog::text(format!("Unable to update limits: {}", e.chain()))
                 .dismiss_button("Back")
                 .title("Error"),
         );
@@ -142,7 +142,7 @@ fn actually_delete(model: &RefCell<Model>, siv: &mut Cursive) {
     }
     if let Err(e) = writer::lower_retention(&model.db, model.dir_id, &new_limits[..]) {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to delete excess video: {e}"))
+            views::Dialog::text(format!("Unable to delete excess video: {}", e.chain()))
                 .title("Error")
                 .dismiss_button("Abort"),
         );
@@ -282,9 +282,13 @@ fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
 fn add_dir(db: &Arc<db::Database>, siv: &mut Cursive, path: &Path) {
     if let Err(e) = db.lock().add_sample_file_dir(path.to_owned()) {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to add path {}: {}", path.display(), e))
-                .dismiss_button("Back")
-                .title("Error"),
+            views::Dialog::text(format!(
+                "Unable to add path {}: {}",
+                path.display(),
+                e.chain()
+            ))
+            .dismiss_button("Back")
+            .title("Error"),
         );
         return;
     }
@@ -312,7 +316,7 @@ fn delete_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
 fn delete_dir(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
     if let Err(e) = db.lock().delete_sample_file_dir(dir_id) {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to delete dir id {dir_id}: {e}"))
+            views::Dialog::text(format!("Unable to delete dir id {dir_id}: {}", e.chain()))
                 .dismiss_button("Back")
                 .title("Error"),
         );

@@ -176,7 +176,7 @@ where
         let snd = snd.clone();
         move || {
             if let Err(err) = snd.send(SyncerCommand::DatabaseFlushed) {
-                warn!(%err, "Unable to notify syncer for dir {}", dir_id);
+                warn!(%err, "unable to notify syncer for dir {}", dir_id);
             }
         }
     }));
@@ -403,9 +403,9 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
             // Try to delete files; retain ones in `garbage` that don't exist.
             let mut errors = 0;
             for &id in &garbage {
-                if let Err(e) = self.dir.unlink_file(id) {
-                    if e != nix::Error::ENOENT {
-                        warn!("dir: Unable to unlink {}: {}", id, e);
+                if let Err(err) = self.dir.unlink_file(id) {
+                    if err != nix::Error::ENOENT {
+                        warn!(%err, "dir: unable to unlink {}", id);
                         errors += 1;
                     }
                 }
@@ -1199,8 +1199,8 @@ mod tests {
         tdb.db.lock().on_flush(Box::new({
             let snd = syncer_tx.clone();
             move || {
-                if let Err(e) = snd.send(super::SyncerCommand::DatabaseFlushed) {
-                    warn!("Unable to notify syncer for dir {} of flush: {}", dir_id, e);
+                if let Err(err) = snd.send(super::SyncerCommand::DatabaseFlushed) {
+                    warn!(%err, "unable to notify syncer for dir {} of flush", dir_id);
                 }
             }
         }));

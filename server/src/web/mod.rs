@@ -638,13 +638,13 @@ impl Service {
                         }),
                     })
                 }
-                Err(e) if e.kind() == base::ErrorKind::Unauthenticated => {
+                Err(err) if err.kind() == base::ErrorKind::Unauthenticated => {
                     // Log the specific reason this session is unauthenticated.
                     // Don't let the API client see it, as it may have a
                     // revocation reason that isn't for their eyes.
-                    warn!("Session authentication failed: {e}");
+                    warn!(err = %err.chain(), "session authentication failed");
                 }
-                Err(e) => return Err(e),
+                Err(err) => return Err(err),
             };
         }
 

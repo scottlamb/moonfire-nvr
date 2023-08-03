@@ -2322,7 +2322,7 @@ impl<C: Clocks + Clone> Drop for Database<C> {
         }
         if let Some(m) = self.db.take() {
             if let Err(e) = m.into_inner().unwrap().flush(&self.clocks, "drop") {
-                error!("Final database flush failed: {}", e);
+                error!(err = %e.chain(), "final database flush failed");
             }
         }
     }
@@ -2358,7 +2358,7 @@ impl<C: Clocks + Clone> Database<C> {
             let open_uuid = SqlUuid(Uuid::new_v4());
             let boot_uuid = match get_boot_uuid() {
                 Err(e) => {
-                    warn!("Unable to get boot uuid: {}", e);
+                    warn!(err = %e.chain(), "unable to get boot uuid");
                     None
                 }
                 Ok(id) => id.map(SqlUuid),

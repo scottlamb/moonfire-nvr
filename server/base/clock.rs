@@ -99,7 +99,7 @@ impl Clocks for RealClocks {
     fn sleep(&self, how_long: Duration) {
         match how_long.to_std() {
             Ok(d) => thread::sleep(d),
-            Err(e) => warn!("Invalid duration {:?}: {}", how_long, e),
+            Err(err) => warn!(%err, "invalid duration {:?}", how_long),
         };
     }
 

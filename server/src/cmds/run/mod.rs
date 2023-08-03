@@ -439,8 +439,8 @@ async fn inner(
 
     info!("Waiting for TEARDOWN requests to complete.");
     for g in session_groups_by_camera.values() {
-        if let Err(e) = g.await_teardown().await {
-            error!("{}", e);
+        if let Err(err) = g.await_teardown().await {
+            error!(%err, "teardown failed");
         }
     }
 

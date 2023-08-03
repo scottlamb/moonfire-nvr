@@ -43,7 +43,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
             if e == "ok" {
                 continue;
             }
-            error!("{}", e);
+            error!(err = %e, "sqlite integrity error");
             printed_error = true;
         }
     }

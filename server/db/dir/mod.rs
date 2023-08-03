@@ -95,8 +95,8 @@ impl std::os::unix::io::AsRawFd for Fd {
 
 impl Drop for Fd {
     fn drop(&mut self) {
-        if let Err(e) = nix::unistd::close(self.0) {
-            warn!("Unable to close sample file dir: {}", e);
+        if let Err(err) = nix::unistd::close(self.0) {
+            warn!(%err, "unable to close sample file dir");
         }
     }
 }
@@ -236,9 +236,10 @@ impl SampleFileDir {
             bail!(
                 Internal,
                 msg(
-                    "metadata mismatch: {e}.\nexpected:\n{expected_meta:#?}\n\nactual:\n\
+                    "metadata mismatch\nexpected:\n{expected_meta:#?}\n\nactual:\n\
                     {dir_meta:#?}",
                 ),
+                source(e),
             );
         }
         if expected_meta.in_progress_open.is_some() {

@@ -44,7 +44,8 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
     if let Err(e) = dir::SampleFileDir::check_consistent(db_meta, &dir_meta) {
         bail!(
             FailedPrecondition,
-            msg("inconsistent db_meta={db_meta:?} dir_meta={dir_meta:?}: {e}"),
+            msg("inconsistent db_meta={db_meta:?} dir_meta={dir_meta:?}"),
+            source(e),
         );
     }
     let mut f = crate::fs::openat(

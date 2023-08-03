@@ -6,7 +6,6 @@ use cursive::traits::{Nameable, Resizable};
 use cursive::views;
 use cursive::Cursive;
 use std::sync::Arc;
-use tracing::info;
 
 /// Builds a `UserChange` from an active `edit_user_dialog`.
 fn get_change(
@@ -48,7 +47,6 @@ fn get_change(
         ),
     ] {
         **b = siv.find_name::<views::Checkbox>(id).unwrap().is_checked();
-        info!("{}: {}", id, **b);
     }
     change
 }
@@ -61,7 +59,7 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>, pw: Pa
     };
     if let Err(e) = result {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to apply change: {e}"))
+            views::Dialog::text(format!("Unable to apply change: {}", e.chain()))
                 .title("Error")
                 .dismiss_button("Abort"),
         );
@@ -94,7 +92,7 @@ fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32) {
     };
     if let Err(e) = result {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to delete user: {e}"))
+            views::Dialog::text(format!("Unable to delete user: {}", e.chain()))
                 .title("Error")
                 .dismiss_button("Abort"),
         );

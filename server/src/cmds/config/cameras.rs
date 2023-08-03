@@ -397,7 +397,7 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
         }
         if let Err(e) = lower_retention(db, zero_limits) {
             siv.add_layer(
-                views::Dialog::text(format!("Unable to delete recordings: {e}"))
+                views::Dialog::text(format!("Unable to delete recordings: {}", e.chain()))
                     .title("Error")
                     .dismiss_button("Abort"),
             );
@@ -433,7 +433,7 @@ fn actually_delete(siv: &mut Cursive, db: &Arc<db::Database>, id: i32) {
     };
     if let Err(e) = result {
         siv.add_layer(
-            views::Dialog::text(format!("Unable to delete camera: {e}"))
+            views::Dialog::text(format!("Unable to delete camera: {}", e.chain()))
                 .title("Error")
                 .dismiss_button("Abort"),
         );
