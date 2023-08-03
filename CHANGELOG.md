@@ -11,6 +11,10 @@ upgrades, e.g. `0.6.x` -> `0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 
+## unreleased
+
+*  log to `stderr` again, fixing a regression with the `tracing` change in 0.7.6.
+
 ## 0.7.6 (2023-07-08)
 
 *   new log formats using `tracing`. This will allow richer context information.

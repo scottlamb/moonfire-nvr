@@ -118,6 +118,7 @@ pub fn install() {
         Ok(s) if s == "systemd" => {
             let sub = tracing_subscriber::registry().with(
                 tracing_subscriber::fmt::Layer::new()
+                    .with_writer(std::io::stderr)
                     .with_ansi(false)
                     .event_format(FormatSystemd)
                     .with_filter(filter),
@@ -127,6 +128,7 @@ pub fn install() {
         Ok(s) if s == "json" => {
             let sub = tracing_subscriber::registry().with(
                 tracing_subscriber::fmt::Layer::new()
+                    .with_writer(std::io::stderr)
                     .with_thread_names(true)
                     .json()
                     .with_filter(filter),
@@ -136,6 +138,7 @@ pub fn install() {
         _ => {
             let sub = tracing_subscriber::registry().with(
                 tracing_subscriber::fmt::Layer::new()
+                    .with_writer(std::io::stderr)
                     .with_timer(ChronoTimer)
                     .with_thread_names(true)
                     .with_filter(filter),
