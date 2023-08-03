@@ -11,7 +11,7 @@ upgrades, e.g. `0.6.x` -> `0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 
-## unreleased
+## 0.7.7 (2023-08-03)
 
 *  fix [#289](https://github.com/scottlamb/moonfire-nvr/issues/289): crash on
    pressing the `Add` button in the sample file directory dialog
