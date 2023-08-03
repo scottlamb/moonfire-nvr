@@ -266,7 +266,7 @@ fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
             let db = db.clone();
             move |siv| {
                 let path = siv
-                    .find_name::<views::EditView>("path")
+                    .find_name::<TabCompleteEditView>("path")
                     .unwrap()
                     .get_content();
                 add_dir(&db, siv, path.as_ref().as_ref())

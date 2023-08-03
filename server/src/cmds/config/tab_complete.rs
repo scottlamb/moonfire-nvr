@@ -32,6 +32,10 @@ impl TabCompleteEditView {
         self.tab_completer = Some(Rc::new(handler));
         self
     }
+
+    pub fn get_content(&self) -> Rc<String> {
+        self.edit_view.borrow_mut().get_content()
+    }
 }
 
 impl View for TabCompleteEditView {

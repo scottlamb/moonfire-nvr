@@ -13,7 +13,10 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 
 ## unreleased
 
+*  fix [#289](https://github.com/scottlamb/moonfire-nvr/issues/289): crash on
+   pressing the `Add` button in the sample file directory dialog
 *  log to `stderr` again, fixing a regression with the `tracing` change in 0.7.6.
+
 
 ## 0.7.6 (2023-07-08)
 
