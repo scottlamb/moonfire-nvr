@@ -299,9 +299,14 @@ fn press_test(siv: &mut Cursive, t: db::StreamType) {
             let description = match r {
                 Err(ref e) => {
                     siv.add_layer(
-                        views::Dialog::text(format!("{} stream at {}:\n\n{}", t.as_str(), &url, e))
-                            .title("Stream test failed")
-                            .dismiss_button("Back"),
+                        views::Dialog::text(format!(
+                            "{} stream at {}:\n\n{}",
+                            t.as_str(),
+                            &url,
+                            e.chain()
+                        ))
+                        .title("Stream test failed")
+                        .dismiss_button("Back"),
                     );
                     return;
                 }
