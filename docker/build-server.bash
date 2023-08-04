@@ -27,8 +27,8 @@ ln -s /cargo-cache/{git,registry} ~/.cargo
 
 build_profile=release-lto
 cd src/server
-time cargo test
-time cargo build --profile=$build_profile
+time cargo test --features=bundled-ui
+time cargo build --features=bundled-ui --profile=$build_profile
 find /cargo-cache -ls > /docker-build-debug/build-server/cargo-cache-after
 find ~/target -ls > /docker-build-debug/build-server/target-after
 sudo install -m 755 \

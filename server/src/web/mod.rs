@@ -17,6 +17,7 @@ use self::path::Path;
 use crate::body::Body;
 use crate::json;
 use crate::mp4;
+use crate::web::static_file::Ui;
 use base::err;
 use base::Error;
 use base::ResultExt;
@@ -28,7 +29,6 @@ use db::{auth, recording};
 use fnv::FnvHashMap;
 use http::header::{self, HeaderValue};
 use http::{status::StatusCode, Request, Response};
-use http_serve::dir::FsDir;
 use hyper::body::Bytes;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -162,7 +162,7 @@ fn require_csrf_if_session(caller: &Caller, csrf: Option<&str>) -> Result<(), ba
 
 pub struct Config<'a> {
     pub db: Arc<db::Database>,
-    pub ui_dir: Option<&'a std::path::Path>,
+    pub ui_dir: Option<&'a crate::cmds::run::config::UiDir>,
     pub trust_forward_hdrs: bool,
     pub time_zone_name: String,
     pub allow_unauthenticated_permissions: Option<db::Permissions>,
@@ -171,7 +171,7 @@ pub struct Config<'a> {
 
 pub struct Service {
     db: Arc<db::Database>,
-    ui_dir: Option<Arc<FsDir>>,
+    ui: Ui,
     dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
     time_zone_name: String,
     allow_unauthenticated_permissions: Option<db::Permissions>,
@@ -195,19 +195,7 @@ enum CacheControl {
 
 impl Service {
     pub fn new(config: Config) -> Result<Self, Error> {
-        let mut ui_dir = None;
-        if let Some(d) = config.ui_dir {
-            match FsDir::builder().for_path(d) {
-                Err(e) => {
-                    warn!(
-                        "Unable to load ui dir {}; will serve no static files: {}",
-                        d.display(),
-                        e
-                    );
-                }
-                Ok(d) => ui_dir = Some(d),
-            };
-        }
+        let ui_dir = config.ui_dir.map(Ui::from).unwrap_or(Ui::None);
         let dirs_by_stream_id = {
             let l = config.db.lock();
             let mut d =
@@ -225,7 +213,7 @@ impl Service {
         Ok(Service {
             db: config.db,
             dirs_by_stream_id,
-            ui_dir,
+            ui: ui_dir,
             allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
             trust_forward_hdrs: config.trust_forward_hdrs,
             time_zone_name: config.time_zone_name,

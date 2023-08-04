@@ -24,7 +24,7 @@ use tracing::{info, warn};
 
 use self::config::ConfigFile;
 
-mod config;
+pub mod config;
 
 /// Runs the server, saving recordings and allowing web access.
 #[derive(Bpaf, Debug)]

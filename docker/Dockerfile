@@ -48,6 +48,7 @@ FROM --platform=$BUILDPLATFORM dev AS build-server
 LABEL maintainer="slamb@slamb.org"
 ARG INVALIDATE_CACHE_BUILD_SERVER=
 COPY docker/build-server.bash /
+COPY --from=build-ui /var/lib/moonfire-nvr/src/ui/build /var/lib/moonfire-nvr/src/ui/build
 RUN --mount=type=cache,id=target,target=/var/lib/moonfire-nvr/target,sharing=locked,mode=777 \
     --mount=type=cache,id=cargo,target=/cargo-cache,sharing=locked,mode=777 \
     --mount=type=bind,source=server,target=/var/lib/moonfire-nvr/src/server,readonly \
@@ -66,7 +67,6 @@ COPY --from=dev /docker-build-debug/dev/ /docker-build-debug/dev/
 COPY --from=build-server /docker-build-debug/build-server/ /docker-build-debug/build-server/
 COPY --from=build-server /usr/local/bin/moonfire-nvr /usr/local/bin/moonfire-nvr
 COPY --from=build-ui /docker-build-debug/build-ui /docker-build-debug/build-ui
-COPY --from=build-ui /var/lib/moonfire-nvr/src/ui/build /usr/local/lib/moonfire-nvr/ui
 
 # The install instructions say to use --user in the docker run commandline.
 # Specify a non-root user just in case someone forgets.

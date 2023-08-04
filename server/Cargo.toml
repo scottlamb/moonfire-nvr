@@ -9,14 +9,15 @@ rust-version = "1.70"
 publish = false
 
 [features]
-
 # The nightly feature is used within moonfire-nvr itself to gate the
 # benchmarks. Also pass it along to crates that can benefit from it.
 nightly = ["db/nightly"]
 
-# The bundled feature includes bundled (aka statically linked) versions of
-# native libraries where possible.
-bundled = ["rusqlite/bundled"]
+# The bundled feature aims to make a single executable file that is deployable,
+# including statically linked libraries and embedded UI files.
+bundled = ["rusqlite/bundled", "bundled-ui"]
+
+bundled-ui = []
 
 [workspace]
 members = ["base", "db"]
@@ -71,6 +72,12 @@ tracing-log = "0.1.3"
 ulid = "1.0.0"
 url = "2.1.1"
 uuid = { version = "1.1.2", features = ["serde", "std", "v4"] }
+flate2 = "1.0.26"
+
+[build-dependencies]
+blake3 = "1.0.0"
+fnv = "1.0"
+walkdir = "2.3.3"
 
 [dev-dependencies]
 mp4 = { git = "https://github.com/scottlamb/mp4-rust", branch = "moonfire" }

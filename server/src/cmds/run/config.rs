@@ -14,9 +14,6 @@ use crate::json::Permissions;
 fn default_db_dir() -> PathBuf {
     crate::DEFAULT_DB_DIR.into()
 }
-fn default_ui_dir() -> PathBuf {
-    "/usr/local/lib/moonfire-nvr/ui".into()
-}
 
 /// Top-level configuration file object.
 #[derive(Debug, Deserialize)]
@@ -32,14 +29,43 @@ pub struct ConfigFile {
     pub db_dir: PathBuf,
 
     /// Directory holding user interface files (`.html`, `.js`, etc).
-    #[serde(default = "default_ui_dir")]
-    pub ui_dir: PathBuf,
+    #[cfg_attr(not(feature = "bundled-ui"), serde(default))]
+    #[cfg_attr(feature = "bundled-ui", serde(default))]
+    pub ui_dir: UiDir,
 
     /// The number of worker threads used by the asynchronous runtime.
     ///
     /// Defaults to the number of cores on the system.
     #[serde(default)]
     pub worker_threads: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", untagged)]
+pub enum UiDir {
+    FromFilesystem(PathBuf),
+    Bundled(BundledUi),
+}
+
+impl Default for UiDir {
+    #[cfg(feature = "bundled-ui")]
+    fn default() -> Self {
+        UiDir::Bundled(BundledUi { bundled: true })
+    }
+
+    #[cfg(not(feature = "bundled-ui"))]
+    fn default() -> Self {
+        UiDir::FromFilesystem("/usr/local/lib/moonfire-nvr/ui".into())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct BundledUi {
+    /// Just a marker to select this variant.
+    #[allow(unused)]
+    bundled: bool,
 }
 
 /// Per-bind configuration.

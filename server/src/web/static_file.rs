@@ -4,45 +4,104 @@
 
 //! Static file serving.
 
-use base::{bail, err, Error, ErrorKind, ResultExt};
+use std::sync::Arc;
+
+use base::{bail, err, ErrorKind, ResultExt};
 use http::{header, HeaderValue, Request};
+use http_serve::dir::FsDir;
+use tracing::warn;
+
+use crate::cmds::run::config::UiDir;
 
 use super::{ResponseResult, Service};
+
+pub enum Ui {
+    None,
+    FromFilesystem(Arc<FsDir>),
+    #[cfg(feature = "bundled-ui")]
+    Bundled(&'static crate::bundled_ui::Ui),
+}
+
+impl Ui {
+    pub fn from(cfg: &UiDir) -> Self {
+        match cfg {
+            UiDir::FromFilesystem(d) => match FsDir::builder().for_path(d) {
+                Err(err) => {
+                    warn!(
+                        %err,
+                        "unable to load ui dir {}; will serve no static files",
+                        d.display(),
+                    );
+                    Self::None
+                }
+                Ok(d) => Self::FromFilesystem(d),
+            },
+            #[cfg(feature = "bundled-ui")]
+            UiDir::Bundled(_) => Self::Bundled(crate::bundled_ui::Ui::get()),
+            #[cfg(not(feature = "bundled-ui"))]
+            UiDir::Bundled(_) => {
+                warn!("server compiled without bundled ui; will serve not static files");
+                Self::None
+            }
+        }
+    }
+
+    async fn serve(
+        &self,
+        path: &str,
+        req: &Request<hyper::Body>,
+        cache_control: &'static str,
+        content_type: &'static str,
+    ) -> ResponseResult {
+        match self {
+            Ui::None => bail!(
+                NotFound,
+                msg("ui not configured or missing; no static files available")
+            ),
+            Ui::FromFilesystem(d) => {
+                let node = d.clone().get(path, req.headers()).await.map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        err!(NotFound, msg("static file not found"))
+                    } else {
+                        err!(Internal, source(e))
+                    }
+                })?;
+                let mut hdrs = http::HeaderMap::new();
+                node.add_encoding_headers(&mut hdrs);
+                hdrs.insert(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static(cache_control),
+                );
+                hdrs.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+                let e = node.into_file_entity(hdrs).err_kind(ErrorKind::Internal)?;
+                Ok(http_serve::serve(e, &req))
+            }
+            #[cfg(feature = "bundled-ui")]
+            Ui::Bundled(ui) => {
+                let Some(e) = ui.lookup(path, req.headers(), cache_control, content_type) else {
+                    bail!(NotFound, msg("static file not found"));
+                };
+                Ok(http_serve::serve(e, &req))
+            }
+        }
+    }
+}
 
 impl Service {
     /// Serves a static file if possible.
     pub(super) async fn static_file(&self, req: Request<hyper::Body>) -> ResponseResult {
-        let Some(dir) = self.ui_dir.clone() else {
-            bail!(NotFound, msg("ui dir not configured or missing; no static files available"))
-        };
         let Some(static_req) = StaticFileRequest::parse(req.uri().path()) else {
             bail!(NotFound, msg("static file not found"));
         };
-        let f = dir.get(static_req.path, req.headers());
-        let node = f.await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                err!(NotFound, msg("no such static file"))
-            } else {
-                Error::wrap(ErrorKind::Internal, e)
-            }
-        })?;
-        let mut hdrs = http::HeaderMap::new();
-        node.add_encoding_headers(&mut hdrs);
-        hdrs.insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static(if static_req.immutable {
-                // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#Caching_static_assets
-                "public, max-age=604800, immutable"
-            } else {
-                "public"
-            }),
-        );
-        hdrs.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static(static_req.mime),
-        );
-        let e = node.into_file_entity(hdrs).err_kind(ErrorKind::Internal)?;
-        Ok(http_serve::serve(e, &req))
+        let cache_control = if static_req.immutable {
+            // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#Caching_static_assets
+            "public, max-age=604800, immutable"
+        } else {
+            "public"
+        };
+        self.ui
+            .serve(static_req.path, &req, cache_control, static_req.mime)
+            .await
     }
 }
 

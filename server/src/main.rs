@@ -20,6 +20,9 @@ mod stream;
 mod streamer;
 mod web;
 
+#[cfg(feature = "bundled-ui")]
+mod bundled_ui;
+
 const DEFAULT_DB_DIR: &str = "/var/lib/moonfire-nvr/db";
 
 /// Moonfire NVR: security camera network video recorder.
