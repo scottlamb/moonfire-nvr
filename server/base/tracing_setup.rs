@@ -154,3 +154,19 @@ pub fn install() {
         std::panic::set_hook(Box::new(&panic_hook));
     }
 }
+
+pub fn install_for_tests() {
+    let filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
+        .with_env_var("MOONFIRE_LOG")
+        .from_env_lossy();
+    tracing_log::LogTracer::init().unwrap();
+    let sub = tracing_subscriber::registry().with(
+        tracing_subscriber::fmt::Layer::new()
+            .with_test_writer()
+            .with_timer(ChronoTimer)
+            .with_thread_names(true)
+            .with_filter(filter),
+    );
+    tracing::subscriber::set_global_default(sub).unwrap();
+}
