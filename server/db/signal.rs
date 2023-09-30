@@ -759,7 +759,10 @@ impl State {
                 if let Entry::Occupied(ref e) = e {
                     let (prev_time, prev_state) = *e.get();
                     let Some(s) = signals_by_id.get_mut(&signal) else {
-                        bail!(DataLoss, msg("time {time_90k} references invalid signal {signal}"));
+                        bail!(
+                            DataLoss,
+                            msg("time {time_90k} references invalid signal {signal}")
+                        );
                     };
                     s.days.adjust(prev_time..time_90k, 0, prev_state);
                 }

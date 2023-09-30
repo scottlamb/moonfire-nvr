@@ -2274,8 +2274,7 @@ pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Er
     let Some(ver) = get_schema_version(conn)? else {
         bail!(
             FailedPrecondition,
-            msg(
-                "no such table: version.\n\n\
+            msg("no such table: version.\n\n\
                 If you have created an empty database by hand, delete it and use `nvr init` \
                 instead, as noted in the installation instructions: \
                 <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/install.md>\n\n\

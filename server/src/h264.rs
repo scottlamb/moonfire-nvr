@@ -84,8 +84,18 @@ pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Er
             msg("SPS has invalid pixel dimensions: {:?}", e)
         )
     })?;
-    let (Ok(width), Ok(height)) = (u16::try_from(pixel_dimensions.0), u16::try_from(pixel_dimensions.1)) else {
-        bail!(InvalidArgument, msg("bad dimensions {}x{}", pixel_dimensions.0, pixel_dimensions.1));
+    let (Ok(width), Ok(height)) = (
+        u16::try_from(pixel_dimensions.0),
+        u16::try_from(pixel_dimensions.1),
+    ) else {
+        bail!(
+            InvalidArgument,
+            msg(
+                "bad dimensions {}x{}",
+                pixel_dimensions.0,
+                pixel_dimensions.1
+            )
+        );
     };
 
     let mut sample_entry = Vec::with_capacity(256);

@@ -107,7 +107,10 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
     let Some(sample_file_path) = sample_file_path.to_str() else {
         bail!(
             InvalidArgument,
-            msg("sample file dir {} is not a valid string", sample_file_path.display()),
+            msg(
+                "sample file dir {} is not a valid string",
+                sample_file_path.display()
+            ),
         );
     };
     tx.execute(
