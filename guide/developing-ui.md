@@ -66,6 +66,9 @@ $ PROXY_TARGET=https://nvr.example.com/ npm run start
 This allows you to test a new UI against your stable, production Moonfire NVR
 installation with real data.
 
+**Note:** the live stream currently does not work in combination with
+`PROXY_TARGET` due to [#290](https://github.com/scottlamb/moonfire-nvr/issues/290).
+
 You can also set environment variables in `.env` files, as described in
 [Adding Custom Environment Variables](https://create-react-app.dev/docs/adding-custom-environment-variables/).
 
