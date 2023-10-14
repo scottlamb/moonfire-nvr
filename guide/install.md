@@ -1,14 +1,14 @@
 # Installing Moonfire NVR <!-- omit in toc -->
 
-* [Downloading, installing, and configuring Moonfire NVR with Docker](#downloading-installing-and-configuring-moonfire-nvr-with-docker)
+* [Downloading, installing, and configuring Moonfire NVR](#downloading-installing-and-configuring-moonfire-nvr)
     * [Dedicated hard drive setup](#dedicated-hard-drive-setup)
     * [Completing configuration through the UI](#completing-configuration-through-the-ui)
     * [Starting it up](#starting-it-up)
 
-## Downloading, installing, and configuring Moonfire NVR with Docker
+## Downloading, installing, and configuring Moonfire NVR
 
 This document describes how to download, install, and configure Moonfire NVR
-via the prebuilt Docker images available for x86-64, arm64, and arm. If you
+via the prebuilt Linux binaries available for x86-64, arm64, and arm. If you
 instead want to build Moonfire NVR yourself, see the [Build
 instructions](build.md).
 
@@ -18,17 +18,16 @@ left, and pick the [latest tagged version](https://github.com/scottlamb/moonfire
 
 ![Selecting a version of install instructions](install-version.png)
 
-Next, install [Docker](https://www.docker.com/) if you haven't already,
-and verify `sudo docker run --rm hello-world` works.
+Download the binary for your platform from the matching GitHub release.
+Install it as `/usr/local/bin/moonfire-nvr` and ensure it is executable, e.g.
+for version `v0.7.8` on Intel machines:
 
-<details>
-  <summary><tt>sudo</tt> or not?</summary>
-
-If you prefer to save typing by not prefixing all `docker` and `nvr` commands
-with `sudo`, see [Docker docs: Manage Docker as a non-root
-user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
-Note `docker` access is equivalent to root access security-wise.
-</details>
+```console
+$ VERSION=v0.7.8
+$ ARCH=x86_64-unknown-linux-musl
+$ curl -OL "https://github.com/scottlamb/moonfire-nvr/releases/download/$VERSION/moonfire-nvr-$VERSION-$ARCH"
+$ sudo install -m 755 "moonfire-nvr-$VERSION-$ARCH" /usr/local/bin/moonfire-nvr
+```
 
 Next, you'll need to set up your filesystem and the Moonfire NVR user.
 
@@ -49,22 +48,12 @@ On most Linux systems, you can create the user as follows:
 $ sudo useradd --user-group --create-home --home /var/lib/moonfire-nvr moonfire-nvr
 ```
 
-and create a script called `nvr` to run Moonfire NVR as the intended host user.
-This script supports running Moonfire NVR's various administrative commands interactively
-and managing a long-lived Docker container for its web interface.
-
-As you set up this script, adjust the `tz` variable as appropriate for your
-time zone.
-
-Use your favorite editor to create `/etc/moonfire-nvr.toml` and
-`/usr/local/bin/nvr`, starting from the configurations below:
+Use your favorite editor to create `/etc/moonfire-nvr.toml`,
+starting from the configurations below:
 
 ```console
 $ sudo nano /etc/moonfire-nvr.toml
 (see below for contents)
-$ sudo nano /usr/local/bin/nvr
-(see below for contents)
-$ sudo chmod a+rx /usr/local/bin/nvr
 ```
 
 `/etc/moonfire-nvr.toml` (see [ref/config.md](../ref/config.md) for more explanation):
@@ -78,79 +67,10 @@ unix = "/var/lib/moonfire-nvr/sock"
 ownUidIsPrivileged = true
 ```
 
-`/usr/local/bin/nvr`:
-```bash
-#!/bin/bash -e
-
-# Set your timezone here.
-tz="America/Los_Angeles"
-
-image_name="scottlamb/moonfire-nvr:v0.7.7"
-container_name="moonfire-nvr"
-common_docker_run_args=(
-        --mount=type=bind,source=/var/lib/moonfire-nvr,destination=/var/lib/moonfire-nvr
-        --mount=type=bind,source=/etc/moonfire-nvr.toml,destination=/etc/moonfire-nvr.toml
-
-        # Add additional mount lines here for each sample file directory
-        # outside of /var/lib/moonfire-nvr, e.g.:
-        # --mount=type=bind,source=/media/nvr/sample,destination=/media/nvr/sample
-
-        --user="$(id -u moonfire-nvr):$(id -g moonfire-nvr)"
-
-        # This avoids errors with broken seccomp on older 32-bit hosts.
-        # https://github.com/moby/moby/issues/40734
-        --security-opt=seccomp:unconfined
-
-        # This is the simplest way of configuring networking, although
-        # you can use e.g. --publish=8080:8080 in the run) case below if you
-        # prefer.
-        --network=host
-
-        # docker's default log driver won't rotate logs properly, and will throw
-        # away logs when you destroy and recreate the container. Using journald
-        # solves these problems.
-        # https://docs.docker.com/config/containers/logging/configure/
-        --log-driver=journald
-        --log-opt="tag=moonfire-nvr"
-
-        --env=RUST_BACKTRACE=1
-        --env=TZ=":${tz}"
-)
-
-case "$1" in
-run)
-        shift
-        exec docker run \
-                --detach=true \
-                --restart=unless-stopped \
-                "${common_docker_run_args[@]}" \
-                --name="${container_name}" \
-                "${image_name}" \
-                run \
-                "$@"
-        ;;
-start|stop|logs|rm)
-        exec docker "$@" "${container_name}"
-        ;;
-pull)
-        exec docker pull "${image_name}"
-        ;;
-*)
-        exec docker run \
-                --interactive=true \
-                --tty \
-                --rm \
-                "${common_docker_run_args[@]}" \
-                "${image_name}" \
-                "$@"
-        ;;
-esac
-```
-
-then try it out by initializing the database:
+Then initialize the database:
 
 ```console
-$ sudo nvr init
+$ sudo -u moonfire-nvr moonfire-nvr init
 ```
 
 This will create a directory `/var/lib/moonfire-nvr/db` with a SQLite3 database
@@ -189,10 +109,6 @@ system will boot successfully even when the hard drive is unavailable (such as
 when your external USB storage is unmounted). This can be helpful when
 recovering from problems.
 
-Add a new `--mount` line to your Docker wrapper script `/usr/local/bin/nvr`
-to expose the new sample directory `/media/nvr/sample` to the Docker container,
-right where a comment mentions "Additional mount lines".
-
 ### Completing configuration through the UI
 
 Once your system is set up, it's time to initialize an empty database
@@ -200,16 +116,17 @@ and add the cameras and sample directories. You can do this
 by using the `moonfire-nvr` binary's text-based configuration tool.
 
 ```console
-$ sudo nvr config 2>debug-log
+$ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
 ```
 
 <details>
   <summary>Did it return without doing anything?</summary>
 
-If `nvr config` returns you to the console prompt right away, look in the
-`debug-log` file for why. One common reason is that you have Moonfire NVR
-running; you'll need to shut it down first. Try `nvr stop` before `nvr config`
-and `nvr start` afterward.
+If `moonfire-nvr config` returns you to the console prompt right away, look in
+the `debug-log` file for why. One common reason is that you have Moonfire NVR
+running; you'll need to shut it down first. If you are running a systemd
+service as described below, try `sudo systemctl stop moonfire-nvr` before
+editing the config and `sudo systemctl start moonfire-nvr` after.
 </details>
 
 In the user interface,
@@ -277,15 +194,58 @@ starting it in this configuration to try it out, particularly if the machine
 it's running on is behind a home router's firewall. You might not; in that case
 read through [secure the system](secure.md) first.
 
-This command will start a detached Docker container for the web interface.
-It will automatically restart when your system does.
+Assuming you want to proceed, you can launch Moonfire NVR through `systemd`.
+Create `/etc/systemd/system/moonfire-nvr.service`:
 
-```console
-$ sudo nvr run
+```ini
+[Unit]
+Description=Moonfire NVR
+After=network-online.target
+
+# If you use an external hard drive, uncomment this with a reference to the
+# mount point as written in `/etc/fstab`.
+# RequiresMountsFor=/media/nvr
+
+[Service]
+ExecStart=/usr/local/bin/moonfire-nvr run
+Environment=TZ=:/etc/localtime
+Environment=MOONFIRE_FORMAT=systemd
+Environment=MOONFIRE_LOG=info
+Environment=RUST_BACKTRACE=1
+Type=simple
+User=moonfire-nvr
+Restart=on-failure
+CPUAccounting=true
+MemoryAccounting=true
+BlockIOAccounting=true
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-You can temporarily disable the service via `nvr stop` and restart it later via
-`nvr start`. You'll need to do this before and after using `nvr config`.
+Then start it up as follows:
+
+```console
+$ sudo systemctl daemon-reload              # read in the new config file
+$ sudo systemctl enable --now moonfire-nvr  # start the service now and on boot
+```
+
+Some handy commands:
+
+```console
+$ sudo systemctl daemon-reload                                  # reload configuration files
+$ sudo systemctl start moonfire-nvr                             # start the service now without enabling on boot
+$ sudo systemctl stop moonfire-nvr                              # stop the service now (but don't wait for it finish stopping)
+$ sudo systemctl status moonfire-nvr                            # show if the service is running and the last few log lines
+$ sudo systemctl enable moonfire-nvr                            # start the service on boot
+$ sudo systemctl disable moonfire-nvr                           # don't start the service on boot
+$ sudo journalctl --unit=moonfire-nvr --since='-5 min' --follow # look at recent logs and await more
+```
+
+See the [systemd](http://www.freedesktop.org/wiki/Software/systemd/)
+documentation for more information. The [manual
+pages](http://www.freedesktop.org/software/systemd/man/) for `systemd.service`
+and `systemctl` may be of particular interest.
 
 The HTTP interface is accessible on port 8080; if your web browser is running
 on the same machine, you can access it at

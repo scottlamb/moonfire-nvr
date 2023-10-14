@@ -22,6 +22,7 @@ struct BuildFile {
     encoding: FileEncoding,
 }
 
+#[allow(unused)] // it's valid for a UI to have all uncompressed files or vice versa.
 #[derive(Copy, Clone)]
 enum FileEncoding {
     Uncompressed,

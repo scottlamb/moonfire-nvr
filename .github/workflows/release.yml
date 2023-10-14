@@ -1,19 +1,109 @@
 name: Release
 
+defaults:
+  run:
+    shell: bash
+
 on:
   push:
     tags:
       - v[0-9]+.*
 
 jobs:
-  create-release:
+  base:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: taiki-e/create-gh-release-action@v1
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
         with:
-          # (Optional) Path to changelog.
-          changelog: CHANGELOG.md
+          tool: parse-changelog
+      - name: Generate changelog
+        run: |
+          VERSION_MINUS_V=${GITHUB_REF_NAME/#v/}
+          parse-changelog CHANGELOG.md $VERSION_MINUS_V > CHANGELOG-$GITHUB_REF_NAME.md
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: cd ui && npm ci
+      - run: cd ui && npm run build
+      - run: cd ui && npm run test
+      # Upload the UI and changelog as *job* artifacts (not *release* artifacts), used below.
+      - uses: actions/upload-artifact@v3
+        with:
+          name: moonfire-nvr-ui-${{ github.ref_name }}
+          path: ui/build
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v3
+        with:
+          name: CHANGELOG-${{ github.ref_name }}
+          path: CHANGELOG-${{ github.ref_name }}.md
+          if-no-files-found: error
+
+  cross:
+    needs: base # for bundled ui
+    strategy:
+      matrix:
+        include:
+        - target: x86_64-unknown-linux-musl
+        - target: aarch64-unknown-linux-musl
+        - target: armv7-unknown-linux-musleabihf
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download UI
+        uses: actions/download-artifact@v3
+        with:
+          name: moonfire-nvr-ui-${{ github.ref_name }}
+          path: ui/build
+
+      # actions-rust-cross doesn't actually use cross for x86_64.
+      # Install the needed musl-tools in the host.
+      - name: Install musl-tools
+        run: sudo apt-get --option=APT::Acquire::Retries=3 update && sudo apt-get --option=APT::Acquire::Retries=3 install musl-tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+      - name: Build
+        uses: houseabsolute/actions-rust-cross@v0
         env:
-          # (Required) GitHub token for creating GitHub Releases.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UI_BUILD_DIR: ../ui/build
+
+          # cross doesn't install `git` within its Docker container, so plumb
+          # the version through rather than try `git describe` from `build.rs`.
+          VERSION: ${{ github.ref_name }}
+        with:
+          working-directory: server
+          target: ${{ matrix.target }}
+          command: build
+          args: --release --features bundled
+      # Upload as a *job* artifact (not *release* artifact), used below.
+      - name: Upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: moonfire-nvr-${{ github.ref_name }}-${{ matrix.target }}
+          path: server/target/${{ matrix.target }}/release/moonfire-nvr
+          if-no-files-found: error
+
+  release:
+    needs: [ base, cross ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+      - name: ls before rearranging
+        run: find . -ls
+      - name: Rearrange
+        run: |
+          (cd artifacts/moonfire-nvr-ui-${GITHUB_REF_NAME} && zip -r ../../moonfire-nvr-ui-${GITHUB_REF_NAME}.zip .)
+          (cd artifacts; for i in moonfire-nvr-*/moonfire-nvr; do mv $i "../$(dirname $i)"; done)
+      - name: ls after rearranging
+        run: find . -ls
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: artifacts/CHANGELOG-${{ github.ref_name }}/CHANGELOG-${{ github.ref_name }}.md
+          files: |
+            moonfire-nvr-*

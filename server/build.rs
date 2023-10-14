@@ -6,13 +6,17 @@
 
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::Command;
 
-const UI_DIR: &str = "../ui/build";
+const UI_BUILD_DIR_ENV_VAR: &str = "UI_BUILD_DIR";
+const DEFAULT_UI_BUILD_DIR: &str = "../ui/build";
+
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 fn ensure_link(original: &Path, link: &Path) {
     match std::fs::read_link(link) {
         Ok(dst) if dst == original => return,
+        Ok(_) => std::fs::remove_file(link).expect("removing stale symlink should succeed"),
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
             panic!("couldn't create link {link:?} to original path {original:?}: {e}")
         }
@@ -67,37 +71,30 @@ fn stringify_files(files: &FileMap) -> Result<String, std::fmt::Error> {
     Ok(buf)
 }
 
-fn main() -> ExitCode {
-    // Explicitly declare dependencies, so this doesn't re-run if other source files change.
-    println!("cargo:rerun-if-changed=build.rs");
-
+fn handle_bundled_ui() -> Result<(), BoxError> {
     // Nothing to do if the feature is off. cargo will re-run if features change.
     if !cfg!(feature = "bundled-ui") {
-        return ExitCode::SUCCESS;
+        return Ok(());
     }
 
+    let ui_dir =
+        std::env::var(UI_BUILD_DIR_ENV_VAR).unwrap_or_else(|_| DEFAULT_UI_BUILD_DIR.to_owned());
+
     // If the feature is on, also re-run if the actual UI files change.
-    println!("cargo:rerun-if-changed={UI_DIR}");
+    println!("cargo:rerun-if-env-changed={UI_BUILD_DIR_ENV_VAR}");
+    println!("cargo:rerun-if-changed={ui_dir}");
 
     let out_dir: PathBuf = std::env::var_os("OUT_DIR")
         .expect("cargo should set OUT_DIR")
         .into();
 
-    let abs_ui_dir = std::fs::canonicalize(UI_DIR)
-        .expect("ui dir should be accessible. Did you run `npm run build` first?");
+    let abs_ui_dir = std::fs::canonicalize(&ui_dir).map_err(|e| format!("ui dir {ui_dir:?} should be accessible. Did you run `npm run build` first?\n\ncaused by:\n{e}"))?;
 
     let mut files = FileMap::default();
     for entry in walkdir::WalkDir::new(&abs_ui_dir) {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!(
-                    "walkdir failed. Did you run `npm run build` first?\n\n\
-                    caused by:\n{e}"
-                );
-                return ExitCode::FAILURE;
-            }
-        };
+        let entry = entry.map_err(|e| {
+            format!("walkdir failed. Did you run `npm run build` first?\n\ncaused by:\n{e}")
+        })?;
         if !entry.file_type().is_file() {
             continue;
         }
@@ -135,6 +132,13 @@ fn main() -> ExitCode {
         );
     }
 
+    if !files.contains_key("index.html") {
+        return Err(format!(
+            "No `index.html` within {ui_dir:?}. Did you run `npm run build` first?"
+        )
+        .into());
+    }
+
     let files = stringify_files(&files).expect("write to String should succeed");
     let mut out_rs_path = std::path::PathBuf::new();
     out_rs_path.push(&out_dir);
@@ -145,5 +149,49 @@ fn main() -> ExitCode {
     out_link_path.push(&out_dir);
     out_link_path.push("ui_files");
     ensure_link(&abs_ui_dir, &out_link_path);
-    return ExitCode::SUCCESS;
+    Ok(())
+}
+
+fn handle_version() -> Result<(), BoxError> {
+    println!("cargo:rerun-if-env-changed=VERSION");
+    if std::env::var("VERSION").is_ok() {
+        return Ok(());
+    }
+
+    // Get version from `git describe`. Inspired by the `git-version` crate.
+    // We don't use that directly because `cross`'s default docker image doesn't install `git`,
+    // and thus we need the environment variable pass-through above.
+
+    // Avoid reruns when the output doesn't meaningfully change. I don't think this is quite right:
+    // it won't recognize toggling between `-dirty` and not. But it'll do.
+    let dir = Command::new("git")
+        .arg("rev-parse")
+        .arg("--git-dir")
+        .output()?
+        .stdout;
+    let dir = String::from_utf8(dir).unwrap();
+    let dir = dir.strip_suffix('\n').unwrap();
+    println!("cargo:rerun-if-changed={dir}/logs/HEAD");
+    println!("cargo:rerun-if-changed={dir}/index");
+
+    // Plumb the version through.
+    let version = Command::new("git")
+        .arg("describe")
+        .arg("--always")
+        .arg("--dirty")
+        .output()?
+        .stdout;
+    let version = String::from_utf8(version).unwrap();
+    let version = version.strip_suffix('\n').unwrap();
+    println!("cargo:rustc-env=VERSION={version}");
+
+    Ok(())
+}
+
+fn main() -> Result<(), BoxError> {
+    // Explicitly declare dependencies, so this doesn't re-run if other source files change.
+    println!("cargo:rerun-if-changed=build.rs");
+    handle_bundled_ui()?;
+    handle_version()?;
+    Ok(())
 }

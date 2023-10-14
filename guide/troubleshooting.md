@@ -11,7 +11,6 @@ need more help.
     * [Camera stream errors](#camera-stream-errors)
 * [Problems](#problems)
     * [Server errors](#server-errors)
-        * [`clock_gettime failed: EPERM: Operation not permitted`](#clock_gettime-failed-eperm-operation-not-permitted)
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
         * [Database or filesystem corruption errors](#database-or-filesystem-corruption-errors)
@@ -29,9 +28,8 @@ While Moonfire NVR is running, logs will be written to stderr.
 *   When running the configuration UI, you typically should redirect stderr
     to a text file to avoid poor interaction between the interactive stdout
     output and the logging. If you use the recommended
-    `nvr config 2>debug-log` command, output will be in the `debug-log` file.
-*   When running detached through Docker, Docker saves the logs for you.
-    Try `nvr logs` or `docker logs moonfire-nvr`.
+    `moonfire-nvr config 2>debug-log` command, output will be in the
+    `debug-log` file.
 *   When running through systemd, stderr will be redirected to the journal.
     Try `sudo journalctl --unit moonfire-nvr` to view the logs. You also
     likely want to set `MOONFIRE_FORMAT=systemd` to format logs as
@@ -55,8 +53,6 @@ Logging options are controlled by environment variables:
     *   `json` outputs one JSON-formatted log message per line, for machine
         consumption.
 *   Errors include a backtrace if `RUST_BACKTRACE=1` is set.
-
-If you use Docker, set these via Docker's `--env` argument.
 
 With `MOONFIRE_FORMAT` left unset, log events look as follows:
 
@@ -191,23 +187,6 @@ quickly enough. In the latter case, you'll likely see a
 
 ### Server errors
 
-#### `clock_gettime failed: EPERM: Operation not permitted`
-
-If commands fail with an error like the following, you're likely running
-Docker with an overly restrictive `seccomp` setup. [This stackoverflow
-answer](https://askubuntu.com/questions/1263284/apt-update-throws-signature-error-in-ubuntu-20-04-container-on-arm/1264921#1264921) describes the
-problem in more detail. The simplest solution is to add
-`--security-opt=seccomp:unconfined` to your Docker commandline.
-If you are using the recommended `/usr/local/bin/nvr` wrapper script,
-add this option to the `common_docker_run_args` section.
-
-```console
-$ sudo docker run --rm -it moonfire-nvr:latest
-clock_gettime failed: EPERM: Operation not permitted
-
-This indicates a broken environment. See the troubleshooting guide.
-```
-
 #### `Error: pts not monotonically increasing; got 26615520 then 26539470`
 
 If your streams cut out and you see error messages like this one in Moonfire
@@ -322,8 +301,7 @@ mechanism to fix old timestamps after the fact. Ideas and help welcome; see
 
 #### `moonfire-nvr config` displays garbage
 
-This happens if you're not using the premade Docker containers and have
-configured your machine is configured to a non-UTF-8 locale, due to
+This may happen if your machine is configured to a non-UTF-8 locale, due to
 gyscos/Cursive#13. As a workaround, try setting the environment variable
 `LC_ALL=C.UTF-8`.
 

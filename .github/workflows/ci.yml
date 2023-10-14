@@ -1,6 +1,10 @@
 name: CI
 on: [push, pull_request]
 
+defaults:
+  run:
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
   MOONFIRE_COLOR: always
@@ -37,11 +41,7 @@ jobs:
           restore-keys: |
             cargo-${{ matrix.rust }}-
             cargo-
-      - name: Install dependencies
-        # The retry here is to work around "Unable to connect to azure.archive.ubuntu.com" errors.
-        # https://github.com/actions/runner-images/issues/6894
-        run: sudo apt-get --option=APT::Acquire::Retries=3 update && sudo apt-get --option=APT::Acquire::Retries=3 install libncurses-dev libsqlite3-dev pkgconf
-      - uses: actions/setup-node@v2
+      - uses: actions/setup-node@v3
         with:
           node-version: 18
       - name: Install Rust
@@ -51,13 +51,10 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
           components: ${{ matrix.extra_components }}
-      - run: cd ui && npm ci
-      - run: cd ui && npm run build
       - name: Test
         run: |
           cd server
-          cargo test ${{ matrix.extra_args }} --all
-          cargo test --features=bundled-ui ${{ matrix.extra_args }} --all
+          cargo test --features=rusqlite/bundled ${{ matrix.extra_args }} --all
         continue-on-error: ${{ matrix.rust == 'nightly' }}
       - name: Check formatting
         if: matrix.rust == 'stable'
@@ -70,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v2
+      - uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node }}
       - run: cd ui && npm ci
@@ -83,5 +80,5 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - run: find . -type f -print0 | xargs -0 .github/workflows/check-license.py

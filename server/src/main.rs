@@ -25,7 +25,8 @@ mod bundled_ui;
 
 const DEFAULT_DB_DIR: &str = "/var/lib/moonfire-nvr/db";
 
-const VERSION: &str = git_version::git_version!(args = ["--always", "--dirty"]);
+// This is either in the environment when `cargo` is invoked or set from within `build.rs`.
+const VERSION: &str = env!("VERSION");
 
 /// Moonfire NVR: security camera network video recorder.
 #[derive(Bpaf, Debug)]

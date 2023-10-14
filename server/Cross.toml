@@ -1,0 +1,14 @@
+[build.env]
+volumes = [
+    # For the (optional) `bundled-ui` feature.
+    "UI_BUILD_DIR",
+
+    # For tests which use the `America/Los_Angeles` zone.
+    "ZONEINFO=/usr/share/zoneinfo",
+]
+
+passthrough = [
+    # Cross's default docker image doesn't install `git`, so `git_version!` doesn't work.
+    # Allow passing through the version via this environment variable.
+    "VERSION",
+]

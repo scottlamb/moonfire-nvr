@@ -1,17 +1,22 @@
 # Moonfire NVR change log
 
 Below are some highlights in each release. For a full description of all
-changes, see Git history.
-
-Each release is tagged in Git and on the Docker repository
-[`scottlamb/moonfire-nvr`](https://hub.docker.com/r/scottlamb/moonfire-nvr).
+changes, see Git history. Each release is tagged in git.
 
 Backwards-incompatible database schema changes happen on on major version
-upgrades, e.g. `0.6.x` -> `0.7.x`. The config file format and
+upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
-even on minor releases, e.g. `0.7.5` -> `0.7.6`.
+even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## 0.7.7 (2023-08-03)
+## v0.7.8 (2023-10-18)
+
+*  release as self-contained Linux binaries (for `x86_64`, `aarch64`, and
+   `armv8` architectures) rather than Docker images. This minimizes hassle and
+   total download size. Along the way, we switched libc to from `glibc` to
+   `musl` in the process. Please report any problems with the build or
+   instructions!
+
+## v0.7.7 (2023-08-03)
 
 *  fix [#289](https://github.com/scottlamb/moonfire-nvr/issues/289): crash on
    pressing the `Add` button in the sample file directory dialog
@@ -19,7 +24,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *  experimental (off by default) support for bundling UI files into the
    executable.
 
-## 0.7.6 (2023-07-08)
+## v0.7.6 (2023-07-08)
 
 *   new log formats using `tracing`. This will allow richer context information.
 *   bump minimum Rust version to 1.70.
@@ -53,7 +58,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   improvements to `moonfire-nvr config`,
     thanks to [@sky1e](https://github.com/sky1e).
 
-## 0.7.5 (2022-05-09)
+## v0.7.5 (2022-05-09)
 
 *   [#219](https://github.com/scottlamb/moonfire-nvr/issues/219): fix
     live stream failing with `ws close: 1006` on URLs with port numbers.
@@ -63,7 +68,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     Retina 0.3.10, improving compatibility with OMNY M5S2A 2812 cameras that
     send invalid `rtptime` values.
 
-## 0.7.4 (2022-04-13)
+## v0.7.4 (2022-04-13)
 
 *   upgrade to Retina 0.3.9, improving camera interop and diagnostics.
     Fixes [#213](https://github.com/scottlamb/moonfire-nvr/issues/213),
@@ -74,13 +79,13 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   [#206](https://github.com/scottlamb/moonfire-nvr/issues/206#issuecomment-1086442543):
     fix `teardown Sender shouldn't be dropped: RecvError(())` errors on shutdown.
 
-## 0.7.3 (2022-03-22)
+## v0.7.3 (2022-03-22)
 
 *   security fix: check the `Origin` header on live stream WebSocket requests
     to avoid cross-site WebSocket hijacking (CSWSH).
 *   RTSP connections always use the Retina library rather than FFmpeg.
 
-## 0.7.2 (2022-03-16)
+## v0.7.2 (2022-03-16)
 
 *   introduce a configuration file `/etc/moonfire-nvr.toml`; you will need
     to create one when upgrading.
@@ -97,13 +102,13 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   progress on [#70](https://github.com/scottlamb/moonfire-nvr/issues/184):
     shrink the binary from 154 MiB to 70 MiB by reducing debugging information.
 
-## 0.7.1 (2021-10-27)
+## v0.7.1 (2021-10-27)
 
 *   bugfix: editing a camera from `nvr config` would erroneously clear the
     sample file directory associated with its streams.
 *   RTSP transport (TCP or UDP) can be set per-stream from `nvr config`.
 
-## 0.7.0 (2021-10-27)
+## v0.7.0 (2021-10-27)
 
 *   [schema version 7](guide/schema.md#version-7)
 *   Changes to the [API](guide/api.md):
@@ -130,7 +135,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
             currently may be either absent or the string `record`.
     *   Added `POST /api/users/<id>` for altering a user's UI preferences.
 
-## 0.6.7 (2021-10-20)
+## v0.6.7 (2021-10-20)
 
 *   trim whitespace when detecting time zone by reading `/etc/timezone`.
 *   (Retina 0.3.2) better `TEARDOWN` handling with the default
@@ -142,7 +147,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     `--rtsp-library=retina` (see
     [scottlamb/retina#25](https://github.com/scottlamb/retina/25)).
 
-## 0.6.6 (2021-09-23)
+## v0.6.6 (2021-09-23)
 
 *   fix [#146](https://github.com/scottlamb/moonfire-nvr/issues/146): "init
     segment fetch error" when browsers have cached data from `v0.6.4` and
@@ -167,7 +172,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     impatient to get fast results with ctrl-C when running interactively, rather
     than having to use `SIGKILL` from another terminal.
 
-## 0.6.5 (2021-08-13)
+## v0.6.5 (2021-08-13)
 
 *   UI: improve video aspect ratio handling. Live streams formerly worked
     around a Firefox pixel aspect ratio bug by forcing all videos to 16:9, which
@@ -181,7 +186,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     `GET_PARAMETERS` as a RTSP keepalive. GW Security cameras would ignored
     the latter, causing Moonfire NVR to drop the connection every minute.
 
-## 0.6.4 (2021-06-28)
+## v0.6.4 (2021-06-28)
 
 *   Default to a new pure-Rust RTSP library, `retina`. If you hit problems, you
     can switch back via `--rtsp-library=ffmpeg`. Please report a bug if this
@@ -189,7 +194,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   Correct the pixel aspect ratio of 9:16 sub streams (eg a standard 16x9
     camera rotated 90 degrees) in the same way as 16:9 sub streams.
 
-## 0.6.3 (2021-03-31)
+## v0.6.3 (2021-03-31)
 
 *   New user interface! Besides a more modern appearance, it has better
     error handling and an experimental live view UI.
@@ -199,7 +204,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     not calculated properly there might be unexpected gaps or overlaps in
     playback.
 
-## 0.6.2 (2021-03-12)
+## v0.6.2 (2021-03-12)
 
 *   Fix panics when a stream's PTS has extreme jumps
     ([#113](https://github.com/scottlamb/moonfire-nvr/issues/113))
@@ -209,7 +214,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
     `moonfire-nvr check --delete-orphan-rows` command from actually deleting
     rows.
 
-## 0.6.1 (2021-02-16)
+## v0.6.1 (2021-02-16)
 
 *   Improve the server's error messages on the console and in logs.
 *   Switch the UI build from the `yarn` package manager to `npm`.
@@ -221,7 +226,7 @@ even on minor releases, e.g. `0.7.5` -> `0.7.6`.
 *   Fix mangled favicons
     ([#105](https://github.com/scottlamb/moonfire-nvr/issues/105))
 
-## 0.6.0 (2021-01-22)
+## v0.6.0 (2021-01-22)
 
 This is the first tagged version and first Docker image release. I chose the
 version number 0.6.0 to match the current schema version 6.

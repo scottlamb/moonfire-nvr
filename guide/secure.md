@@ -161,8 +161,8 @@ your browser. See [How to secure Nginx with Let's Encrypt on Ubuntu
 
 ## 6. Reconfigure Moonfire NVR
 
-If you follow the recommended Docker setup, your `/etc/moonfire-nvr.toml`
-will contain this line:
+If you follow the recommended setup, your `/etc/moonfire-nvr.toml` will contain
+this line:
 
 ```toml
 allowUnauthenticatedPermissions = { viewVideo = true }
@@ -185,18 +185,16 @@ This change has two effects:
 See also [ref/config.md](../ref/config.md) for more about the configuration file.
 
 If the webserver is running on the same machine as Moonfire NVR, you might
-also change `--publish=8080:8080` to `--publish=127.0.0.1:8080:8080` in your
-`/usr/local/bin/nvr` script, preventing other machines on the network from
-impersonating the proxy, effectively allowing them to lie about the client's IP
-and protocol.
+also change the `ipv4 = "0.0.0.0:8080"` line in `/etc/moonfire-nvr/toml` to
+`ipv4 = "127.0.0.1:8080"`, so that only the local host can directly connect to
+Moonfire NVR. If other machines can connect directly, they can impersonate
+the proxy, which would effectively allow them to lie about the client's IP and
+protocol.
 
-To make this take effect, you'll need to stop the running Docker container,
-delete it, and create/run a new one:
+To make this take effect, you'll need to restart Moonfire NVR:
 
 ```console
-$ sudo nvr stop
-$ sudo nvr rm
-$ sudo nvr run
+$ sudo systemctl restart moonfire-nvr
 ```
 
 ## 7. Configure the webserver

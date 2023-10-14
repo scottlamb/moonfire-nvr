@@ -35,7 +35,7 @@ bpaf = { version = "0.9.1", features = ["autocomplete", "bright-color", "derive"
 bytes = "1"
 byteorder = "1.0"
 chrono = "0.4.23"
-cursive = "0.20.0"
+cursive = { version = "0.20.0", default-features = false, features = ["termion-backend"] }
 db = { package = "moonfire-db", path = "db" }
 futures = "0.3"
 fnv = "1.0"

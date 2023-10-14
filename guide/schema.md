@@ -62,11 +62,11 @@ SQLite database:
         no longer in the dangerous mode.
 
 Next ensure Moonfire NVR is not running and does not automatically restart if
-the system is rebooted during the upgrade. If you followed the Docker
+the system is rebooted during the upgrade. If you followed the standard
 instructions, you can do this as follows:
 
 ```console
-$ sudo nvr stop
+$ sudo systemctl disable --now moonfire-nvr
 ```
 
 Then back up your SQLite database. If you are using the default path, you can
@@ -92,34 +92,27 @@ manual for write-ahead logging](https://www.sqlite.org/wal.html):
 
 Run the upgrade procedure using the new software binary.
 
-```console
-$ sudo nvr pull     # updates the docker image to the latest binary
-$ sudo nvr upgrade  # runs the upgrade
-```
-
 As a rule of thumb, on a Raspberry Pi 4 with a 1 GiB database, an upgrade might
 take about four minutes for each schema version and for the final vacuum.
 
 Next, you can run the system in read-only mode, although you'll find this only
 works in the "insecure" setup. (Authorization requires writing the database.)
+To just run directly within the console until you hit ctrl-C, use the following
+command:
 
 ```console
-$ sudo nvr rm
-$ sudo nvr run --read-only
+$ sudo -u moonfire-nvr moonfire-nvr run --read-only
 ```
 
 Go to the web interface and ensure the system is operating correctly. If
 you detect a problem now, you can copy the old database back over the new one
-and edit your `nvr` script to use the corresponding older Docker image. If
-you detect a problem after enabling read-write operation, a restore will be
-more complicated.
+and go back to the prior release. If you detect a problem after enabling
+read-write operation, a restore will be more complicated.
 
-Once you're satisfied, restart the system in read-write mode:
+Once you're satisfied, ctrl-C and start the system in read-write mode:
 
 ```console
-$ sudo nvr stop
-$ sudo nvr rm
-$ sudo nvr run
+$ sudo systemctl enable --now moonfire-nvr
 ```
 
 Hopefully your system is functioning correctly. If not, there are two options
@@ -137,7 +130,8 @@ for restore; neither are easy:
 *  undo the changes by hand. There's no documentation on this; you'll need
     to read the code and come up with a reverse transformation.
 
-The `nvr check` command will show you what problems exist on your system.
+The `sudo -u moonfire-nvr moonfire-nvr check` command will show you what
+problems exist on your system.
 
 ### Unversioned to version 0
 
