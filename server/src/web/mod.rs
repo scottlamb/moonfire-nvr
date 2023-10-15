@@ -783,7 +783,7 @@ mod bench {
 
     use db::testutil::{self, TestDb};
     use hyper;
-    use std::sync::Arc;
+    use std::sync::{Arc, OnceLock};
     use uuid::Uuid;
 
     struct Server {
@@ -840,12 +840,12 @@ mod bench {
         }
     }
 
-    static SERVER: once_cell::sync::Lazy<Server> = once_cell::sync::Lazy::new(Server::new);
+    static SERVER: OnceLock<Server> = OnceLock::new();
 
     #[bench]
     fn serve_stream_recordings(b: &mut test::Bencher) {
         testutil::init();
-        let server = &*SERVER;
+        let server = SERVER.get_or_init(Server::new);
         let url = reqwest::Url::parse(&format!(
             "{}/api/cameras/{}/main/recordings",
             server.base_url, server.test_camera_uuid

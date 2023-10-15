@@ -3070,7 +3070,7 @@ mod bench {
     #[bench]
     fn serve_generated_bytes(b: &mut test::Bencher) {
         testutil::init();
-        let server = server.get_or_init(BenchServer::new);
+        let server = SERVER.get_or_init(BenchServer::new);
         let p = server.generated_len;
         b.bytes = p;
         let client = reqwest::Client::new();
