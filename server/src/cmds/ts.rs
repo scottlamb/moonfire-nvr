@@ -7,7 +7,7 @@ use bpaf::Bpaf;
 
 /// Translates between integer and human-readable timestamps.
 #[derive(Bpaf, Debug)]
-#[bpaf(command("config"))]
+#[bpaf(command("ts"))]
 pub struct Args {
     /// Timestamp(s) to translate.
     ///
