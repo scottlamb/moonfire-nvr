@@ -17,10 +17,15 @@ jobs:
             extra_args: "--features nightly --benches"
           - rust: stable
             extra_components: rustfmt
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+        with:
+          # `git describe` output gets baked into the binary for `moonfire-nvr --version`.
+          # Fetch all revs so it can see tag history.
+          fetch-depth: 0
+          filter: 'tree:0'
       - name: Cache
         uses: actions/cache@v2
         with:
@@ -62,9 +67,9 @@ jobs:
     strategy:
       matrix:
         node: [ "14", "16", "18" ]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v2
         with:
           node-version: ${{ matrix.node }}

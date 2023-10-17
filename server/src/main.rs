@@ -25,9 +25,11 @@ mod bundled_ui;
 
 const DEFAULT_DB_DIR: &str = "/var/lib/moonfire-nvr/db";
 
+const VERSION: &str = git_version::git_version!(args = ["--always", "--dirty"]);
+
 /// Moonfire NVR: security camera network video recorder.
 #[derive(Bpaf, Debug)]
-#[bpaf(options, version)]
+#[bpaf(options, version(VERSION))]
 enum Args {
     // See docstrings of `cmds::*::Args` structs for a description of the respective subcommands.
     Check(#[bpaf(external(cmds::check::args))] cmds::check::Args),

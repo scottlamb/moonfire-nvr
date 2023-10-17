@@ -141,10 +141,7 @@ Releases are currently a bit manual. From a completely clean git work tree,
 
 1.  manually verify the current commit is pushed to github's master branch and
     has a green checkmark indicating CI passed.
-2.  update versions:
-    *   update `server/Cargo.toml` version by hand; run `cargo test --workspace`
-        to update `Cargo.lock`.
-    *   ensure `README.md` and `CHANGELOG.md` refer to the new version.
+2.  update version in `CHANGELOG.md`.
 3.  run commands:
     ```bash
     VERSION=x.y.z

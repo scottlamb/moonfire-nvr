@@ -25,7 +25,7 @@ If applicable, add screenshots to help explain your problem.
 
 **Server (please complete the following information):**
   - If using Docker: `docker ps` + `docker images`
-  - If building from git: `git describe --dirty` + `moonfire-nvr --version`
+  - If building from git: `moonfire-nvr --version`
   - Attach a [log file](https://github.com/scottlamb/moonfire-nvr/blob/master/guide/troubleshooting.md#viewing-moonfire-nvrs-logs). Run with the `RUST_BACKTRACE=1` environment variable set if possible.
 
 **Camera (please complete the following information):**

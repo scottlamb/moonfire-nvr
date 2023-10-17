@@ -6,7 +6,7 @@
 //!
 //! See `guide/schema.md` for more information.
 
-use crate::db::{self, EXPECTED_VERSION};
+use crate::db::{self, EXPECTED_SCHEMA_VERSION};
 use base::{bail, Error};
 use nix::NixPath;
 use rusqlite::params;
@@ -22,8 +22,6 @@ mod v3_to_v4;
 mod v4_to_v5;
 mod v5_to_v6;
 mod v6_to_v7;
-
-const UPGRADE_NOTES: &str = concat!("upgraded using moonfire-db ", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug)]
 pub struct Args<'a> {
@@ -46,7 +44,12 @@ fn set_journal_mode(conn: &rusqlite::Connection, requested: &str) -> Result<(), 
     Ok(())
 }
 
-fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Result<(), Error> {
+fn upgrade(
+    args: &Args,
+    target_schema_ver: i32,
+    sw_version: &str,
+    conn: &mut rusqlite::Connection,
+) -> Result<(), Error> {
     let upgraders = [
         v0_to_v1::run,
         v1_to_v2::run,
@@ -58,25 +61,31 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
     ];
 
     {
-        assert_eq!(upgraders.len(), db::EXPECTED_VERSION as usize);
-        let old_ver = conn.query_row("select max(id) from version", params![], |row| row.get(0))?;
-        if old_ver > EXPECTED_VERSION {
+        assert_eq!(upgraders.len(), db::EXPECTED_SCHEMA_VERSION as usize);
+        let old_schema_ver =
+            conn.query_row("select max(id) from version", params![], |row| row.get(0))?;
+        if old_schema_ver > EXPECTED_SCHEMA_VERSION {
             bail!(
                 FailedPrecondition,
-                msg("database is at version {old_ver}, later than expected {EXPECTED_VERSION}"),
+                msg("database is at version {old_schema_ver}, \
+                     later than expected {EXPECTED_SCHEMA_VERSION}"),
             );
-        } else if old_ver < 0 {
+        } else if old_schema_ver < 0 {
             bail!(
                 FailedPrecondition,
-                msg("Database is at negative version {old_ver}!")
+                msg("Database is at negative version {old_schema_ver}!")
             );
         }
         info!(
-            "Upgrading database from version {} to version {}...",
-            old_ver, target_ver
+            "Upgrading database from schema version {} to schema version {}...",
+            old_schema_ver, target_schema_ver
         );
-        for ver in old_ver..target_ver {
-            info!("...from version {} to version {}", ver, ver + 1);
+        for ver in old_schema_ver..target_schema_ver {
+            info!(
+                "...from schema version {} to schema version {}",
+                ver,
+                ver + 1
+            );
             let tx = conn.transaction()?;
             upgraders[ver as usize](args, &tx)?;
             tx.execute(
@@ -84,7 +93,7 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
                 insert into version (id, unix_time, notes)
                              values (?, cast(strftime('%s', 'now') as int32), ?)
                 "#,
-                params![ver + 1, UPGRADE_NOTES],
+                params![ver + 1, format!("Upgraded using moonfire-nvr {sw_version}")],
             )?;
             tx.commit()?;
         }
@@ -93,11 +102,11 @@ fn upgrade(args: &Args, target_ver: i32, conn: &mut rusqlite::Connection) -> Res
     Ok(())
 }
 
-pub fn run(args: &Args, conn: &mut rusqlite::Connection) -> Result<(), Error> {
+pub fn run(args: &Args, sw_version: &str, conn: &mut rusqlite::Connection) -> Result<(), Error> {
     db::check_sqlite_version()?;
     db::set_integrity_pragmas(conn)?;
     set_journal_mode(conn, args.preset_journal)?;
-    upgrade(args, EXPECTED_VERSION, conn)?;
+    upgrade(args, EXPECTED_SCHEMA_VERSION, sw_version, conn)?;
 
     // As in "moonfire-nvr init": try for page_size=16384 and wal for the reasons explained there.
     //
@@ -291,9 +300,10 @@ mod tests {
                     no_vacuum: false,
                 },
                 *ver,
+                "test",
                 &mut upgraded,
             )
-            .map_err(|e| err!(e, msg("upgrade to version {ver} failed")))?;
+            .map_err(|e| err!(e, msg("upgrade to schema version {ver} failed")))?;
             if let Some(f) = fresh_sql {
                 compare(&upgraded, *ver, f)?;
             }

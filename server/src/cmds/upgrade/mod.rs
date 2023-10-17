@@ -39,6 +39,7 @@ pub fn run(args: Args) -> Result<i32, Error> {
             preset_journal: &args.preset_journal,
             no_vacuum: args.no_vacuum,
         },
+        crate::VERSION,
         &mut conn,
     )?;
     Ok(0)

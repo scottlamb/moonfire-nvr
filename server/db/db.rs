@@ -60,7 +60,7 @@ use tracing::{error, info, trace};
 use uuid::Uuid;
 
 /// Expected schema version. See `guide/schema.md` for more information.
-pub const EXPECTED_VERSION: i32 = 7;
+pub const EXPECTED_SCHEMA_VERSION: i32 = 7;
 
 /// Length of the video index cache.
 /// The actual data structure is one bigger than this because we insert before we remove.
@@ -2238,9 +2238,10 @@ pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
 }
 
 /// Gets the schema version from the given database connection.
-/// A fully initialized database will return `Ok(Some(version))` where `version` is an integer that
-/// can be compared to `EXPECTED_VERSION`. An empty database will return `Ok(None)`. A partially
-/// initialized database (in particular, one without a version row) will return some error.
+/// A fully initialized database will return `Ok(Some(schema_version))` where `schema_version` is
+/// an integer that can be compared to `EXPECTED_SCHEMA_VERSION`. An empty database will return
+/// `Ok(None)`. A partially initialized database (in particular, one without a version row) will
+/// return some error.
 pub fn get_schema_version(conn: &rusqlite::Connection) -> Result<Option<i32>, Error> {
     let ver_tables: i32 = conn.query_row_and_then(
         "select count(*) from sqlite_master where name = 'version'",
@@ -2282,11 +2283,11 @@ pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Er
                 <https://github.com/scottlamb/moonfire-nvr/blob/master/guide/schema.md>."),
         )
     };
-    match ver.cmp(&EXPECTED_VERSION) {
+    match ver.cmp(&EXPECTED_SCHEMA_VERSION) {
         std::cmp::Ordering::Less => bail!(
             FailedPrecondition,
             msg(
-                "database schema version {ver} is too old (expected {EXPECTED_VERSION}); \
+                "database schema version {ver} is too old (expected {EXPECTED_SCHEMA_VERSION}); \
                 see upgrade instructions in guide/upgrade.md"
             ),
         ),
@@ -2294,7 +2295,7 @@ pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Er
         std::cmp::Ordering::Greater => bail!(
             FailedPrecondition,
             msg(
-                "database schema version {ver} is too new (expected {EXPECTED_VERSION}); \
+                "database schema version {ver} is too new (expected {EXPECTED_SCHEMA_VERSION}); \
                 must use a newer binary to match"
             ),
         ),

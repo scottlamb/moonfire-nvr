@@ -54,7 +54,10 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
         error!("Schema version is not as expected:\n{}", e);
         printed_error = true;
     } else {
-        info!("Schema at expected version {}.", db::EXPECTED_VERSION);
+        info!(
+            "Schema at expected version {}.",
+            db::EXPECTED_SCHEMA_VERSION
+        );
     }
 
     // Compare schemas.
