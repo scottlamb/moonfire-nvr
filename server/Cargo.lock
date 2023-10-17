@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-base"
-version = "0.0.1"
+version = "0.0.0"
 dependencies = [
  "chrono",
  "coded",
@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "moonfire-db"
-version = "0.7.7"
+version = "0.0.0"
 dependencies = [
  "base64",
  "blake3",
