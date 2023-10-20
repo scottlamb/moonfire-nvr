@@ -111,6 +111,10 @@ pub enum AddressConfig {
 
     /// Unix socket path such as `/var/lib/moonfire-nvr/sock`.
     Unix(PathBuf),
-    // TODO: SystemdFileDescriptorName(String), see
-    // https://www.freedesktop.org/software/systemd/man/systemd.socket.html
+
+    /// `systemd` socket activation.
+    ///
+    /// See [systemd.socket(5) manual
+    /// page](https://www.freedesktop.org/software/systemd/man/systemd.socket.html).
+    Systemd(String),
 }

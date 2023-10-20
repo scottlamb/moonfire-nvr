@@ -14,6 +14,8 @@ lines, meant to be more easily edited by humans.
 
 ## Examples
 
+### Starter config
+
 The following is a starter config which allows connecting and viewing video with no authentication:
 
 ```toml
@@ -26,6 +28,8 @@ unix = "/var/lib/moonfire-nvr/sock"
 ownUidIsPrivileged = true
 ```
 
+### Authenticated config
+
 The following is for a more secure setup with authentication and a TLS proxy
 server in front, as in [guide/secure.md](../guide/secure.md).
 
@@ -37,6 +41,57 @@ trustForwardHeaders = true
 [[binds]]
 unix = "/var/lib/moonfire-nvr/sock"
 ownUidIsPrivileged = true
+```
+
+### `systemd` socket activation
+
+`systemd` socket activation (Linux-only) expects `systemd` to create the sockets
+on behalf of Moonfire NVR. This can speed startup of services that depend on them and allow
+Moonfire to bind to privileged ports (80 or 443) without root privileges. The latter is
+expected to be more useful once
+[moonfire-nvr#27](https://github.com/scottlamb/moonfire-nvr/issues/27) is
+complete and Moonfire is suitable for direct use as an Internet-facing webserver.
+
+To set this up, you'll need an additional systemd unit file for each socket and
+to reference them from `/etc/moonfire-nvr.toml`. Be sure to run `sudo systemctl
+daemon-reload` to tell `systemd` to read in the new unit files. Your
+`moonfire-nvr.service` file should also `Requires=` each socket file.
+
+#### `/etc/moonfire-nvr.toml`
+
+```toml
+[[binds]]
+systemd = "moonfire-nvr-tcp.socket"
+allowUnauthenticatedPermissions = { viewVideo = true }
+
+[[binds]]
+systemd = "moonfire-nvr-unix.socket"
+ownUidIsPrivileged = true
+```
+
+### `/etc/systemd/system/moonfire-nvr.service`
+
+```ini
+[Unit]
+Requires=moonfire-nvr-tcp.socket
+Requires=moonfire-nvr-unix.socket
+# ...rest as before...
+```
+
+### `/etc/systemd/system/moonfire-nvr-tcp.socket`
+
+```ini
+[Socket]
+ListenStream=80
+Service=moonfire-nvr.service
+```
+
+### `/etc/systemd/system/moonfire-nvr-unix.socket`
+
+```ini
+[Socket]
+ListenStream=/var/lib/moonfire-nvr/sock
+Service=moonfire-nvr.service
 ```
 
 ## Reference
@@ -55,7 +110,7 @@ should start with a `[[binds]]` line and specify one of the following:
 
 *   `ipv4`: an IPv4 socket address. `0.0.0.0:8080` would allow connections from outside the machine;
     `127.0.0.1:8080` would allow connections only from the local host.
-*   `ipv6`: an IPv6 socket address. [::0]:8080` would allow connections from outside the machine;
+*   `ipv6`: an IPv6 socket address. `[::0]:8080` would allow connections from outside the machine;
     `[[::1]:8080` would allow connections from only the local host.
 *   `unix`: a path in the local filesystem where a UNIX-domain socket can be created. Permissions on the
     enclosing directories control which users are allowed to connect to it. Web browsers typically don't
@@ -68,6 +123,9 @@ should start with a `[[binds]]` line and specify one of the following:
         Moonfire NVR instance on `nvr-host` via https://localhost:8080/. If
         `ownUidIsPrivileged` is specified (see below), it will additionally
         have all permissions.
+*   `systemd` (Linux-only): a name of a socket passed from `systemd`. See
+     [`systemd.socket(5)`](https://www.freedesktop.org/software/systemd/man/latest/systemd.socket.html)
+     for more information, or the example above.
 
 Additional options within `[[binds]]`:
 

@@ -12,6 +12,7 @@ use bpaf::Bpaf;
 use db::{dir, writer};
 use fnv::FnvHashMap;
 use hyper::service::{make_service_fn, service_fn};
+use itertools::Itertools;
 use retina::client::SessionGroup;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -23,7 +24,7 @@ use tracing::error;
 use tracing::{info, warn};
 
 #[cfg(target_os = "linux")]
-use libsystemd::daemon::{NotifyState, notify};
+use libsystemd::daemon::{notify, NotifyState};
 
 use self::config::ConfigFile;
 
@@ -132,6 +133,53 @@ struct Syncer {
     join: thread::JoinHandle<()>,
 }
 
+#[cfg(target_os = "linux")]
+fn get_preopened_sockets() -> Result<FnvHashMap<String, Listener>, Error> {
+    use libsystemd::activation::IsType as _;
+    use std::os::fd::{FromRawFd, IntoRawFd};
+
+    // `receive_descriptors_with_names` errors out if not running under systemd or not using socket
+    // activation.
+    if std::env::var_os("LISTEN_FDS").is_none() {
+        info!("no LISTEN_FDs");
+        return Ok(FnvHashMap::default());
+    }
+
+    let sockets = libsystemd::activation::receive_descriptors_with_names(false)
+        .map_err(|e| err!(Unknown, source(e), msg("unable to receive systemd sockets")))?;
+    sockets
+        .into_iter()
+        .map(|(fd, name)| {
+            if fd.is_unix() {
+                // SAFETY: yes, it's a socket we own.
+                let l = unsafe { std::os::unix::net::UnixListener::from_raw_fd(fd.into_raw_fd()) };
+                l.set_nonblocking(true)?;
+                Ok(Some((
+                    name,
+                    Listener::Unix(tokio::net::UnixListener::from_std(l)?),
+                )))
+            } else if fd.is_inet() {
+                // SAFETY: yes, it's a socket we own.
+                let l = unsafe { std::net::TcpListener::from_raw_fd(fd.into_raw_fd()) };
+                l.set_nonblocking(true)?;
+                Ok(Some((
+                    name,
+                    Listener::Tcp(tokio::net::TcpListener::from_std(l)?),
+                )))
+            } else {
+                warn!("ignoring systemd socket {name:?} which is not unix or inet");
+                Ok(None)
+            }
+        })
+        .filter_map(Result::transpose)
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_preopened_sockets() -> Result<FnvHashMap<String, Listener>, Error> {
+    Ok(FnvHashMap::default())
+}
+
 fn read_config(path: &Path) -> Result<ConfigFile, Error> {
     let config = std::fs::read(path)?;
     let config = toml::from_slice(&config).map_err(|e| err!(InvalidArgument, source(e)))?;
@@ -217,7 +265,13 @@ fn prepare_unix_socket(p: &Path) {
     let _ = nix::unistd::unlink(p);
 }
 
-fn make_listener(addr: &config::AddressConfig) -> Result<Listener, Error> {
+fn make_listener(
+    addr: &config::AddressConfig,
+    #[cfg_attr(not(target_os = "linux"), allow(unused))] preopened: &mut FnvHashMap<
+        String,
+        Listener,
+    >,
+) -> Result<Listener, Error> {
     let sa: SocketAddr = match addr {
         config::AddressConfig::Ipv4(a) => (*a).into(),
         config::AddressConfig::Ipv6(a) => (*a).into(),
@@ -226,6 +280,23 @@ fn make_listener(addr: &config::AddressConfig) -> Result<Listener, Error> {
             return Ok(Listener::Unix(tokio::net::UnixListener::bind(p).map_err(
                 |e| err!(e, msg("unable bind Unix socket {}", p.display())),
             )?));
+        }
+        #[cfg(target_os = "linux")]
+        config::AddressConfig::Systemd(n) => {
+            return preopened.remove(n).ok_or_else(|| {
+                err!(
+                    NotFound,
+                    msg(
+                        "can't find systemd socket named {}; available sockets are: {}",
+                        n,
+                        preopened.keys().join(", ")
+                    )
+                )
+            });
+        }
+        #[cfg(not(target_os = "linux"))]
+        config::AddressConfig::Systemd(_) => {
+            bail!(Unimplemented, msg("systemd sockets are Linux-only"))
         }
     };
 
@@ -375,6 +446,7 @@ async fn inner(
 
     // Start the web interface(s).
     let own_euid = nix::unistd::Uid::effective();
+    let mut preopened = get_preopened_sockets()?;
     let web_handles: Result<Vec<_>, Error> = config
         .binds
         .iter()
@@ -397,13 +469,19 @@ async fn inner(
                     move |req| Arc::clone(&svc).serve(req, conn_data)
                 }))
             });
-            let listener = make_listener(&b.address)?;
+            let listener = make_listener(&b.address, &mut preopened)?;
             let server = ::hyper::Server::builder(listener).serve(make_svc);
             let server = server.with_graceful_shutdown(shutdown_rx.future());
             Ok(tokio::spawn(server))
         })
         .collect();
     let web_handles = web_handles?;
+    if !preopened.is_empty() {
+        warn!(
+            "ignoring systemd sockets not referenced in config: {}",
+            preopened.keys().join(", ")
+        );
+    }
 
     #[cfg(target_os = "linux")]
     {

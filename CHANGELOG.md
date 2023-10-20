@@ -10,7 +10,11 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 ## unreleased
 
-*  On Linux, notify `systemd` of starting/stopping.
+*  `systemd` integration on Linux
+   *   notify `systemd` on starting/stopping. To take advantage of this, you'll
+       need to modify your `/etc/systemd/moonfire-nvr.service`. See
+       [`guide/install.md`](guide/install.md).
+   *   socket activation. See [`ref/config.md`](ref/config.md).
 
 ## v0.7.8 (2023-10-18)
 
