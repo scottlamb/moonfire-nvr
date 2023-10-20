@@ -22,6 +22,9 @@ use tokio::signal::unix::{signal, SignalKind};
 use tracing::error;
 use tracing::{info, warn};
 
+#[cfg(target_os = "linux")]
+use libsystemd::daemon::{NotifyState, notify};
+
 use self::config::ConfigFile;
 
 pub mod config;
@@ -402,8 +405,22 @@ async fn inner(
         .collect();
     let web_handles = web_handles?;
 
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(err) = notify(false, &[NotifyState::Ready]) {
+            tracing::warn!(%err, "unable to notify systemd on ready");
+        }
+    }
+
     info!("Ready to serve HTTP requests");
     shutdown_rx.as_future().await;
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(err) = notify(false, &[NotifyState::Stopping]) {
+            tracing::warn!(%err, "unable to notify systemd on stopping");
+        }
+    }
 
     info!("Shutting down streamers and syncers.");
     tokio::task::spawn_blocking({

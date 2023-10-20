@@ -966,6 +966,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsystemd"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88b9597a67aa1c81a6624603e6bd0bcefb9e0f94c9c54970ec53771082104b4e"
+dependencies = [
+ "hmac",
+ "libc",
+ "log",
+ "nix",
+ "nom",
+ "once_cell",
+ "serde",
+ "sha2",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1125,6 +1143,7 @@ dependencies = [
  "hyper",
  "itertools",
  "libc",
+ "libsystemd",
  "log",
  "memchr",
  "moonfire-base",
