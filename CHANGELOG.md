@@ -10,6 +10,12 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 ## unreleased
 
+*  upgrade date/time pickers to `@mui/x-date-pickers` v6 beta, improving
+   time entry. Fixes
+   [#256](https://github.com/scottlamb/moonfire-nvr/issues/256).
+
+## v0.7.9 (2023-10-21)
+
 *  `systemd` integration on Linux
    *   notify `systemd` on starting/stopping. To take advantage of this, you'll
        need to modify your `/etc/systemd/moonfire-nvr.service`. See
@@ -20,8 +26,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 *  release as self-contained Linux binaries (for `x86_64`, `aarch64`, and
    `armv8` architectures) rather than Docker images. This minimizes hassle and
-   total download size. Along the way, we switched libc from `glibc` to `musl`
-   in the process. Please report any problems with the build or instructions!
+   total download size. Along the way, we switched libc from `glibc` to `musl`.
+   Please report any problems with the build or instructions!
 
 ## v0.7.7 (2023-08-03)
 
