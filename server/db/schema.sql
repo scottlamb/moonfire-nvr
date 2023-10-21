@@ -361,8 +361,8 @@ create table user_session (
 
   -- A value indicating the reason for revocation, with optional additional
   -- text detail. Enumeration values:
-  -- 0: logout link clicked (i.e. from within the session itself)
-  -- 1: obsoleted by a change in hashing algorithm (eg schema 5->6 upgrade)
+  -- 1: logout link clicked (i.e. from within the session itself)
+  -- 2: obsoleted by a change in hashing algorithm (eg schema 5->6 upgrade)
   --
   -- This might be extended for a variety of other reasons:
   -- x: user revoked (while authenticated in another way)
