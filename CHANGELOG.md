@@ -23,9 +23,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 *  release as self-contained Linux binaries (for `x86_64`, `aarch64`, and
    `armv8` architectures) rather than Docker images. This minimizes hassle and
-   total download size. Along the way, we switched libc to from `glibc` to
-   `musl` in the process. Please report any problems with the build or
-   instructions!
+   total download size. Along the way, we switched libc from `glibc` to `musl`
+   in the process. Please report any problems with the build or instructions!
 
 ## v0.7.7 (2023-08-03)
 
