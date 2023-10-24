@@ -213,7 +213,8 @@ Environment=MOONFIRE_FORMAT=systemd
 Environment=MOONFIRE_LOG=info
 Environment=RUST_BACKTRACE=1
 Type=notify
-TimeoutStartSec=300 # large installations take a while to scan the sample file dirs
+# large installations take a while to scan the sample file dirs
+TimeoutStartSec=300
 User=moonfire-nvr
 Restart=on-failure
 CPUAccounting=true
