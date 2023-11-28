@@ -8,11 +8,12 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## unreleased
+## v0.7.10 (2023-11-28)
 
-*  upgrade date/time pickers to `@mui/x-date-pickers` v6 beta, improving
-   time entry. Fixes
-   [#256](https://github.com/scottlamb/moonfire-nvr/issues/256).
+*   build docker images again
+*   upgrade date/time pickers to `@mui/x-date-pickers` v6 beta, improving
+    time entry. Fixes
+    [#256](https://github.com/scottlamb/moonfire-nvr/issues/256).
 
 ## v0.7.9 (2023-10-21)
 
