@@ -4,6 +4,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  DOCKER_TAG: "ghcr.io/${{ github.repository }}:${{ github.ref_name }}"
+
 on:
   push:
     tags:
@@ -42,12 +45,22 @@ jobs:
 
   cross:
     needs: base # for bundled ui
+    permissions:
+      contents: read
+      packages: write
     strategy:
       matrix:
         include:
-        - target: x86_64-unknown-linux-musl
-        - target: aarch64-unknown-linux-musl
-        - target: armv7-unknown-linux-musleabihf
+        # Note: keep these arches in sync with `Upload Docker Manifest` list.
+        - arch: x86_64 # as in `uname -m` on Linux.
+          rust_target: x86_64-unknown-linux-musl # as in <https://doc.rust-lang.org/rustc/platform-support.html>
+          docker_platform: linux/amd64 # as in <https://docs.docker.com/build/building/multi-platform/>
+        - arch: aarch64
+          rust_target: aarch64-unknown-linux-musl
+          docker_platform: linux/arm64
+        - arch: armv7l
+          rust_target: armv7-unknown-linux-musleabihf
+          docker_platform: linux/arm/v7
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -62,7 +75,7 @@ jobs:
       # Install the needed musl-tools in the host.
       - name: Install musl-tools
         run: sudo apt-get --option=APT::Acquire::Retries=3 update && sudo apt-get --option=APT::Acquire::Retries=3 install musl-tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+        if: matrix.rust_target == 'x86_64-unknown-linux-musl'
       - name: Build
         uses: houseabsolute/actions-rust-cross@v0
         env:
@@ -73,15 +86,30 @@ jobs:
           VERSION: ${{ github.ref_name }}
         with:
           working-directory: server
-          target: ${{ matrix.target }}
+          target: ${{ matrix.rust_target }}
           command: build
           args: --release --features bundled
+      - name: Upload Docker Artifact
+        run: |
+          tag="${DOCKER_TAG}-${{ matrix.arch }}"
+          mkdir output
+          ln ./server/target/${{ matrix.rust_target }}/release/moonfire-nvr output/
+          echo ${{secrets.GITHUB_TOKEN}} | docker login --username ${{github.actor}} --password-stdin ghcr.io
+          docker build --platform ${{ matrix.docker_platform }} --push --tag "${tag}" --file - output <<EOF
+          FROM scratch
+          LABEL org.opencontainers.image.title="Moonfire NVR"
+          LABEL org.opencontainers.image.description="security camera network video recorder"
+          LABEL org.opencontainers.image.source="https://github.com/${{ github.repository }}"
+          LABEL org.opencontainers.image.version="${{ github.ref_name }}"
+          COPY --chown=root:root --chmod=755 ./moonfire-nvr /usr/local/bin/moonfire-nvr
+          ENTRYPOINT ["/usr/local/bin/moonfire-nvr"]
+          EOF
       # Upload as a *job* artifact (not *release* artifact), used below.
-      - name: Upload
+      - name: Upload Job Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: moonfire-nvr-${{ github.ref_name }}-${{ matrix.target }}
-          path: server/target/${{ matrix.target }}/release/moonfire-nvr
+          name: moonfire-nvr-${{ github.ref_name }}-${{ matrix.arch }}
+          path: output/moonfire-nvr
           if-no-files-found: error
 
   release:
@@ -89,6 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/download-artifact@v3
         with:
@@ -101,6 +130,13 @@ jobs:
           (cd artifacts; for i in moonfire-nvr-*/moonfire-nvr; do mv $i "../$(dirname $i)"; done)
       - name: ls after rearranging
         run: find . -ls
+      - name: Upload Docker Manifest (ghcr.io)
+        run: |
+          echo ${{secrets.GITHUB_TOKEN}} | docker login --username ${{github.actor}} --password-stdin ghcr.io
+
+          # Note: keep these arches in sync with `cross` job matrix.
+          docker manifest create "$DOCKER_TAG" "${DOCKER_TAG}"-{x86_64,aarch64,armv7l}
+          docker manifest push "$DOCKER_TAG"
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
