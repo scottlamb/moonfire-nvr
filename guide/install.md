@@ -12,11 +12,17 @@ via the prebuilt Linux binaries available for x86-64, arm64, and arm. If you
 instead want to build Moonfire NVR yourself, see the [Build
 instructions](build.md).
 
-First, make sure you are viewing instructions that match the release you intend
+<table><tr><td><details>
+<summary>Go to the instructions for your exact Moonfire version</summary>
+
+Make sure you are viewing instructions that match the release you intend
 to install. When viewing this page on Github, look for a pull-down in the upper
 left, and pick the [latest tagged version](https://github.com/scottlamb/moonfire-nvr/releases/latest):
 
-![Selecting a version of install instructions](install-version.png)
+<img src="install-version.png" height=367 alt="Selecting a version of install instructions">
+
+</details></td></tr></table>
+
 
 Download the binary for your platform from the matching GitHub release.
 Install it as `/usr/local/bin/moonfire-nvr` and ensure it is executable, e.g.
@@ -29,7 +35,7 @@ $ curl -OL "https://github.com/scottlamb/moonfire-nvr/releases/download/$VERSION
 $ sudo install -m 755 "moonfire-nvr-$VERSION-$ARCH" /usr/local/bin/moonfire-nvr
 ```
 
-<details>
+<table><tr><td><details>
 <summary>Docker</summary>
 
 If you are a Docker fan, you can install the `ghcr.io/scottlamb/moonfire-nvr`
@@ -44,11 +50,12 @@ services:
     command: run
 
     volumes:
-      # Mount a Docker volume called `moonfire-db` to Moonfire's default
-      # database path.
+      # Pass through `/var/lib/moonfire-nvr` from the host.
       - "/var/lib/moonfire-nvr:/var/lib/moonfire-nvr"
 
       # Pass through `/etc/moonfire-nvr.toml` from the host.
+      # Be sure to create `/etc/moonfire-nvr.toml` first (see below).
+      # Docker will "helpfully" create a directory by this name otherwise.
       - "/etc/moonfire-nvr.toml:/etc/moonfire-nvr.toml:ro"
 
       # Add additional mount lines here for each sample file directory
@@ -59,8 +66,10 @@ services:
       # it from the host for Moonfire to support local time.
       - "/usr/share/zoneinfo:/usr/share/zoneinfo:ro"
 
-    # Edit this to match your `moonfire-nvr` user (see `useradd` command in
-    # install instructions).
+    # Edit this to match your `moonfire-nvr` user.
+    # - Be sure to run the `useradd` command below first.
+    # - Then run `echo $(id -u moonfire-nvr):$(id -u moonfire-nvr`) to see
+    #   what should be filled in here.
     user: UID:GID
 
     # Uncomment this if Moonfire fails with `clock_gettime failed` (likely on
@@ -96,7 +105,7 @@ Command reference:
 | Run interactive configuration | `sudo -u moonfire-nvr moonfire-nvr config 2>debug-log` | `sudo docker compose run --rm moonfire-nvr config 2>debug-log` |
 | Enable and start the server   | `sudo systemctl enable --now moonfire-nvr`             | `sudo docker compose up --detach moonfire-nvr` |
 
-</details>
+</details></td></tr></table>
 
 Next, you'll need to set up your filesystem and the Moonfire NVR user.
 
@@ -188,15 +197,15 @@ by using the `moonfire-nvr` binary's text-based configuration tool.
 $ sudo -u moonfire-nvr moonfire-nvr config 2>debug-log
 ```
 
-<details>
-  <summary>Did it return without doing anything?</summary>
+<table><tr><td><details>
+<summary>Did it return without doing anything?</summary>
 
 If `moonfire-nvr config` returns you to the console prompt right away, look in
 the `debug-log` file for why. One common reason is that you have Moonfire NVR
 running; you'll need to shut it down first. If you are running a systemd
 service as described below, try `sudo systemctl stop moonfire-nvr` before
 editing the config and `sudo systemctl start moonfire-nvr` after.
-</details>
+</details></td></tr></table>
 
 In the user interface,
 

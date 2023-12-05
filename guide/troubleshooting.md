@@ -10,6 +10,10 @@ need more help.
     * [Slow operations](#slow-operations)
     * [Camera stream errors](#camera-stream-errors)
 * [Problems](#problems)
+    * [Docker setup](#docker-setup)
+        * [`"/etc/moonfire-nvr.toml" is a directory`](#etcmoonfire-nvrtoml-is-a-directory)
+        * [`Error response from daemon: unable to find user UID: no matching entries in passwd file`](#error-response-from-daemon-unable-to-find-user-uid-no-matching-entries-in-passwd-file)
+        * [`clock_gettime failed: EPERM: Operation not permitted`](#clock_gettime-failed-eperm-operation-not-permitted)
     * [Server errors](#server-errors)
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
@@ -184,6 +188,45 @@ quickly enough. In the latter case, you'll likely see a
 ```
 
 ## Problems
+
+### Docker setup
+
+If you are using the Docker compose snippet mentioned in the
+[install.md](install instructions), you might run into a few unique problems.
+
+#### `"/etc/moonfire-nvr.toml" is a directory`
+
+If you try running the Docker container with its
+`/etc/moonfire-nvr.toml:/etc/moonfire-nvr.toml:ro` mount before creating the
+config file, Docker will "helpfully" create it as a directory. Shut down
+the Docker container, remove the directory, and try again.
+
+#### `Error response from daemon: unable to find user UID: no matching entries in passwd file`
+
+If Docker produces this error, look at this section of the docker compose setup:
+
+```yaml
+    # Edit this to match your `moonfire-nvr` user.
+    # - Be sure to run the `useradd` command below first.
+    # - Then run `echo $(id -u moonfire-nvr):$(id -u moonfire-nvr`) to see
+    #   what should be filled in here.
+    user: UID:GID
+```
+
+#### `clock_gettime failed: EPERM: Operation not permitted`
+
+If commands fail with an error like the following, you're likely running
+Docker with an overly restrictive `seccomp` setup. [This stackoverflow
+answer](https://askubuntu.com/questions/1263284/apt-update-throws-signature-error-in-ubuntu-20-04-container-on-arm/1264921#1264921) describes the
+problem in more detail. The simplest solution is to uncomment
+the `- seccomp: unconfined` line in your Docker compose file.
+
+```console
+$ sudo docker compose run --rm moonfire-nvr --version
+clock_gettime failed: EPERM: Operation not permitted
+
+This indicates a broken environment. See the troubleshooting guide.
+```
 
 ### Server errors
 
