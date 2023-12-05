@@ -99,11 +99,21 @@ services:
 
 Command reference:
 
-|                               | Moonfire directly installed on the host                | Moonfire with docker compose |
-|-------------------------------|--------------------------------------------------------|------------------------------|
-| Initialize the database       | `sudo -u moonfire-nvr moonfire-nvr init`               | `sudo docker compose run --rm moonfire-nvr init` |
-| Run interactive configuration | `sudo -u moonfire-nvr moonfire-nvr config 2>debug-log` | `sudo docker compose run --rm moonfire-nvr config 2>debug-log` |
-| Enable and start the server   | `sudo systemctl enable --now moonfire-nvr`             | `sudo docker compose up --detach moonfire-nvr` |
+<table>
+
+<tr><th colspan="2">Initialize the database</th></tr>
+<tr><th>Non-Docker</th><td><code>sudo -u moonfire-nvr moonfire-nvr init</code></td></tr>
+<tr><th>Docker</th><td><code>sudo docker compose run --rm moonfire-nvr init</code></td></tr>
+
+<tr><th colspan="2">Run interactive configuration</th></tr>
+<tr><th>Non-Docker</th><td><code>sudo -u moonfire-nvr moonfire-nvr config 2>debug-log</code></td></tr>
+<tr><th>Docker</th><td><code>sudo docker compose run --rm moonfire-nvr config 2>debug-log</code></td></tr>
+
+<tr><th colspan="2">Enable and start the server</th></tr>
+<tr><th>Non-Docker<td><code>sudo systemctl enable --now moonfire-nvr</code></td></tr>
+<tr><th>Docker</th><td><code>sudo docker compose up --detach moonfire-nvr</code></td></tr>
+
+</table>
 
 </details></td></tr></table>
 
