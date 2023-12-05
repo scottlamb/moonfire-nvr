@@ -208,7 +208,7 @@ If Docker produces this error, look at this section of the docker compose setup:
 ```yaml
     # Edit this to match your `moonfire-nvr` user.
     # - Be sure to run the `useradd` command below first.
-    # - Then run `echo $(id -u moonfire-nvr):$(id -u moonfire-nvr)` to see
+    # - Then run `echo $(id -u moonfire-nvr):$(id -g moonfire-nvr)` to see
     #   what should be filled in here.
     user: UID:GID
 ```
