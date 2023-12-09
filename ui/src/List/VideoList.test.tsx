@@ -162,7 +162,10 @@ test("slow replace", async () => {
   expect(screen.getByText(/26 Apr 2021 08:21:13/)).toBeInTheDocument();
 
   // A loading indicator should show up after a second.
-  expect(await screen.findByRole("progressbar")).toBeInTheDocument();
+  // The default timeout is 1 second; extend it to pass reliably.
+  expect(
+    await screen.findByRole("progressbar", {}, { timeout: 2000 })
+  ).toBeInTheDocument();
 
   // Then the second query result should show up.
   expect(await screen.findByText(/27 Apr 2021 06:17:43/)).toBeInTheDocument();

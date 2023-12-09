@@ -2,7 +2,7 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { SnackbarProvider, useSnackbars } from "./snackbars";
 
@@ -34,24 +34,24 @@ test("notifications that time out", async () => {
   expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 
   // ...then start to close...
-  jest.advanceTimersByTime(5000);
+  act(() => jest.advanceTimersByTime(5000));
   expect(screen.getByText(/message A/)).toBeInTheDocument();
   expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 
   // ...then it should close and message B should open...
-  jest.runOnlyPendingTimers();
+  act(() => jest.runOnlyPendingTimers());
   await waitFor(() =>
     expect(screen.queryByText(/message A/)).not.toBeInTheDocument()
   );
   expect(screen.getByText(/message B/)).toBeInTheDocument();
 
   // ...then message B should start to close...
-  jest.advanceTimersByTime(5000);
+  act(() => jest.advanceTimersByTime(5000));
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
   expect(screen.getByText(/message B/)).toBeInTheDocument();
 
   // ...then message B should fully close.
-  jest.runOnlyPendingTimers();
+  act(() => jest.runOnlyPendingTimers());
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
   await waitFor(() =>
     expect(screen.queryByText(/message B/)).not.toBeInTheDocument()
