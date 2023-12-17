@@ -6,6 +6,8 @@
 
 const { createProxyMiddleware } = require("http-proxy-middleware");
 
+const target = process.env.PROXY_TARGET || "http://localhost:8080/";
+
 module.exports = (app) => {
   app.use(
     "/api",
@@ -13,7 +15,7 @@ module.exports = (app) => {
     // Note: the `/api` here seems redundant with that above, but without it, the
     // `ws: true` here appears to break react-script's automatic websocket reloading.
     createProxyMiddleware("/api", {
-      target: process.env.PROXY_TARGET || "http://localhost:8080/",
+      target,
       ws: true,
 
       // XXX: this doesn't appear to work for websocket requests. See
@@ -37,6 +39,13 @@ module.exports = (app) => {
               .join("; ");
           });
         }
+      },
+
+      // The `changeOrigin` above doesn't appear to apply to WebSocket requests.
+      // This has a similar effect.
+      // <https://github.com/scottlamb/moonfire-nvr/issues/290>
+      onProxyReqWs: (proxyReq, req, socket, options, head) => {
+        proxyReq.setHeader("origin", target);
       },
     })
   );
