@@ -4,6 +4,7 @@
 
 import { render, screen } from "@testing-library/react";
 import ErrorBoundary from "./ErrorBoundary";
+import { expect, test } from "vitest";
 
 const ThrowsLiteralComponent = () => {
   throw "simple string error";

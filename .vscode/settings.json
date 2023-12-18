@@ -35,11 +35,7 @@
       }
     ],
 
-    // It seems like rust-analyzer is supposed to be able to format
-    // Rust files, but with "matklad.rust-analyzer" here, VS Code says
-    // "There is no formatter for 'rust' files installed."
-    "editor.defaultFormatter": "matklad.rust-analyzer"
-    //"editor.defaultFormatter": null
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
   "markdown.extension.list.indentationSize": "inherit",
   "markdown.extension.toc.unorderedList.marker": "*",
@@ -47,5 +43,7 @@
   // Specify the path to the workspace version of TypeScript. Note this only
   // takes effect when workspace version is selected in the UI.
   // https://code.visualstudio.com/docs/typescript/typescript-compiling#_using-the-workspace-version-of-typescript
-  "typescript.tsdk": "./ui/node_modules/typescript/lib"
+  "typescript.tsdk": "./ui/node_modules/typescript/lib",
+  "cmake.configureOnOpen": false,
+  "vitest.enable": true
 }

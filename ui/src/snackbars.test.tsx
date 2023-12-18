@@ -5,12 +5,13 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { SnackbarProvider, useSnackbars } from "./snackbars";
+import { beforeEach, afterEach, expect, test, vi } from "vitest";
 
 // Mock out timers.
-beforeEach(() => jest.useFakeTimers());
+beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => {
-  jest.runOnlyPendingTimers();
-  jest.useRealTimers();
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
 });
 
 test("notifications that time out", async () => {
@@ -34,24 +35,24 @@ test("notifications that time out", async () => {
   expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 
   // ...then start to close...
-  act(() => jest.advanceTimersByTime(5000));
+  act(() => vi.advanceTimersByTime(5000));
   expect(screen.getByText(/message A/)).toBeInTheDocument();
   expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 
   // ...then it should close and message B should open...
-  act(() => jest.runOnlyPendingTimers());
+  act(() => vi.runOnlyPendingTimers());
   await waitFor(() =>
     expect(screen.queryByText(/message A/)).not.toBeInTheDocument()
   );
   expect(screen.getByText(/message B/)).toBeInTheDocument();
 
   // ...then message B should start to close...
-  act(() => jest.advanceTimersByTime(5000));
+  act(() => vi.advanceTimersByTime(5000));
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
   expect(screen.getByText(/message B/)).toBeInTheDocument();
 
   // ...then message B should fully close.
-  act(() => jest.runOnlyPendingTimers());
+  act(() => vi.runOnlyPendingTimers());
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
   await waitFor(() =>
     expect(screen.queryByText(/message B/)).not.toBeInTheDocument()

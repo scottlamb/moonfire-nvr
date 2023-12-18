@@ -11,6 +11,7 @@ import { Recording, VideoSampleEntry } from "../api";
 import { renderWithCtx } from "../testutil";
 import { Camera, Stream } from "../types";
 import VideoList from "./VideoList";
+import { beforeAll, afterAll, afterEach, expect, test } from "vitest";
 
 const TEST_CAMERA: Camera = {
   uuid: "c7278ba0-a001-420c-911e-fff4e33f6916",

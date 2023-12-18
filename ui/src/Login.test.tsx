@@ -8,6 +8,7 @@ import { rest } from "msw";
 import { setupServer } from "msw/node";
 import Login from "./Login";
 import { renderWithCtx } from "./testutil";
+import { beforeAll, afterEach, afterAll, test, vi, expect } from "vitest";
 
 // Set up a fake API backend.
 const server = setupServer(
@@ -47,20 +48,20 @@ afterAll(() => server.close());
 //   https://github.com/facebook/jest/issues/13018 ?
 //
 // Argh!
-// beforeEach(() => jest.useFakeTimers({
+// beforeEach(() => vi.useFakeTimers({
 //   legacyFakeTimers: true,
 // }));
 // afterEach(() => {
 //   act(() => {
-//     jest.runOnlyPendingTimers();
-//     jest.useRealTimers();
+//     vi.runOnlyPendingTimers();
+//     vi.useRealTimers();
 //   });
 // });
 
 test("success", async () => {
   const user = userEvent.setup();
-  const handleClose = jest.fn().mockName("handleClose");
-  const onSuccess = jest.fn().mockName("handleOpen");
+  const handleClose = vi.fn().mockName("handleClose");
+  const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
@@ -75,8 +76,8 @@ test("success", async () => {
 // so the delay("infinite") request just sticks around, even though the fetch
 // has been aborted. Maybe https://github.com/mswjs/msw/pull/585 will fix it.
 test.skip("close while pending", async () => {
-  const handleClose = jest.fn().mockName("handleClose");
-  const onSuccess = jest.fn().mockName("handleOpen");
+  const handleClose = vi.fn().mockName("handleClose");
+  const onSuccess = vi.fn().mockName("handleOpen");
   const { rerender } = renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
@@ -96,8 +97,8 @@ test.skip("close while pending", async () => {
 // TODO: fix and re-enable this test.
 // It depends on the timers; see TODO above.
 test.skip("bad credentials", async () => {
-  const handleClose = jest.fn().mockName("handleClose");
-  const onSuccess = jest.fn().mockName("handleOpen");
+  const handleClose = vi.fn().mockName("handleClose");
+  const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
@@ -110,8 +111,8 @@ test.skip("bad credentials", async () => {
 // TODO: fix and re-enable this test.
 // It depends on the timers; see TODO above.
 test.skip("server error", async () => {
-  const handleClose = jest.fn().mockName("handleClose");
-  const onSuccess = jest.fn().mockName("handleOpen");
+  const handleClose = vi.fn().mockName("handleClose");
+  const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
@@ -127,8 +128,8 @@ test.skip("server error", async () => {
 // TODO: fix and re-enable this test.
 // It depends on the timers; see TODO above.
 test.skip("network error", async () => {
-  const handleClose = jest.fn().mockName("handleClose");
-  const onSuccess = jest.fn().mockName("handleOpen");
+  const handleClose = vi.fn().mockName("handleClose");
+  const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );

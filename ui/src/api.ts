@@ -40,7 +40,7 @@ async function myfetch(
 ): Promise<FetchResult<Response>> {
   let response;
   try {
-    response = await fetch(url, init);
+    response = await fetch(window.location.origin + url, init);
   } catch (e) {
     if (!(e instanceof DOMException)) {
       throw e;
