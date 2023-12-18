@@ -6,7 +6,7 @@ import { render, screen } from "@testing-library/react";
 import ErrorBoundary from "./ErrorBoundary";
 
 const ThrowsLiteralComponent = () => {
-  throw "simple string error"; // eslint-disable-line no-throw-literal
+  throw "simple string error";
 };
 
 test("renders string error", () => {

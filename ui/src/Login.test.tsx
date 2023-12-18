@@ -74,7 +74,7 @@ test("success", async () => {
 // I think the problem is that npmjs doesn't really support aborting requests,
 // so the delay("infinite") request just sticks around, even though the fetch
 // has been aborted. Maybe https://github.com/mswjs/msw/pull/585 will fix it.
-xtest("close while pending", async () => {
+test.skip("close while pending", async () => {
   const handleClose = jest.fn().mockName("handleClose");
   const onSuccess = jest.fn().mockName("handleOpen");
   const { rerender } = renderWithCtx(
@@ -95,7 +95,7 @@ xtest("close while pending", async () => {
 
 // TODO: fix and re-enable this test.
 // It depends on the timers; see TODO above.
-xtest("bad credentials", async () => {
+test.skip("bad credentials", async () => {
   const handleClose = jest.fn().mockName("handleClose");
   const onSuccess = jest.fn().mockName("handleOpen");
   renderWithCtx(
@@ -109,7 +109,7 @@ xtest("bad credentials", async () => {
 
 // TODO: fix and re-enable this test.
 // It depends on the timers; see TODO above.
-xtest("server error", async () => {
+test.skip("server error", async () => {
   const handleClose = jest.fn().mockName("handleClose");
   const onSuccess = jest.fn().mockName("handleOpen");
   renderWithCtx(
@@ -126,7 +126,7 @@ xtest("server error", async () => {
 
 // TODO: fix and re-enable this test.
 // It depends on the timers; see TODO above.
-xtest("network error", async () => {
+test.skip("network error", async () => {
   const handleClose = jest.fn().mockName("handleClose");
   const onSuccess = jest.fn().mockName("handleOpen");
   renderWithCtx(

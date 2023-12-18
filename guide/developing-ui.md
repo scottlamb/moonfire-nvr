@@ -6,7 +6,7 @@
 
 The UI is presented from a single HTML page (index.html) and any number
 of Javascript files, css files, images, etc. These are "packed" together
-using [webpack](https://webpack.js.org).
+using [vite](https://vitejs.dev/).
 
 For ongoing development it is possible to have the UI running in a web
 browser using "hot loading". This means that as you make changes to source
@@ -26,12 +26,12 @@ Checkout the branch you want to work on and type
 
 ```
 $ cd ui
-$ npm run start
+$ npm run dev
 ```
 
 This will pack and prepare a development setup. By default the development
 server that serves up the web page(s) will listen on
-[http://localhost:3000/](http://localhost:3000/) so you can direct your browser
+[http://localhost:5173/](http://localhost:5173/) so you can direct your browser
 there. It assumes the Moonfire NVR server is running at
 [http://localhost:8080/](http://localhost:8080/) and will proxy API requests
 there.
@@ -45,32 +45,25 @@ process, but some will show up in the browser console, or both.
 
 ## Overriding defaults
 
-The UI is setup with [Create React App](https://create-react-app.dev/).
-`npm run start` will honor any of the environment variables described in their
-[Advanced Configuration](https://create-react-app.dev/docs/advanced-configuration/),
-as well as Moonfire NVR's custom `PROXY_TARGET` variable. Quick reference:
+Currently there's only one supported environment variable override defined in
+`ui/vite.config.ts`:
 
-| variable       | description                                                              | default                  |
-| :------------- | :----------------------------------------------------------------------- | :----------------------- |
-| `PROXY_TARGET` | base URL of the backing Moonfire NVR server (see `ui/src/setupProxy.js`) | `http://localhost:8080/` |
-| `PORT`         | port to listen on                                                        | 3000                     |
-| `HOST`         | host/IP to listen on (or `0.0.0.0` for all)                              | `0.0.0.0`                |
+| variable       | description                                 | default                  |
+| :------------- | :------------------------------------------ | :----------------------- |
+| `PROXY_TARGET` | base URL of the backing Moonfire NVR server | `http://localhost:8080/` |
 
 Thus one could connect to a remote Moonfire NVR by specifying its URL as
 follows:
 
 ```
-$ PROXY_TARGET=https://nvr.example.com/ npm run start
+$ PROXY_TARGET=https://nvr.example.com/ npm run dev
 ```
 
 This allows you to test a new UI against your stable, production Moonfire NVR
 installation with real data.
 
-**Note:** the live stream currently does not work in combination with
-`PROXY_TARGET` due to [#290](https://github.com/scottlamb/moonfire-nvr/issues/290).
-
 You can also set environment variables in `.env` files, as described in
-[Adding Custom Environment Variables](https://create-react-app.dev/docs/adding-custom-environment-variables/).
+[vitejs.dev: Env Variables and Modes](https://vitejs.dev/guide/env-and-mode).
 
 ## A note on `https`
 

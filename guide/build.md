@@ -38,7 +38,9 @@ can skip this if compiling with `--features=rusqlite/bundled` and don't
 mind the `moonfire-nvr sql` command not working.
 
 To build the UI, you'll need a [nodejs](https://nodejs.org/en/download/) release
-in "Maintenance" or "LTS" status: currently v14, v16, or v18.
+in "Maintenance", "LTS", or "Current" status on the
+[Release Schedule](https://github.com/nodejs/release#release-schedule):
+currently v18, v20, or v21.
 
 On recent Ubuntu or Raspbian Linux, the following command will install
 most non-Rust dependencies:
@@ -90,7 +92,7 @@ $ npm install
 $ npm run build
 $ sudo mkdir /usr/local/lib/moonfire-nvr
 $ cd ..
-$ sudo rsync --recursive --delete --chmod=D755,F644 ui/build/ /usr/local/lib/moonfire-nvr/ui
+$ sudo rsync --recursive --delete --chmod=D755,F644 ui/dist/ /usr/local/lib/moonfire-nvr/ui
 ```
 
 ### Running interactively straight from the working copy
@@ -100,7 +102,7 @@ the binaries in the working copy will run via just `nvr`:
 
 ```console
 $ sudo mkdir /usr/local/lib/moonfire-nvr
-$ sudo ln -s `pwd`/ui/build /usr/local/lib/moonfire-nvr/ui
+$ sudo ln -s `pwd`/ui/dist /usr/local/lib/moonfire-nvr/ui
 $ sudo mkdir /var/lib/moonfire-nvr
 $ sudo chown $USER: /var/lib/moonfire-nvr
 $ ln -s `pwd`/server/target/release/moonfire-nvr $HOME/bin/moonfire-nvr 

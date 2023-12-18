@@ -8,8 +8,8 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const UI_BUILD_DIR_ENV_VAR: &str = "UI_BUILD_DIR";
-const DEFAULT_UI_BUILD_DIR: &str = "../ui/build";
+const UI_DIST_DIR_ENV_VAR: &str = "UI_DIST_DIR";
+const DEFAULT_UI_DIST_DIR: &str = "../ui/dist";
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -53,7 +53,7 @@ impl FileEncoding {
 /// Map of "bare path" to the best representation.
 ///
 /// A "bare path" has no prefix for the root and no suffix for encoding, e.g.
-/// `favicons/blah.ico` rather than `../../ui/build/favicons/blah.ico.gz`.
+/// `favicons/blah.ico` rather than `../../ui/dist/favicons/blah.ico.gz`.
 ///
 /// The best representation is gzipped if available, uncompressed otherwise.
 type FileMap = fnv::FnvHashMap<String, File>;
@@ -78,10 +78,10 @@ fn handle_bundled_ui() -> Result<(), BoxError> {
     }
 
     let ui_dir =
-        std::env::var(UI_BUILD_DIR_ENV_VAR).unwrap_or_else(|_| DEFAULT_UI_BUILD_DIR.to_owned());
+        std::env::var(UI_DIST_DIR_ENV_VAR).unwrap_or_else(|_| DEFAULT_UI_DIST_DIR.to_owned());
 
     // If the feature is on, also re-run if the actual UI files change.
-    println!("cargo:rerun-if-env-changed={UI_BUILD_DIR_ENV_VAR}");
+    println!("cargo:rerun-if-env-changed={UI_DIST_DIR_ENV_VAR}");
     println!("cargo:rerun-if-changed={ui_dir}");
 
     let out_dir: PathBuf = std::env::var_os("OUT_DIR")

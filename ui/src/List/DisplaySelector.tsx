@@ -8,7 +8,6 @@ import InputLabel from "@mui/material/InputLabel";
 import FormControl from "@mui/material/FormControl";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
-import React from "react";
 import { useTheme } from "@mui/material/styles";
 import FormControlLabel from "@mui/material/FormControlLabel";
 

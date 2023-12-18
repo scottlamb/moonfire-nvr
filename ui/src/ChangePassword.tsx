@@ -62,9 +62,9 @@ const ChangePassword = ({ user, open, handleClose }: Props) => {
     if (loading === null) {
       return;
     }
-    let abort = new AbortController();
+    const abort = new AbortController();
     const send = async (signal: AbortSignal) => {
-      let response = await api.updateUser(
+      const response = await api.updateUser(
         loading.userId,
         {
           csrf: loading.csrf,

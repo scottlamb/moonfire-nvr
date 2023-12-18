@@ -29,7 +29,7 @@ export function parsePart(raw: Uint8Array): ParseResult {
   // Parse into headers and body.
   const headers = new Headers();
   let pos = 0;
-  while (true) {
+  for (;;) {
     const cr = raw.indexOf(CR, pos);
     if (cr === -1 || raw.length === cr + 1 || raw[cr + 1] !== NL) {
       return {

@@ -35,7 +35,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: moonfire-nvr-ui-${{ github.ref_name }}
-          path: ui/build
+          path: ui/dist
           if-no-files-found: error
       - uses: actions/upload-artifact@v3
         with:
@@ -69,7 +69,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: moonfire-nvr-ui-${{ github.ref_name }}
-          path: ui/build
+          path: ui/dist
 
       # actions-rust-cross doesn't actually use cross for x86_64.
       # Install the needed musl-tools in the host.
@@ -79,7 +79,7 @@ jobs:
       - name: Build
         uses: houseabsolute/actions-rust-cross@v0
         env:
-          UI_BUILD_DIR: ../ui/build
+          UI_BUILD_DIR: ../ui/dist
 
           # cross doesn't install `git` within its Docker container, so plumb
           # the version through rather than try `git describe` from `build.rs`.

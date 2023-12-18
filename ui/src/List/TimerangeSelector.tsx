@@ -298,7 +298,7 @@ function daysStateReducer(old: DaysState, op: DaysOp): DaysState {
         }
       }
       break;
-    case "set-end-day":
+    case "set-end-day": {
       const millis = toMillis(op.newEndDate);
       if (
         state.rangeMillis === null ||
@@ -310,6 +310,7 @@ function daysStateReducer(old: DaysState, op: DaysOp): DaysState {
         state.rangeMillis[1] = millis;
       }
       break;
+    }
     case "set-end-type":
       state.endType = op.newEndType;
       if (state.endType === "same-day" && state.rangeMillis !== null) {

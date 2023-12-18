@@ -43,7 +43,7 @@ class MoonfireErrorBoundary extends React.Component<Props, State> {
     const { children } = this.props;
 
     if (this.state.error !== null) {
-      var error;
+      let error;
       if (this.state.error.stack !== undefined) {
         error = <pre>{this.state.error.stack}</pre>;
       } else if (this.state.error instanceof Error) {
