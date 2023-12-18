@@ -6,6 +6,7 @@ import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { SnackbarProvider } from "./snackbars";
+import React from "react";
 
 export function renderWithCtx(
   children: React.ReactElement

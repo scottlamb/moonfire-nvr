@@ -22,6 +22,7 @@ import MoreVertIcon from "@mui/icons-material/MoreVert";
 import IconButton from "@mui/material/IconButton";
 import DeleteDialog from "./DeleteDialog";
 import AddEditDialog from "./AddEditDialog";
+import React from "react";
 
 interface Props {
   Frame: (props: FrameProps) => JSX.Element;
