@@ -8,7 +8,9 @@ import { SnackbarProvider, useSnackbars } from "./snackbars";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
 
 // Mock out timers.
-beforeEach(() => { vi.useFakeTimers(); });
+beforeEach(() => {
+  vi.useFakeTimers();
+});
 afterEach(() => {
   vi.runOnlyPendingTimers();
   vi.useRealTimers();

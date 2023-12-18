@@ -5,7 +5,7 @@
 import { screen } from "@testing-library/react";
 import { utcToZonedTime } from "date-fns-tz";
 import format from "date-fns/format";
-import { rest } from "msw";
+import { DefaultBodyType, delay, http, HttpResponse, PathParams } from "msw";
 import { setupServer } from "msw/node";
 import { Recording, VideoSampleEntry } from "../api";
 import { renderWithCtx } from "../testutil";
@@ -85,32 +85,32 @@ function TestFormat(time90k: number) {
 }
 
 const server = setupServer(
-  rest.get("/api/cameras/:camera/:streamType/recordings", (req, res, ctx) => {
-    const p = req.url.searchParams;
-    const range90k = [
-      parseInt(p.get("startTime90k")!, 10),
-      parseInt(p.get("endTime90k")!, 10),
-    ];
-    if (range90k[0] === 42) {
-      return res(ctx.status(503), ctx.text("server error"));
-    }
-    if (range90k[0] === TEST_RANGE1[0]) {
-      return res(
-        ctx.json({
+  http.get<PathParams, DefaultBodyType, any>(
+    "/api/cameras/:camera/:streamType/recordings",
+    async ({ request }) => {
+      const url = new URL(request.url);
+      const p = url.searchParams;
+      const range90k = [
+        parseInt(p.get("startTime90k")!, 10),
+        parseInt(p.get("endTime90k")!, 10),
+      ];
+      if (range90k[0] === 42) {
+        return HttpResponse.text("server error", { status: 503 });
+      }
+      if (range90k[0] === TEST_RANGE1[0]) {
+        return HttpResponse.json({
           recordings: TEST_RECORDINGS1,
           videoSampleEntries: TEST_VIDEO_SAMPLE_ENTRIES,
-        })
-      );
-    } else {
-      return res(
-        ctx.delay(2000), // 2 second delay
-        ctx.json({
+        });
+      } else {
+        await delay(2000); // 2 second delay
+        return HttpResponse.json({
           recordings: TEST_RECORDINGS2,
           videoSampleEntries: TEST_VIDEO_SAMPLE_ENTRIES,
-        })
-      );
+        });
+      }
     }
-  })
+  )
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
@@ -169,7 +169,9 @@ test("slow replace", async () => {
   ).toBeInTheDocument();
 
   // Then the second query result should show up.
-  expect(await screen.findByText(/27 Apr 2021 06:17:43/)).toBeInTheDocument();
+  expect(
+    await screen.findByText(/27 Apr 2021 06:17:43/, {}, { timeout: 2000 })
+  ).toBeInTheDocument();
 });
 
 test("error", async () => {

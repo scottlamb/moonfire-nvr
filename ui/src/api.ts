@@ -40,18 +40,37 @@ async function myfetch(
 ): Promise<FetchResult<Response>> {
   let response;
   try {
-    response = await fetch(window.location.origin + url, init);
+    // Note: `fetch` handles relative URLs on real browsers. Our test
+    // environment doesn't appear to simulate this properly. Even with the
+    // browser-like `jsdom` and `msw`'s interception, it uses node's native
+    // `Request`, which fails with a `TypeError` if given a relative URL.
+    // Resolve it ourselves here. Harmless in production, makes the tests work.
+    response = await fetch(new URL(url, window.location.origin), init);
   } catch (e) {
-    if (!(e instanceof DOMException)) {
-      throw e;
-    }
-    if (e.name === "AbortError") {
-      return { status: "aborted" };
-    } else {
+    if (e instanceof TypeError) {
+      // One might expect this to indicate a logic flaw, but it can happen on a variety of
+      // conditions including network errors (as seen in Chrome, Firefox, and msw):
+      // <https://developer.mozilla.org/en-US/docs/Web/API/fetch#exceptions>
+      //
+      // It turns out the `DOMException` name of `NetworkEror` is just a decoy, I guess?
+      // Or possibly only used by the older `XMLHTTPRequest`.
+      // <https://webidl.spec.whatwg.org/#idl-DOMException-error-names>
+      // <https://developer.mozilla.org/en-US/docs/Web/API/DOMException#error_names>
+      // <https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/send>
       return {
         status: "error",
-        message: `network error: ${e.message}`,
+        message: `${e.name}: ${e.message}`,
       };
+    } else if (e instanceof DOMException) {
+      if (e.name === "AbortError") {
+        return { status: "aborted" };
+      }
+      return {
+        status: "error",
+        message: `${e.name}: ${e.message}`,
+      };
+    } else {
+      throw e;
     }
   }
   if (!response.ok) {

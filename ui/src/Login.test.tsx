@@ -2,61 +2,62 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import { screen, waitFor } from "@testing-library/react";
+import {
+  screen,
+  waitFor,
+  waitForElementToBeRemoved,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { rest } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import Login from "./Login";
 import { renderWithCtx } from "./testutil";
-import { beforeAll, afterEach, afterAll, test, vi, expect } from "vitest";
+import {
+  beforeAll,
+  afterEach,
+  afterAll,
+  test,
+  vi,
+  expect,
+  beforeEach,
+} from "vitest";
 
 // Set up a fake API backend.
 const server = setupServer(
-  rest.post("/api/login", (req, res, ctx) => {
-    const { username, password } = req.body! as Record<string, string>;
+  http.post<any, Record<string, string>>("/api/login", async ({ request }) => {
+    const body = await request.json();
+    const { username, password } = body!;
     console.log(
       "/api/login post username=" + username + " password=" + password
     );
     if (username === "slamb" && password === "hunter2") {
-      return res(ctx.status(204));
+      return new HttpResponse(null, { status: 204 });
     } else if (username === "delay") {
-      return res(ctx.delay("infinite"));
+      await delay("infinite");
+      return new HttpResponse(null);
     } else if (username === "server-error") {
-      return res(ctx.status(503), ctx.text("server error"));
+      return HttpResponse.text("server error", { status: 503 });
     } else if (username === "network-error") {
-      return res.networkError("network error");
+      return HttpResponse.error();
     } else {
-      return res(ctx.status(401), ctx.text("bad credentials"));
+      return HttpResponse.text("bad credentials", { status: 401 });
     }
   })
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterEach(() => server.resetHandlers());
+beforeEach(() => {
+  // Using fake timers allows tests to jump forward to when a snackbar goes away, without incurring
+  // extra real delay. msw only appears to work when `shouldAdvanceTime` is set though.
+  vi.useFakeTimers({
+    shouldAdvanceTime: true,
+  });
+});
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
+  server.resetHandlers();
+});
 afterAll(() => server.close());
-
-// TODO: fix this. It's meant to allow the snack bar timers to run quickly
-// in tests, but fake timers seem to have problems:
-//
-// * react-scripts v4, @testing-library/react v11: worked
-// * react-scripts v5, @testing-library/react v11:
-//   saw "was not wrapped in act" warnings, test failed
-//   (Seems like waitFor's internal advance calls aren't wrapped in act)
-// * react-scripts v5, @testing-library/react v12:
-//   msw requests never complete
-//   https://github.com/mswjs/msw/issues/448#issuecomment-723438099 ?
-//   https://github.com/facebook/jest/issues/11103 ?
-//   https://github.com/facebook/jest/issues/13018 ?
-//
-// Argh!
-// beforeEach(() => vi.useFakeTimers({
-//   legacyFakeTimers: true,
-// }));
-// afterEach(() => {
-//   act(() => {
-//     vi.runOnlyPendingTimers();
-//     vi.useRealTimers();
-//   });
-// });
 
 test("success", async () => {
   const user = userEvent.setup();
@@ -70,12 +71,7 @@ test("success", async () => {
   await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
 });
 
-// TODO: fix and re-enable this test.
-// Currently it makes "CI=true npm run test" hang.
-// I think the problem is that npmjs doesn't really support aborting requests,
-// so the delay("infinite") request just sticks around, even though the fetch
-// has been aborted. Maybe https://github.com/mswjs/msw/pull/585 will fix it.
-test.skip("close while pending", async () => {
+test("close while pending", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   const { rerender } = renderWithCtx(
@@ -94,9 +90,7 @@ test.skip("close while pending", async () => {
   );
 });
 
-// TODO: fix and re-enable this test.
-// It depends on the timers; see TODO above.
-test.skip("bad credentials", async () => {
+test("bad credentials", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
@@ -108,9 +102,7 @@ test.skip("bad credentials", async () => {
   expect(onSuccess).toHaveBeenCalledTimes(0);
 });
 
-// TODO: fix and re-enable this test.
-// It depends on the timers; see TODO above.
-test.skip("server error", async () => {
+test("server error", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
@@ -119,15 +111,12 @@ test.skip("server error", async () => {
   await userEvent.type(screen.getByLabelText(/Username/), "server-error");
   await userEvent.type(screen.getByLabelText(/Password/), "asdf{enter}");
   await screen.findByText(/server error/);
-  await waitFor(() =>
-    expect(screen.queryByText(/server error/)).not.toBeInTheDocument()
-  );
+  vi.runOnlyPendingTimers();
+  await waitForElementToBeRemoved(() => screen.queryByText(/server error/));
   expect(onSuccess).toHaveBeenCalledTimes(0);
 });
 
-// TODO: fix and re-enable this test.
-// It depends on the timers; see TODO above.
-test.skip("network error", async () => {
+test("network error", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
@@ -135,9 +124,9 @@ test.skip("network error", async () => {
   );
   await userEvent.type(screen.getByLabelText(/Username/), "network-error");
   await userEvent.type(screen.getByLabelText(/Password/), "asdf{enter}");
-  await screen.findByText(/network error/);
-  await waitFor(() =>
-    expect(screen.queryByText(/network error/)).not.toBeInTheDocument()
-  );
+
+  // This is the text chosen by msw:
+  // https://github.com/mswjs/interceptors/blob/122a6533ce57d551dc3b59b3bb43a39026989b70/src/interceptors/fetch/index.ts#L187
+  await screen.findByText(/Failed to fetch/);
   expect(onSuccess).toHaveBeenCalledTimes(0);
 });

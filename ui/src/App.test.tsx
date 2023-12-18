@@ -5,13 +5,13 @@
 import { screen } from "@testing-library/react";
 import App from "./App";
 import { renderWithCtx } from "./testutil";
-import { rest } from "msw";
+import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { beforeAll, afterAll, afterEach, expect, test } from "vitest";
 
 const server = setupServer(
-  rest.get("/api/", (req, res, ctx) => {
-    return res(ctx.status(503), ctx.text("server error"));
+  http.get("/api/", () => {
+    return HttpResponse.text("server error", { status: 503 });
   })
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
