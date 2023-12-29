@@ -7,6 +7,7 @@
 use crate::json::UserConfig;
 use crate::schema::Permissions;
 use base::{bail, err, strutil, Error, ErrorKind, ResultExt as _};
+use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use fnv::FnvHashMap;
 use protobuf::Message;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -282,7 +283,8 @@ pub struct RawSessionId([u8; 48]);
 impl RawSessionId {
     pub fn decode_base64(input: &[u8]) -> Result<Self, Error> {
         let mut s = RawSessionId([0u8; 48]);
-        let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut s.0[..])
+        let l = STANDARD_NO_PAD
+            .decode_slice(input, &mut s.0[..])
             .map_err(|e| err!(InvalidArgument, msg("bad session id"), source(e)))?;
         if l != 48 {
             bail!(InvalidArgument, msg("session id must be 48 bytes"));
@@ -326,12 +328,15 @@ pub struct SessionHash(pub [u8; 24]);
 
 impl SessionHash {
     pub fn encode_base64(&self, output: &mut [u8; 32]) {
-        ::base64::encode_config_slice(self.0, ::base64::STANDARD_NO_PAD, output);
+        STANDARD_NO_PAD
+            .encode_slice(self.0, output)
+            .expect("base64 encode should succeed");
     }
 
     pub fn decode_base64(input: &[u8]) -> Result<Self, Error> {
         let mut h = SessionHash([0u8; 24]);
-        let l = ::base64::decode_config_slice(input, ::base64::STANDARD_NO_PAD, &mut h.0[..])
+        let l = STANDARD_NO_PAD
+            .decode_slice(input, &mut h.0[..])
             .map_err(|e| err!(InvalidArgument, msg("invalid session hash"), source(e)))?;
         if l != 24 {
             bail!(InvalidArgument, msg("session hash must be 24 bytes"));

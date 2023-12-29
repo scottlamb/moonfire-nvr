@@ -8,6 +8,13 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   upgrade some Rust dependencies. Most notably, Retina 0.4.6 improves camera
+    compatibility.
+*   update frontend build and tests from no-longer-maintained create-react-app
+    to vite and vitest.
+
 ## v0.7.10 (2023-11-28)
 
 *   build docker images again

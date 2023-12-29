@@ -23,13 +23,15 @@ bundled-ui = []
 members = ["base", "db"]
 
 [workspace.dependencies]
+base64 = "0.21.0"
+h264-reader = "0.7.0"
 nix = "0.26.1"
 tracing = { version = "0.1", features = ["log"] }
-rusqlite = "0.28.0"
+rusqlite = "0.30.0"
 
 [dependencies]
 base = { package = "moonfire-base", path = "base" }
-base64 = "0.13.0"
+base64 = { workspace = true }
 blake3 = "1.0.0"
 bpaf = { version = "0.9.1", features = ["autocomplete", "bright-color", "derive"]}
 bytes = "1"
@@ -39,7 +41,7 @@ cursive = { version = "0.20.0", default-features = false, features = ["termion-b
 db = { package = "moonfire-db", path = "db" }
 futures = "0.3"
 fnv = "1.0"
-h264-reader = "0.6.0"
+h264-reader = { workspace = true }
 http = "0.2.3"
 http-serve = { version = "0.3.1", features = ["dir"] }
 hyper = { version = "0.14.2", features = ["http1", "server", "stream", "tcp"] }
@@ -62,7 +64,7 @@ sync_wrapper = "0.1.0"
 time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1.5"
-tokio-tungstenite = "0.18.0"
+tokio-tungstenite = "0.20.0"
 toml = "0.5"
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
@@ -107,4 +109,5 @@ lto = true
 debug = 1
 
 [patch.crates-io]
-hashlink = { git = "https://github.com/scottlamb/hashlink", rev = "26715ca0efe3f1773a0a22bbde8e36cafcaaed52" }
+# This version uses fallible-iterator v0.3 (same one rusqlite 0.30 uses) and hasn't been released yet.
+sdp-types = { git = "https://github.com/sdroege/sdp-types", rev = "e8d0a2c4b8b1fc1ddf1c60a01dc717a2f4e2d514" }

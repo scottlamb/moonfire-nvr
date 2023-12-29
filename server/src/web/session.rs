@@ -5,6 +5,7 @@
 //! Session management: `/api/login` and `/api/logout`.
 
 use base::{bail, ErrorKind, ResultExt};
+use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use db::auth;
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
 use memchr::memchr;
@@ -124,7 +125,7 @@ impl Service {
 fn encode_sid(sid: db::RawSessionId, flags: i32) -> String {
     let mut cookie = String::with_capacity(128);
     cookie.push_str("s=");
-    base64::encode_config_buf(sid, base64::STANDARD_NO_PAD, &mut cookie);
+    STANDARD_NO_PAD.encode_string(sid, &mut cookie);
     use auth::SessionFlag;
     if (flags & SessionFlag::HttpOnly as i32) != 0 {
         cookie.push_str("; HttpOnly");

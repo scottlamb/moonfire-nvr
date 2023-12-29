@@ -6,6 +6,7 @@
 
 use base::clock::{self, Clocks};
 use base::{bail, err, Error};
+use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use bpaf::Bpaf;
 use db::auth::SessionFlag;
 use std::io::Write as _;
@@ -94,7 +95,9 @@ pub fn run(args: Args) -> Result<i32, Error> {
         permissions,
     )?;
     let mut encoded = [0u8; 64];
-    base64::encode_config_slice(sid, base64::STANDARD_NO_PAD, &mut encoded);
+    STANDARD_NO_PAD
+        .encode_slice(sid, &mut encoded)
+        .expect("base64 encode should succeed");
     let encoded = std::str::from_utf8(&encoded[..]).expect("base64 is valid UTF-8");
 
     if let Some(ref p) = args.curl_cookie_jar {
