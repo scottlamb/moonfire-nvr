@@ -8,7 +8,7 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## unreleased
+## v0.7.11 (2023-12-29)
 
 *   upgrade some Rust dependencies. Most notably, Retina 0.4.6 improves camera
     compatibility.

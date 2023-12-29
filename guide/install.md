@@ -26,10 +26,10 @@ left, and pick the [latest tagged version](https://github.com/scottlamb/moonfire
 
 Download the binary for your platform from the matching GitHub release.
 Install it as `/usr/local/bin/moonfire-nvr` and ensure it is executable, e.g.
-for version `v0.7.10` on Intel machines:
+for version `v0.7.11`:
 
 ```console
-$ VERSION=v0.7.10
+$ VERSION=v0.7.11
 $ ARCH=$(uname -m)
 $ curl -OL "https://github.com/scottlamb/moonfire-nvr/releases/download/$VERSION/moonfire-nvr-$VERSION-$ARCH"
 $ sudo install -m 755 "moonfire-nvr-$VERSION-$ARCH" /usr/local/bin/moonfire-nvr
@@ -46,7 +46,7 @@ workflow. You may find the following Docker compose snippet useful:
 version: 3
 services:
   moonfire-nvr:
-    image: ghcr.io/scottlamb/moonfire-nvr:v0.7.10
+    image: ghcr.io/scottlamb/moonfire-nvr:v0.7.11
     command: run
 
     volumes:
