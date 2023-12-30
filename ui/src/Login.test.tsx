@@ -72,13 +72,14 @@ test("success", async () => {
 });
 
 test("close while pending", async () => {
+  const user = userEvent.setup();
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   const { rerender } = renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
-  userEvent.type(screen.getByLabelText(/Username/), "delay");
-  userEvent.type(screen.getByLabelText(/Password/), "hunter2{enter}");
+  await user.type(screen.getByLabelText(/Username/), "delay");
+  await user.type(screen.getByLabelText(/Password/), "hunter2{enter}");
   expect(screen.getByRole("button", { name: /Log in/ })).toBeInTheDocument();
   rerender(
     <Login open={false} onSuccess={onSuccess} handleClose={handleClose} />
@@ -91,25 +92,27 @@ test("close while pending", async () => {
 });
 
 test("bad credentials", async () => {
+  const user = userEvent.setup();
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
-  await userEvent.type(screen.getByLabelText(/Username/), "slamb");
-  await userEvent.type(screen.getByLabelText(/Password/), "wrong{enter}");
+  await user.type(screen.getByLabelText(/Username/), "slamb");
+  await user.type(screen.getByLabelText(/Password/), "wrong{enter}");
   await screen.findByText(/bad credentials/);
   expect(onSuccess).toHaveBeenCalledTimes(0);
 });
 
 test("server error", async () => {
+  const user = userEvent.setup();
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
-  await userEvent.type(screen.getByLabelText(/Username/), "server-error");
-  await userEvent.type(screen.getByLabelText(/Password/), "asdf{enter}");
+  await user.type(screen.getByLabelText(/Username/), "server-error");
+  await user.type(screen.getByLabelText(/Password/), "asdf{enter}");
   await screen.findByText(/server error/);
   vi.runOnlyPendingTimers();
   await waitForElementToBeRemoved(() => screen.queryByText(/server error/));
@@ -117,13 +120,14 @@ test("server error", async () => {
 });
 
 test("network error", async () => {
+  const user = userEvent.setup();
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
     <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
   );
-  await userEvent.type(screen.getByLabelText(/Username/), "network-error");
-  await userEvent.type(screen.getByLabelText(/Password/), "asdf{enter}");
+  await user.type(screen.getByLabelText(/Username/), "network-error");
+  await user.type(screen.getByLabelText(/Password/), "asdf{enter}");
 
   // This is the text chosen by msw:
   // https://github.com/mswjs/interceptors/blob/122a6533ce57d551dc3b59b3bb43a39026989b70/src/interceptors/fetch/index.ts#L187
