@@ -72,7 +72,7 @@ fn open_conn(db_dir: &Path, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connec
         mode,
         rusqlite::version()
     );
-    let conn = rusqlite::Connection::open_with_flags(
+    let conn = rusqlite::Connection::open_with_flags_and_vfs(
         db_path,
         match mode {
             OpenMode::ReadOnly => rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -81,9 +81,17 @@ fn open_conn(db_dir: &Path, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connec
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
             },
         } |
-        // rusqlite::Connection is not Sync, so there's no reason to tell SQLite3 to use the
+        // `rusqlite::Connection` is not Sync, so there's no reason to tell SQLite3 to use the
         // serialized threading mode.
         rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        // In read/write mode, Moonfire holds a directory lock for its entire operation, as
+        // described above. There's then no point in SQLite releasing its lock after each
+        // transaction and reacquiring it, or in using shared memory for the wal-index.
+        // See the following page: <https://www.sqlite.org/vfs.html>
+        match mode {
+            OpenMode::ReadOnly => "unix",
+            _ => "unix-excl",
+        },
     )?;
     Ok((dir, conn))
 }
