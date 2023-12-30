@@ -9,5 +9,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/setupTests.ts"],
+
+    // This avoids node's native fetch from causing vitest workers to hang
+    // and use 100% CPU.
+    // <https://github.com/vitest-dev/vitest/issues/3077#issuecomment-1815767839>
+    pool: "forks",
   },
 });
