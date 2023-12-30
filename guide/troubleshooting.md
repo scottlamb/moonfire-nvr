@@ -228,6 +228,22 @@ clock_gettime failed: EPERM: Operation not permitted
 This indicates a broken environment. See the troubleshooting guide.
 ```
 
+#### `VFS is unable to determine a suitable directory for temporary files`
+
+Moonfire NVR's database internally uses SQLite, which creates
+[various temporary files](https://www.sqlite.org/tempfiles.html). If it can't
+find a path that exists and is writable by the current user, it will produce
+errors such as the following:
+
+```
+2023-12-29T16:16:47.795330  WARN           sync-1 syncer{path=/media/nvr/sample}: moonfire_db::writer: flush failure on save for reason 120 sec after start of 59 seconds driveway-sub recording 10/1222348; will retry after PT60S: UNAVAILABLE
+caused by: disk I/O error
+caused by: Error code 6410: VFS is unable to determine a suitable directory for temporary files
+```
+
+The simplest solution is to pass `/var/tmp` through from the host to the Docker
+container in your Docker compose file.
+
 ### Server errors
 
 #### `Error: pts not monotonically increasing; got 26615520 then 26539470`

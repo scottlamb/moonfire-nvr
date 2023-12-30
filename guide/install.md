@@ -58,6 +58,12 @@ services:
       # Docker will "helpfully" create a directory by this name otherwise.
       - "/etc/moonfire-nvr.toml:/etc/moonfire-nvr.toml:ro"
 
+      # Pass through `/var/tmp` from the host.
+      # SQLite expects to be able to create temporary files in this dir, which
+      # is not created in Moonfire's minimal Docker image.
+      # See: <https://www.sqlite.org/tempfiles.html>
+      - "/var/tmp:/var/tmp"
+
       # Add additional mount lines here for each sample file directory
       # outside of /var/lib/moonfire-nvr, e.g.:
       # - "/media/nvr:/media/nvr"
