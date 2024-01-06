@@ -985,7 +985,7 @@ impl FileBuilder {
     pub fn build(
         mut self,
         db: Arc<db::Database>,
-        dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
+        dirs_by_stream_id: Arc<::base::FastHashMap<i32, Arc<dir::SampleFileDir>>>,
     ) -> Result<File, Error> {
         let mut max_end = None;
         let mut etag = blake3::Hasher::new();
@@ -1777,7 +1777,7 @@ impl BodyState {
 
 struct FileInner {
     db: Arc<db::Database>,
-    dirs_by_stream_id: Arc<::fnv::FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
+    dirs_by_stream_id: Arc<::base::FastHashMap<i32, Arc<dir::SampleFileDir>>>,
     segments: Vec<Segment>,
     slices: Slices<Slice>,
     buf: Vec<u8>,

@@ -308,7 +308,7 @@ fn verify_dir_contents(
         params![],
         |r| r.get(0),
     )?;
-    let mut files = ::fnv::FnvHashSet::with_capacity_and_hasher(n as usize, Default::default());
+    let mut files = ::base::FastHashSet::with_capacity_and_hasher(n as usize, Default::default());
     for e in dir.iter() {
         let e = e?;
         let f = e.file_name();

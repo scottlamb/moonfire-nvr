@@ -12,7 +12,7 @@ use crate::raw;
 use crate::recording;
 use crate::schema;
 use base::{err, Error};
-use fnv::{FnvHashMap, FnvHashSet};
+use base::{FastHashMap, FastHashSet};
 use nix::fcntl::AtFlags;
 use rusqlite::params;
 use std::os::unix::io::AsRawFd;
@@ -27,8 +27,8 @@ pub struct Options {
 
 #[derive(Default)]
 pub struct Context {
-    rows_to_delete: FnvHashSet<CompositeId>,
-    files_to_trash: FnvHashSet<(i32, CompositeId)>, // (dir_id, composite_id)
+    rows_to_delete: FastHashSet<CompositeId>,
+    files_to_trash: FastHashSet<(i32, CompositeId)>, // (dir_id, composite_id)
 }
 
 pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error> {
@@ -79,7 +79,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
     let (db_uuid, _config) = raw::read_meta(conn)?;
 
     // Scan directories.
-    let mut dirs_by_id: FnvHashMap<i32, Dir> = FnvHashMap::default();
+    let mut dirs_by_id: FastHashMap<i32, Dir> = FastHashMap::default();
     {
         let mut dir_stmt = conn.prepare(
             r#"
@@ -229,11 +229,11 @@ struct Recording {
 
 #[derive(Default)]
 struct Stream {
-    recordings: FnvHashMap<i32, Recording>,
+    recordings: FastHashMap<i32, Recording>,
     cum_recordings: Option<i32>,
 }
 
-type Dir = FnvHashMap<i32, Stream>;
+type Dir = FastHashMap<i32, Stream>;
 
 fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
     let mut it = recording::SampleIndexIterator::default();

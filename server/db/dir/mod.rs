@@ -25,6 +25,7 @@ use std::ffi::CStr;
 use std::fs;
 use std::io::{Read, Write};
 use std::ops::Range;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::Arc;
@@ -87,9 +88,9 @@ impl NixPath for CompositeIdPath {
 #[derive(Debug)]
 pub struct Fd(std::os::unix::io::RawFd);
 
-impl std::os::unix::io::AsRawFd for Fd {
-    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
-        self.0
+impl AsFd for Fd {
+    fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
+        unsafe { BorrowedFd::borrow_raw(self.0) }
     }
 }
 
@@ -316,7 +317,7 @@ impl SampleFileDir {
 
     pub(crate) fn opendir(&self) -> Result<nix::dir::Dir, nix::Error> {
         nix::dir::Dir::openat(
-            self.fd.as_raw_fd(),
+            self.fd.as_fd().as_raw_fd(),
             ".",
             OFlag::O_DIRECTORY | OFlag::O_RDONLY,
             Mode::empty(),

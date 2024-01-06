@@ -144,8 +144,8 @@ fn encode_sid(sid: db::RawSessionId, flags: i32) -> String {
 
 #[cfg(test)]
 mod tests {
+    use base::FastHashMap;
     use db::testutil;
-    use fnv::FnvHashMap;
     use tracing::info;
 
     use crate::web::tests::Server;
@@ -163,7 +163,7 @@ mod tests {
         let resp = cli.post(&login_url).send().await.unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 
-        let mut p = FnvHashMap::default();
+        let mut p = FastHashMap::default();
         p.insert("username", "slamb");
         p.insert("password", "asdf");
         let resp = cli.post(&login_url).json(&p).send().await.unwrap();
@@ -190,7 +190,7 @@ mod tests {
         testutil::init();
         let s = Server::new(None);
         let cli = reqwest::Client::new();
-        let mut p = FnvHashMap::default();
+        let mut p = FastHashMap::default();
         p.insert("username", "slamb");
         p.insert("password", "hunter2");
         let resp = cli
@@ -239,7 +239,7 @@ mod tests {
             .get("csrf")
             .unwrap()
             .as_str();
-        let mut p = FnvHashMap::default();
+        let mut p = FastHashMap::default();
         p.insert("csrf", csrf);
         let resp = cli
             .post(&format!("{}/api/logout", &s.base_url))

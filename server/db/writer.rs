@@ -9,8 +9,8 @@ use crate::dir;
 use crate::recording::{self, MAX_RECORDING_WALL_DURATION};
 use base::clock::{self, Clocks};
 use base::shutdown::ShutdownError;
+use base::FastHashMap;
 use base::{bail, err, Error};
-use fnv::FnvHashMap;
 use std::cmp::{self, Ordering};
 use std::convert::TryFrom;
 use std::io;
@@ -294,7 +294,7 @@ impl<F: FileWriter> SyncerChannel<F> {
 /// on opening.
 fn list_files_to_abandon(
     dir: &dir::SampleFileDir,
-    streams_to_next: FnvHashMap<i32, i32>,
+    streams_to_next: FastHashMap<i32, i32>,
 ) -> Result<Vec<CompositeId>, Error> {
     let mut v = Vec::new();
     let mut d = dir.opendir()?;
@@ -330,7 +330,7 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
 
         // Abandon files.
         // First, get a list of the streams in question.
-        let streams_to_next: FnvHashMap<_, _> = l
+        let streams_to_next: FastHashMap<_, _> = l
             .streams_by_id()
             .iter()
             .filter_map(|(&k, v)| {

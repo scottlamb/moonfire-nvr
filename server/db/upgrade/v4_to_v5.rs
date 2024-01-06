@@ -15,6 +15,7 @@ use nix::sys::stat::Mode;
 use protobuf::Message;
 use rusqlite::params;
 use std::io::{Read, Write};
+use std::os::fd::AsFd as _;
 use std::os::unix::io::AsRawFd;
 use tracing::info;
 use uuid::Uuid;
@@ -25,7 +26,12 @@ const FIXED_DIR_META_LEN: usize = 512;
 fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, Error> {
     let tmp_path = cstr!("meta.tmp");
     let meta_path = cstr!("meta");
-    let mut f = crate::fs::openat(dir.as_raw_fd(), meta_path, OFlag::O_RDONLY, Mode::empty())?;
+    let mut f = crate::fs::openat(
+        dir.as_fd().as_raw_fd(),
+        meta_path,
+        OFlag::O_RDONLY,
+        Mode::empty(),
+    )?;
     let mut data = Vec::new();
     f.read_to_end(&mut data)?;
     if data.len() == FIXED_DIR_META_LEN {
@@ -49,7 +55,7 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
         );
     }
     let mut f = crate::fs::openat(
-        dir.as_raw_fd(),
+        dir.as_fd().as_raw_fd(),
         tmp_path,
         OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_WRONLY,
         Mode::S_IRUSR | Mode::S_IWUSR,
@@ -72,9 +78,9 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
     f.sync_all()?;
 
     nix::fcntl::renameat(
-        Some(dir.as_raw_fd()),
+        Some(dir.as_fd().as_raw_fd()),
         tmp_path,
-        Some(dir.as_raw_fd()),
+        Some(dir.as_fd().as_raw_fd()),
         meta_path,
     )?;
     Ok(true)
@@ -89,7 +95,7 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
 fn maybe_cleanup_garbage_uuids(dir: &dir::Fd) -> Result<bool, Error> {
     let mut need_sync = false;
     let mut dir2 = nix::dir::Dir::openat(
-        dir.as_raw_fd(),
+        dir.as_fd().as_raw_fd(),
         ".",
         OFlag::O_DIRECTORY | OFlag::O_RDONLY,
         Mode::empty(),
@@ -105,7 +111,7 @@ fn maybe_cleanup_garbage_uuids(dir: &dir::Fd) -> Result<bool, Error> {
         if Uuid::parse_str(f_str).is_ok() {
             info!("removing leftover garbage file {}", f_str);
             nix::unistd::unlinkat(
-                Some(dir.as_raw_fd()),
+                Some(dir.as_fd().as_raw_fd()),
                 f,
                 nix::unistd::UnlinkatFlags::NoRemoveDir,
             )?;

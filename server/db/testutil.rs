@@ -9,7 +9,7 @@ use crate::db;
 use crate::dir;
 use crate::writer;
 use base::clock::Clocks;
-use fnv::FnvHashMap;
+use base::FastHashMap;
 use std::env;
 use std::sync::Arc;
 use std::thread;
@@ -47,7 +47,7 @@ pub fn init() {
 
 pub struct TestDb<C: Clocks + Clone> {
     pub db: Arc<db::Database<C>>,
-    pub dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<dir::SampleFileDir>>>,
+    pub dirs_by_stream_id: Arc<FastHashMap<i32, Arc<dir::SampleFileDir>>>,
     pub shutdown_tx: base::shutdown::Sender,
     pub shutdown_rx: base::shutdown::Receiver,
     pub syncer_channel: writer::SyncerChannel<::std::fs::File>,
@@ -116,7 +116,7 @@ impl<C: Clocks + Clone> TestDb<C> {
                 .get()
                 .unwrap();
         }
-        let mut dirs_by_stream_id = FnvHashMap::default();
+        let mut dirs_by_stream_id = FastHashMap::default();
         dirs_by_stream_id.insert(TEST_STREAM_ID, dir);
         let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
         let (syncer_channel, syncer_join) =

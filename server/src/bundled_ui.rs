@@ -4,14 +4,14 @@
 
 //! UI bundled (compiled/linked) into the executable for single-file deployment.
 
-use fnv::FnvHashMap;
+use base::FastHashMap;
 use http::{header, HeaderMap, HeaderValue};
 use std::io::Read;
 use std::sync::OnceLock;
 
 use crate::body::{BoxedError, Chunk};
 
-pub struct Ui(FnvHashMap<&'static str, FileSet>);
+pub struct Ui(FastHashMap<&'static str, FileSet>);
 
 /// A file as passed in from `build.rs`.
 struct BuildFile {

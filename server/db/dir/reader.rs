@@ -22,7 +22,6 @@
 
 use std::convert::TryFrom;
 use std::future::Future;
-use std::os::unix::prelude::AsRawFd;
 use std::path::Path;
 use std::{
     ops::Range,
@@ -352,7 +351,7 @@ impl ReaderInt {
                 map_len,
                 nix::sys::mman::ProtFlags::PROT_READ,
                 nix::sys::mman::MapFlags::MAP_SHARED,
-                file.as_raw_fd(),
+                Some(&file),
                 offset,
             )
         }

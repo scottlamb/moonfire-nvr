@@ -10,6 +10,7 @@ use crate::dir;
 use crate::schema;
 use base::Error;
 use rusqlite::params;
+use std::os::fd::AsFd as _;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -71,9 +72,9 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         let from_path = super::UuidPath::from(sample_file_uuid.0);
         let to_path = crate::dir::CompositeIdPath::from(id);
         if let Err(e) = nix::fcntl::renameat(
-            Some(d.fd.as_raw_fd()),
+            Some(d.fd.as_fd().as_raw_fd()),
             &from_path,
-            Some(d.fd.as_raw_fd()),
+            Some(d.fd.as_fd().as_raw_fd()),
             &to_path,
         ) {
             if e == nix::Error::ENOENT {

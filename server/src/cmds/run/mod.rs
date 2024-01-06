@@ -7,10 +7,10 @@ use crate::web;
 use crate::web::accept::Listener;
 use base::clock;
 use base::err;
+use base::FastHashMap;
 use base::{bail, Error};
 use bpaf::Bpaf;
 use db::{dir, writer};
-use fnv::FnvHashMap;
 use hyper::service::{make_service_fn, service_fn};
 use itertools::Itertools;
 use retina::client::SessionGroup;
@@ -134,7 +134,7 @@ struct Syncer {
 }
 
 #[cfg(target_os = "linux")]
-fn get_preopened_sockets() -> Result<FnvHashMap<String, Listener>, Error> {
+fn get_preopened_sockets() -> Result<FastHashMap<String, Listener>, Error> {
     use libsystemd::activation::IsType as _;
     use std::os::fd::{FromRawFd, IntoRawFd};
 
@@ -142,7 +142,7 @@ fn get_preopened_sockets() -> Result<FnvHashMap<String, Listener>, Error> {
     // activation.
     if std::env::var_os("LISTEN_FDS").is_none() {
         info!("no LISTEN_FDs");
-        return Ok(FnvHashMap::default());
+        return Ok(FastHashMap::default());
     }
 
     let sockets = libsystemd::activation::receive_descriptors_with_names(false)
@@ -176,13 +176,14 @@ fn get_preopened_sockets() -> Result<FnvHashMap<String, Listener>, Error> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn get_preopened_sockets() -> Result<FnvHashMap<String, Listener>, Error> {
-    Ok(FnvHashMap::default())
+fn get_preopened_sockets() -> Result<FastHashMap<String, Listener>, Error> {
+    Ok(FastHashMap::default())
 }
 
 fn read_config(path: &Path) -> Result<ConfigFile, Error> {
     let config = std::fs::read(path)?;
-    let config = toml::from_slice(&config).map_err(|e| err!(InvalidArgument, source(e)))?;
+    let config = std::str::from_utf8(&config).map_err(|e| err!(InvalidArgument, source(e)))?;
+    let config = toml::from_str(&config).map_err(|e| err!(InvalidArgument, source(e)))?;
     Ok(config)
 }
 
@@ -267,7 +268,7 @@ fn prepare_unix_socket(p: &Path) {
 
 fn make_listener(
     addr: &config::AddressConfig,
-    #[cfg_attr(not(target_os = "linux"), allow(unused))] preopened: &mut FnvHashMap<
+    #[cfg_attr(not(target_os = "linux"), allow(unused))] preopened: &mut FastHashMap<
         String,
         Listener,
     >,
@@ -341,11 +342,11 @@ async fn inner(
 
     // Start a streamer for each stream.
     let mut streamers = Vec::new();
-    let mut session_groups_by_camera: FnvHashMap<i32, Arc<retina::client::SessionGroup>> =
-        FnvHashMap::default();
+    let mut session_groups_by_camera: FastHashMap<i32, Arc<retina::client::SessionGroup>> =
+        FastHashMap::default();
     let syncers = if !read_only {
         let l = db.lock();
-        let mut dirs = FnvHashMap::with_capacity_and_hasher(
+        let mut dirs = FastHashMap::with_capacity_and_hasher(
             l.sample_file_dirs_by_id().len(),
             Default::default(),
         );
@@ -377,7 +378,7 @@ async fn inner(
 
         // Then, with the lock dropped, create syncers.
         drop(l);
-        let mut syncers = FnvHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
+        let mut syncers = FastHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
         for (id, dir) in dirs.drain() {
             let (channel, join) = writer::start_syncer(db.clone(), shutdown_rx.clone(), id)?;
             syncers.insert(id, Syncer { dir, channel, join });

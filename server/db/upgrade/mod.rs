@@ -166,7 +166,7 @@ mod tests {
     use crate::compare;
     use crate::testutil;
     use base::err;
-    use fnv::FnvHashMap;
+    use base::FastHashMap;
 
     const BAD_ANAMORPHIC_VIDEO_SAMPLE_ENTRY: &[u8] = b"\x00\x00\x00\x84\x61\x76\x63\x31\x00\x00\
           \x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
@@ -344,7 +344,7 @@ mod tests {
                     "#,
                 )?;
                 let mut rows = stmt.query(params![])?;
-                let mut pasp_by_id = FnvHashMap::default();
+                let mut pasp_by_id = FastHashMap::default();
                 while let Some(row) = rows.next()? {
                     let id: i32 = row.get(0)?;
                     let pasp_h_spacing: i32 = row.get(1)?;

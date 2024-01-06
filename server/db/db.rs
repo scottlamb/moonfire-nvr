@@ -37,8 +37,7 @@ use crate::signal;
 use base::clock::{self, Clocks};
 use base::strutil::encode_size;
 use base::{bail, err, Error};
-// use failure::{bail, err, Error, ResultExt};
-use fnv::{FnvHashMap, FnvHashSet};
+use base::{FastHashMap, FastHashSet};
 use hashlink::LinkedHashMap;
 use itertools::Itertools;
 use rusqlite::{named_params, params};
@@ -325,7 +324,7 @@ pub struct SampleFileDir {
 
     /// ids which are in the `garbage` database table (rather than `recording`) as of last commit
     /// but may still exist on disk. These can't be safely removed from the database yet.
-    pub(crate) garbage_needs_unlink: FnvHashSet<CompositeId>,
+    pub(crate) garbage_needs_unlink: FastHashSet<CompositeId>,
 
     /// ids which are in the `garbage` database table and are guaranteed to no longer exist on
     /// disk (have been unlinked and the dir has been synced). These may be removed from the
@@ -620,7 +619,7 @@ pub struct LockedDatabase {
     streams_by_id: BTreeMap<i32, Stream>,
     cameras_by_uuid: BTreeMap<Uuid, i32>, // values are ids.
     video_sample_entries_by_id: BTreeMap<i32, Arc<VideoSampleEntry>>,
-    video_index_cache: RefCell<LinkedHashMap<i64, Box<[u8]>, fnv::FnvBuildHasher>>,
+    video_index_cache: RefCell<LinkedHashMap<i64, Box<[u8]>, base::RandomState>>,
     on_flush: Vec<Box<dyn Fn() + Send>>,
 }
 
@@ -1010,7 +1009,7 @@ impl LockedDatabase {
         };
         let tx = self.conn.transaction()?;
         let mut new_ranges =
-            FnvHashMap::with_capacity_and_hasher(self.streams_by_id.len(), Default::default());
+            FastHashMap::with_capacity_and_hasher(self.streams_by_id.len(), Default::default());
         {
             let mut stmt = tx.prepare_cached(UPDATE_STREAM_COUNTERS_SQL)?;
             for (&stream_id, s) in &self.streams_by_id {
@@ -1100,7 +1099,7 @@ impl LockedDatabase {
             added_bytes: i64,
             deleted_bytes: i64,
         }
-        let mut dir_logs: FnvHashMap<i32, DirLog> = FnvHashMap::default();
+        let mut dir_logs: FastHashMap<i32, DirLog> = FastHashMap::default();
 
         // Process delete_garbage.
         for (&id, dir) in &mut self.sample_file_dirs_by_id {
@@ -1214,7 +1213,7 @@ impl LockedDatabase {
     /// Currently this only happens at startup (or during configuration), so this isn't a problem
     /// in practice.
     pub fn open_sample_file_dirs(&mut self, ids: &[i32]) -> Result<(), Error> {
-        let mut in_progress = FnvHashMap::with_capacity_and_hasher(ids.len(), Default::default());
+        let mut in_progress = FastHashMap::with_capacity_and_hasher(ids.len(), Default::default());
         for &id in ids {
             let e = in_progress.entry(id);
             use ::std::collections::hash_map::Entry;
@@ -1837,7 +1836,7 @@ impl LockedDatabase {
                 uuid,
                 dir: Some(dir),
                 last_complete_open: Some(*o),
-                garbage_needs_unlink: FnvHashSet::default(),
+                garbage_needs_unlink: FastHashSet::default(),
                 garbage_unlinked: Vec::new(),
             }),
             Entry::Occupied(_) => bail!(Internal, msg("duplicate sample file dir id {id}")),
@@ -2161,7 +2160,7 @@ impl LockedDatabase {
     pub fn signals_by_id(&self) -> &BTreeMap<u32, signal::Signal> {
         self.signal.signals_by_id()
     }
-    pub fn signal_types_by_uuid(&self) -> &FnvHashMap<Uuid, signal::Type> {
+    pub fn signal_types_by_uuid(&self) -> &FastHashMap<Uuid, signal::Type> {
         self.signal.types_by_uuid()
     }
     pub fn list_changes_by_time(

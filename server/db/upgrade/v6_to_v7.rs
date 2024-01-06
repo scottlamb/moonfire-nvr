@@ -2,9 +2,9 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
+use base::FastHashMap;
 /// Upgrades a version 6 schema to a version 7 schema.
 use base::{err, Error};
-use fnv::FnvHashMap;
 use rusqlite::{named_params, params};
 use std::{convert::TryFrom, path::PathBuf};
 use tracing::debug;
@@ -133,7 +133,7 @@ fn copy_users(tx: &rusqlite::Transaction) -> Result<(), Error> {
 }
 
 fn copy_signal_types(tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let mut types_ = FnvHashMap::default();
+    let mut types_ = FastHashMap::default();
     let mut stmt = tx.prepare("select type_uuid, value, name from signal_type_enum")?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
@@ -164,7 +164,7 @@ struct Signal {
 }
 
 fn copy_signals(tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let mut signals = FnvHashMap::default();
+    let mut signals = FastHashMap::default();
 
     // Read from signal table.
     {

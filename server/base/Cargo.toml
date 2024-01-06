@@ -14,6 +14,7 @@ nightly = []
 path = "lib.rs"
 
 [dependencies]
+ahash = "0.8"
 chrono = "0.4.23"
 coded = { git = "https://github.com/scottlamb/coded", rev = "2c97994974a73243d5dd12134831814f42cdb0e8"}
 futures = "0.3"
@@ -27,5 +28,5 @@ slab = "0.4"
 time = "0.1"
 tracing = { workspace = true }
 tracing-core = "0.1.30"
-tracing-log = "0.1.3"
+tracing-log = { workspace = true }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }

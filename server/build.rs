@@ -56,7 +56,7 @@ impl FileEncoding {
 /// `favicons/blah.ico` rather than `../../ui/dist/favicons/blah.ico.gz`.
 ///
 /// The best representation is gzipped if available, uncompressed otherwise.
-type FileMap = fnv::FnvHashMap<String, File>;
+type FileMap = std::collections::HashMap<String, File, ahash::RandomState>;
 
 fn stringify_files(files: &FileMap) -> Result<String, std::fmt::Error> {
     let mut buf = String::new();

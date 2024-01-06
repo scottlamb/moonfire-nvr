@@ -8,8 +8,8 @@
 use crate::json::{SignalConfig, SignalTypeConfig};
 use crate::{coding, days};
 use crate::{recording, SqlUuid};
+use base::FastHashMap;
 use base::{bail, err, Error};
-use fnv::FnvHashMap;
 use rusqlite::{params, Connection, Transaction};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,7 +25,7 @@ pub(crate) struct State {
     /// All types with known states. Note that currently there's no requirement an entry here
     /// exists for every `type_` specified in a `Signal`, and there's an implied `0` (unknown)
     /// state for every `Type`.
-    types_by_uuid: FnvHashMap<Uuid, Type>,
+    types_by_uuid: FastHashMap<Uuid, Type>,
 
     /// All points in time.
     /// Invariants, checked by `State::debug_assert_point_invariants`:
@@ -691,8 +691,8 @@ impl State {
         Ok(signals)
     }
 
-    fn init_types(conn: &Connection) -> Result<FnvHashMap<Uuid, Type>, Error> {
-        let mut types = FnvHashMap::default();
+    fn init_types(conn: &Connection) -> Result<FastHashMap<Uuid, Type>, Error> {
+        let mut types = FastHashMap::default();
         let mut stmt = conn.prepare(
             r#"
             select
@@ -790,7 +790,7 @@ impl State {
     pub fn signals_by_id(&self) -> &BTreeMap<u32, Signal> {
         &self.signals_by_id
     }
-    pub fn types_by_uuid(&self) -> &FnvHashMap<Uuid, Type> {
+    pub fn types_by_uuid(&self) -> &FastHashMap<Uuid, Type> {
         &self.types_by_uuid
     }
 

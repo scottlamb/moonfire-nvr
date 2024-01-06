@@ -25,8 +25,11 @@ members = ["base", "db"]
 [workspace.dependencies]
 base64 = "0.21.0"
 h264-reader = "0.7.0"
-nix = "0.26.1"
+itertools = "0.12.0"
+nix = "0.27.0"
 tracing = { version = "0.1", features = ["log"] }
+tracing-log = "0.2"
+ring = "0.17.0"
 rusqlite = "0.30.0"
 
 [dependencies]
@@ -40,22 +43,21 @@ chrono = "0.4.23"
 cursive = { version = "0.20.0", default-features = false, features = ["termion-backend"] }
 db = { package = "moonfire-db", path = "db" }
 futures = "0.3"
-fnv = "1.0"
 h264-reader = { workspace = true }
 http = "0.2.3"
 http-serve = { version = "0.3.1", features = ["dir"] }
 hyper = { version = "0.14.2", features = ["http1", "server", "stream", "tcp"] }
-itertools = "0.10.0"
+itertools = { workspace = true }
 libc = "0.2"
 log = { version = "0.4" }
 memchr = "2.0.2"
-nix = { workspace = true}
+nix = { workspace = true, features = ["time", "user"] }
 nom = "7.0.0"
-password-hash = "0.4.2"
+password-hash = "0.5.0"
 protobuf = "3.0"
 reffers = "0.7.0"
 retina = "0.4.0"
-ring = "0.16.2"
+ring = { workspace = true }
 rusqlite = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -65,12 +67,12 @@ time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1.5"
 tokio-tungstenite = "0.20.0"
-toml = "0.5"
+toml = "0.6"
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
 tracing-core = "0.1.30"
 tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }
-tracing-log = "0.1.3"
+tracing-log = { workspace = true }
 ulid = "1.0.0"
 url = "2.1.1"
 uuid = { version = "1.1.2", features = ["serde", "std", "v4"] }
@@ -78,11 +80,11 @@ flate2 = "1.0.26"
 git-version = "0.3.5"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-libsystemd = "0.6.0"
+libsystemd = "0.7.0"
 
 [build-dependencies]
+ahash = "0.8"
 blake3 = "1.0.0"
-fnv = "1.0"
 walkdir = "2.3.3"
 
 [dev-dependencies]

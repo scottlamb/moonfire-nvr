@@ -7,8 +7,8 @@
 use crate::db::{self, CompositeId, SqlUuid};
 use crate::json::GlobalConfig;
 use crate::recording;
+use base::FastHashSet;
 use base::{bail, err, Error, ErrorKind, ResultExt as _};
-use fnv::FnvHashSet;
 use rusqlite::{named_params, params};
 use std::ops::Range;
 use uuid::Uuid;
@@ -422,8 +422,8 @@ pub(crate) fn get_range(
 pub(crate) fn list_garbage(
     conn: &rusqlite::Connection,
     dir_id: i32,
-) -> Result<FnvHashSet<CompositeId>, Error> {
-    let mut garbage = FnvHashSet::default();
+) -> Result<FastHashSet<CompositeId>, Error> {
+    let mut garbage = FastHashSet::default();
     let mut stmt =
         conn.prepare_cached("select composite_id from garbage where sample_file_dir_id = ?")?;
     let mut rows = stmt.query([&dir_id])?;

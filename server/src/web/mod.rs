@@ -20,13 +20,13 @@ use crate::mp4;
 use crate::web::static_file::Ui;
 use base::err;
 use base::Error;
+use base::FastHashMap;
 use base::ResultExt;
 use base::{bail, clock::Clocks, ErrorKind};
 use core::borrow::Borrow;
 use core::str::FromStr;
 use db::dir::SampleFileDir;
 use db::{auth, recording};
-use fnv::FnvHashMap;
 use http::header::{self, HeaderValue};
 use http::{status::StatusCode, Request, Response};
 use hyper::body::Bytes;
@@ -172,7 +172,7 @@ pub struct Config<'a> {
 pub struct Service {
     db: Arc<db::Database>,
     ui: Ui,
-    dirs_by_stream_id: Arc<FnvHashMap<i32, Arc<SampleFileDir>>>,
+    dirs_by_stream_id: Arc<FastHashMap<i32, Arc<SampleFileDir>>>,
     time_zone_name: String,
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
@@ -199,7 +199,7 @@ impl Service {
         let dirs_by_stream_id = {
             let l = config.db.lock();
             let mut d =
-                FnvHashMap::with_capacity_and_hasher(l.streams_by_id().len(), Default::default());
+                FastHashMap::with_capacity_and_hasher(l.streams_by_id().len(), Default::default());
             for (&id, s) in l.streams_by_id().iter() {
                 let dir_id = match s.sample_file_dir_id {
                     Some(d) => d,

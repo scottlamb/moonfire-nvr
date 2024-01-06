@@ -6,9 +6,9 @@
 
 use crate::json::UserConfig;
 use crate::schema::Permissions;
+use base::FastHashMap;
 use base::{bail, err, strutil, Error, ErrorKind, ResultExt as _};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
-use fnv::FnvHashMap;
 use protobuf::Message;
 use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::{named_params, params, Connection, Transaction};
@@ -42,7 +42,8 @@ fn params() -> &'static Params {
 /// For testing only: use fast but insecure hashes.
 /// Call via `testutil::init()`.
 pub(crate) fn set_test_config() {
-    let test_params = scrypt::Params::new(8, 8, 1).expect("test params should be valid");
+    let test_params = scrypt::Params::new(8, 8, 1, scrypt::Params::RECOMMENDED_LEN)
+        .expect("test params should be valid");
     if let Err(existing_params) = PARAMS.set(Params {
         actual: test_params,
         is_test: true,
@@ -386,7 +387,7 @@ pub(crate) struct State {
     /// TODO: Add eviction of clean sessions. Keep a linked hash set of clean session hashes and
     /// evict the oldest when its size exceeds a threshold. Or just evict everything on every flush
     /// (and accept more frequent database accesses).
-    sessions: FnvHashMap<SessionHash, Session>,
+    sessions: FastHashMap<SessionHash, Session>,
 
     rand: SystemRandom,
 }
@@ -396,7 +397,7 @@ impl State {
         let mut state = State {
             users_by_id: BTreeMap::new(),
             users_by_name: BTreeMap::new(),
-            sessions: FnvHashMap::default(),
+            sessions: FastHashMap::default(),
             rand: ring::rand::SystemRandom::new(),
         };
         let mut stmt = conn.prepare(
@@ -657,7 +658,7 @@ impl State {
         domain: Option<Vec<u8>>,
         creation_password_id: Option<i32>,
         flags: i32,
-        sessions: &'s mut FnvHashMap<SessionHash, Session>,
+        sessions: &'s mut FastHashMap<SessionHash, Session>,
         permissions: Permissions,
     ) -> Result<(RawSessionId, &'s Session), base::Error> {
         let mut session_id = RawSessionId([0u8; 48]);

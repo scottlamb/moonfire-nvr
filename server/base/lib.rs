@@ -10,3 +10,7 @@ pub mod time;
 pub mod tracing_setup;
 
 pub use crate::error::{Error, ErrorBuilder, ErrorKind, ResultExt};
+
+pub use ahash::RandomState;
+pub type FastHashMap<K, V> = std::collections::HashMap<K, V, ahash::RandomState>;
+pub type FastHashSet<K> = std::collections::HashSet<K, ahash::RandomState>;
