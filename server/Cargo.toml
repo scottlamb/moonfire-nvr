@@ -67,7 +67,7 @@ time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1.5"
 tokio-tungstenite = "0.20.0"
-toml = "0.6"
+toml = "0.8"
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
 tracing-core = "0.1.30"
@@ -111,5 +111,9 @@ lto = true
 debug = 1
 
 [patch.crates-io]
+# update to indexmap 2
+protobuf-codegen = { git = "https://github.com/scottlamb/rust-protobuf.git", rev = "a61e09785c957eb9a183d129b426710146bfde38" }
+protobuf-parse = { git = "https://github.com/scottlamb/rust-protobuf.git", rev = "a61e09785c957eb9a183d129b426710146bfde38" }
+
 # This version uses fallible-iterator v0.3 (same one rusqlite 0.30 uses) and hasn't been released yet.
 sdp-types = { git = "https://github.com/sdroege/sdp-types", rev = "e8d0a2c4b8b1fc1ddf1c60a01dc717a2f4e2d514" }

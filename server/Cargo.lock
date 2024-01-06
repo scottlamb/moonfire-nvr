@@ -19,17 +19,6 @@ checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
 
 [[package]]
 name = "ahash"
-version = "0.7.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a824f2aa7e75a0c98c5a504fceb80649e9c35265d44525b5f94de4771a395cd"
-dependencies = [
- "getrandom",
- "once_cell",
- "version_check",
-]
-
-[[package]]
-name = "ahash"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c3a9648d43b9cd48db467b3f87fdd6e146bcc88ab0180006cef2179fe11d01"
@@ -49,6 +38,12 @@ checksum = "b2969dcb958b36655471fc61f7e416fa76033bdd4bfed0678d8fee1e2d07a1f0"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "allocator-api2"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 
 [[package]]
 name = "android-tzdata"
@@ -343,7 +338,7 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5438eb16bdd8af51b31e74764fef5d0a9260227a5ec82ba75c9d11ce46595839"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "cfg-if",
  "crossbeam-channel",
  "cursive_core",
@@ -362,7 +357,7 @@ version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4db3b58161228d0dcb45c7968c5e74c3f03ad39e8983e58ad7d57061aa2cd94d"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "crossbeam-channel",
  "enum-map",
  "enumset",
@@ -497,6 +492,12 @@ dependencies = [
  "quote",
  "syn 2.0.48",
 ]
+
+[[package]]
+name = "equivalent"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
 name = "errno"
@@ -695,9 +696,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.21"
+version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91fc23aa11be92976ef4729127f1a74adf36d8436f7816b185d18df956790833"
+checksum = "4d6250322ef6e60f93f9a2162799302cd6f68f79f6e5d85c8c16f14d1d958178"
 dependencies = [
  "bytes",
  "fnv",
@@ -727,18 +728,19 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.12.3"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
- "ahash 0.7.7",
+ "ahash",
+ "allocator-api2",
 ]
 
 [[package]]
 name = "hashlink"
-version = "0.8.1"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69fe1fcf8b4278d860ad0548329f892a3631fb63f82574df68275f34cdbe0ffa"
+checksum = "e8094feaf31ff591f651a2664fb9cfd92bba7a60ce3197265e9482ebe753c8f7"
 dependencies = [
  "hashbrown",
 ]
@@ -916,11 +918,11 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "1.9.3"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
+checksum = "d530e1a18b1cb4c484e6e34556a0d948706958449fca0cab753d649f2bce3d1f"
 dependencies = [
- "autocfg",
+ "equivalent",
  "hashbrown",
 ]
 
@@ -1103,7 +1105,7 @@ dependencies = [
 name = "moonfire-base"
 version = "0.0.0"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "chrono",
  "coded",
  "futures",
@@ -1140,7 +1142,7 @@ dependencies = [
  "num-rational",
  "odds",
  "pretty-hex",
- "protobuf",
+ "protobuf 3.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "protobuf-codegen",
  "ring",
  "rusqlite",
@@ -1161,7 +1163,7 @@ dependencies = [
 name = "moonfire-nvr"
 version = "0.0.0"
 dependencies = [
- "ahash 0.8.7",
+ "ahash",
  "base64",
  "blake3",
  "bpaf",
@@ -1188,7 +1190,7 @@ dependencies = [
  "nom",
  "num-rational",
  "password-hash",
- "protobuf",
+ "protobuf 3.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "reffers",
  "reqwest",
  "retina",
@@ -1264,15 +1266,6 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
-]
-
-[[package]]
-name = "nom8"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae01545c9c7fc4486ab7debaf2aad7003ac19431791868fb2e8066df97fad2f8"
-dependencies = [
- "memchr",
 ]
 
 [[package]]
@@ -1532,19 +1525,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b65f4a8ec18723a734e5dc09c173e0abf9690432da5340285d536edcb4dac190"
 dependencies = [
  "once_cell",
- "protobuf-support",
+ "protobuf-support 3.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "thiserror",
+]
+
+[[package]]
+name = "protobuf"
+version = "3.3.0"
+source = "git+https://github.com/scottlamb/rust-protobuf.git?rev=a61e09785c957eb9a183d129b426710146bfde38#a61e09785c957eb9a183d129b426710146bfde38"
+dependencies = [
+ "once_cell",
+ "protobuf-support 3.3.0 (git+https://github.com/scottlamb/rust-protobuf.git?rev=a61e09785c957eb9a183d129b426710146bfde38)",
  "thiserror",
 ]
 
 [[package]]
 name = "protobuf-codegen"
 version = "3.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e85514a216b1c73111d9032e26cc7a5ecb1bb3d4d9539e91fb72a4395060f78"
+source = "git+https://github.com/scottlamb/rust-protobuf.git?rev=a61e09785c957eb9a183d129b426710146bfde38#a61e09785c957eb9a183d129b426710146bfde38"
 dependencies = [
  "anyhow",
  "once_cell",
- "protobuf",
+ "protobuf 3.3.0 (git+https://github.com/scottlamb/rust-protobuf.git?rev=a61e09785c957eb9a183d129b426710146bfde38)",
  "protobuf-parse",
  "regex",
  "tempfile",
@@ -1554,14 +1556,13 @@ dependencies = [
 [[package]]
 name = "protobuf-parse"
 version = "3.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77d6fbd6697c9e531873e81cec565a85e226b99a0f10e1acc079be057fe2fcba"
+source = "git+https://github.com/scottlamb/rust-protobuf.git?rev=a61e09785c957eb9a183d129b426710146bfde38#a61e09785c957eb9a183d129b426710146bfde38"
 dependencies = [
  "anyhow",
  "indexmap",
  "log",
- "protobuf",
- "protobuf-support",
+ "protobuf 3.3.0 (git+https://github.com/scottlamb/rust-protobuf.git?rev=a61e09785c957eb9a183d129b426710146bfde38)",
+ "protobuf-support 3.3.0 (git+https://github.com/scottlamb/rust-protobuf.git?rev=a61e09785c957eb9a183d129b426710146bfde38)",
  "tempfile",
  "thiserror",
  "which",
@@ -1572,6 +1573,14 @@ name = "protobuf-support"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6872f4d4f4b98303239a2b5838f5bbbb77b01ffc892d627957f37a22d7cfe69c"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "protobuf-support"
+version = "3.3.0"
+source = "git+https://github.com/scottlamb/rust-protobuf.git?rev=a61e09785c957eb9a183d129b426710146bfde38#a61e09785c957eb9a183d129b426710146bfde38"
 dependencies = [
  "thiserror",
 ]
@@ -2257,9 +2266,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.6.0"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb9d890e4dc9298b70f740f615f2e05b9db37dce531f6b24fb77ac993f9f217"
+checksum = "a1a195ec8c9da26928f773888e0742ca3ca1040c6cd859c919c9f59c1954ab35"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -2269,24 +2278,24 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "0.5.1"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4553f467ac8e3d374bc9a177a26801e5d0f9b211aa1673fb137a403afd1c9cf5"
+checksum = "3550f4e9685620ac18a50ed434eb3aec30db8ba93b0287467bca5826ea25baf1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.18.1"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56c59d8dd7d0dcbc6428bf7aa2f0e823e26e43b3c9aca15bbc9475d23e5fa12b"
+checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
 dependencies = [
  "indexmap",
- "nom8",
  "serde",
  "serde_spanned",
  "toml_datetime",
+ "winnow",
 ]
 
 [[package]]
@@ -2826,6 +2835,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
+
+[[package]]
+name = "winnow"
+version = "0.5.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7520bbdec7211caa7c4e682eb1fbe07abe20cee6756b6e00f537c82c11816aa"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winreg"
