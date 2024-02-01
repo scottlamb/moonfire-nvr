@@ -100,7 +100,11 @@ At the top level, before any `[[bind]]` lines, the following
 keys are understood:
 
 *   `dbDir`: path to the SQLite database directory. Defaults to `/var/lib/moonfire-nvr/db`.
-*   `uiDir`: path to the UI to serve. Defaults to `/usr/local/lib/moonfire-nvr/ui`.
+*   `uiDir`: UI to serve; can be a path. Defaults to the special value
+    `uiDir = { bundled = true }` if a UI was built into the binary, or
+    `/usr/local/lib/moonfire-nvr/ui` otherwise. Release builds have UIs
+    built in; you can replicate this yourself via `--features=bundled` or `--features=bundled-ui`
+    when [building the server](../guide/build.md).
 *   `workerThreads`: number of [tokio](https://tokio.rs/) worker threads to
     use. Defaults to the number of CPUs on the system. This normally does not
     need to be changed, but reducing it may slightly lower idle CPU usage.

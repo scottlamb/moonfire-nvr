@@ -95,6 +95,11 @@ $ cd ..
 $ sudo rsync --recursive --delete --chmod=D755,F644 ui/dist/ /usr/local/lib/moonfire-nvr/ui
 ```
 
+If you wish to bundle the UI into the binary, you can build the UI first and then pass
+`--features=bundled-ui` when building the server. See also the
+[release workflow](../.github/workflows/release.yml) which statically links SQLite and
+(musl-based) libc for a zero-dependencies binary.
+
 ### Running interactively straight from the working copy
 
 The author finds it convenient for local development to set up symlinks so that
