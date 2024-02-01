@@ -38,14 +38,33 @@ $ sudo install -m 755 "moonfire-nvr-$VERSION-$ARCH" /usr/local/bin/moonfire-nvr
 <table><tr><td><details>
 <summary>Docker</summary>
 
-If you are a Docker fan, you can install the `ghcr.io/scottlamb/moonfire-nvr`
-Docker images instead. You'll have to adapt the instructions below to a Docker
-workflow. You may find the following Docker compose snippet useful:
+The procedure above, in which Moonfire runs directly on the host, is strongly
+recommended.
+
+  * The single binary installed in `/usr/local/bin` has zero dependencies.
+    It is statically linked and bundles the UI. It just works. There's no
+    complex distribution-specific install procedures or danger of conflicting
+    version requirements between Moonfire and other software. These are the same
+    problems most people use Docker to solve.
+  * Moonfire's recommended install method used to involve Docker. In our
+    experience, complexity around Docker commands, filesystem/process namespace
+    mappings, broken seccomp defaults that do not allow standard system calls
+    like `clock_gettime`, etc. has been a major frustration for folks installing
+    Moonfire. Now that we have the zero-dependencies binary, we recommend
+    sidestepping all of this and have rewritten the docs accordingly.
+
+…but, you may still prefer Docker for familiarity or other reasons. If so, you
+can install the [`ghcr.io/scottlamb/moonfire-nvr`](https://github.com/scottlamb/moonfire-nvr/pkgs/container/moonfire-nvr) Docker images instead. We'll
+assume you know your way around your preferred tools and can adapt the
+instructions to the workflow you use with Docker.  You may find the following
+Docker compose snippet useful:
 
 ```yaml
 version: 3
 services:
   moonfire-nvr:
+    # The `vX.Y.Z` images will work on any architecture (x86-64, arm, or
+    # aarch64); just pick the correct version.
     image: ghcr.io/scottlamb/moonfire-nvr:v0.7.11
     command: run
 
@@ -73,6 +92,8 @@ services:
       - "/usr/share/zoneinfo:/usr/share/zoneinfo:ro"
 
     # Edit this to match your `moonfire-nvr` user.
+    # Note that Docker will not honor names from the host here, even if
+    # `/etc/passwd` is passed through.
     # - Be sure to run the `useradd` command below first.
     # - Then run `echo $(id -u moonfire-nvr):$(id -g moonfire-nvr)` to see
     #   what should be filled in here.

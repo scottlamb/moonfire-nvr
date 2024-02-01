@@ -14,6 +14,7 @@ need more help.
         * [`"/etc/moonfire-nvr.toml" is a directory`](#etcmoonfire-nvrtoml-is-a-directory)
         * [`Error response from daemon: unable to find user UID: no matching entries in passwd file`](#error-response-from-daemon-unable-to-find-user-uid-no-matching-entries-in-passwd-file)
         * [`clock_gettime failed: EPERM: Operation not permitted`](#clock_gettime-failed-eperm-operation-not-permitted)
+        * [`VFS is unable to determine a suitable directory for temporary files`](#vfs-is-unable-to-determine-a-suitable-directory-for-temporary-files)
     * [Server errors](#server-errors)
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
@@ -192,14 +193,15 @@ quickly enough. In the latter case, you'll likely see a
 ### Docker setup
 
 If you are using the Docker compose snippet mentioned in the
-[install.md](install instructions), you might run into a few unique problems.
+[install instructions](install.md), you might run into a few unique problems.
 
 #### `"/etc/moonfire-nvr.toml" is a directory`
 
 If you try running the Docker container with its
 `/etc/moonfire-nvr.toml:/etc/moonfire-nvr.toml:ro` mount before creating the
 config file, Docker will "helpfully" create it as a directory. Shut down
-the Docker container, remove the directory, and try again.
+the Docker container, remove the directory, create the config file,
+and try again.
 
 #### `Error response from daemon: unable to find user UID: no matching entries in passwd file`
 
@@ -207,6 +209,8 @@ If Docker produces this error, look at this section of the docker compose setup:
 
 ```yaml
     # Edit this to match your `moonfire-nvr` user.
+    # Note that Docker will not honor names from the host here, even if
+    # `/etc/passwd` is passed through.
     # - Be sure to run the `useradd` command below first.
     # - Then run `echo $(id -u moonfire-nvr):$(id -g moonfire-nvr)` to see
     #   what should be filled in here.
