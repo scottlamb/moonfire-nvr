@@ -1,4 +1,4 @@
-# Working on UI development <!-- omit in toc -->
+# Developing the UI <!-- omit in toc -->
 
 * [Getting started](#getting-started)
 * [Overriding defaults](#overriding-defaults)
