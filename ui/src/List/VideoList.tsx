@@ -71,7 +71,7 @@ export function combine(
       cur.height === vse.height &&
       cur.aspectWidth === vse.aspectWidth &&
       cur.aspectHeight === vse.aspectHeight &&
-      (split90k === undefined || r.endTime90k - cur.startTime90k <= split90k)
+      (split90k === undefined || cur.endTime90k - r.startTime90k <= split90k)
     ) {
       cur.startId = r.startId;
       cur.firstUncommitted == r.firstUncommitted ?? cur.firstUncommitted;
