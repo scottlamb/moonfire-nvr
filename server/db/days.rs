@@ -102,7 +102,7 @@ impl Value for SignalValue {
     type Change = SignalChange;
 
     fn apply(&mut self, c: &SignalChange) {
-        if self.states.len() < usize::try_from(c.new_state).unwrap() {
+        if self.states.len() < usize::from(c.new_state) {
             self.states.resize(c.new_state as usize, 0);
         }
 
@@ -117,7 +117,7 @@ impl Value for SignalValue {
 
         if c.old_state > 0 {
             // remove from old state.
-            let i = usize::try_from(c.old_state).unwrap() - 1;
+            let i = usize::from(c.old_state) - 1;
             assert!(
                 self.states.len() > i,
                 "no such old state: s={self:?} c={c:?}"

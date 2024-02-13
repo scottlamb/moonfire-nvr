@@ -145,7 +145,7 @@ where
         // (from the preceding slice) the start of its range.
         let (i, slice_start) = match self.slices.binary_search_by_key(&range.start, |s| s.end()) {
             Ok(i) => (i + 1, self.slices[i].end()), // desired start == slice i's end; first is i+1!
-            Err(i) if i == 0 => (0, 0),             // desired start < slice 0's end; first is 0.
+            Err(0) => (0, 0),                       // desired start < slice 0's end; first is 0.
             Err(i) => (i, self.slices[i - 1].end()), // desired start < slice i's end; first is i.
         };
 

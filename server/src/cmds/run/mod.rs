@@ -183,7 +183,7 @@ fn get_preopened_sockets() -> Result<FastHashMap<String, Listener>, Error> {
 fn read_config(path: &Path) -> Result<ConfigFile, Error> {
     let config = std::fs::read(path)?;
     let config = std::str::from_utf8(&config).map_err(|e| err!(InvalidArgument, source(e)))?;
-    let config = toml::from_str(&config).map_err(|e| err!(InvalidArgument, source(e)))?;
+    let config = toml::from_str(config).map_err(|e| err!(InvalidArgument, source(e)))?;
     Ok(config)
 }
 

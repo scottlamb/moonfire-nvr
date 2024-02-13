@@ -60,14 +60,14 @@ type FileMap = std::collections::HashMap<String, File, ahash::RandomState>;
 
 fn stringify_files(files: &FileMap) -> Result<String, std::fmt::Error> {
     let mut buf = String::new();
-    write!(buf, "const FILES: [BuildFile; {}] = [\n", files.len())?;
+    writeln!(buf, "const FILES: [BuildFile; {}] = [", files.len())?;
     for (bare_path, file) in files {
         let include_path = &file.include_path;
         let etag = file.etag.to_hex();
         let encoding = file.encoding.to_str();
-        write!(buf, "    BuildFile {{ bare_path: {bare_path:?}, data: include_bytes!({include_path:?}), etag: {etag:?}, encoding: {encoding} }},\n")?;
+        writeln!(buf, "    BuildFile {{ bare_path: {bare_path:?}, data: include_bytes!({include_path:?}), etag: {etag:?}, encoding: {encoding} }},")?;
     }
-    write!(buf, "];\n")?;
+    writeln!(buf, "];")?;
     Ok(buf)
 }
 

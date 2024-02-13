@@ -74,7 +74,7 @@ impl Ui {
                 );
                 hdrs.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
                 let e = node.into_file_entity(hdrs).err_kind(ErrorKind::Internal)?;
-                Ok(http_serve::serve(e, &req))
+                Ok(http_serve::serve(e, req))
             }
             #[cfg(feature = "bundled-ui")]
             Ui::Bundled(ui) => {

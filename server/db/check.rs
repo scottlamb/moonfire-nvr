@@ -345,7 +345,7 @@ fn compare_stream(
             stream
                 .recordings
                 .entry(id.recording())
-                .or_insert_with(Recording::default)
+                .or_default()
                 .recording_row = Some(s);
         }
     }
@@ -382,7 +382,7 @@ fn compare_stream(
             stream
                 .recordings
                 .entry(id.recording())
-                .or_insert_with(Recording::default)
+                .or_default()
                 .playback_row = Some(s);
         }
     }
@@ -405,7 +405,7 @@ fn compare_stream(
             stream
                 .recordings
                 .entry(id.recording())
-                .or_insert_with(Recording::default)
+                .or_default()
                 .integrity_row = true;
         }
     }
