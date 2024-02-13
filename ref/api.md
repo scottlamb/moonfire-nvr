@@ -342,6 +342,7 @@ arbitrary order. Each recording object has the following properties:
     together are as described. Adjacent recordings from the same RTSP session
     may be coalesced in this fashion to reduce the amount of redundant data
     transferred.
+*   `runStartId`. The id of the first recording in this run.
 *   `firstUncommitted` (optional). If this range is not fully committed to the
     database, the first id that is uncommitted. This is significant because
     it's possible that after a crash and restart, this id will refer to a

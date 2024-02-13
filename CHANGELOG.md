@@ -8,6 +8,12 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   seamlessly merge together recordings which have imperceptible changes in
+    their `VideoSampleEntry`. Improves
+    [#302](https://github.com/scottlamb/moonfire-nvr/issues/302).
+
 ## v0.7.12 (2024-01-08)
 
 *   update to Retina 0.4.7, supporting RTSP servers that do not set

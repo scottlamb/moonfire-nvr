@@ -470,6 +470,7 @@ pub struct Recording {
     pub video_sample_entry_id: i32,
     pub start_id: i32,
     pub open_id: u32,
+    pub run_start_id: i32,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_uncommitted: Option<i32>,

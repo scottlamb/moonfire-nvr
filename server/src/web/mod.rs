@@ -496,6 +496,7 @@ impl Service {
                 } else {
                     Some(end)
                 },
+                run_start_id: row.run_start_id,
                 start_time_90k: row.time.start.0,
                 end_time_90k: row.time.end.0,
                 sample_file_bytes: row.sample_file_bytes,

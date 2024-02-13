@@ -16,7 +16,7 @@ import { Stream } from "../types";
 import DisplaySelector, { DEFAULT_DURATION } from "./DisplaySelector";
 import StreamMultiSelector from "./StreamMultiSelector";
 import TimerangeSelector from "./TimerangeSelector";
-import VideoList from "./VideoList";
+import VideoList, { CombinedRecording } from "./VideoList";
 import { useLayoutEffect } from "react";
 import { fillAspect } from "../aspect";
 import useResizeObserver from "@react-hook/resize-observer";
@@ -208,7 +208,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
   );
 
   const [activeRecording, setActiveRecording] = useState<
-    [Stream, api.Recording, api.VideoSampleEntry] | null
+    [Stream, CombinedRecording] | null
   >(null);
   const formatTime = useMemo(() => {
     return (time90k: number) => {
@@ -341,8 +341,8 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
                 trimStartAndEnd ? range90k! : undefined
               )}
               aspect={[
-                activeRecording[2].aspectWidth,
-                activeRecording[2].aspectHeight,
+                activeRecording[1].aspectWidth,
+                activeRecording[1].aspectHeight,
               ]}
             />
           </Modal>

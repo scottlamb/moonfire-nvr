@@ -325,6 +325,16 @@ export async function deleteUser(
   });
 }
 
+export interface RecordingSpecifier {
+  startId: number;
+  endId?: number;
+  firstUncommitted?: number;
+  growing?: boolean;
+  openId: number;
+  startTime90k: number;
+  endTime90k: number;
+}
+
 /**
  * Represents a range of one or more recordings as in a single array entry of
  * <tt>GET /api/cameras/&lt;uuid>/&lt;stream>/&lt;recordings></tt>.
@@ -338,6 +348,9 @@ export interface Recording {
    * are described here.
    */
   endId?: number;
+
+  /** id of the first recording in this run. */
+  runStartId: number;
 
   /**
    * If this range is not fully committed to the database, the first id that is
@@ -459,7 +472,7 @@ export async function recordings(req: RecordingsRequest, init: RequestInit) {
 export function recordingUrl(
   cameraUuid: string,
   stream: StreamType,
-  r: Recording,
+  r: RecordingSpecifier,
   timestampTrack: boolean,
   trimToRange90k?: [number, number]
 ): string {

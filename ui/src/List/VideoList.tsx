@@ -17,10 +17,95 @@ interface Props {
   range90k: [number, number] | null;
   split90k?: number;
   trimStartAndEnd: boolean;
-  setActiveRecording: (
-    recording: [Stream, api.Recording, api.VideoSampleEntry] | null
-  ) => void;
+  setActiveRecording: (recording: [Stream, CombinedRecording] | null) => void;
   formatTime: (time90k: number) => string;
+}
+
+/**
+ * Matches `api.Recording`, except that two entries with differing
+ * `videoSampleEntryId` but the same resolution may be combined.
+ */
+export interface CombinedRecording {
+  startId: number;
+  endId?: number;
+  runStartId: number;
+  firstUncommitted?: number;
+  growing?: boolean;
+  openId: number;
+  startTime90k: number;
+  endTime90k: number;
+  videoSamples: number;
+  sampleFileBytes: number;
+  width: number;
+  height: number;
+  aspectWidth: number;
+  aspectHeight: number;
+}
+
+/**
+ * Combines recordings, which are assumed to already be sorted in descending
+ * chronological order.
+ *
+ * This is exported only for testing.
+ */
+export function combine(
+  split90k: number | undefined,
+  response: api.RecordingsResponse
+): CombinedRecording[] {
+  let out = [];
+  let cur = null;
+
+  for (const r of response.recordings) {
+    const vse = response.videoSampleEntries[r.videoSampleEntryId];
+
+    // Combine `r` into `cur` if `r` precedes r, shouldn't be split, and
+    // has similar resolution. It doesn't have to have exactly the same
+    // video sample entry; minor changes to encoding can be seamlessly
+    // combined into one `.mp4` file.
+    if (
+      cur !== null &&
+      r.openId === cur.openId &&
+      r.runStartId === cur.runStartId &&
+      (r.endId ?? r.startId) + 1 === cur.startId &&
+      cur.width === vse.width &&
+      cur.height === vse.height &&
+      cur.aspectWidth === vse.aspectWidth &&
+      cur.aspectHeight === vse.aspectHeight &&
+      (split90k === undefined || r.endTime90k - cur.startTime90k <= split90k)
+    ) {
+      cur.startId = r.startId;
+      cur.firstUncommitted == r.firstUncommitted ?? cur.firstUncommitted;
+      cur.startTime90k = r.startTime90k;
+      cur.videoSamples += r.videoSamples;
+      cur.sampleFileBytes += r.sampleFileBytes;
+      continue;
+    }
+
+    // Otherwise, start a new `cur`, flushing any existing one.
+    if (cur !== null) {
+      out.push(cur);
+    }
+    cur = {
+      startId: r.startId,
+      endId: r.endId ?? r.startId,
+      runStartId: r.runStartId,
+      firstUncommitted: r.firstUncommitted,
+      growing: r.growing,
+      openId: r.openId,
+      startTime90k: r.startTime90k,
+      endTime90k: r.endTime90k,
+      videoSamples: r.videoSamples,
+      sampleFileBytes: r.sampleFileBytes,
+      width: vse.width,
+      height: vse.height,
+      aspectWidth: vse.aspectWidth,
+      aspectHeight: vse.aspectHeight,
+    };
+  }
+  if (cur !== null) {
+    out.push(cur);
+  }
+  return out;
 }
 
 const frameRateFmt = new Intl.NumberFormat([], {
@@ -37,7 +122,8 @@ interface State {
    * During loading, this can differ from the requested range.
    */
   range90k: [number, number];
-  response: { status: "skeleton" } | api.FetchResult<api.RecordingsResponse>;
+  split90k?: number;
+  response: { status: "skeleton" } | api.FetchResult<CombinedRecording[]>;
 }
 
 interface RowProps extends TableRowProps {
@@ -111,12 +197,21 @@ const VideoList = ({
         split90k,
       };
       let response = await api.recordings(req, { signal });
-      if (response.status === "success") {
-        // Sort recordings in descending order by start time.
-        response.response.recordings.sort((a, b) => b.startId - a.startId);
-      }
       clearTimeout(timerId);
-      setState({ range90k, response });
+      if (response.status === "success") {
+        // Sort recordings in descending order.
+        response.response.recordings.sort((a, b) => b.startId - a.startId);
+        setState({
+          range90k,
+          split90k,
+          response: {
+            status: "success",
+            response: combine(split90k, response.response),
+          },
+        });
+      } else {
+        setState({ range90k, split90k, response });
+      }
     };
     if (range90k !== null) {
       const timerId = setTimeout(
@@ -157,8 +252,7 @@ const VideoList = ({
     );
   } else if (state.response.status === "success") {
     const resp = state.response.response;
-    body = resp.recordings.map((r: api.Recording) => {
-      const vse = resp.videoSampleEntries[r.videoSampleEntryId];
+    body = resp.map((r: CombinedRecording) => {
       const durationSec = (r.endTime90k - r.startTime90k) / 90000;
       const rate = (r.sampleFileBytes / durationSec) * 0.000008;
       const start = trimStartAndEnd
@@ -171,10 +265,10 @@ const VideoList = ({
         <Row
           key={r.startId}
           className="recording"
-          onClick={() => setActiveRecording([stream, r, vse])}
+          onClick={() => setActiveRecording([stream, r])}
           start={formatTime(start)}
           end={formatTime(end)}
-          resolution={`${vse.width}x${vse.height}`}
+          resolution={`${r.width}x${r.height}`}
           fps={frameRateFmt.format(r.videoSamples / durationSec)}
           storage={`${sizeFmt.format(r.sampleFileBytes / 1048576)} MiB`}
           bitrate={`${sizeFmt.format(rate)} Mbps`}

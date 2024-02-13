@@ -10,7 +10,7 @@ import { setupServer } from "msw/node";
 import { Recording, VideoSampleEntry } from "../api";
 import { renderWithCtx } from "../testutil";
 import { Camera, Stream } from "../types";
-import VideoList from "./VideoList";
+import VideoList, { combine } from "./VideoList";
 import { beforeAll, afterAll, afterEach, expect, test } from "vitest";
 
 const TEST_CAMERA: Camera = {
@@ -46,8 +46,29 @@ const TEST_RANGE2: [number, number] = [
 
 const TEST_RECORDINGS1: Recording[] = [
   {
+    startId: 44,
+    openId: 1,
+    runStartId: 44,
+    startTime90k: 145750553550000, // 2021-04-26T08:23:15:00000-07:00
+    endTime90k: 145750558950000, // 2021-04-26T08:24:15:00000-07:00
+    videoSampleEntryId: 4,
+    videoSamples: 1860,
+    sampleFileBytes: 248000,
+  },
+  {
+    startId: 43,
+    openId: 1,
+    runStartId: 40,
+    startTime90k: 145750548150000, // 2021-04-26T08:22:15:00000-07:00
+    endTime90k: 145750553550000, // 2021-04-26T08:23:15:00000-07:00
+    videoSampleEntryId: 4,
+    videoSamples: 1860,
+    sampleFileBytes: 248000,
+  },
+  {
     startId: 42,
     openId: 1,
+    runStartId: 40,
     startTime90k: 145750542570000, // 2021-04-26T08:21:13:00000-07:00
     endTime90k: 145750548150000, // 2021-04-26T08:22:15:00000-07:00
     videoSampleEntryId: 4,
@@ -60,6 +81,7 @@ const TEST_RECORDINGS2: Recording[] = [
   {
     startId: 42,
     openId: 1,
+    runStartId: 40,
     startTime90k: 145757651670000, // 2021-04-27T06:17:43:00000-07:00
     endTime90k: 145757656980000, // 2021-04-27T06:18:42:00000-07:00
     videoSampleEntryId: 4,
@@ -115,6 +137,59 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
+
+test("combine", () => {
+  const actual = combine(undefined, {
+    videoSampleEntries: TEST_VIDEO_SAMPLE_ENTRIES,
+    recordings: TEST_RECORDINGS1,
+  });
+  const expected = [
+    // 44 shouldn't be combined; it's not from the same run as the others.
+    {
+      startId: 44,
+      endId: 44,
+      openId: 1,
+      runStartId: 44,
+      startTime90k: 145750553550000, // 2021-04-26T08:23:15:00000-07:00
+      endTime90k: 145750558950000, // 2021-04-26T08:24:15:00000-07:00
+      videoSamples: 1860,
+      sampleFileBytes: 248000,
+      aspectWidth: TEST_VIDEO_SAMPLE_ENTRIES[4].aspectWidth,
+      aspectHeight: TEST_VIDEO_SAMPLE_ENTRIES[4].aspectHeight,
+      width: TEST_VIDEO_SAMPLE_ENTRIES[4].width,
+      height: TEST_VIDEO_SAMPLE_ENTRIES[4].height,
+      firstUncommitted: undefined,
+      growing: undefined,
+    },
+    // 42 and 43 are combinable.
+    {
+      startId: 42,
+      endId: 43,
+      openId: 1,
+      runStartId: 40,
+      startTime90k: 145750542570000, // 2021-04-26T08:21:13:00000-07:00
+      endTime90k: 145750553550000, // 2021-04-26T08:23:15:00000-07:00
+      videoSamples: 3720,
+      sampleFileBytes: 496000,
+      aspectWidth: TEST_VIDEO_SAMPLE_ENTRIES[4].aspectWidth,
+      aspectHeight: TEST_VIDEO_SAMPLE_ENTRIES[4].aspectHeight,
+      width: TEST_VIDEO_SAMPLE_ENTRIES[4].width,
+      height: TEST_VIDEO_SAMPLE_ENTRIES[4].height,
+      firstUncommitted: undefined,
+      growing: undefined,
+    },
+  ];
+
+  // XXX: unsure why this doesn't work:
+  //
+  // expect(actual).toContainEqual(expected)
+  //
+  // ...but this does:
+  expect(actual).toHaveLength(expected.length);
+  for (let i = 0; i < expected.length; i++) {
+    expect(actual[i]).toEqual(expected[i]);
+  }
+});
 
 test("load", async () => {
   renderWithCtx(
