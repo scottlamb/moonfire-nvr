@@ -14,6 +14,9 @@ import MenuIcon from "@mui/icons-material/Menu";
 import React from "react";
 import { LoginState } from "./App";
 import Box from "@mui/material/Box";
+import { useThemeMode } from "./components/ThemeMode";
+import { Brightness2, Brightness7, BrightnessAuto } from "@mui/icons-material";
+import { Tooltip } from "@mui/material";
 
 interface Props {
   loginState: LoginState;
@@ -26,6 +29,7 @@ interface Props {
 
 // https://material-ui.com/components/app-bar/
 function MoonfireMenu(props: Props) {
+  const { getTheme, changeTheme } = useThemeMode();
   const theme = useTheme();
   const [accountMenuAnchor, setAccountMenuAnchor] =
     React.useState<null | HTMLElement>(null);
@@ -69,6 +73,15 @@ function MoonfireMenu(props: Props) {
             {props.activityMenuPart}
           </Box>
         )}
+        <Tooltip title="Toggle theme">
+          <IconButton
+            onClick={changeTheme}
+            color="inherit"
+            size="small"
+          >
+            {getTheme === 1 ? <Brightness7 /> : getTheme === 2 ? <Brightness2 /> : <BrightnessAuto />}
+          </IconButton>
+        </Tooltip>
         {props.loginState !== "unknown" && props.loginState !== "logged-in" && (
           <Button color="inherit" onClick={props.requestLogin}>
             Log in

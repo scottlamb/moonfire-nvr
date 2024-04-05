@@ -2,18 +2,17 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Avatar from "@mui/material/Avatar";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormHelperText from "@mui/material/FormHelperText";
-import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import LoadingButton from "@mui/lab/LoadingButton";
 import React, { useEffect } from "react";
 import * as api from "./api";
 import { useSnackbars } from "./snackbars";
+import { Box, DialogContent, InputAdornment, Typography } from "@mui/material";
+import { AccountCircle, Lock } from "@mui/icons-material";
 
 interface Props {
   open: boolean;
@@ -47,7 +46,6 @@ interface Props {
  * <tt>--allow-unauthenticated-permissions</tt>), the caller may ignore this.
  */
 const Login = ({ open, onSuccess, handleClose }: Props) => {
-  const theme = useTheme();
   const snackbars = useSnackbars();
 
   // This is a simple uncontrolled form; use refs.
@@ -111,38 +109,52 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
       fullWidth={true}
     >
       <DialogTitle id="login-title">
-        <Avatar sx={{ backgroundColor: theme.palette.secondary.main }}>
-          <LockOutlinedIcon />
-        </Avatar>
-        Log in
+        Welcome back!
+        <Typography variant="body2">Please login to Moonfire NVR.</Typography>
       </DialogTitle>
-
       <form onSubmit={onSubmit}>
-        <TextField
-          id="username"
-          label="Username"
-          variant="filled"
-          required
-          autoComplete="username"
-          fullWidth
-          error={error != null}
-          inputRef={usernameRef}
-        />
-        <TextField
-          id="password"
-          label="Password"
-          variant="filled"
-          type="password"
-          required
-          autoComplete="current-password"
-          fullWidth
-          error={error != null}
-          inputRef={passwordRef}
-        />
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              id="username"
+              label="Username"
+              variant="outlined"
+              required
+              autoComplete="username"
+              fullWidth
+              error={error != null}
+              inputRef={usernameRef}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <AccountCircle />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <TextField
+              id="password"
+              label="Password"
+              variant="outlined"
+              type="password"
+              required
+              autoComplete="current-password"
+              fullWidth
+              error={error != null}
+              inputRef={passwordRef}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Lock />
+                  </InputAdornment>
+                ),
+              }}
+            />
 
-        {/* reserve space for an error; show when there's something to see */}
-        <FormHelperText>{error == null ? " " : error}</FormHelperText>
-
+            {/* reserve space for an error; show when there's something to see */}
+            <FormHelperText>{error == null ? " " : error}</FormHelperText>
+          </Box>
+        </DialogContent>
         <DialogActions>
           <LoadingButton
             type="submit"

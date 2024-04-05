@@ -8,8 +8,8 @@ import InputLabel from "@mui/material/InputLabel";
 import FormControl from "@mui/material/FormControl";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
-import { useTheme } from "@mui/material/styles";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import { CardContent } from "@mui/material";
 
 interface Props {
   split90k?: number;
@@ -33,15 +33,14 @@ export const DEFAULT_DURATION = DURATIONS[0][1];
  * Returns a card for setting options relating to how videos are displayed.
  */
 const DisplaySelector = (props: Props) => {
-  const theme = useTheme();
   return (
     <Card
       sx={{
-        padding: theme.spacing(1),
         display: "flex",
         flexDirection: "column",
       }}
     >
+      <CardContent>
       <FormControl fullWidth variant="outlined">
         <InputLabel id="split90k-label" shrink>
           Max video duration
@@ -97,7 +96,8 @@ const DisplaySelector = (props: Props) => {
           />
         }
         label="Timestamp track"
-      />
+        />
+      </CardContent>
     </Card>
   );
 };
