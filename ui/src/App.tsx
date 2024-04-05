@@ -19,25 +19,16 @@
  */
 
 import Container from "@mui/material/Container";
-import React, { useEffect, useReducer, useState } from "react";
+import React, { useEffect, useState } from "react";
 import * as api from "./api";
-import MoonfireMenu from "./AppMenu";
 import Login from "./Login";
 import { useSnackbars } from "./snackbars";
 import ListActivity from "./List";
-import AppBar from "@mui/material/AppBar";
-import { Routes, Route, Link, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import LiveActivity from "./Live";
 import UsersActivity from "./Users";
-import Drawer from "@mui/material/Drawer";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import ListItemText from "@mui/material/ListItemText";
-import ListIcon from "@mui/icons-material/List";
-import PeopleIcon from "@mui/icons-material/People";
-import Videocam from "@mui/icons-material/Videocam";
-import ListItemIcon from "@mui/material/ListItemIcon";
 import ChangePassword from "./ChangePassword";
+import Header from "./components/Header";
 
 export type LoginState =
   | "unknown"
@@ -52,7 +43,6 @@ export interface FrameProps {
 }
 
 function App() {
-  const [showMenu, toggleShowMenu] = useReducer((m: boolean) => !m, false);
   const [toplevel, setToplevel] = useState<api.ToplevelResponse | null>(null);
   const [timeZoneName, setTimeZoneName] = useState<string | null>(null);
   const [fetchSeq, setFetchSeq] = useState(0);
@@ -122,67 +112,14 @@ function App() {
   const Frame = ({ activityMenuPart, children }: FrameProps): JSX.Element => {
     return (
       <>
-        <AppBar position="static">
-          <MoonfireMenu
-            loginState={loginState}
-            requestLogin={() => {
-              setLoginState("user-requested-login");
-            }}
-            logout={logout}
-            changePassword={() => setChangePasswordOpen(true)}
-            menuClick={toggleShowMenu}
-            activityMenuPart={activityMenuPart}
-          />
-        </AppBar>
-        <Drawer
-          variant="temporary"
-          open={showMenu}
-          onClose={toggleShowMenu}
-          ModalProps={{
-            keepMounted: true,
-          }}
-        >
-          <List>
-            <ListItem
-              button
-              key="list"
-              onClick={toggleShowMenu}
-              component={Link}
-              to="/"
-            >
-              <ListItemIcon>
-                <ListIcon />
-              </ListItemIcon>
-              <ListItemText primary="List view" />
-            </ListItem>
-            <ListItem
-              button
-              key="live"
-              onClick={toggleShowMenu}
-              component={Link}
-              to="/live"
-            >
-              <ListItemIcon>
-                <Videocam />
-              </ListItemIcon>
-              <ListItemText primary="Live view (experimental)" />
-            </ListItem>
-            {toplevel?.permissions.adminUsers && (
-              <ListItem
-                button
-                key="users"
-                onClick={toggleShowMenu}
-                component={Link}
-                to="/users"
-              >
-                <ListItemIcon>
-                  <PeopleIcon />
-                </ListItemIcon>
-                <ListItemText primary="Users" />
-              </ListItem>
-            )}
-          </List>
-        </Drawer>
+        <Header
+          loginState={loginState}
+          logout={logout}
+          setChangePasswordOpen={setChangePasswordOpen}
+          activityMenuPart={activityMenuPart}
+          setLoginState={setLoginState}
+          toplevel={toplevel}
+        />
         <Login
           onSuccess={onLoginSuccess}
           open={

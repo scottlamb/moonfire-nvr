@@ -5,22 +5,25 @@
 import Box from "@mui/material/Box";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
-import React, { useReducer } from "react";
+import React, { useCallback, useEffect, useReducer } from "react";
 import { Camera } from "../types";
-import { useTheme } from "@mui/material/styles";
 import { useSearchParams } from "react-router-dom";
+import { IconButton, Tooltip } from "@mui/material";
+import { Fullscreen } from "@mui/icons-material";
 
 export interface Layout {
   className: string;
   cameras: number;
+  name: string
 }
 
 // These class names must match useStyles rules (below).
 const LAYOUTS: Layout[] = [
-  { className: "solo", cameras: 1 },
-  { className: "main-plus-five", cameras: 6 },
-  { className: "two-by-two", cameras: 4 },
-  { className: "three-by-three", cameras: 9 },
+  { className: "solo", cameras: 1, name: "1" },
+  { className: "dual", cameras: 2, name: "2" },
+  { className: "main-plus-five", cameras: 6, name: "Main + 5" },
+  { className: "two-by-two", cameras: 4, name: "2x2" },
+  { className: "three-by-three", cameras: 9, name: "3x3" }
 ];
 const MAX_CAMERAS = 9;
 
@@ -63,7 +66,7 @@ export const MultiviewChooser = (props: MultiviewChooserProps) => {
     >
       {LAYOUTS.map((e, i) => (
         <MenuItem key={e.className} value={i}>
-          {e.className}
+          {e.name}
         </MenuItem>
       ))}
     </Select>
@@ -106,17 +109,61 @@ function selectedReducer(old: SelectedCameras, op: SelectOp): SelectedCameras {
  */
 const Multiview = (props: MultiviewProps) => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const theme = useTheme();
 
   const [selected, updateSelected] = useReducer(
     selectedReducer,
     searchParams.has("cams")
-      ? JSON.parse(searchParams.get("cams") || "")
+      ? JSON.parse(searchParams.get("cams") || "") :
+      localStorage.getItem("camsSelected") !== null ?
+        JSON.parse(localStorage.getItem("camsSelected") || "")
       : Array(MAX_CAMERAS).fill(null)
   );
 
+  /**
+   * Save previously selected cameras to local storage.
+   */
+  useEffect(() => {
+    if (searchParams.has("cams")) localStorage.setItem("camsSelected", (searchParams.get("cams") || ""));
+  }, [searchParams]);
+
   const outerRef = React.useRef<HTMLDivElement>(null);
   const layout = LAYOUTS[props.layoutIndex];
+
+  /**
+   * Toggle full screen.
+   */
+  const handleFullScreen = useCallback(() => {
+    if (outerRef.current) {
+      const elem = outerRef.current;
+      //@ts-expect-error another browser (if not bruh)
+      if (document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement) {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+          //@ts-expect-error another browser (if not bruh)
+        } else if (document.webkitExitFullscreen) {
+          //@ts-expect-error another browser (if not bruh)
+          document.webkitExitFullscreen();
+          //@ts-expect-error another browser (if not bruh)
+        } else if (document.msExitFullscreen) {
+          //@ts-expect-error another browser (if not bruh)
+          document.msExitFullscreen();
+        }
+      } else {
+        if (elem.requestFullscreen) {
+          elem.requestFullscreen();
+          //@ts-expect-error another browser (if not bruh)
+        } else if (elem.webkitRequestFullscreen) {
+          //@ts-expect-error another browser (if not bruh)
+          elem.webkitRequestFullscreen();
+          //@ts-expect-error another browser (if not bruh)
+        } else if (elem.msRequestFullscreen) {
+          //@ts-expect-error another browser (if not bruh)
+          elem.msRequestFullscreen();
+        }
+      }
+    }
+  }, [outerRef]);
+
 
   const monoviews = selected.slice(0, layout.cameras).map((e, i) => {
     // When a camera is selected, use the camera's index as the key.
@@ -153,7 +200,6 @@ const Multiview = (props: MultiviewProps) => {
       sx={{
         flex: "1 0 0",
         color: "white",
-        marginTop: theme.spacing(2),
         overflow: "hidden",
 
         // TODO: this mid-level div can probably be removed.
@@ -165,6 +211,15 @@ const Multiview = (props: MultiviewProps) => {
         },
       }}
     >
+      <Tooltip title="Toggle full screen">
+        <IconButton size="small" sx={{
+          position: 'fixed', background: 'rgba(255,255,255,0.3) !important', transition: '0.2s', opacity: '0.1', bottom: 10, right: 10, zIndex: 9, color: "#fff", ":hover": {
+            opacity: '1'
+          }
+        }} onClick={handleFullScreen}>
+          <Fullscreen />
+        </IconButton>
+      </Tooltip>
       <div className="mid">
         <Box
           className={layout.className}
@@ -183,6 +238,18 @@ const Multiview = (props: MultiviewProps) => {
             "&.solo": {
               gridTemplateColumns: "100%",
               gridTemplateRows: "100%",
+            },
+            "&.dual": {
+              gridTemplateColumns: {
+                xs: "100%",
+                sm: "100%",
+                md: "repeat(2, calc(100% / 2))"
+              },
+              gridTemplateRows: {
+                xs: "50%",
+                sm: "50%",
+                md: "repeat(1, calc(100% / 1))"
+              },
             },
             "&.two-by-two": {
               gridTemplateColumns: "repeat(2, calc(100% / 2))",
@@ -229,8 +296,9 @@ const Monoview = (props: MonoviewProps) => {
       displayEmpty
       size="small"
       sx={{
+        transform: "scale(0.8)",
         // Restyle to fit over the video (or black).
-        backgroundColor: "rgba(255, 255, 255, 0.5)",
+        backgroundColor: "rgba(255, 255, 255, 0.3)",
         "& svg": {
           color: "inherit",
         },

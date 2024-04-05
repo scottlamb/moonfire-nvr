@@ -9,7 +9,7 @@ import LiveCamera from "./LiveCamera";
 import Multiview, { MultiviewChooser } from "./Multiview";
 import { FrameProps } from "../App";
 import { useSearchParams } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export interface LiveProps {
   cameras: Camera[];
@@ -19,9 +19,16 @@ export interface LiveProps {
 const Live = ({ cameras, Frame }: LiveProps) => {
   const [searchParams, setSearchParams] = useSearchParams();
 
+
+
   const [multiviewLayoutIndex, setMultiviewLayoutIndex] = useState(
-    Number.parseInt(searchParams.get("layout") || "0", 10)
+    Number.parseInt(searchParams.get("layout") || localStorage.getItem("multiviewLayoutIndex") || "0", 10)
   );
+
+  useEffect(() => {
+    if (searchParams.has("layout"))
+      localStorage.setItem("multiviewLayoutIndex", (searchParams.get("layout") || "0"));
+  }, [searchParams]);
 
   if ("MediaSource" in window === false) {
     return (

@@ -240,6 +240,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
     <TableContainer
       component={Paper}
       sx={{
+        mx: 1,
         flexGrow: 1,
         width: "max-content",
         height: "max-content",
@@ -272,6 +273,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
           aria-label="selectors"
           onClick={toggleShowSelectors}
           color="inherit"
+          sx={showSelectors ? { border: `1px solid #eee` } : {}}
           size="small"
         >
           <FilterList />
@@ -287,12 +289,12 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
       >
         <Box
           sx={{
-            display: showSelectors ? "block" : "none",
-            width: "max-content",
-            "& .MuiCard-root": {
-              marginRight: theme.spacing(2),
-              marginBottom: theme.spacing(2),
-            },
+            display: showSelectors ? "flex" : "none",
+            maxWidth: { xs: "100%", sm: "300px", md: "300px" },
+
+            gap: 1,
+            mb: 2,
+            flexDirection: "column",
           }}
         >
           <StreamMultiSelector

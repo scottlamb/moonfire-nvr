@@ -6,8 +6,8 @@ import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import { Camera, Stream, StreamType } from "../types";
 import Checkbox from "@mui/material/Checkbox";
-import { useTheme } from "@mui/material/styles";
 import { ToplevelResponse } from "../api";
+import { CardContent } from "@mui/material";
 
 interface Props {
   toplevel: ToplevelResponse;
@@ -17,7 +17,6 @@ interface Props {
 
 /** Returns a table which allows selecting zero or more streams. */
 const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
-  const theme = useTheme();
   const setStream = (s: Stream, checked: boolean) => {
     const updated = new Set(selected);
     if (checked) {
@@ -92,10 +91,8 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
   });
   return (
     <Card
-      sx={{
-        padding: theme.spacing(1),
-      }}
     >
+      <CardContent>
       <Box
         component="table"
         sx={{
@@ -124,7 +121,8 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
           </tr>
         </thead>
         <tbody>{cameraRows}</tbody>
-      </Box>
+        </Box>
+      </CardContent>
     </Card>
   );
 };

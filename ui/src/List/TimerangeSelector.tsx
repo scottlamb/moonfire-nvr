@@ -60,7 +60,6 @@ import { zonedTimeToUtc } from "date-fns-tz";
 import { addDays, addMilliseconds, differenceInMilliseconds } from "date-fns";
 import startOfDay from "date-fns/startOfDay";
 import Card from "@mui/material/Card";
-import { useTheme } from "@mui/material/styles";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import FormLabel from "@mui/material/FormLabel";
 import Radio from "@mui/material/Radio";
@@ -68,6 +67,7 @@ import RadioGroup from "@mui/material/RadioGroup";
 import { TimePicker, TimePickerProps } from "@mui/x-date-pickers/TimePicker";
 import Collapse from "@mui/material/Collapse";
 import Box from "@mui/material/Box";
+import { CardContent } from "@mui/material";
 
 interface Props {
   selectedStreams: Set<Stream>;
@@ -140,7 +140,7 @@ const SmallStaticDatePicker = (props: StaticDatePickerProps<Date>) => {
         },
       }}
     >
-      <StaticDatePicker {...props} />
+      <StaticDatePicker {...props} sx={{ background: "transparent" }} />
     </Box>
   );
 };
@@ -326,7 +326,6 @@ const TimerangeSelector = ({
   timeZoneName,
   setRange90k,
 }: Props) => {
-  const theme = useTheme();
   const [days, updateDays] = React.useReducer(daysStateReducer, {
     allowed: null,
     rangeMillis: null,
@@ -371,8 +370,9 @@ const TimerangeSelector = ({
     endDate = new Date(days.rangeMillis[1]);
   }
   return (
-    <Card sx={{ padding: theme.spacing(1) }}>
-      <div>
+    <Card>
+      <CardContent>
+        <Box>
         <FormLabel component="legend">From</FormLabel>
         <SmallStaticDatePicker
           displayStaticWrapperAs="desktop"
@@ -398,9 +398,9 @@ const TimerangeSelector = ({
           }}
           disabled={days.allowed === null}
         />
-      </div>
-      <div>
-        <FormLabel component="legend">To</FormLabel>
+        </Box>
+        <Box>
+          <FormLabel sx={{ mt: 1 }} component="legend">To</FormLabel>
         <RadioGroup
           row
           value={days.endType}
@@ -447,7 +447,8 @@ const TimerangeSelector = ({
           }}
           disabled={days.allowed === null}
         />
-      </div>
+        </Box>
+      </CardContent>
     </Card>
   );
 };
