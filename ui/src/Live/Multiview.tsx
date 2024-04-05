@@ -299,6 +299,7 @@ const Monoview = (props: MonoviewProps) => {
         transform: "scale(0.8)",
         // Restyle to fit over the video (or black).
         backgroundColor: "rgba(255, 255, 255, 0.3)",
+        color: "#fff",
         "& svg": {
           color: "inherit",
         },
