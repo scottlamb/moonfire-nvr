@@ -3,44 +3,53 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import { useColorScheme } from "@mui/material";
-import React, { createContext } from "react";
+import React, { createContext, useCallback } from "react";
+
+export enum CurrentMode {
+  Auto = 0,
+  Light = 1,
+  Dark = 2
+}
 
 interface ThemeProps {
   changeTheme: () => void,
-  currentTheme?: 'dark' | 'light',
-  getTheme: 0 | 1 | 2,
-  systemColor: 'dark' | 'light'
+  currentTheme: 'dark' | 'light',
+  choosenTheme: CurrentMode
 }
 
 export const ThemeContext = createContext<ThemeProps>({
   currentTheme: window.matchMedia("(prefers-color-scheme: dark)").matches ? 'dark' : 'light',
   changeTheme: () => { },
-  getTheme: 0,
-  systemColor: window.matchMedia("(prefers-color-scheme: dark)").matches ? 'dark' : 'light'
+  choosenTheme: CurrentMode.Auto
 });
 
 const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
   const { mode, setMode } = useColorScheme();
-  const [detectedSystemColorScheme, setDetectedSystemColorScheme] = React.useState<'dark' | 'light'>(
-    window.matchMedia("(prefers-color-scheme: dark)").matches ? 'dark' : 'light'
-  );
 
-  React.useEffect(() => {
-    window.matchMedia("(prefers-color-scheme: dark)")
-      .addEventListener("change", (e) => {
-        setDetectedSystemColorScheme(e.matches ? 'dark' : 'light');
-      });
+  const useMediaQuery = useCallback((query: string) => {
+    const [matches, setMatches] = React.useState(
+      () => window.matchMedia(query).matches
+    );
+    React.useEffect(() => {
+      const m = window.matchMedia(query);
+      const l = () => setMatches(m.matches);
+      m.addEventListener("change", l);
+      return () => m.removeEventListener("change", l);
+    }, [query]);
+    return matches;
   }, []);
+
+  const detectedSystemColorScheme = useMediaQuery("(prefers-color-scheme: dark)") ? "dark" : "light";
 
   const changeTheme = React.useCallback(() => {
     setMode(mode === 'dark' ? 'light' : mode === 'light' ? 'system' : 'dark')
   }, [mode]);
 
-  const currentTheme = mode === 'system' ? detectedSystemColorScheme : mode;
-  const getTheme = mode === 'dark' ? 2 : mode === 'light' ? 1 : 0;
+  const currentTheme = mode === 'system' ? detectedSystemColorScheme : (mode ?? detectedSystemColorScheme);
+  const choosenTheme = mode === 'dark' ? CurrentMode.Dark : mode === 'light' ? CurrentMode.Light : CurrentMode.Auto;
 
   return (
-    <ThemeContext.Provider value={{ changeTheme, currentTheme, getTheme, systemColor: detectedSystemColorScheme }}>
+    <ThemeContext.Provider value={{ changeTheme, currentTheme, choosenTheme }}>
       {children}
     </ThemeContext.Provider>
   )

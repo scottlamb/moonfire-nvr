@@ -135,30 +135,13 @@ const Multiview = (props: MultiviewProps) => {
   const handleFullScreen = useCallback(() => {
     if (outerRef.current) {
       const elem = outerRef.current;
-      //@ts-expect-error another browser (if not bruh)
-      if (document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement) {
+      if (document.fullscreenElement) {
         if (document.exitFullscreen) {
           document.exitFullscreen();
-          //@ts-expect-error another browser (if not bruh)
-        } else if (document.webkitExitFullscreen) {
-          //@ts-expect-error another browser (if not bruh)
-          document.webkitExitFullscreen();
-          //@ts-expect-error another browser (if not bruh)
-        } else if (document.msExitFullscreen) {
-          //@ts-expect-error another browser (if not bruh)
-          document.msExitFullscreen();
         }
       } else {
         if (elem.requestFullscreen) {
           elem.requestFullscreen();
-          //@ts-expect-error another browser (if not bruh)
-        } else if (elem.webkitRequestFullscreen) {
-          //@ts-expect-error another browser (if not bruh)
-          elem.webkitRequestFullscreen();
-          //@ts-expect-error another browser (if not bruh)
-        } else if (elem.msRequestFullscreen) {
-          //@ts-expect-error another browser (if not bruh)
-          elem.msRequestFullscreen();
         }
       }
     }
@@ -213,7 +196,7 @@ const Multiview = (props: MultiviewProps) => {
     >
       <Tooltip title="Toggle full screen">
         <IconButton size="small" sx={{
-          position: 'fixed', background: 'rgba(255,255,255,0.3) !important', transition: '0.2s', opacity: '0.1', bottom: 10, right: 10, zIndex: 9, color: "#fff", ":hover": {
+          position: 'fixed', background: 'rgba(255,255,255,0.4) !important', transition: '0.2s', opacity: '0.4', bottom: 10, right: 10, zIndex: 9, color: "#fff", ":hover": {
             opacity: '1'
           }
         }} onClick={handleFullScreen}>
