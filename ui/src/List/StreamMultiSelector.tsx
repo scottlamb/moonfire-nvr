@@ -7,7 +7,7 @@ import Card from "@mui/material/Card";
 import { Camera, Stream, StreamType } from "../types";
 import Checkbox from "@mui/material/Checkbox";
 import { ToplevelResponse } from "../api";
-import { CardContent } from "@mui/material";
+import CardContent from "@mui/material/CardContent/CardContent";
 
 interface Props {
   toplevel: ToplevelResponse;

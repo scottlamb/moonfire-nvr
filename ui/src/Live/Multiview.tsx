@@ -8,8 +8,9 @@ import MenuItem from "@mui/material/MenuItem";
 import React, { useCallback, useEffect, useReducer } from "react";
 import { Camera } from "../types";
 import { useSearchParams } from "react-router-dom";
-import { IconButton, Tooltip } from "@mui/material";
-import { Fullscreen } from "@mui/icons-material";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Fullscreen from "@mui/icons-material/Fullscreen";
 
 export interface Layout {
   className: string;

@@ -2,8 +2,9 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import { useColorScheme } from "@mui/material";
-import React, { createContext, useCallback } from "react";
+/* eslint-disable no-unused-vars */
+import { useColorScheme } from "@mui/material/styles";
+import React, { createContext } from "react";
 
 export enum CurrentMode {
   Auto = 0,
@@ -26,7 +27,7 @@ export const ThemeContext = createContext<ThemeProps>({
 const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
   const { mode, setMode } = useColorScheme();
 
-  const useMediaQuery = useCallback((query: string) => {
+  const useMediaQuery = (query: string) => {
     const [matches, setMatches] = React.useState(
       () => window.matchMedia(query).matches
     );
@@ -37,13 +38,13 @@ const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
       return () => m.removeEventListener("change", l);
     }, [query]);
     return matches;
-  }, []);
+  };
 
   const detectedSystemColorScheme = useMediaQuery("(prefers-color-scheme: dark)") ? "dark" : "light";
 
   const changeTheme = React.useCallback(() => {
     setMode(mode === 'dark' ? 'light' : mode === 'light' ? 'system' : 'dark')
-  }, [mode]);
+  }, [mode, setMode]);
 
   const currentTheme = mode === 'system' ? detectedSystemColorScheme : (mode ?? detectedSystemColorScheme);
   const choosenTheme = mode === 'dark' ? CurrentMode.Dark : mode === 'light' ? CurrentMode.Light : CurrentMode.Auto;
