@@ -197,7 +197,7 @@ const Multiview = (props: MultiviewProps) => {
     >
       <Tooltip title="Toggle full screen">
         <IconButton size="small" sx={{
-          position: 'fixed', background: 'rgba(255,255,255,0.4) !important', transition: '0.2s', opacity: '0.4', bottom: 10, right: 10, zIndex: 9, color: "#fff", ":hover": {
+          position: 'fixed', background: 'rgba(50,50,50,0.4) !important', transition: '0.2s', opacity: '0.4', bottom: 10, right: 10, zIndex: 9, color: "#fff", ":hover": {
             opacity: '1'
           }
         }} onClick={handleFullScreen}>
@@ -282,7 +282,8 @@ const Monoview = (props: MonoviewProps) => {
       sx={{
         transform: "scale(0.8)",
         // Restyle to fit over the video (or black).
-        backgroundColor: "rgba(255, 255, 255, 0.3)",
+        backgroundColor: "rgba(50, 50, 50, 0.6)",
+        boxShadow: "0 0 10px rgba(0, 0, 0, 0.4)",
         color: "#fff",
         "& svg": {
           color: "inherit",
