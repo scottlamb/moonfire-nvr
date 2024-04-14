@@ -41,61 +41,65 @@ const DisplaySelector = (props: Props) => {
       }}
     >
       <CardContent>
-      <FormControl fullWidth variant="outlined">
-        <InputLabel id="split90k-label" shrink>
-          Max video duration
-        </InputLabel>
-        <Select
-          labelId="split90k-label"
-          label="Max video duration"
-          id="split90k"
-          size="small"
-          value={props.split90k}
-          onChange={(e) =>
-            props.setSplit90k(
-              typeof e.target.value === "string"
-                ? parseInt(e.target.value)
-                : e.target.value
-            )
-          }
-          displayEmpty
-        >
-          {DURATIONS.map(([l, d]) => (
-            <MenuItem key={l} value={d}>
-              {l}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-      <FormControlLabel
-        title="Trim each segment of video so that it is fully
+        <FormControl fullWidth variant="outlined">
+          <InputLabel id="split90k-label" shrink>
+            Max video duration
+          </InputLabel>
+          <Select
+            labelId="split90k-label"
+            label="Max video duration"
+            id="split90k"
+            size="small"
+            value={props.split90k}
+            onChange={(e) =>
+              props.setSplit90k(
+                typeof e.target.value === "string"
+                  ? parseInt(e.target.value)
+                  : e.target.value
+              )
+            }
+            displayEmpty
+          >
+            {DURATIONS.map(([l, d]) => (
+              <MenuItem key={l} value={d}>
+                {l}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControlLabel
+          title="Trim each segment of video so that it is fully
     contained within the select time range. When this is not selected,
     all segments will overlap with the selected time range but may start
     and/or end outside it."
-        control={
-          <Checkbox
-            checked={props.trimStartAndEnd}
-            size="small"
-            onChange={(event) => props.setTrimStartAndEnd(event.target.checked)}
-            name="trim-start-and-end"
-            color="secondary"
-          />
-        }
-        label="Trim start and end"
-      />
-      <FormControlLabel
-        title="Include a text track in each .mp4 with the
+          control={
+            <Checkbox
+              checked={props.trimStartAndEnd}
+              size="small"
+              onChange={(event) =>
+                props.setTrimStartAndEnd(event.target.checked)
+              }
+              name="trim-start-and-end"
+              color="secondary"
+            />
+          }
+          label="Trim start and end"
+        />
+        <FormControlLabel
+          title="Include a text track in each .mp4 with the
     timestamp at which the video was recorded."
-        control={
-          <Checkbox
-            checked={props.timestampTrack}
-            size="small"
-            onChange={(event) => props.setTimestampTrack(event.target.checked)}
-            name="timestamp-track"
-            color="secondary"
-          />
-        }
-        label="Timestamp track"
+          control={
+            <Checkbox
+              checked={props.timestampTrack}
+              size="small"
+              onChange={(event) =>
+                props.setTimestampTrack(event.target.checked)
+              }
+              name="timestamp-track"
+              color="secondary"
+            />
+          }
+          label="Timestamp track"
         />
       </CardContent>
     </Card>

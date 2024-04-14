@@ -9,19 +9,21 @@ import React, { createContext } from "react";
 export enum CurrentMode {
   Auto = 0,
   Light = 1,
-  Dark = 2
+  Dark = 2,
 }
 
 interface ThemeProps {
-  changeTheme: () => void,
-  currentTheme: 'dark' | 'light',
-  choosenTheme: CurrentMode
+  changeTheme: () => void;
+  currentTheme: "dark" | "light";
+  choosenTheme: CurrentMode;
 }
 
 export const ThemeContext = createContext<ThemeProps>({
-  currentTheme: window.matchMedia("(prefers-color-scheme: dark)").matches ? 'dark' : 'light',
-  changeTheme: () => { },
-  choosenTheme: CurrentMode.Auto
+  currentTheme: window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light",
+  changeTheme: () => {},
+  choosenTheme: CurrentMode.Auto,
 });
 
 const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
@@ -40,21 +42,33 @@ const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
     return matches;
   };
 
-  const detectedSystemColorScheme = useMediaQuery("(prefers-color-scheme: dark)") ? "dark" : "light";
+  const detectedSystemColorScheme = useMediaQuery(
+    "(prefers-color-scheme: dark)"
+  )
+    ? "dark"
+    : "light";
 
   const changeTheme = React.useCallback(() => {
-    setMode(mode === 'dark' ? 'light' : mode === 'light' ? 'system' : 'dark')
+    setMode(mode === "dark" ? "light" : mode === "light" ? "system" : "dark");
   }, [mode, setMode]);
 
-  const currentTheme = mode === 'system' ? detectedSystemColorScheme : (mode ?? detectedSystemColorScheme);
-  const choosenTheme = mode === 'dark' ? CurrentMode.Dark : mode === 'light' ? CurrentMode.Light : CurrentMode.Auto;
+  const currentTheme =
+    mode === "system"
+      ? detectedSystemColorScheme
+      : mode ?? detectedSystemColorScheme;
+  const choosenTheme =
+    mode === "dark"
+      ? CurrentMode.Dark
+      : mode === "light"
+      ? CurrentMode.Light
+      : CurrentMode.Auto;
 
   return (
     <ThemeContext.Provider value={{ changeTheme, currentTheme, choosenTheme }}>
       {children}
     </ThemeContext.Provider>
-  )
-}
+  );
+};
 
 export default ThemeMode;
 

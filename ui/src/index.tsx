@@ -3,7 +3,10 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import CssBaseline from "@mui/material/CssBaseline";
-import { Experimental_CssVarsProvider, experimental_extendTheme } from "@mui/material/styles";
+import {
+  Experimental_CssVarsProvider,
+  experimental_extendTheme,
+} from "@mui/material/styles";
 import StyledEngineProvider from "@mui/material/StyledEngineProvider";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import "@fontsource/roboto";
@@ -22,15 +25,15 @@ const themeExtended = experimental_extendTheme({
     dark: {
       palette: {
         primary: {
-          main: "#000000"
+          main: "#000000",
         },
         secondary: {
-          main: "#e65100"
-        }
-      }
+          main: "#e65100",
+        },
+      },
     },
-  }
-})
+  },
+});
 const container = document.getElementById("root");
 const root = createRoot(container!);
 root.render(

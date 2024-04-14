@@ -76,12 +76,14 @@ function MoonfireMenu(props: Props) {
           </Box>
         )}
         <Tooltip title="Toggle theme">
-          <IconButton
-            onClick={changeTheme}
-            color="inherit"
-            size="small"
-          >
-            {choosenTheme === CurrentMode.Light ? <Brightness7 /> : choosenTheme === CurrentMode.Dark ? <Brightness2 /> : <BrightnessAuto />}
+          <IconButton onClick={changeTheme} color="inherit" size="small">
+            {choosenTheme === CurrentMode.Light ? (
+              <Brightness7 />
+            ) : choosenTheme === CurrentMode.Dark ? (
+              <Brightness2 />
+            ) : (
+              <BrightnessAuto />
+            )}
           </IconButton>
         </Tooltip>
         {props.loginState !== "unknown" && props.loginState !== "logged-in" && (

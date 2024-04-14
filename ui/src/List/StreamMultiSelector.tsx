@@ -90,37 +90,36 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
     );
   });
   return (
-    <Card
-    >
+    <Card>
       <CardContent>
-      <Box
-        component="table"
-        sx={{
-          fontSize: "0.9rem",
-          "& td:first-of-type": {
-            paddingRight: "3px",
-          },
-          "& td:not(:first-of-type)": {
-            textAlign: "center",
-          },
-          "& .MuiCheckbox-root": {
-            padding: "3px",
-          },
-          "@media (pointer: fine)": {
-            "& .MuiCheckbox-root": {
-              padding: "0px",
+        <Box
+          component="table"
+          sx={{
+            fontSize: "0.9rem",
+            "& td:first-of-type": {
+              paddingRight: "3px",
             },
-          },
-        }}
-      >
-        <thead>
-          <tr>
-            <td />
-            <td onClick={() => toggleType("main")}>main</td>
-            <td onClick={() => toggleType("sub")}>sub</td>
-          </tr>
-        </thead>
-        <tbody>{cameraRows}</tbody>
+            "& td:not(:first-of-type)": {
+              textAlign: "center",
+            },
+            "& .MuiCheckbox-root": {
+              padding: "3px",
+            },
+            "@media (pointer: fine)": {
+              "& .MuiCheckbox-root": {
+                padding: "0px",
+              },
+            },
+          }}
+        >
+          <thead>
+            <tr>
+              <td />
+              <td onClick={() => toggleType("main")}>main</td>
+              <td onClick={() => toggleType("sub")}>sub</td>
+            </tr>
+          </thead>
+          <tbody>{cameraRows}</tbody>
         </Box>
       </CardContent>
     </Card>

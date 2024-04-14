@@ -18,15 +18,21 @@ import { useReducer } from "react";
 import { LoginState } from "../App";
 import { Link } from "react-router-dom";
 
-export default function Header({ loginState, logout, setChangePasswordOpen, activityMenuPart, setLoginState, toplevel }:
-  {
-    loginState: LoginState,
-    logout: () => void,
-    setChangePasswordOpen: React.Dispatch<React.SetStateAction<boolean>>,
-    activityMenuPart?: JSX.Element,
-    setLoginState: React.Dispatch<React.SetStateAction<LoginState>>,
-    toplevel: api.ToplevelResponse | null
-  }) {
+export default function Header({
+  loginState,
+  logout,
+  setChangePasswordOpen,
+  activityMenuPart,
+  setLoginState,
+  toplevel,
+}: {
+  loginState: LoginState;
+  logout: () => void;
+  setChangePasswordOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  activityMenuPart?: JSX.Element;
+  setLoginState: React.Dispatch<React.SetStateAction<LoginState>>;
+  toplevel: api.ToplevelResponse | null;
+}) {
   const [showMenu, toggleShowMenu] = useReducer((m: boolean) => !m, false);
 
   return (
@@ -90,5 +96,5 @@ export default function Header({ loginState, logout, setChangePasswordOpen, acti
         </List>
       </Drawer>
     </>
-  )
+  );
 }

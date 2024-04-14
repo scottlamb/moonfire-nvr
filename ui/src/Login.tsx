@@ -118,7 +118,7 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
       </DialogTitle>
       <form onSubmit={onSubmit}>
         <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <TextField
               id="username"
               label="Username"
