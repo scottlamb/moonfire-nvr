@@ -28,9 +28,10 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 18
-      - run: cd ui && npm ci
-      - run: cd ui && npm run build
-      - run: cd ui && npm run test
+      - run: npm i -g pnpm
+      - run: cd ui && pnpm i --frozen-lockfile
+      - run: cd ui && pnpm run build
+      - run: cd ui && pnpm run test
       # Upload the UI and changelog as *job* artifacts (not *release* artifacts), used below.
       - uses: actions/upload-artifact@v3
         with:
