@@ -20,13 +20,20 @@ and more effort is expended on packing and minimizing the components of
 the application as represented in the various "bundles". Read more about
 this in the webpack documentation.
 
+## Requirements
+
+* Node.js v18+
+* `npm` or `pnpm` installed
+
+This guide below will use [`pnpm`](https://pnpm.io/) as package manager instead `npm`. But you can still use `npm`. We highly recommended you to switch to `pnpm`.
+
 ## Getting started
 
 Checkout the branch you want to work on and type
 
-```
-$ cd ui
-$ npm run dev
+```bash
+cd ui
+pnpm run dev
 ```
 
 This will pack and prepare a development setup. By default the development
@@ -55,8 +62,8 @@ Currently there's only one supported environment variable override defined in
 Thus one could connect to a remote Moonfire NVR by specifying its URL as
 follows:
 
-```
-$ PROXY_TARGET=https://nvr.example.com/ npm run dev
+```bash
+PROXY_TARGET=https://nvr.example.com/ npm run dev
 ```
 
 This allows you to test a new UI against your stable, production Moonfire NVR

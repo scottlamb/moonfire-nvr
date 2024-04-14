@@ -70,11 +70,13 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node }}
-      - run: cd ui && npm ci
-      - run: cd ui && npm run build
-      - run: cd ui && npm run test
-      - run: cd ui && npm run lint
-      - run: cd ui && npm run check-format
+      # Install pnpm then use pnpm instead npm
+      - run: npm i -g pnpm
+      - run: cd ui && pnpm i --frozen-lockfile
+      - run: cd ui && pnpm run build
+      - run: cd ui && pnpm run test
+      - run: cd ui && pnpm run lint
+      - run: cd ui && pnpm run check-format
   license:
     name: Check copyright/license headers
     runs-on: ubuntu-20.04

@@ -84,16 +84,18 @@ $ sudo install -m 755 target/release/moonfire-nvr /usr/local/bin
 $ cd ..
 ```
 
-You can build the UI via `npm` and find it in the `ui/build` directory:
+You can build the UI via `pnpm` and find it in the `ui/build` directory:
 
 ```console
 $ cd ui
-$ npm install
-$ npm run build
+$ pnpm install
+$ pnpm run build
 $ sudo mkdir /usr/local/lib/moonfire-nvr
 $ cd ..
 $ sudo rsync --recursive --delete --chmod=D755,F644 ui/dist/ /usr/local/lib/moonfire-nvr/ui
 ```
+
+You can use `npm` instead if you don't want to use `pnpm`.
 
 If you wish to bundle the UI into the binary, you can build the UI first and then pass
 `--features=bundled-ui` when building the server. See also the
