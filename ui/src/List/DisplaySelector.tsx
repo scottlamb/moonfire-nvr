@@ -9,7 +9,7 @@ import FormControl from "@mui/material/FormControl";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import { CardContent } from "@mui/material";
+import CardContent from "@mui/material/CardContent/CardContent";
 
 interface Props {
   split90k?: number;

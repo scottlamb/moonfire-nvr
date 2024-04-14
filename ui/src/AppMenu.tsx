@@ -15,8 +15,10 @@ import React from "react";
 import { LoginState } from "./App";
 import Box from "@mui/material/Box";
 import { CurrentMode, useThemeMode } from "./components/ThemeMode";
-import { Brightness2, Brightness7, BrightnessAuto } from "@mui/icons-material";
-import { Tooltip } from "@mui/material";
+import Brightness2 from "@mui/icons-material/Brightness2";
+import Brightness7 from "@mui/icons-material/Brightness7";
+import BrightnessAuto from "@mui/icons-material/BrightnessAuto";
+import Tooltip from "@mui/material/Tooltip";
 
 interface Props {
   loginState: LoginState;

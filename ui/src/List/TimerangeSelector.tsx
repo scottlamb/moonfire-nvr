@@ -67,7 +67,7 @@ import RadioGroup from "@mui/material/RadioGroup";
 import { TimePicker, TimePickerProps } from "@mui/x-date-pickers/TimePicker";
 import Collapse from "@mui/material/Collapse";
 import Box from "@mui/material/Box";
-import { CardContent } from "@mui/material";
+import CardContent from "@mui/material/CardContent/CardContent";
 
 interface Props {
   selectedStreams: Set<Stream>;

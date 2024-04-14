@@ -11,8 +11,12 @@ import LoadingButton from "@mui/lab/LoadingButton";
 import React, { useEffect } from "react";
 import * as api from "./api";
 import { useSnackbars } from "./snackbars";
-import { Box, DialogContent, InputAdornment, Typography } from "@mui/material";
-import { AccountCircle, Lock } from "@mui/icons-material";
+import Box from "@mui/material/Box/Box";
+import DialogContent from "@mui/material/DialogContent/DialogContent";
+import InputAdornment from "@mui/material/InputAdornment/InputAdornment";
+import Typography from "@mui/material/Typography/Typography";
+import AccountCircle from "@mui/icons-material/AccountCircle";
+import Lock from "@mui/icons-material/Lock";
 
 interface Props {
   open: boolean;
