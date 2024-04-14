@@ -95,7 +95,7 @@ $ cd ..
 $ sudo rsync --recursive --delete --chmod=D755,F644 ui/dist/ /usr/local/lib/moonfire-nvr/ui
 ```
 
-You can use `npm` instead if you don't want to use `pnpm`.
+For more information about using `pnpm`, check out the [Developing UI Guide](./developing-ui.md#requirements).
 
 If you wish to bundle the UI into the binary, you can build the UI first and then pass
 `--features=bundled-ui` when building the server. See also the

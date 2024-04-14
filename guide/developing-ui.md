@@ -23,9 +23,10 @@ this in the webpack documentation.
 ## Requirements
 
 * Node.js v18+
-* `npm` or `pnpm` installed
+* `pnpm` installed
 
-This guide below will use [`pnpm`](https://pnpm.io/) as package manager instead `npm`. But you can still use `npm`. We highly recommended you to switch to `pnpm`.
+This guide below will use [`pnpm`](https://pnpm.io/) as package manager instead
+`npm`. So we highly recommended you to use `pnpm` in this project.
 
 ## Getting started
 
