@@ -37,7 +37,7 @@ root.render(
   <React.StrictMode>
     <StyledEngineProvider injectFirst>
       {/* <ThemeProvider theme={theme}> */}
-      <Experimental_CssVarsProvider theme={themeExtended}>
+      <Experimental_CssVarsProvider defaultMode="system" theme={themeExtended}>
         <CssBaseline />
         <ThemeMode>
           <ErrorBoundary>
