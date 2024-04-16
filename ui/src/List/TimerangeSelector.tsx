@@ -59,7 +59,6 @@ import React, { useEffect } from "react";
 import { zonedTimeToUtc } from "date-fns-tz";
 import { addDays, addMilliseconds, differenceInMilliseconds } from "date-fns";
 import startOfDay from "date-fns/startOfDay";
-import Card from "@mui/material/Card";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import FormLabel from "@mui/material/FormLabel";
 import Radio from "@mui/material/Radio";
@@ -67,7 +66,8 @@ import RadioGroup from "@mui/material/RadioGroup";
 import { TimePicker, TimePickerProps } from "@mui/x-date-pickers/TimePicker";
 import Collapse from "@mui/material/Collapse";
 import Box from "@mui/material/Box";
-import CardContent from "@mui/material/CardContent/CardContent";
+import Paper from "@mui/material/Paper";
+import { useTheme } from "@mui/material/styles";
 
 interface Props {
   selectedStreams: Set<Stream>;
@@ -326,6 +326,7 @@ const TimerangeSelector = ({
   timeZoneName,
   setRange90k,
 }: Props) => {
+  const theme = useTheme();
   const [days, updateDays] = React.useReducer(daysStateReducer, {
     allowed: null,
     rangeMillis: null,
@@ -370,88 +371,86 @@ const TimerangeSelector = ({
     endDate = new Date(days.rangeMillis[1]);
   }
   return (
-    <Card>
-      <CardContent>
-        <Box>
-          <FormLabel component="legend">From</FormLabel>
+    <Paper sx={{ padding: theme.spacing(1) }}>
+      <Box>
+        <FormLabel component="legend">From</FormLabel>
+        <SmallStaticDatePicker
+          displayStaticWrapperAs="desktop"
+          value={startDate}
+          disabled={days.allowed === null}
+          shouldDisableDate={shouldDisableDate}
+          maxDate={
+            days.allowed === null ? today : new Date(days.allowed.maxMillis)
+          }
+          minDate={
+            days.allowed === null ? today : new Date(days.allowed.minMillis)
+          }
+          onChange={(d: Date | null) => {
+            updateDays({ op: "set-start-day", newStartDate: d });
+          }}
+        />
+        <MyTimePicker
+          value={startTime}
+          onChange={(newValue) => {
+            if (newValue === null || isFinite((newValue as Date).getTime())) {
+              setStartTime(newValue);
+            }
+          }}
+          disabled={days.allowed === null}
+        />
+      </Box>
+      <Box>
+        <FormLabel sx={{ mt: 1 }} component="legend">
+          To
+        </FormLabel>
+        <RadioGroup
+          row
+          value={days.endType}
+          onChange={(e) => {
+            updateDays({
+              op: "set-end-type",
+              newEndType: e.target.value as EndDayType,
+            });
+          }}
+        >
+          <FormControlLabel
+            value="same-day"
+            control={<Radio size="small" color="secondary" />}
+            label="Same day"
+          />
+          <FormControlLabel
+            value="other-day"
+            control={<Radio size="small" color="secondary" />}
+            label="Other day"
+          />
+        </RadioGroup>
+        <Collapse in={days.endType === "other-day"}>
           <SmallStaticDatePicker
             displayStaticWrapperAs="desktop"
-            value={startDate}
-            disabled={days.allowed === null}
-            shouldDisableDate={shouldDisableDate}
+            value={endDate}
+            shouldDisableDate={(d: Date | null) =>
+              days.endType !== "other-day" || shouldDisableDate(d)
+            }
             maxDate={
-              days.allowed === null ? today : new Date(days.allowed.maxMillis)
+              startDate === null ? today : new Date(days.allowed!.maxMillis)
             }
-            minDate={
-              days.allowed === null ? today : new Date(days.allowed.minMillis)
-            }
+            minDate={startDate === null ? today : startDate}
             onChange={(d: Date | null) => {
-              updateDays({ op: "set-start-day", newStartDate: d });
+              updateDays({ op: "set-end-day", newEndDate: d! });
             }}
           />
-          <MyTimePicker
-            value={startTime}
-            onChange={(newValue) => {
-              if (newValue === null || isFinite((newValue as Date).getTime())) {
-                setStartTime(newValue);
-              }
-            }}
-            disabled={days.allowed === null}
-          />
-        </Box>
-        <Box>
-          <FormLabel sx={{ mt: 1 }} component="legend">
-            To
-          </FormLabel>
-          <RadioGroup
-            row
-            value={days.endType}
-            onChange={(e) => {
-              updateDays({
-                op: "set-end-type",
-                newEndType: e.target.value as EndDayType,
-              });
-            }}
-          >
-            <FormControlLabel
-              value="same-day"
-              control={<Radio size="small" color="secondary" />}
-              label="Same day"
-            />
-            <FormControlLabel
-              value="other-day"
-              control={<Radio size="small" color="secondary" />}
-              label="Other day"
-            />
-          </RadioGroup>
-          <Collapse in={days.endType === "other-day"}>
-            <SmallStaticDatePicker
-              displayStaticWrapperAs="desktop"
-              value={endDate}
-              shouldDisableDate={(d: Date | null) =>
-                days.endType !== "other-day" || shouldDisableDate(d)
-              }
-              maxDate={
-                startDate === null ? today : new Date(days.allowed!.maxMillis)
-              }
-              minDate={startDate === null ? today : startDate}
-              onChange={(d: Date | null) => {
-                updateDays({ op: "set-end-day", newEndDate: d! });
-              }}
-            />
-          </Collapse>
-          <MyTimePicker
-            value={endTime}
-            onChange={(newValue) => {
-              if (newValue === null || isFinite((newValue as Date).getTime())) {
-                setEndTime(newValue);
-              }
-            }}
-            disabled={days.allowed === null}
-          />
-        </Box>
-      </CardContent>
-    </Card>
+        </Collapse>
+        <MyTimePicker
+          value={endTime}
+          onChange={(newValue) => {
+            if (newValue === null || isFinite((newValue as Date).getTime())) {
+              setEndTime(newValue);
+            }
+          }}
+          disabled={days.allowed === null}
+        />
+      </Box>
+    </Paper>
   );
 };
 

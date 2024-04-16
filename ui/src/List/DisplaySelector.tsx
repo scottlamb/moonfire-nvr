@@ -2,14 +2,15 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import Card from "@mui/material/Card";
 import Checkbox from "@mui/material/Checkbox";
 import InputLabel from "@mui/material/InputLabel";
 import FormControl from "@mui/material/FormControl";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import CardContent from "@mui/material/CardContent/CardContent";
+import FormGroup from "@mui/material/FormGroup";
+import Paper from "@mui/material/Paper";
+import { useTheme } from "@mui/material/styles";
 
 interface Props {
   split90k?: number;
@@ -33,14 +34,10 @@ export const DEFAULT_DURATION = DURATIONS[0][1];
  * Returns a card for setting options relating to how videos are displayed.
  */
 const DisplaySelector = (props: Props) => {
+  const theme = useTheme();
   return (
-    <Card
-      sx={{
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <CardContent>
+    <Paper style={{ padding: theme.spacing(1) }}>
+      <FormGroup>
         <FormControl fullWidth variant="outlined">
           <InputLabel id="split90k-label" shrink>
             Max video duration
@@ -101,8 +98,8 @@ const DisplaySelector = (props: Props) => {
           }
           label="Timestamp track"
         />
-      </CardContent>
-    </Card>
+      </FormGroup>
+    </Paper>
   );
 };
 

@@ -3,11 +3,11 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import Box from "@mui/material/Box";
-import Card from "@mui/material/Card";
 import { Camera, Stream, StreamType } from "../types";
 import Checkbox from "@mui/material/Checkbox";
 import { ToplevelResponse } from "../api";
-import CardContent from "@mui/material/CardContent/CardContent";
+import Paper from "@mui/material/Paper";
+import { useTheme } from "@mui/material/styles";
 
 interface Props {
   toplevel: ToplevelResponse;
@@ -17,6 +17,7 @@ interface Props {
 
 /** Returns a table which allows selecting zero or more streams. */
 const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
+  const theme = useTheme();
   const setStream = (s: Stream, checked: boolean) => {
     const updated = new Set(selected);
     if (checked) {
@@ -90,39 +91,37 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
     );
   });
   return (
-    <Card>
-      <CardContent>
-        <Box
-          component="table"
-          sx={{
-            fontSize: "0.9rem",
-            "& td:first-of-type": {
-              paddingRight: "3px",
-            },
-            "& td:not(:first-of-type)": {
-              textAlign: "center",
-            },
+    <Paper sx={{ padding: theme.spacing(1) }}>
+      <Box
+        component="table"
+        sx={{
+          fontSize: "0.9rem",
+          "& td:first-of-type": {
+            paddingRight: "3px",
+          },
+          "& td:not(:first-of-type)": {
+            textAlign: "center",
+          },
+          "& .MuiCheckbox-root": {
+            padding: "3px",
+          },
+          "@media (pointer: fine)": {
             "& .MuiCheckbox-root": {
-              padding: "3px",
+              padding: "0px",
             },
-            "@media (pointer: fine)": {
-              "& .MuiCheckbox-root": {
-                padding: "0px",
-              },
-            },
-          }}
-        >
-          <thead>
-            <tr>
-              <td />
-              <td onClick={() => toggleType("main")}>main</td>
-              <td onClick={() => toggleType("sub")}>sub</td>
-            </tr>
-          </thead>
-          <tbody>{cameraRows}</tbody>
-        </Box>
-      </CardContent>
-    </Card>
+          },
+        }}
+      >
+        <thead>
+          <tr>
+            <td />
+            <td onClick={() => toggleType("main")}>main</td>
+            <td onClick={() => toggleType("sub")}>sub</td>
+          </tr>
+        </thead>
+        <tbody>{cameraRows}</tbody>
+      </Box>
+    </Paper>
   );
 };
 
