@@ -8,6 +8,17 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   Many UI improvements in [#315](https://github.com/scottlamb/moonfire-nvr/pull/315)
+    from [@michioxd](https://github.com/michioxd). See the PR description for
+    full details, including screenshots.
+    *   dark/light modes
+    *   redesigned login dialog
+    *   live view: new dual camera layout, more descriptive layout names,
+        full screen option, re-open with last layout and camera selection
+    *   list view: filter button becomes outlined when enabled
+
 ## v0.7.13 (2024-02-12)
 
 *   seamlessly merge together recordings which have imperceptible changes in
