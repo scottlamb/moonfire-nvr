@@ -8,7 +8,7 @@
     "esbenp.prettier-vscode",
     "rust-lang.rust-analyzer",
     "yzhang.markdown-all-in-one",
-    "zixuanchen.vitest-explorer"
+    "vitest.explorer"
   ],
 	// List of extensions recommended by VS Code that should not be recommended for users of this workspace.
 	"unwantedRecommendations": [
