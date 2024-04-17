@@ -5,7 +5,7 @@
 import Container from "@mui/material/Container";
 import ErrorIcon from "@mui/icons-material/Error";
 import { Camera } from "../types";
-import LiveCamera from "./LiveCamera";
+import LiveCamera, { MediaSourceApi } from "./LiveCamera";
 import Multiview, { MultiviewChooser } from "./Multiview";
 import { FrameProps } from "../App";
 import { useSearchParams } from "react-router-dom";
@@ -36,7 +36,8 @@ const Live = ({ cameras, Frame }: LiveProps) => {
       );
   }, [searchParams]);
 
-  if ("MediaSource" in window === false) {
+  const mediaSourceApi = MediaSourceApi;
+  if (mediaSourceApi === undefined) {
     return (
       <Frame>
         <Container>
@@ -72,7 +73,11 @@ const Live = ({ cameras, Frame }: LiveProps) => {
         layoutIndex={multiviewLayoutIndex}
         cameras={cameras}
         renderCamera={(camera: Camera | null, chooser: JSX.Element) => (
-          <LiveCamera camera={camera} chooser={chooser} />
+          <LiveCamera
+            mediaSourceApi={mediaSourceApi}
+            camera={camera}
+            chooser={chooser}
+          />
         )}
       />
     </Frame>

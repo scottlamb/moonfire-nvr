@@ -12,7 +12,20 @@ import Alert from "@mui/material/Alert";
 import useResizeObserver from "@react-hook/resize-observer";
 import { fillAspect } from "../aspect";
 
+/// The media source API to use:
+/// * Essentially everything but iPhone supports `MediaSource`.
+///   (All major desktop browsers; Android browsers; and Safari on iPad are
+///   fine.)
+/// * Safari/macOS and Safari/iPhone on iOS 17+ support `ManagedMediaSource`.
+/// * Safari/iPhone with older iOS does not support anything close to
+///   `MediaSource`.
+export const MediaSourceApi: typeof MediaSource | undefined =
+  (self as any).ManagedMediaSource ?? self.MediaSource;
+
 interface LiveCameraProps {
+  /// Caller should provide a failure path when `MediaSourceApi` is undefined
+  /// and pass it back here otherwise.
+  mediaSourceApi: typeof MediaSource;
   camera: Camera | null;
   chooser: JSX.Element;
 }
@@ -60,11 +73,14 @@ type PlaybackState =
  */
 class LiveCameraDriver {
   constructor(
+    mediaSourceApi: typeof MediaSource,
     camera: Camera,
     setPlaybackState: (state: PlaybackState) => void,
     setAspect: (aspect: [number, number]) => void,
     video: HTMLVideoElement
   ) {
+    this.mediaSourceApi = mediaSourceApi;
+    this.src = new mediaSourceApi();
     this.camera = camera;
     this.setPlaybackState = setPlaybackState;
     this.setAspect = setAspect;
@@ -75,7 +91,12 @@ class LiveCameraDriver {
     video.addEventListener("timeupdate", this.videoTimeUpdate);
     video.addEventListener("waiting", this.videoWaiting);
     this.src.addEventListener("sourceopen", this.onMediaSourceOpen);
-    this.video.src = this.url;
+
+    // This appears necessary for the `ManagedMediaSource` API to function
+    // on Safari/iOS.
+    video["disableRemotePlayback"] = true;
+    video.src = this.objectUrl = URL.createObjectURL(this.src);
+    video.load();
   }
 
   unmount = () => {
@@ -87,8 +108,8 @@ class LiveCameraDriver {
     v.removeEventListener("timeupdate", this.videoTimeUpdate);
     v.removeEventListener("waiting", this.videoWaiting);
     v.src = "";
+    URL.revokeObjectURL(this.objectUrl);
     v.load();
-    URL.revokeObjectURL(this.url);
   };
 
   onMediaSourceOpen = () => {
@@ -169,7 +190,7 @@ class LiveCameraDriver {
       return;
     }
     const part = result.part;
-    if (!MediaSource.isTypeSupported(part.mimeType)) {
+    if (!this.mediaSourceApi.isTypeSupported(part.mimeType)) {
       this.error(`unsupported mime type ${part.mimeType}`);
       return;
     }
@@ -332,13 +353,14 @@ class LiveCameraDriver {
   setAspect: (aspect: [number, number]) => void;
   video: HTMLVideoElement;
 
-  src = new MediaSource();
+  mediaSourceApi: typeof MediaSource;
+  src: MediaSource;
   buf: BufferState = { state: "closed" };
   queue: Part[] = [];
   queuedBytes: number = 0;
 
   /// The object URL for the HTML video element, not the WebSocket URL.
-  url = URL.createObjectURL(this.src);
+  objectUrl: string;
 
   ws?: WebSocket;
 }
@@ -350,7 +372,7 @@ class LiveCameraDriver {
  * should use React's <tt>key</tt> attribute to avoid unnecessarily mounting
  * and unmounting a camera.
  */
-const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
+const LiveCamera = ({ mediaSourceApi, camera, chooser }: LiveCameraProps) => {
   const [aspect, setAspect] = React.useState<[number, number]>([16, 9]);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const boxRef = React.useRef<HTMLElement>(null);
@@ -372,11 +394,17 @@ const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
     if (camera === null || video === null) {
       return;
     }
-    const d = new LiveCameraDriver(camera, setPlaybackState, setAspect, video);
+    const d = new LiveCameraDriver(
+      mediaSourceApi,
+      camera,
+      setPlaybackState,
+      setAspect,
+      video
+    );
     return () => {
       d.unmount();
     };
-  }, [camera]);
+  }, [mediaSourceApi, camera]);
 
   // Display circular progress after 100 ms of waiting.
   const [showProgress, setShowProgress] = React.useState(false);
