@@ -8,7 +8,7 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## unreleased
+## v0.7.14 (2024-04-16)
 
 *   Many UI improvements in [#315](https://github.com/scottlamb/moonfire-nvr/pull/315)
     from [@michioxd](https://github.com/michioxd). See the PR description for
