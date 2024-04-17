@@ -18,6 +18,10 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
     *   live view: new dual camera layout, more descriptive layout names,
         full screen option, re-open with last layout and camera selection
     *   list view: filter button becomes outlined when enabled
+*   Fix [#286](https://github.com/scottlamb/moonfire-nvr/issues/286):
+    live view now works on Firefox! Formerly, it'd fail with messages such as
+    `Security Error: Content at https://mydomain.com/ may not load data from blob:https://mydomain.com/44abc5dc-750d-48d1-817d-2e6a52445592`.
+
 
 ## v0.7.13 (2024-02-12)
 

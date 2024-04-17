@@ -2,7 +2,7 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import React, { SyntheticEvent } from "react";
+import React from "react";
 import { Camera } from "../types";
 import { Part, parsePart } from "./parser";
 import * as api from "../api";
@@ -63,14 +63,33 @@ class LiveCameraDriver {
     camera: Camera,
     setPlaybackState: (state: PlaybackState) => void,
     setAspect: (aspect: [number, number]) => void,
-    videoRef: React.RefObject<HTMLVideoElement>
+    video: HTMLVideoElement
   ) {
     this.camera = camera;
     this.setPlaybackState = setPlaybackState;
     this.setAspect = setAspect;
-    this.videoRef = videoRef;
+    this.video = video;
+    video.addEventListener("pause", this.videoPause);
+    video.addEventListener("play", this.videoPlay);
+    video.addEventListener("playing", this.videoPlaying);
+    video.addEventListener("timeupdate", this.videoTimeUpdate);
+    video.addEventListener("waiting", this.videoWaiting);
     this.src.addEventListener("sourceopen", this.onMediaSourceOpen);
+    this.video.src = this.url;
   }
+
+  unmount = () => {
+    this.stopStream("unmount");
+    const v = this.video;
+    v.removeEventListener("pause", this.videoPause);
+    v.removeEventListener("play", this.videoPlay);
+    v.removeEventListener("playing", this.videoPlaying);
+    v.removeEventListener("timeupdate", this.videoTimeUpdate);
+    v.removeEventListener("waiting", this.videoWaiting);
+    v.src = "";
+    v.load();
+    URL.revokeObjectURL(this.url);
+  };
 
   onMediaSourceOpen = () => {
     this.startStream("sourceopen");
@@ -252,12 +271,11 @@ class LiveCameraDriver {
     if (
       this.buf.state !== "open" ||
       this.buf.busy ||
-      this.buf.srcBuf.buffered.length === 0 ||
-      this.videoRef.current === null
+      this.buf.srcBuf.buffered.length === 0
     ) {
       return;
     }
-    const curTs = this.videoRef.current.currentTime;
+    const curTs = this.video.currentTime;
 
     // TODO: call out key frames in the part headers. The "- 5" here is a guess
     // to avoid removing anything from the current GOP.
@@ -273,13 +291,23 @@ class LiveCameraDriver {
     this.error(`SourceBuffer ${e.type}`);
   };
 
-  videoPlaying = (e: SyntheticEvent<HTMLVideoElement, Event>) => {
+  videoPause = () => {
+    this.stopStream("pause");
+  };
+
+  videoPlay = () => {
+    this.startStream("play");
+  };
+
+  videoPlaying = () => {
     if (this.buf.state !== "error") {
       this.setPlaybackState({ state: "normal" });
     }
   };
 
-  videoWaiting = (e: SyntheticEvent<HTMLVideoElement, Event>) => {
+  videoTimeUpdate = () => {};
+
+  videoWaiting = () => {
     if (this.buf.state !== "error") {
       this.setPlaybackState({ state: "waiting" });
     }
@@ -302,7 +330,7 @@ class LiveCameraDriver {
   camera: Camera;
   setPlaybackState: (state: PlaybackState) => void;
   setAspect: (aspect: [number, number]) => void;
-  videoRef: React.RefObject<HTMLVideoElement>;
+  video: HTMLVideoElement;
 
   src = new MediaSource();
   buf: BufferState = { state: "closed" };
@@ -321,7 +349,6 @@ class LiveCameraDriver {
  * Note there's a significant setup cost to creating a LiveCamera, so the parent
  * should use React's <tt>key</tt> attribute to avoid unnecessarily mounting
  * and unmounting a camera.
- *
  */
 const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
   const [aspect, setAspect] = React.useState<[number, number]>([16, 9]);
@@ -339,25 +366,15 @@ const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
   });
 
   // Load the camera driver.
-  const [driver, setDriver] = React.useState<LiveCameraDriver | null>(null);
   React.useEffect(() => {
     setPlaybackState({ state: "normal" });
-    if (camera === null) {
-      setDriver(null);
+    const video = videoRef.current;
+    if (camera === null || video === null) {
       return;
     }
-    const d = new LiveCameraDriver(
-      camera,
-      setPlaybackState,
-      setAspect,
-      videoRef
-    );
-    setDriver(d);
+    const d = new LiveCameraDriver(camera, setPlaybackState, setAspect, video);
     return () => {
-      // Explictly stop the stream on unmount. There don't seem to be any DOM
-      // event handlers that run in this case. (In particular, the MediaSource's
-      // sourceclose doesn't run.)
-      d.stopStream("unmount or camera change");
+      d.unmount();
     };
   }, [camera]);
 
@@ -372,22 +389,6 @@ const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
     return () => clearTimeout(timerId);
   }, [playbackState]);
 
-  const videoElement =
-    driver === null ? (
-      <video />
-    ) : (
-      <video
-        ref={videoRef}
-        muted
-        autoPlay
-        src={driver.url}
-        onPause={() => driver.stopStream("pause")}
-        onPlay={() => driver.startStream("play")}
-        onPlaying={driver.videoPlaying}
-        onTimeUpdate={driver.tryTrimBuffer}
-        onWaiting={driver.videoWaiting}
-      />
-    );
   return (
     <Box
       ref={boxRef}
@@ -446,7 +447,7 @@ const LiveCamera = ({ camera, chooser }: LiveCameraProps) => {
           <Alert severity="error">{playbackState.message}</Alert>
         </div>
       )}
-      {videoElement}
+      <video ref={videoRef} muted autoPlay />
     </Box>
   );
 };
