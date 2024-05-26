@@ -8,6 +8,11 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## v0.7.15 (2024-05-26)
+
+*   update Retina to 0.4.8, improving compatibility with some Reolink cameras.
+    See [retina#102](https://github.com/scottlamb/retina/issues/102).
+
 ## v0.7.14 (2024-04-16)
 
 *   Many UI improvements in [#315](https://github.com/scottlamb/moonfire-nvr/pull/315)
