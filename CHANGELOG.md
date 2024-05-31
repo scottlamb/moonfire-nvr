@@ -8,6 +8,10 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## v0.7.16 (2024-05-30)
+
+*   further changes to improve Reolink camera compatibility.
+
 ## v0.7.15 (2024-05-26)
 
 *   update Retina to 0.4.8, improving compatibility with some Reolink cameras.

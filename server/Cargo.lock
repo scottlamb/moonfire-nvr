@@ -1190,6 +1190,7 @@ dependencies = [
  "nom",
  "num-rational",
  "password-hash",
+ "pretty-hex",
  "protobuf 3.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "reffers",
  "reqwest",

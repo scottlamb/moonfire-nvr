@@ -29,7 +29,7 @@ libc = "0.2"
 nix = { workspace = true, features = ["dir", "feature", "fs", "mman"] }
 num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
 odds = { version = "0.4.0", features = ["std-vec"] }
-pretty-hex = "0.4.0"
+pretty-hex = { workspace = true }
 protobuf = "3.0"
 ring = { workspace = true }
 rusqlite = { workspace = true }

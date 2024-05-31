@@ -21,6 +21,8 @@
 use base::{bail, err, Error};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use db::VideoSampleEntryToInsert;
+use h264_reader::nal::Nal;
+use pretty_hex::PrettyHex as _;
 use std::convert::TryFrom;
 
 // For certain common sub stream anamorphic resolutions, add a pixel aspect ratio box.
@@ -60,8 +62,84 @@ fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
     }
 }
 
-/// Parses the `AvcDecoderConfigurationRecord` in the "extra data".
-pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Error> {
+/// `h264_reader::rbsp::BitRead` impl that does not care about extra trailing data.
+///
+/// Some (Reolink) cameras appear to have a stray extra byte at the end. Follow the lead of most
+/// other RTSP implementations in tolerating this.
+#[derive(Debug)]
+struct TolerantBitReader<R> {
+    inner: R,
+}
+
+impl<R: h264_reader::rbsp::BitRead> h264_reader::rbsp::BitRead for TolerantBitReader<R> {
+    fn read_ue(&mut self, name: &'static str) -> Result<u32, h264_reader::rbsp::BitReaderError> {
+        self.inner.read_ue(name)
+    }
+
+    fn read_se(&mut self, name: &'static str) -> Result<i32, h264_reader::rbsp::BitReaderError> {
+        self.inner.read_se(name)
+    }
+
+    fn read_bool(&mut self, name: &'static str) -> Result<bool, h264_reader::rbsp::BitReaderError> {
+        self.inner.read_bool(name)
+    }
+
+    fn read_u8(
+        &mut self,
+        bit_count: u32,
+        name: &'static str,
+    ) -> Result<u8, h264_reader::rbsp::BitReaderError> {
+        self.inner.read_u8(bit_count, name)
+    }
+
+    fn read_u16(
+        &mut self,
+        bit_count: u32,
+        name: &'static str,
+    ) -> Result<u16, h264_reader::rbsp::BitReaderError> {
+        self.inner.read_u16(bit_count, name)
+    }
+
+    fn read_u32(
+        &mut self,
+        bit_count: u32,
+        name: &'static str,
+    ) -> Result<u32, h264_reader::rbsp::BitReaderError> {
+        self.inner.read_u32(bit_count, name)
+    }
+
+    fn read_i32(
+        &mut self,
+        bit_count: u32,
+        name: &'static str,
+    ) -> Result<i32, h264_reader::rbsp::BitReaderError> {
+        self.inner.read_i32(bit_count, name)
+    }
+
+    fn has_more_rbsp_data(
+        &mut self,
+        name: &'static str,
+    ) -> Result<bool, h264_reader::rbsp::BitReaderError> {
+        self.inner.has_more_rbsp_data(name)
+    }
+
+    fn finish_rbsp(self) -> Result<(), h264_reader::rbsp::BitReaderError> {
+        match self.inner.finish_rbsp() {
+            Ok(()) => Ok(()),
+            Err(h264_reader::rbsp::BitReaderError::RemainingData) => {
+                tracing::debug!("extra data at end of NAL unit");
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn finish_sei_payload(self) -> Result<(), h264_reader::rbsp::BitReaderError> {
+        self.inner.finish_sei_payload()
+    }
+}
+
+fn parse_extra_data_inner(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Error> {
     let avcc =
         h264_reader::avcc::AvcDecoderConfigurationRecord::try_from(extradata).map_err(|e| {
             err!(
@@ -72,9 +150,39 @@ pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Er
     if avcc.num_of_sequence_parameter_sets() != 1 {
         bail!(Unimplemented, msg("multiple SPSs!"));
     }
-    let ctx = avcc
-        .create_context()
-        .map_err(|e| err!(Unknown, msg("can't load SPS+PPS: {:?}", e)))?;
+
+    // This logic is essentially copied from
+    // `h264_reader::avcc::AvcDecoderConfigurationRecord::create_context` but
+    // using our `TolerantBitReader` wrapper.
+    let mut ctx = h264_reader::Context::new();
+    for sps in avcc.sequence_parameter_sets() {
+        let sps = h264_reader::nal::RefNal::new(
+            &sps.map_err(|e| err!(InvalidArgument, msg("bad SPS: {e:?}")))?[..],
+            &[],
+            true,
+        );
+        let sps = h264_reader::nal::sps::SeqParameterSet::from_bits(TolerantBitReader {
+            inner: sps.rbsp_bits(),
+        })
+        .map_err(|e| err!(InvalidArgument, msg("bad SPS: {e:?}")))?;
+        ctx.put_seq_param_set(sps);
+    }
+    for pps in avcc.picture_parameter_sets() {
+        let pps = h264_reader::nal::RefNal::new(
+            &pps.map_err(|e| err!(InvalidArgument, msg("bad PPS: {e:?}")))?[..],
+            &[],
+            true,
+        );
+        let pps = h264_reader::nal::pps::PicParameterSet::from_bits(
+            &ctx,
+            TolerantBitReader {
+                inner: pps.rbsp_bits(),
+            },
+        )
+        .map_err(|e| err!(InvalidArgument, msg("bad PPS: {e:?}")))?;
+        ctx.put_pic_param_set(pps);
+    }
+
     let sps = ctx
         .sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())
         .ok_or_else(|| err!(Unimplemented, msg("no SPS 0")))?;
@@ -175,17 +283,52 @@ pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Er
     })
 }
 
+/// Parses the `AvcDecoderConfigurationRecord` in the "extra data".
+pub fn parse_extra_data(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, Error> {
+    parse_extra_data_inner(extradata).map_err(|e| {
+        err!(
+            e,
+            msg(
+                "can't parse AvcDecoderRecord {}",
+                extradata.hex_conf(pretty_hex::HexConfig {
+                    width: 0,
+                    group: 0,
+                    chunk: 0,
+                    ..Default::default()
+                })
+            )
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use db::testutil;
 
     #[rustfmt::skip]
     const AVC_DECODER_CONFIG_TEST_INPUT: [u8; 38] = [
-        0x01, 0x4d, 0x00, 0x1f, 0xff, 0xe1, 0x00, 0x17,
+        0x01, 0x4d, 0x00, 0x1f, 0xff,
+
+        0xe1, 0x00, 0x17, // 1 SPS, length 0x17
+        0x67, 0x4d, 0x00, 0x1f, 0x9a, 0x66, 0x02, 0x80,
+        0x2d, 0xff, 0x35, 0x01, 0x01, 0x01, 0x40, 0x00,
+        0x00, 0xfa, 0x00, 0x00, 0x1d, 0x4c, 0x01,
+
+        0x01, 0x00, 0x04, // 1 PPS, length 0x04
+        0x68, 0xee, 0x3c, 0x80,
+    ];
+
+    #[rustfmt::skip]
+    const AVC_DECODER_CONFIG_TEST_INPUT_WITH_TRAILING_GARBAGE: [u8; 40] = [
+        0x01, 0x4d, 0x00, 0x1f, 0xff,
+
+        0xe1, 0x00, 0x18, // 1 SPS, length 0x18
         0x67, 0x4d, 0x00, 0x1f, 0x9a, 0x66, 0x02, 0x80,
         0x2d, 0xff, 0x35, 0x01, 0x01, 0x01, 0x40, 0x00,
         0x00, 0xfa, 0x00, 0x00, 0x1d, 0x4c, 0x01, 0x01,
-        0x00, 0x04, 0x68, 0xee, 0x3c, 0x80,
+
+        0x01, 0x00, 0x04, // 1 PPS, length 0x05
+        0x68, 0xee, 0x3c, 0x80, 0x80,
     ];
 
     #[rustfmt::skip]
@@ -231,5 +374,10 @@ mod tests {
             let (h_spacing, v_spacing) = default_pixel_aspect_ratio(h, w);
             assert_eq!(Ratio::new(h * h_spacing, w * v_spacing), Ratio::new(9, 16));
         }
+    }
+
+    #[test]
+    fn extra_sps_data() {
+        super::parse_extra_data(&AVC_DECODER_CONFIG_TEST_INPUT_WITH_TRAILING_GARBAGE).unwrap();
     }
 }
