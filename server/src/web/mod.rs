@@ -37,26 +37,6 @@ use tracing::Instrument;
 use url::form_urlencoded;
 use uuid::Uuid;
 
-/// An HTTP error response.
-/// This is a thin wrapper over the hyper response type; it doesn't even verify
-/// that the response actually uses a non-2xx status code. Its purpose is to
-/// allow automatic conversion from `base::Error`. Rust's orphan rule prevents
-/// this crate from defining a direct conversion from `base::Error` to
-/// `hyper::Response`.
-struct HttpError(Response<Body>);
-
-impl From<Response<Body>> for HttpError {
-    fn from(response: Response<Body>) -> Self {
-        HttpError(response)
-    }
-}
-
-impl From<base::Error> for HttpError {
-    fn from(err: base::Error) -> Self {
-        HttpError(from_base_error(&err))
-    }
-}
-
 fn plain_response<B: Into<Body>>(status: http::StatusCode, body: B) -> Response<Body> {
     Response::builder()
         .status(status)

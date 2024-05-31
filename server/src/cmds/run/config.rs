@@ -44,7 +44,7 @@ pub struct ConfigFile {
 #[serde(rename_all = "camelCase", untagged)]
 pub enum UiDir {
     FromFilesystem(PathBuf),
-    Bundled(BundledUi),
+    Bundled(#[allow(unused)] BundledUi),
 }
 
 impl Default for UiDir {
@@ -116,5 +116,5 @@ pub enum AddressConfig {
     ///
     /// See [systemd.socket(5) manual
     /// page](https://www.freedesktop.org/software/systemd/man/systemd.socket.html).
-    Systemd(String),
+    Systemd(#[cfg_attr(not(target_os = "linux"), allow(unused))] String),
 }
