@@ -152,6 +152,34 @@ fn handle_bundled_ui() -> Result<(), BoxError> {
     Ok(())
 }
 
+/// Returns one-line `stdout` from a `git` command; `args` are simply space-separated (no escapes).
+fn git_oneline_output(args: &str) -> Result<String, BoxError> {
+    static HELP_TEXT: &str =
+        "If you are building from a release archive or without the `git` CLI available, \n\
+        try again with the `VERSION` environment variable set";
+
+    // `output()` returns `Err` e.g. if `git` was not found.
+    let mut output = Command::new("git")
+        .args(args.split(' '))
+        .output()
+        .map_err(|e| format!("`git {args}` failed: {e}\n\n{HELP_TEXT}"))?;
+
+    // `status` is non-success if `git` launched and then failed.
+    if !output.status.success() {
+        let status = output.status;
+        let stderr = output.stderr.escape_ascii();
+        return Err(format!("`git {args}` failed with {status}: {stderr}\n\n{HELP_TEXT}").into());
+    }
+    if output.stdout.pop() != Some(b'\n') {
+        return Err(format!("`git {args}` stdout should end with newline").into());
+    }
+    if output.stdout.contains(&b'\n') {
+        return Err(format!("`git {args}` stdout should be single line").into());
+    }
+    Ok(String::from_utf8(output.stdout)
+        .map_err(|_| format!("`git {args}` stdout should be valid UTF-8"))?)
+}
+
 fn handle_version() -> Result<(), BoxError> {
     println!("cargo:rerun-if-env-changed=VERSION");
     if std::env::var("VERSION").is_ok() {
@@ -164,25 +192,12 @@ fn handle_version() -> Result<(), BoxError> {
 
     // Avoid reruns when the output doesn't meaningfully change. I don't think this is quite right:
     // it won't recognize toggling between `-dirty` and not. But it'll do.
-    let dir = Command::new("git")
-        .arg("rev-parse")
-        .arg("--git-dir")
-        .output()?
-        .stdout;
-    let dir = String::from_utf8(dir).unwrap();
-    let dir = dir.strip_suffix('\n').unwrap();
+    let dir = git_oneline_output("rev-parse --git-dir")?;
     println!("cargo:rerun-if-changed={dir}/logs/HEAD");
     println!("cargo:rerun-if-changed={dir}/index");
 
     // Plumb the version through.
-    let version = Command::new("git")
-        .arg("describe")
-        .arg("--always")
-        .arg("--dirty")
-        .output()?
-        .stdout;
-    let version = String::from_utf8(version).unwrap();
-    let version = version.strip_suffix('\n').unwrap();
+    let version = git_oneline_output("describe --always --dirty")?;
     println!("cargo:rustc-env=VERSION={version}");
 
     Ok(())
