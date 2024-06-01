@@ -157,7 +157,7 @@ fn parse_extra_data_inner(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, 
     let mut ctx = h264_reader::Context::new();
     for sps in avcc.sequence_parameter_sets() {
         let sps = h264_reader::nal::RefNal::new(
-            &sps.map_err(|e| err!(InvalidArgument, msg("bad SPS: {e:?}")))?[..],
+            sps.map_err(|e| err!(InvalidArgument, msg("bad SPS: {e:?}")))?,
             &[],
             true,
         );
@@ -169,7 +169,7 @@ fn parse_extra_data_inner(extradata: &[u8]) -> Result<VideoSampleEntryToInsert, 
     }
     for pps in avcc.picture_parameter_sets() {
         let pps = h264_reader::nal::RefNal::new(
-            &pps.map_err(|e| err!(InvalidArgument, msg("bad PPS: {e:?}")))?[..],
+            pps.map_err(|e| err!(InvalidArgument, msg("bad PPS: {e:?}")))?,
             &[],
             true,
         );

@@ -113,7 +113,7 @@ fn handle_bundled_ui() -> Result<(), BoxError> {
             None => {
                 bare_path = path;
                 encoding = FileEncoding::Uncompressed;
-                if files.get(bare_path).is_some() {
+                if files.contains_key(bare_path) {
                     continue; // don't replace with suboptimal encoding.
                 }
             }

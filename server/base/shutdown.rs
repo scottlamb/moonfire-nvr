@@ -133,7 +133,7 @@ fn poll_impl(inner: &Inner, waker_i: &mut usize, cx: &mut Context<'_>) -> Poll<(
     } else {
         let existing_waker = &mut wakers[*waker_i];
         if !new_waker.will_wake(existing_waker) {
-            *existing_waker = new_waker.clone();
+            existing_waker.clone_from(new_waker);
         }
     }
     Poll::Pending

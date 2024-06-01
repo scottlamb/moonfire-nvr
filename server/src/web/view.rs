@@ -39,6 +39,11 @@ impl Service {
             bail!(PermissionDenied, msg("view_video required"));
         }
         let (stream_id, camera_name);
+
+        // False positive: on Rust 1.78.0, clippy erroneously suggests calling `clone_from` on the
+        // uninitialized `camera_name`.
+        // Apparently fixed in rustc 1.80.0-nightly (ada5e2c7b 2024-05-31).
+        #[allow(clippy::assigning_clones)]
         {
             let db = self.db.lock();
             let camera = db

@@ -181,14 +181,16 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
                 );
             }
             let stream_change = &mut change.streams[i];
-            stream_change.config.mode = (if stream.record {
+            (if stream.record {
                 db::json::STREAM_MODE_RECORD
             } else {
                 ""
             })
-            .to_owned();
+            .clone_into(&mut stream_change.config.mode);
             stream_change.config.url = parse_stream_url(type_, &stream.url)?;
-            stream_change.config.rtsp_transport = stream.rtsp_transport.to_owned();
+            stream
+                .rtsp_transport
+                .clone_into(&mut stream_change.config.rtsp_transport);
             stream_change.sample_file_dir_id = stream.sample_file_dir_id;
             stream_change.config.flush_if_sec = if stream.flush_if_sec.is_empty() {
                 0
