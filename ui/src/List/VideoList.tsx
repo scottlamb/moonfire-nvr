@@ -11,6 +11,8 @@ import TableCell from "@mui/material/TableCell";
 import TableRow, { TableRowProps } from "@mui/material/TableRow";
 import Skeleton from "@mui/material/Skeleton";
 import Alert from "@mui/material/Alert";
+import Tooltip from "@mui/material/Tooltip";
+import Typography from "@mui/material/Typography";
 
 interface Props {
   stream: Stream;
@@ -40,6 +42,7 @@ export interface CombinedRecording {
   height: number;
   aspectWidth: number;
   aspectHeight: number;
+  endReason?: string;
 }
 
 /**
@@ -58,7 +61,7 @@ export function combine(
   for (const r of response.recordings) {
     const vse = response.videoSampleEntries[r.videoSampleEntryId];
 
-    // Combine `r` into `cur` if `r` precedes r, shouldn't be split, and
+    // Combine `r` into `cur` if `r` precedes `cur`, shouldn't be split, and
     // has similar resolution. It doesn't have to have exactly the same
     // video sample entry; minor changes to encoding can be seamlessly
     // combined into one `.mp4` file.
@@ -100,6 +103,7 @@ export function combine(
       height: vse.height,
       aspectWidth: vse.aspectWidth,
       aspectHeight: vse.aspectHeight,
+      endReason: r.endReason,
     };
   }
   if (cur !== null) {
@@ -129,6 +133,7 @@ interface State {
 interface RowProps extends TableRowProps {
   start: React.ReactNode;
   end: React.ReactNode;
+  endReason?: string;
   resolution: React.ReactNode;
   fps: React.ReactNode;
   storage: React.ReactNode;
@@ -138,6 +143,7 @@ interface RowProps extends TableRowProps {
 const Row = ({
   start,
   end,
+  endReason,
   resolution,
   fps,
   storage,
@@ -146,7 +152,15 @@ const Row = ({
 }: RowProps) => (
   <TableRow {...rest}>
     <TableCell align="right">{start}</TableCell>
-    <TableCell align="right">{end}</TableCell>
+    <TableCell align="right">
+      {endReason !== undefined ? (
+        <Tooltip title={endReason}>
+          <Typography>{end}</Typography>
+        </Tooltip>
+      ) : (
+        end
+      )}
+    </TableCell>
     <TableCell align="right" className="opt">
       {resolution}
     </TableCell>
@@ -268,6 +282,7 @@ const VideoList = ({
           onClick={() => setActiveRecording([stream, r])}
           start={formatTime(start)}
           end={formatTime(end)}
+          endReason={r.endReason}
           resolution={`${r.width}x${r.height}`}
           fps={frameRateFmt.format(r.videoSamples / durationSec)}
           storage={`${sizeFmt.format(r.sampleFileBytes / 1048576)} MiB`}

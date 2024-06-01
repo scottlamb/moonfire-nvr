@@ -375,6 +375,9 @@ arbitrary order. Each recording object has the following properties:
     and Moonfire NVR fills in a duration of 0. When using `/view.mp4`, it's
     not possible to append additional segments after such frames, as noted
     below.
+*   `endReason`: the reason the recording ended. Absent if the recording did
+    not end (`growing` is true or this was split via `split90k`) or if the
+    reason was unknown (recording predates schema version 7).
 
 Under the property `videoSampleEntries`, an object mapping ids to objects with
 the following properties:

@@ -927,7 +927,7 @@ impl FileBuilder {
     pub fn append(
         &mut self,
         db: &db::LockedDatabase,
-        row: db::ListRecordingsRow,
+        row: &db::ListRecordingsRow,
         rel_media_range_90k: Range<i32>,
         start_at_key: bool,
     ) -> Result<(), Error> {
@@ -2364,7 +2364,7 @@ mod tests {
                     "skip_90k={skip_90k} shorten_90k={shorten_90k} r={r:?}"
                 );
                 builder
-                    .append(&db, r, skip_90k..d - shorten_90k, true)
+                    .append(&db, &r, skip_90k..d - shorten_90k, true)
                     .unwrap();
                 Ok(())
             })
@@ -2492,7 +2492,7 @@ mod tests {
             };
             duration_so_far += row.media_duration_90k;
             builder
-                .append(&db.db.lock(), row, d_start..d_end, start_at_key)
+                .append(&db.db.lock(), &row, d_start..d_end, start_at_key)
                 .unwrap();
         }
         builder.build(db.db.clone(), db.dirs_by_stream_id.clone())

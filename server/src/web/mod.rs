@@ -486,6 +486,7 @@ impl Service {
                 video_sample_entry_id: row.video_sample_entry_id,
                 growing: row.growing,
                 has_trailing_zero: row.has_trailing_zero,
+                end_reason: row.end_reason.clone(),
             });
             if !out
                 .video_sample_entries

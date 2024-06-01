@@ -179,7 +179,7 @@ impl std::fmt::Debug for VideoSampleEntryToInsert {
 }
 
 /// A row used in `list_recordings_by_time` and `list_recordings_by_id`.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct ListRecordingsRow {
     pub start: recording::Time,
     pub video_sample_entry_id: i32,
@@ -200,6 +200,7 @@ pub struct ListRecordingsRow {
     /// (It's not included in the `recording_cover` index, so adding it to
     /// `list_recordings_by_time` would be inefficient.)
     pub prev_media_duration_and_runs: Option<(recording::Duration, i32)>,
+    pub end_reason: Option<String>,
 }
 
 /// A row used in `list_aggregated_recordings`.
@@ -217,6 +218,7 @@ pub struct ListAggregatedRecordingsRow {
     pub first_uncommitted: Option<i32>,
     pub growing: bool,
     pub has_trailing_zero: bool,
+    pub end_reason: Option<String>,
 }
 
 impl ListAggregatedRecordingsRow {
@@ -241,6 +243,7 @@ impl ListAggregatedRecordingsRow {
             },
             growing,
             has_trailing_zero: (row.flags & RecordingFlags::TrailingZero as i32) != 0,
+            end_reason: row.end_reason,
         }
     }
 }
@@ -301,6 +304,7 @@ impl RecordingToInsert {
             open_id,
             flags: self.flags | RecordingFlags::Uncommitted as i32,
             prev_media_duration_and_runs: Some((self.prev_media_duration, self.prev_runs)),
+            end_reason: self.end_reason.clone(),
         }
     }
 }
@@ -1376,7 +1380,7 @@ impl LockedDatabase {
         stream_id: i32,
         desired_time: Range<recording::Time>,
         forced_split: recording::Duration,
-        f: &mut dyn FnMut(&ListAggregatedRecordingsRow) -> Result<(), base::Error>,
+        f: &mut dyn FnMut(ListAggregatedRecordingsRow) -> Result<(), base::Error>,
     ) -> Result<(), base::Error> {
         // Iterate, maintaining a map from a recording_id to the aggregated row for the latest
         // batch of recordings from the run starting at that id. Runs can be split into multiple
@@ -1410,8 +1414,7 @@ impl LockedDatabase {
                         || new_dur >= forced_split;
                     if needs_flush {
                         // flush then start a new entry.
-                        f(a)?;
-                        *a = ListAggregatedRecordingsRow::from(row);
+                        f(std::mem::replace(a, ListAggregatedRecordingsRow::from(row)))?;
                     } else {
                         // append.
                         if a.time.end != row.start {
@@ -1450,6 +1453,7 @@ impl LockedDatabase {
                         }
                         a.growing = growing;
                         a.has_trailing_zero = has_trailing_zero;
+                        a.end_reason = row.end_reason;
                     }
                 }
                 Entry::Vacant(e) => {
@@ -1458,7 +1462,7 @@ impl LockedDatabase {
             }
             Ok(())
         })?;
-        for a in aggs.values() {
+        for a in aggs.into_values() {
             f(a)?;
         }
         Ok(())

@@ -111,8 +111,8 @@ impl Service {
             let mut rows = 0;
             db.list_recordings_by_id(stream_id, live.recording..live.recording + 1, &mut |r| {
                 rows += 1;
+                builder.append(&db, &r, live.media_off_90k.clone(), start_at_key)?;
                 row = Some(r);
-                builder.append(&db, r, live.media_off_90k.clone(), start_at_key)?;
                 Ok(())
             })?;
         }

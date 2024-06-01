@@ -26,7 +26,8 @@ const LIST_RECORDINGS_BY_TIME_SQL: &str = r#"
         recording.video_samples,
         recording.video_sync_samples,
         recording.video_sample_entry_id,
-        recording.open_id
+        recording.open_id,
+        recording.end_reason
     from
         recording
     where
@@ -51,6 +52,7 @@ const LIST_RECORDINGS_BY_ID_SQL: &str = r#"
         recording.video_sync_samples,
         recording.video_sample_entry_id,
         recording.open_id,
+        recording.end_reason,
         recording.prev_media_duration_90k,
         recording.prev_runs
     from
@@ -158,11 +160,12 @@ fn list_recordings_inner(
             video_sync_samples: row.get(8).err_kind(ErrorKind::Internal)?,
             video_sample_entry_id: row.get(9).err_kind(ErrorKind::Internal)?,
             open_id: row.get(10).err_kind(ErrorKind::Internal)?,
+            end_reason: row.get(11).err_kind(ErrorKind::Internal)?,
             prev_media_duration_and_runs: match include_prev {
                 false => None,
                 true => Some((
-                    recording::Duration(row.get(11).err_kind(ErrorKind::Internal)?),
-                    row.get(12).err_kind(ErrorKind::Internal)?,
+                    recording::Duration(row.get(12).err_kind(ErrorKind::Internal)?),
+                    row.get(13).err_kind(ErrorKind::Internal)?,
                 )),
             },
         })?;

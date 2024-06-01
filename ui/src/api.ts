@@ -405,6 +405,11 @@ export interface Recording {
    * the number of bytes of video in this recording.
    */
   sampleFileBytes: number;
+
+  /**
+   * the reason this recording ended, if any/known.
+   */
+  endReason?: string;
 }
 
 export interface VideoSampleEntry {

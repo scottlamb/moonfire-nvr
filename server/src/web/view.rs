@@ -141,7 +141,7 @@ impl Service {
                                             r.wall_duration_90k,
                                             r.media_duration_90k,
                                         );
-                                builder.append(&db, r, mr, true)?;
+                                builder.append(&db, &r, mr, true)?;
                             } else {
                                 trace!("...skipping recording {} wall dur {}", r.id, wd);
                             }

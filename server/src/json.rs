@@ -483,6 +483,9 @@ pub struct Recording {
 
     #[serde(skip_serializing_if = "Not::not")]
     pub has_trailing_zero: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

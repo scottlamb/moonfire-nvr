@@ -8,6 +8,11 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   in UI's list view, add a tooltip on the end time which shows why the
+    recording ended.
+
 ## v0.7.16 (2024-05-30)
 
 *   further changes to improve Reolink camera compatibility.
