@@ -34,6 +34,7 @@ pub struct VideoFrame {
 
     /// An estimate of the duration of the frame, or zero.
     /// This can be deceptive and is only used by some testing code.
+    #[cfg(test)]
     pub duration: i32,
 
     pub is_key: bool,
@@ -262,6 +263,7 @@ impl Stream for RetinaStream {
             })?;
         Ok(VideoFrame {
             pts: frame.timestamp().elapsed(),
+            #[cfg(test)]
             duration: 0,
             is_key: frame.is_random_access_point(),
             data: frame.into_data().into(),
@@ -345,6 +347,7 @@ pub mod testutil {
             self.next_sample_id += 1;
             Ok(VideoFrame {
                 pts: sample.start_time as i64,
+                #[cfg(test)]
                 duration: sample.duration as i32,
                 is_key: sample.is_sync,
                 data: sample.bytes,
