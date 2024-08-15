@@ -66,6 +66,13 @@ pub const EXPECTED_SCHEMA_VERSION: i32 = 7;
 /// Make it one less than a power of two so that the data structure's size is efficient.
 const VIDEO_INDEX_CACHE_LEN: usize = 1023;
 
+/// Maximum number of live segments references to keep.
+///
+/// These should only be 16 bytes each, so they're fairly cheap, but we should
+/// have some bound in case subscribers are slow, and anyway it's generally
+/// not a good experience for subscribers to fall too far behind.
+const LIVE_SEGMENTS_BUF_LEN: usize = 128;
+
 const GET_RECORDING_PLAYBACK_SQL: &str = r#"
     select
       video_index
@@ -500,21 +507,22 @@ pub struct Stream {
     /// The number of recordings in `uncommitted` which are synced and ready to commit.
     synced_recordings: usize,
 
-    on_live_segment: Vec<Box<dyn FnMut(LiveSegment) -> bool + Send>>,
+    live_segments: tokio::sync::broadcast::Sender<LiveFrame>,
 }
 
-/// Bounds of a live view segment. Currently this is a single frame of video.
+/// Bounds of a live view frame.
+///
 /// This is used for live stream recordings. The stream id should already be known to the
 /// subscriber. Note this doesn't actually contain the video, just a reference that can be
 /// looked up within the database.
 #[derive(Clone, Debug)]
-pub struct LiveSegment {
+pub struct LiveFrame {
     pub recording: i32,
 
     /// If the segment's one frame is a key frame.
     pub is_key: bool,
 
-    /// The pts, relative to the start of the recording, of the start and end of this live segment,
+    /// The pts, relative to the start of the recording, of the start and end of this frame,
     /// in 90kHz units.
     pub media_off_90k: Range<i32>,
 }
@@ -823,7 +831,7 @@ impl StreamStateChanger {
                         cum_runs: 0,
                         uncommitted: VecDeque::new(),
                         synced_recordings: 0,
-                        on_live_segment: Vec::new(),
+                        live_segments: tokio::sync::broadcast::channel(LIVE_SEGMENTS_BUF_LEN).0,
                     });
                 }
                 (Entry::Vacant(_), None) => {}
@@ -962,42 +970,27 @@ impl LockedDatabase {
         Ok(())
     }
 
-    /// Registers a callback to run on every live segment immediately after it's recorded.
-    /// The callback is run with the database lock held, so it must not call back into the database
-    /// or block. The callback should return false to unregister.
+    /// Returns a watcher for live segments of the given stream.
     pub fn watch_live(
         &mut self,
         stream_id: i32,
-        cb: Box<dyn FnMut(LiveSegment) -> bool + Send>,
-    ) -> Result<(), Error> {
+    ) -> Result<tokio::sync::broadcast::Receiver<LiveFrame>, Error> {
         let s = match self.streams_by_id.get_mut(&stream_id) {
             None => bail!(NotFound, msg("no such stream {stream_id}")),
             Some(s) => s,
         };
-        s.on_live_segment.push(cb);
-        Ok(())
+        Ok(s.live_segments.subscribe())
     }
 
-    /// Clears all watches on all streams.
-    /// Normally watches are self-cleaning: when a segment is sent, the callback returns false if
-    /// it is no longer interested (typically because hyper has just noticed the client is no
-    /// longer connected). This doesn't work when the system is shutting down and nothing more is
-    /// sent, though.
-    pub fn clear_watches(&mut self) {
-        for s in self.streams_by_id.values_mut() {
-            s.on_live_segment.clear();
-        }
-    }
-
-    pub(crate) fn send_live_segment(&mut self, stream: i32, l: LiveSegment) -> Result<(), Error> {
+    pub(crate) fn send_live_segment(&mut self, stream: i32, l: LiveFrame) -> Result<(), Error> {
         let s = match self.streams_by_id.get_mut(&stream) {
             None => bail!(Internal, msg("no such stream {stream}")),
             Some(s) => s,
         };
 
-        // TODO: use std's retain_mut after it's available in our minimum supported Rust version.
-        // <https://github.com/rust-lang/rust/issues/48919>
-        odds::vec::VecExt::retain_mut(&mut s.on_live_segment, |cb| cb(l.clone()));
+        // Note that `send` will fail if there are no active receivers.
+        // That's fine, so ignore this error.
+        let _ = s.live_segments.send(l);
         Ok(())
     }
 
@@ -1738,7 +1731,7 @@ impl LockedDatabase {
                     cum_runs: row.get(7)?,
                     uncommitted: VecDeque::new(),
                     synced_recordings: 0,
-                    on_live_segment: Vec::new(),
+                    live_segments: tokio::sync::broadcast::channel(LIVE_SEGMENTS_BUF_LEN).0,
                 },
             );
             c.streams[type_.index()] = Some(id);

@@ -654,6 +654,9 @@ However, there are two important differences:
 *   The `/view.m4s` endpoint always returns a time range that starts with a key frame;
     `/live.m4s` messages may not include a key frame.
 
+If the caller falls too many frames behind, the connection will drop with an
+text message error.
+
 Note: an earlier version of this API used a `multipart/mixed` segment instead,
 compatible with the [multipart-stream-js][multipart-stream-js] library. The
 problem with this approach is that browsers have low limits on the number of

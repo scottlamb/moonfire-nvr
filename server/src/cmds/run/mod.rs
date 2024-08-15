@@ -524,8 +524,6 @@ async fn inner(
     .await
     .map_err(|e| err!(Unknown, source(e)))?;
 
-    db.lock().clear_watches();
-
     info!("Waiting for HTTP requests to finish.");
     for h in web_handles {
         h.await

@@ -915,7 +915,7 @@ impl<F: FileWriter> InnerWriter<F> {
         db.lock()
             .send_live_segment(
                 stream_id,
-                db::LiveSegment {
+                db::LiveFrame {
                     recording: self.id.recording(),
                     is_key,
                     media_off_90k: prev_media_duration_90k..media_duration_90k,

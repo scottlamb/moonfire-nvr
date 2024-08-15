@@ -67,7 +67,6 @@ smallvec = { version = "1.7", features = ["union"] }
 sync_wrapper = "0.1.0"
 time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-stream = "0.1.5"
 tokio-tungstenite = "0.20.0"
 toml = "0.8"
 tracing = { workspace = true }

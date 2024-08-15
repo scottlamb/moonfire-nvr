@@ -7,14 +7,22 @@
 use std::sync::Arc;
 
 use base::{bail, err, Error};
-use futures::{future::Either, SinkExt, StreamExt};
+use futures::SinkExt;
 use http::header;
+use tokio::sync::broadcast::error::RecvError;
 use tokio_tungstenite::{tungstenite, WebSocketStream};
 use uuid::Uuid;
 
 use crate::mp4;
 
 use super::{Caller, Service};
+
+/// Interval at which to send keepalives if there are no frames.
+///
+/// Chrome appears to time out WebSockets after 60 seconds of inactivity.
+/// If the camera is disconnected or not sending frames, we'd like to keep
+/// the connection open so everything will recover when the camera comes back.
+const KEEPALIVE_AFTER_IDLE: tokio::time::Duration = tokio::time::Duration::from_secs(30);
 
 impl Service {
     pub(super) async fn stream_live_m4s(
@@ -31,8 +39,7 @@ impl Service {
 
         let stream_id;
         let open_id;
-        let (sub_tx, sub_rx) = futures::channel::mpsc::unbounded();
-        {
+        let mut sub_rx = {
             let mut db = self.db.lock();
             open_id = match db.open {
                 None => {
@@ -48,45 +55,49 @@ impl Service {
                 .ok_or_else(|| err!(NotFound, msg("no such camera {uuid}")))?;
             stream_id = camera.streams[stream_type.index()]
                 .ok_or_else(|| err!(NotFound, msg("no such stream {uuid}/{stream_type}")))?;
-            db.watch_live(
-                stream_id,
-                Box::new(move |l| sub_tx.unbounded_send(l).is_ok()),
-            )
-            .expect("stream_id refed by camera");
-        }
+            db.watch_live(stream_id).expect("stream_id refed by camera")
+        };
 
-        let keepalive = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
-            std::time::Duration::new(30, 0),
-        ));
-        let mut combo = futures::stream::select(
-            sub_rx.map(Either::Left),
-            keepalive.map(|_| Either::Right(())),
-        );
+        let mut keepalive = tokio::time::interval(KEEPALIVE_AFTER_IDLE);
+        keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-        // On the first LiveSegment, send all the data from the previous key frame onward.
-        // For LiveSegments, it's okay to send a single non-key frame at a time.
+        // On the first LiveFrame, send all the data from the previous key frame
+        // onward. Afterward, send a single (often non-key) frame at a time.
         let mut start_at_key = true;
         loop {
-            let next = combo
-                .next()
-                .await
-                .unwrap_or_else(|| unreachable!("timer stream never ends"));
-            match next {
-                Either::Left(live) => {
-                    if !self
-                        .stream_live_m4s_chunk(open_id, stream_id, ws, live, start_at_key)
-                        .await?
-                    {
-                        return Ok(());
+            tokio::select! {
+                biased;
+
+                next = sub_rx.recv() => {
+                    match next {
+                        Ok(l) => {
+                            keepalive.reset_after(KEEPALIVE_AFTER_IDLE);
+                            if !self.stream_live_m4s_chunk(
+                                open_id,
+                                stream_id,
+                                ws,
+                                l,
+                                start_at_key,
+                            ).await? {
+                                return Ok(());
+                            }
+                            start_at_key = false;
+                        }
+                        Err(RecvError::Closed) => {
+                            bail!(Internal, msg("live stream closed unexpectedly"));
+                        }
+                        Err(RecvError::Lagged(frames)) => {
+                            bail!(
+                                ResourceExhausted,
+                                msg("subscriber {frames} frames further behind than allowed; \
+                                     this typically indicates insufficient bandwidth"),
+                            )
+                        }
                     }
-                    start_at_key = false;
                 }
-                Either::Right(_) => {
-                    if ws
-                        .send(tungstenite::Message::Ping(Vec::new()))
-                        .await
-                        .is_err()
-                    {
+
+                _ = keepalive.tick() => {
+                    if ws.send(tungstenite::Message::Ping(Vec::new())).await.is_err() {
                         return Ok(());
                     }
                 }
@@ -101,7 +112,7 @@ impl Service {
         open_id: u32,
         stream_id: i32,
         ws: &mut tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>,
-        live: db::LiveSegment,
+        live: db::LiveFrame,
         start_at_key: bool,
     ) -> Result<bool, Error> {
         let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
