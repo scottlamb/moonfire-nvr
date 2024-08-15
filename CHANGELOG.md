@@ -10,6 +10,9 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 ## unreleased
 
+*   upgrade to Retina 0.4.9, adding support for recording MJPEG video. Note
+    browser playback is unlikely to work.
+*   bump minimum Rust version to 1.79.
 *   in UI's list view, add a tooltip on the end time which shows why the
     recording ended.
 

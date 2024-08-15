@@ -12,7 +12,6 @@ use tracing::{debug, error};
 
 mod body;
 mod cmds;
-mod h264;
 mod json;
 mod mp4;
 mod slices;

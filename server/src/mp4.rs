@@ -2844,7 +2844,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "64f23b856692702b13d1811cd02dc83395b3d501dead7fd16f175eb26b4d8eee",
+            "123e2cf075125c81e80820bffa412d38729aff05c252c7ea2ab3384905903bb7",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
@@ -2873,7 +2873,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "f9e4ed946187b2dd22ef049c4c1869d0f6c4f377ef08f8f53570850b61a06701",
+            "1f85ec7ea7f061b7d8f696c337a3258abc2bf830e81ac23c1342131669d7bb14",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
@@ -2902,7 +2902,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "f913d46d0119a03291e85459455b9a75a84cc9a1a5e3b88ca7e93eb718d73190",
+            "1debe76fc6277546209454919550ff4c3a379560f481fa0ce78378cbf3c646f8",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
@@ -2932,7 +2932,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "64cc763fa2533118bc6bf0b01249f02524ae87e0c97815079447b235722c1e2d",
+            "9c0302294f8f34d14fc8069fea1a65c1593a4c01134c07ab994b7398004f2b63",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
@@ -2961,7 +2961,7 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "6886b36ae6df9ce538f6db7ebd6159e68c2936b9d43307f7728fe75e0b62cad2",
+            "e06b5627788828b73b98726dfb6466d32305df64af0acbe6164fc8ab296de473",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =

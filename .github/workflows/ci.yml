@@ -15,7 +15,7 @@ jobs:
     name: Rust ${{ matrix.rust }}
     strategy:
       matrix:
-        rust: [ "stable", "1.70", "nightly" ]
+        rust: [ "stable", "1.79", "nightly" ]
         include:
           - rust: nightly
             extra_args: "--features nightly --benches"

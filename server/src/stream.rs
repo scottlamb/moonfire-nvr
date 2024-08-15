@@ -2,7 +2,6 @@
 // Copyright (C) 2016 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-use crate::h264;
 use base::{bail, err, Error};
 use bytes::Bytes;
 use futures::StreamExt;
@@ -14,6 +13,43 @@ use tracing::Instrument;
 use url::Url;
 
 static RETINA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+// For certain common sub stream anamorphic resolutions, add a pixel aspect ratio box.
+// Assume the camera is 16x9. These are just the standard wide mode; default_pixel_aspect_ratio
+// tries the transpose also.
+const PIXEL_ASPECT_RATIOS: [((u16, u16), (u16, u16)); 6] = [
+    ((320, 240), (4, 3)),
+    ((352, 240), (40, 33)),
+    ((640, 352), (44, 45)),
+    ((640, 480), (4, 3)),
+    ((704, 480), (40, 33)),
+    ((720, 480), (32, 27)),
+];
+
+/// Gets the pixel aspect ratio to use if none is specified.
+///
+/// The Dahua IPC-HDW5231R-Z sets the aspect ratio in the H.264 SPS (correctly) for both square and
+/// non-square pixels. The Hikvision DS-2CD2032-I doesn't set it, even though the sub stream's
+/// pixels aren't square. So define a default based on the pixel dimensions to use if the camera
+/// doesn't tell us what to do.
+///
+/// Note that at least in the case of .mp4 muxing, we don't need to fix up the underlying SPS.
+/// PixelAspectRatioBox's definition says that it overrides the H.264-level declaration.
+fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
+    if width >= height {
+        PIXEL_ASPECT_RATIOS
+            .iter()
+            .find(|r| r.0 == (width, height))
+            .map(|r| r.1)
+            .unwrap_or((1, 1))
+    } else {
+        PIXEL_ASPECT_RATIOS
+            .iter()
+            .find(|r| r.0 == (height, width))
+            .map(|r| (r.1 .1, r.1 .0))
+            .unwrap_or((1, 1))
+    }
+}
 
 pub struct Options {
     pub session: retina::client::SessionOptions,
@@ -115,6 +151,27 @@ struct RetinaStreamInner {
     video_sample_entry: db::VideoSampleEntryToInsert,
 }
 
+fn params_to_sample_entry(
+    params: &retina::codec::VideoParameters,
+) -> Result<db::VideoSampleEntryToInsert, Error> {
+    let (width, height) = params.pixel_dimensions();
+    let width = u16::try_from(width).map_err(|e| err!(Unknown, source(e)))?;
+    let height = u16::try_from(height).map_err(|e| err!(Unknown, source(e)))?;
+    let aspect = default_pixel_aspect_ratio(width, height);
+    Ok(db::VideoSampleEntryToInsert {
+        data: params
+            .mp4_sample_entry()
+            .with_aspect_ratio(aspect)
+            .build()
+            .map_err(|e| err!(Unknown, source(e)))?,
+        rfc6381_codec: "avc1.4d401e".to_string(),
+        width,
+        height,
+        pasp_h_spacing: aspect.0,
+        pasp_v_spacing: aspect.1,
+    })
+}
+
 impl RetinaStreamInner {
     /// Plays to first frame. No timeout; that's the caller's responsibility.
     async fn play(
@@ -129,8 +186,13 @@ impl RetinaStreamInner {
         let video_i = session
             .streams()
             .iter()
-            .position(|s| s.media() == "video" && s.encoding_name() == "h264")
-            .ok_or_else(|| err!(FailedPrecondition, msg("couldn't find H.264 video stream")))?;
+            .position(|s| s.media() == "video" && matches!(s.encoding_name(), "h264" | "jpeg"))
+            .ok_or_else(|| {
+                err!(
+                    FailedPrecondition,
+                    msg("couldn't find supported video stream")
+                )
+            })?;
         session
             .setup(video_i, options.setup)
             .await
@@ -157,9 +219,9 @@ impl RetinaStreamInner {
         let video_params = match session.streams()[video_i].parameters() {
             Some(retina::codec::ParametersRef::Video(v)) => v.clone(),
             Some(_) => unreachable!(),
-            None => bail!(Unknown, msg("couldn't find H.264 parameters")),
+            None => bail!(Unknown, msg("couldn't find video parameters")),
         };
-        let video_sample_entry = h264::parse_extra_data(video_params.extra_data())?;
+        let video_sample_entry = params_to_sample_entry(&video_params)?;
         let self_ = Box::new(Self {
             label,
             session,
@@ -246,7 +308,7 @@ impl Stream for RetinaStream {
                     })??;
                 let mut new_video_sample_entry = false;
                 if let Some(p) = new_parameters {
-                    let video_sample_entry = h264::parse_extra_data(p.extra_data())?;
+                    let video_sample_entry = params_to_sample_entry(&p)?;
                     if video_sample_entry != inner.video_sample_entry {
                         tracing::debug!(
                             "{}: parameter change:\nold: {:?}\nnew: {:?}",
@@ -274,6 +336,8 @@ impl Stream for RetinaStream {
 
 #[cfg(test)]
 pub mod testutil {
+    use mp4::mp4box::WriteBox as _;
+
     use super::*;
     use std::convert::TryFrom;
     use std::io::Cursor;
@@ -300,14 +364,35 @@ pub mod testutil {
                 .values()
                 .find(|t| matches!(t.media_type(), Ok(mp4::MediaType::H264)))
             {
-                None => bail!(InvalidArgument, msg("expected a H.264 track")),
+                None => bail!(
+                    InvalidArgument,
+                    msg(
+                        "expected a H.264 track, tracks were: {:#?}",
+                        reader.tracks()
+                    )
+                ),
                 Some(t) => t,
             };
-            let video_sample_entry = h264::parse_extra_data(
-                &h264_track
-                    .extra_data()
-                    .map_err(|e| err!(Unknown, source(e)))?[..],
-            )?;
+            let mut data = Vec::new();
+            h264_track
+                .trak
+                .mdia
+                .minf
+                .stbl
+                .stsd
+                .avc1
+                .as_ref()
+                .unwrap()
+                .write_box(&mut data)
+                .unwrap();
+            let video_sample_entry = db::VideoSampleEntryToInsert {
+                data,
+                rfc6381_codec: "avc1.4d401e".to_string(),
+                width: h264_track.width(),
+                height: h264_track.height(),
+                pasp_h_spacing: 1,
+                pasp_v_spacing: 1,
+            };
             let h264_track_id = h264_track.track_id();
             let stream = Mp4Stream {
                 reader,
@@ -357,6 +442,26 @@ pub mod testutil {
 
         fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert {
             &self.video_sample_entry
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use db::testutil;
+
+    #[test]
+    fn pixel_aspect_ratios() {
+        testutil::init();
+        use super::default_pixel_aspect_ratio;
+        use num_rational::Ratio;
+        for &((w, h), _) in &super::PIXEL_ASPECT_RATIOS {
+            let (h_spacing, v_spacing) = default_pixel_aspect_ratio(w, h);
+            assert_eq!(Ratio::new(w * h_spacing, h * v_spacing), Ratio::new(16, 9));
+
+            // 90 or 270 degree rotation.
+            let (h_spacing, v_spacing) = default_pixel_aspect_ratio(h, w);
+            assert_eq!(Ratio::new(h * h_spacing, w * v_spacing), Ratio::new(9, 16));
         }
     }
 }
