@@ -281,7 +281,7 @@ impl Segment {
             // include it for consistency with the fast path. It'd be bizarre to have it included or
             // not based on desired_media_range_90k.start.
             let end_90k = if desired_media_range_90k.end == recording.media_duration_90k {
-                i32::max_value()
+                i32::MAX
             } else {
                 desired_media_range_90k.end
             };

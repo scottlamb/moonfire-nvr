@@ -730,9 +730,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             self.stream_id,
             db::RecordingToInsert {
                 run_offset: prev.map(|p| p.run_offset + 1).unwrap_or(0),
-                start: prev
-                    .map(|p| p.end)
-                    .unwrap_or(recording::Time(i64::max_value())),
+                start: prev.map(|p| p.end).unwrap_or(recording::Time::MAX),
                 video_sample_entry_id,
                 flags: db::RecordingFlags::Growing as i32,
                 ..Default::default()
@@ -749,7 +747,7 @@ impl<'a, C: Clocks + Clone, D: DirWriter> Writer<'a, C, D> {
             e: recording::SampleIndexEncoder::default(),
             id,
             hasher: blake3::Hasher::new(),
-            local_start: recording::Time(i64::max_value()),
+            local_start: recording::Time::MAX,
             unindexed_sample: None,
             video_sample_entry_id,
         });

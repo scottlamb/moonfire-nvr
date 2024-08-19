@@ -87,7 +87,7 @@ fn tab_complete(
                     menu::Tree::new().with(|tree| {
                         for completion in completions {
                             let edit_view = edit_view.clone();
-                            tree.add_leaf(&completion.clone(), move |siv| {
+                            tree.add_leaf(completion.clone(), move |siv| {
                                 edit_view.borrow_mut().set_content(&completion)(siv)
                             })
                         }

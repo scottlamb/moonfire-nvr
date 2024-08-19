@@ -74,15 +74,11 @@ fn parse_zone(input: &str) -> IResult<&str, i32> {
 }
 
 impl Time {
+    pub const MIN: Self = Time(i64::MIN);
+    pub const MAX: Self = Time(i64::MAX);
+
     pub fn new(tm: time::Timespec) -> Self {
         Time(tm.sec * TIME_UNITS_PER_SEC + tm.nsec as i64 * TIME_UNITS_PER_SEC / 1_000_000_000)
-    }
-
-    pub const fn min_value() -> Self {
-        Time(i64::min_value())
-    }
-    pub const fn max_value() -> Self {
-        Time(i64::max_value())
     }
 
     /// Parses a time as either 90,000ths of a second since epoch or a RFC 3339-like string.

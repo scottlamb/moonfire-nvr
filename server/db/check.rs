@@ -309,7 +309,7 @@ fn compare_stream(
     ctx: &mut Context,
 ) -> Result<bool, Error> {
     let start = CompositeId::new(stream_id, 0);
-    let end = CompositeId::new(stream_id, i32::max_value());
+    let end = CompositeId::new(stream_id, i32::MAX);
     let mut printed_error = false;
     let cum_recordings = stream
         .cum_recordings

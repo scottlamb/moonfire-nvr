@@ -117,7 +117,7 @@ impl Service {
 
                             // Add a segment for the relevant part of the recording, if any.
                             // Note all calculations here are in wall times / wall durations.
-                            let end_time = s.end_time.unwrap_or(i64::max_value());
+                            let end_time = s.end_time.unwrap_or(i64::MAX);
                             let wd = i64::from(r.wall_duration_90k);
                             if s.start_time <= cur_off + wd && cur_off < end_time {
                                 let start = cmp::max(0, s.start_time - cur_off);

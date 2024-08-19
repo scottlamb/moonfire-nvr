@@ -56,7 +56,7 @@ impl Service {
     }
 
     fn get_signals(&self, req: &Request<hyper::Body>) -> ResponseResult {
-        let mut time = recording::Time::min_value()..recording::Time::max_value();
+        let mut time = recording::Time::MIN..recording::Time::MAX;
         if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
                 let (key, value) = (key.borrow(), value.borrow());

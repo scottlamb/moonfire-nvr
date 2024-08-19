@@ -169,7 +169,7 @@ impl<'a> PointDataIterator<'a> {
                 msg("signal overflow: {} + {}", self.cur_signal, signal_delta)
             )
         })?;
-        if state > u16::max_value() as u32 {
+        if state > u32::from(u16::MAX) {
             bail!(OutOfRange, msg("state overflow: {state}"));
         }
         self.cur_pos = p;
@@ -858,10 +858,9 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
         let s = State::init(&conn, &GlobalConfig::default()).unwrap();
-        s.list_changes_by_time(
-            recording::Time::min_value()..recording::Time::max_value(),
-            &mut |_r| panic!("no changes expected"),
-        );
+        s.list_changes_by_time(recording::Time::MIN..recording::Time::MAX, &mut |_r| {
+            panic!("no changes expected")
+        });
     }
 
     #[test]
@@ -912,10 +911,9 @@ mod tests {
             ..Default::default()
         };
         let mut s = State::init(&conn, &config).unwrap();
-        s.list_changes_by_time(
-            recording::Time::min_value()..recording::Time::max_value(),
-            &mut |_r| panic!("no changes expected"),
-        );
+        s.list_changes_by_time(recording::Time::MIN..recording::Time::MAX, &mut |_r| {
+            panic!("no changes expected")
+        });
         const START: recording::Time = recording::Time(140067462600000); // 2019-04-26T11:59:00
         const NOW: recording::Time = recording::Time(140067468000000); // 2019-04-26T12:00:00
         s.update_signals(START..NOW, &[1, 2], &[2, 1]).unwrap();
@@ -944,14 +942,12 @@ mod tests {
             },
         ];
 
-        s.list_changes_by_time(
-            recording::Time::min_value()..recording::Time::max_value(),
-            &mut |r| rows.push(*r),
-        );
-        s.list_changes_by_time(
-            recording::Time::max_value()..recording::Time::min_value(),
-            &mut |_r| panic!("no changes expected"),
-        );
+        s.list_changes_by_time(recording::Time::MIN..recording::Time::MAX, &mut |r| {
+            rows.push(*r)
+        });
+        s.list_changes_by_time(recording::Time::MAX..recording::Time::MIN, &mut |_r| {
+            panic!("no changes expected")
+        });
         assert_eq!(&rows[..], EXPECTED);
         let mut expected_days = days::Map::default();
         expected_days.0.insert(
@@ -979,10 +975,9 @@ mod tests {
         drop(s);
         let mut s = State::init(&conn, &config).unwrap();
         rows.clear();
-        s.list_changes_by_time(
-            recording::Time::min_value()..recording::Time::max_value(),
-            &mut |r| rows.push(*r),
-        );
+        s.list_changes_by_time(recording::Time::MIN..recording::Time::MAX, &mut |r| {
+            rows.push(*r)
+        });
         assert_eq!(&rows[..], EXPECTED);
 
         // Go through it again. This time, hit the max number of signals, forcing START to be
@@ -1012,10 +1007,9 @@ mod tests {
                 state: 0,
             },
         ];
-        s.list_changes_by_time(
-            recording::Time::min_value()..recording::Time::max_value(),
-            &mut |r| rows.push(*r),
-        );
+        s.list_changes_by_time(recording::Time::MIN..recording::Time::MAX, &mut |r| {
+            rows.push(*r)
+        });
         assert_eq!(&rows[..], EXPECTED2);
 
         {
@@ -1026,10 +1020,9 @@ mod tests {
         drop(s);
         let s = State::init(&conn, &config).unwrap();
         rows.clear();
-        s.list_changes_by_time(
-            recording::Time::min_value()..recording::Time::max_value(),
-            &mut |r| rows.push(*r),
-        );
+        s.list_changes_by_time(recording::Time::MIN..recording::Time::MAX, &mut |r| {
+            rows.push(*r)
+        });
         assert_eq!(&rows[..], EXPECTED2);
     }
 }

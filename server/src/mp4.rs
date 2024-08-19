@@ -951,7 +951,7 @@ impl FileBuilder {
         }
         let s = Segment::new(
             db,
-            &row,
+            row,
             rel_media_range_90k,
             self.next_frame_num,
             start_at_key,
@@ -1071,7 +1071,7 @@ impl FileBuilder {
 
                 // If the segment is > 4 GiB, the 32-bit trun data offsets are untrustworthy.
                 // We'd need multiple moof+mdat sequences to support large media segments properly.
-                if self.body.slices.len() > u32::max_value() as u64 {
+                if self.body.slices.len() > u64::from(u32::MAX) {
                     bail!(
                         OutOfRange,
                         msg(
