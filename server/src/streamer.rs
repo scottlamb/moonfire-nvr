@@ -120,7 +120,7 @@ where
     pub fn run(&mut self) {
         while self.shutdown_rx.check().is_ok() {
             if let Err(err) = self.run_once() {
-                let sleep_time = time::Duration::seconds(1);
+                let sleep_time = base::clock::Duration::from_secs(1);
                 warn!(
                     err = %err.chain(),
                     "sleeping for 1 s after error"
@@ -181,7 +181,7 @@ where
             self.opener
                 .open(self.short_name.clone(), self.url.clone(), options)?
         };
-        let realtime_offset = self.db.clocks().realtime() - clocks.monotonic();
+        let realtime_offset = self.db.clocks().realtime().0 - clocks.monotonic().0;
         let mut video_sample_entry_id = {
             let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
             self.db
@@ -214,10 +214,10 @@ where
                 debug!("have first key frame");
                 seen_key_frame = true;
             }
-            let frame_realtime = clocks.monotonic() + realtime_offset;
-            let local_time = recording::Time::new(frame_realtime);
+            let frame_realtime = base::clock::SystemTime(realtime_offset + clocks.monotonic().0);
+            let local_time = recording::Time::from(frame_realtime);
             rotate = if let Some(r) = rotate {
-                if frame_realtime.sec > r && frame.is_key {
+                if frame_realtime.as_secs() > r && frame.is_key {
                     trace!("close on normal rotation");
                     let _t = TimerGuard::new(&clocks, || "closing writer");
                     w.close(Some(frame.pts), None)?;
@@ -245,7 +245,7 @@ where
             let r = match rotate {
                 Some(r) => r,
                 None => {
-                    let sec = frame_realtime.sec;
+                    let sec = frame_realtime.as_secs();
                     let r = sec - (sec % self.rotate_interval_sec) + self.rotate_offset_sec;
                     let r = r + if r <= sec {
                         self.rotate_interval_sec
@@ -300,8 +300,8 @@ mod tests {
     struct ProxyingStream {
         clocks: clock::SimulatedClocks,
         inner: Box<dyn stream::Stream>,
-        buffered: time::Duration,
-        slept: time::Duration,
+        buffered: base::clock::Duration,
+        slept: base::clock::Duration,
         ts_offset: i64,
         ts_offset_pkts_left: u32,
         pkts_left: u32,
@@ -310,7 +310,7 @@ mod tests {
     impl ProxyingStream {
         fn new(
             clocks: clock::SimulatedClocks,
-            buffered: time::Duration,
+            buffered: base::clock::Duration,
             inner: Box<dyn stream::Stream>,
         ) -> ProxyingStream {
             clocks.sleep(buffered);
@@ -318,7 +318,7 @@ mod tests {
                 clocks,
                 inner,
                 buffered,
-                slept: time::Duration::seconds(0),
+                slept: base::clock::Duration::default(),
                 ts_offset: 0,
                 ts_offset_pkts_left: 0,
                 pkts_left: 0,
@@ -349,9 +349,10 @@ mod tests {
             // Avoid accumulating conversion error by tracking the total amount to sleep and how
             // much we've already slept, rather than considering each frame in isolation.
             {
-                let goal = frame.pts + i64::from(frame.duration);
-                let goal = time::Duration::nanoseconds(
-                    goal * 1_000_000_000 / recording::TIME_UNITS_PER_SEC,
+                let goal =
+                    u64::try_from(frame.pts).unwrap() + u64::try_from(frame.duration).unwrap();
+                let goal = base::clock::Duration::from_nanos(
+                    goal * 1_000_000_000 / u64::try_from(recording::TIME_UNITS_PER_SEC).unwrap(),
                 );
                 let duration = goal - self.slept;
                 let buf_part = cmp::min(self.buffered, duration);
@@ -430,12 +431,15 @@ mod tests {
     async fn basic() {
         testutil::init();
         // 2015-04-25 00:00:00 UTC
-        let clocks = clock::SimulatedClocks::new(time::Timespec::new(1429920000, 0));
-        clocks.sleep(time::Duration::seconds(86400)); // to 2015-04-26 00:00:00 UTC
+        let clocks = clock::SimulatedClocks::new(clock::SystemTime::new(1429920000, 0));
+        clocks.sleep(clock::Duration::from_secs(86400)); // to 2015-04-26 00:00:00 UTC
 
         let stream = stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
-        let mut stream =
-            ProxyingStream::new(clocks.clone(), time::Duration::seconds(2), Box::new(stream));
+        let mut stream = ProxyingStream::new(
+            clocks.clone(),
+            clock::Duration::from_secs(2),
+            Box::new(stream),
+        );
         stream.ts_offset = 123456; // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::max_value();
         stream.pkts_left = u32::max_value();

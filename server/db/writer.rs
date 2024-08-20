@@ -19,8 +19,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration as StdDuration;
-use time::{Duration, Timespec};
 use tracing::{debug, trace, warn};
 
 /// Trait to allow mocking out [crate::dir::SampleFileDir] in syncer tests.
@@ -103,7 +101,7 @@ struct Syncer<C: Clocks + Clone, D: DirWriter> {
 /// A plan to flush at a given instant due to a recently-saved recording's `flush_if_sec` parameter.
 struct PlannedFlush {
     /// Monotonic time at which this flush should happen.
-    when: Timespec,
+    when: base::clock::Instant,
 
     /// Recording which prompts this flush. If this recording is already flushed at the planned
     /// time, it can be skipped.
@@ -440,9 +438,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
                 let now = self.db.clocks().monotonic();
 
                 // Calculate the timeout to use, mapping negative durations to 0.
-                let timeout = (t - now)
-                    .to_std()
-                    .unwrap_or_else(|_| StdDuration::new(0, 0));
+                let timeout = t.saturating_sub(&now);
                 match self.db.clocks().recv_timeout(cmds, timeout) {
                     Err(mpsc::RecvTimeoutError::Disconnected) => return false, // cmd senders gone.
                     Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -534,8 +530,11 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         let c = db.cameras_by_id().get(&s.camera_id).unwrap();
 
         // Schedule a flush.
-        let how_soon =
-            Duration::seconds(i64::from(s.config.flush_if_sec)) - wall_duration.to_tm_duration();
+        let how_soon = base::clock::Duration::from_secs(u64::from(s.config.flush_if_sec))
+            .saturating_sub(
+                base::clock::Duration::try_from(wall_duration)
+                    .expect("wall_duration is non-negative"),
+            );
         let now = self.db.clocks().monotonic();
         let when = now + how_soon;
         let reason = format!(
@@ -546,7 +545,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
             s.type_.as_str(),
             id
         );
-        trace!("scheduling flush in {} because {}", how_soon, &reason);
+        trace!("scheduling flush in {:?} because {}", how_soon, &reason);
         self.planned_flushes.push(PlannedFlush {
             when,
             reason,
@@ -600,15 +599,15 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
             return;
         }
         if let Err(e) = l.flush(&f.reason) {
-            let d = Duration::minutes(1);
+            let d = base::clock::Duration::from_secs(60);
             warn!(
-                "flush failure on save for reason {}; will retry after {}: {:?}",
+                "flush failure on save for reason {}; will retry after {:?}: {:?}",
                 f.reason, d, e
             );
             self.planned_flushes
                 .peek_mut()
                 .expect("planned_flushes is non-empty")
-                .when = self.db.clocks().monotonic() + Duration::minutes(1);
+                .when = self.db.clocks().monotonic() + base::clock::Duration::from_secs(60);
             return;
         }
 
@@ -1162,7 +1161,7 @@ mod tests {
     }
 
     fn new_harness(flush_if_sec: u32) -> Harness {
-        let clocks = SimulatedClocks::new(::time::Timespec::new(0, 0));
+        let clocks = SimulatedClocks::new(base::clock::SystemTime::new(0, 0));
         let tdb = testutil::TestDb::new_with_flush_if_sec(clocks, flush_if_sec);
         let dir_id = *tdb
             .db
@@ -1653,7 +1652,7 @@ mod tests {
         let mut h = new_harness(60); // flush_if_sec=60
 
         // There's a database constraint forbidding a recording starting at t=0, so advance.
-        h.db.clocks().sleep(time::Duration::seconds(1));
+        h.db.clocks().sleep(base::clock::Duration::from_secs(1));
 
         // Setup: add a 3-byte recording.
         let video_sample_entry_id =
@@ -1700,7 +1699,7 @@ mod tests {
         h.db.lock().flush("forced").unwrap();
         assert!(h.syncer.iter(&h.syncer_rx)); // DatabaseFlushed
         assert_eq!(h.syncer.planned_flushes.len(), 1);
-        h.db.clocks().sleep(time::Duration::seconds(30));
+        h.db.clocks().sleep(base::clock::Duration::from_secs(30));
 
         // Then, a 1-byte recording.
         let mut w = Writer::new(&h.dir, &h.db, &h.channel, testutil::TEST_STREAM_ID);
@@ -1735,13 +1734,22 @@ mod tests {
 
         assert_eq!(h.syncer.planned_flushes.len(), 2);
         let db_flush_count_before = h.db.lock().flushes();
-        assert_eq!(h.db.clocks().monotonic(), time::Timespec::new(31, 0));
+        assert_eq!(
+            h.db.clocks().monotonic(),
+            base::clock::Instant::from_secs(31)
+        );
         assert!(h.syncer.iter(&h.syncer_rx)); // planned flush (no-op)
-        assert_eq!(h.db.clocks().monotonic(), time::Timespec::new(61, 0));
+        assert_eq!(
+            h.db.clocks().monotonic(),
+            base::clock::Instant::from_secs(61)
+        );
         assert_eq!(h.db.lock().flushes(), db_flush_count_before);
         assert_eq!(h.syncer.planned_flushes.len(), 1);
         assert!(h.syncer.iter(&h.syncer_rx)); // planned flush
-        assert_eq!(h.db.clocks().monotonic(), time::Timespec::new(91, 0));
+        assert_eq!(
+            h.db.clocks().monotonic(),
+            base::clock::Instant::from_secs(91)
+        );
         assert_eq!(h.db.lock().flushes(), db_flush_count_before + 1);
         assert_eq!(h.syncer.planned_flushes.len(), 0);
         assert!(h.syncer.iter(&h.syncer_rx)); // DatabaseFlushed

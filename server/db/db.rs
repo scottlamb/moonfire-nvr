@@ -621,7 +621,7 @@ pub struct LockedDatabase {
 
     /// The monotonic time when the database was opened (whether in read-write mode or read-only
     /// mode).
-    open_monotonic: recording::Time,
+    open_monotonic: base::clock::Instant,
 
     auth: auth::State,
     signal: signal::State,
@@ -1076,8 +1076,10 @@ impl LockedDatabase {
                 r"update open set duration_90k = ?, end_time_90k = ? where id = ?",
             )?;
             let rows = stmt.execute(params![
-                (recording::Time::new(clocks.monotonic()) - self.open_monotonic).0,
-                recording::Time::new(clocks.realtime()).0,
+                recording::Duration::try_from(clocks.monotonic() - self.open_monotonic)
+                    .expect("valid duration")
+                    .0,
+                recording::Time::from(clocks.realtime()).0,
                 o.id,
             ])?;
             if rows != 1 {
@@ -2346,9 +2348,9 @@ impl<C: Clocks + Clone> Database<C> {
         // Note: the meta check comes after the version check to improve the error message when
         // trying to open a version 0 or version 1 database (which lacked the meta table).
         let (db_uuid, config) = raw::read_meta(&conn)?;
-        let open_monotonic = recording::Time::new(clocks.monotonic());
+        let open_monotonic = clocks.monotonic();
         let open = if read_write {
-            let real = recording::Time::new(clocks.realtime());
+            let real = recording::Time::from(clocks.realtime());
             let mut stmt = conn
                 .prepare(" insert into open (uuid, start_time_90k, boot_uuid) values (?, ?, ?)")?;
             let open_uuid = SqlUuid(Uuid::new_v4());

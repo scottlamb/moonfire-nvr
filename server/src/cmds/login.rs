@@ -78,7 +78,7 @@ pub fn run(args: Args) -> Result<i32, Error> {
         .map(db::Permissions::from)
         .unwrap_or_else(|| u.permissions.clone());
     let creation = db::auth::Request {
-        when_sec: Some(db.clocks().realtime().sec),
+        when_sec: Some(db.clocks().realtime().as_secs()),
         user_agent: None,
         addr: None,
     };

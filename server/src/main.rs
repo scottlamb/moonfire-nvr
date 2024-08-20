@@ -70,13 +70,13 @@ fn main() {
     // anything (with timestamps...) so we can print a helpful error.
     if let Err(e) = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC) {
         eprintln!(
-            "clock_gettime failed: {e}\n\n\
+            "clock_gettime(CLOCK_MONOTONIC) failed: {e}\n\n\
              This indicates a broken environment. See the troubleshooting guide."
         );
         std::process::exit(1);
     }
-
     base::tracing_setup::install();
+    base::time::init_zone(jiff::tz::TimeZone::system);
 
     // Get the program name from the OS (e.g. if invoked as `target/debug/nvr`: `nvr`),
     // falling back to the crate name if conversion to a path/UTF-8 string fails.

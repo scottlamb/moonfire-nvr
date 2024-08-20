@@ -17,12 +17,18 @@ use tracing_subscriber::{
 
 struct FormatSystemd;
 
-struct ChronoTimer;
+struct JiffTimer;
 
-impl FormatTime for ChronoTimer {
+impl FormatTime for JiffTimer {
     fn format_time(&self, w: &mut Writer<'_>) -> std::fmt::Result {
         const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.6f";
-        write!(w, "{}", chrono::Local::now().format(TIME_FORMAT))
+
+        // Always use the system time zone here, not `base::time::GLOBAL_ZONE`,
+        // to resolve a chicken-and-egg problem. `jiff::tz::TimeZone::system()`
+        // may log an error that is worth seeing. Therefore, we install the
+        // tracing subscriber before initializing `GLOBAL_ZONE`. The latter
+        // only exists to override the zone for tests anyway.
+        write!(w, "{}", jiff::Zoned::now().strftime(TIME_FORMAT))
     }
 }
 
@@ -139,7 +145,7 @@ pub fn install() {
             let sub = tracing_subscriber::registry().with(
                 tracing_subscriber::fmt::Layer::new()
                     .with_writer(std::io::stderr)
-                    .with_timer(ChronoTimer)
+                    .with_timer(JiffTimer)
                     .with_thread_names(true)
                     .with_filter(filter),
             );
@@ -164,7 +170,7 @@ pub fn install_for_tests() {
     let sub = tracing_subscriber::registry().with(
         tracing_subscriber::fmt::Layer::new()
             .with_test_writer()
-            .with_timer(ChronoTimer)
+            .with_timer(JiffTimer)
             .with_thread_names(true)
             .with_filter(filter),
     );

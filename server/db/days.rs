@@ -5,7 +5,7 @@
 //! In-memory indexes by calendar day.
 
 use base::time::{Duration, Time, TIME_UNITS_PER_SEC};
-use base::{err, Error};
+use base::Error;
 use smallvec::SmallVec;
 use std::cmp;
 use std::collections::BTreeMap;
@@ -20,28 +20,22 @@ use tracing::{error, trace};
 pub struct Key(pub(crate) [u8; 10]);
 
 impl Key {
-    fn new(tm: time::Tm) -> Result<Self, Error> {
+    fn new(tm: &jiff::Zoned) -> Result<Self, Error> {
         let mut s = Key([0u8; 10]);
-        write!(
-            &mut s.0[..],
-            "{}",
-            tm.strftime("%Y-%m-%d")
-                .map_err(|e| err!(Internal, source(e)))?
-        )?;
+        write!(&mut s.0[..], "{}", tm.strftime("%Y-%m-%d"))?;
         Ok(s)
     }
 
     pub fn bounds(&self) -> Range<Time> {
-        let mut my_tm = time::strptime(self.as_ref(), "%Y-%m-%d").expect("days must be parseable");
-        my_tm.tm_utcoff = 1; // to the time crate, values != 0 mean local time.
-        my_tm.tm_isdst = -1;
-        let start = Time(my_tm.to_timespec().sec * TIME_UNITS_PER_SEC);
-        my_tm.tm_hour = 0;
-        my_tm.tm_min = 0;
-        my_tm.tm_sec = 0;
-        my_tm.tm_mday += 1;
-        let end = Time(my_tm.to_timespec().sec * TIME_UNITS_PER_SEC);
-        start..end
+        let date: jiff::civil::Date = self.as_ref().parse().expect("Key should be valid date");
+        let start = date
+            .to_zoned(base::time::global_zone())
+            .expect("Key should be valid date");
+        let end = start.tomorrow().expect("Key should have valid tomorrow");
+
+        // Note day boundaries are expected to always be whole numbers of seconds.
+        Time(start.timestamp().as_second() * TIME_UNITS_PER_SEC)
+            ..Time(end.timestamp().as_second() * TIME_UNITS_PER_SEC)
     }
 }
 
@@ -60,13 +54,14 @@ impl std::fmt::Debug for Key {
 pub trait Value: std::fmt::Debug + Default {
     type Change: std::fmt::Debug;
 
-    /// Applies the given change to this value.
+    /// Applies the given change to this value; `c` may be positive or negative.
     fn apply(&mut self, c: &Self::Change);
 
     fn is_empty(&self) -> bool;
 }
 
-/// In-memory state about a particular stream on a particular day.
+/// In-memory state about a particular stream on a particular day, or a change
+/// to make via `<StreamValue as Value::apply>`.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct StreamValue {
     /// The number of recordings that overlap with this day.
@@ -81,6 +76,7 @@ pub struct StreamValue {
 impl Value for StreamValue {
     type Change = Self;
 
+    /// Applies the given change, which may have positive or negative recordings and duration.
     fn apply(&mut self, c: &StreamValue) {
         self.recordings += c.recordings;
         self.duration += c.duration;
@@ -198,42 +194,34 @@ impl<'a, V: Value> IntoIterator for &'a Map<V> {
 
 impl Map<StreamValue> {
     /// Adjusts `self` to reflect the range of the given recording.
+    ///
     /// Note that the specified range may span two days. It will never span more because the maximum
     /// length of a recording entry is less than a day (even a 23-hour "spring forward" day).
-    ///
-    /// This function swallows/logs date formatting errors because they shouldn't happen and there's
-    /// not much that can be done about them. (The database operation has already gone through.)
+    /// See [`crate::recording::MAX_RECORDING_WALL_DURATION`].
     pub(crate) fn adjust(&mut self, r: Range<Time>, sign: i64) {
         // Find first day key.
         let sec = r.start.unix_seconds();
-        let mut my_tm = time::at(time::Timespec { sec, nsec: 0 });
-        let day = match Key::new(my_tm) {
-            Ok(d) => d,
-            Err(ref e) => {
-                error!(
-                    "Unable to fill first day key from {:?}->{:?}: {}; will ignore.",
-                    r, my_tm, e
-                );
-                return;
-            }
-        };
+        let start = jiff::Zoned::new(
+            jiff::Timestamp::from_second(sec).expect("valid timestamp"),
+            base::time::global_zone(),
+        );
+        let start_day = Key::new(&start).expect("valid key");
 
         // Determine the start of the next day.
-        // Use mytm to hold a non-normalized representation of the boundary.
-        my_tm.tm_isdst = -1;
-        my_tm.tm_hour = 0;
-        my_tm.tm_min = 0;
-        my_tm.tm_sec = 0;
-        my_tm.tm_mday += 1;
-        let boundary = my_tm.to_timespec();
-        let boundary_90k = boundary.sec * TIME_UNITS_PER_SEC;
+        let boundary = start
+            .date()
+            .tomorrow()
+            .expect("valid tomorrow")
+            .to_zoned(start.time_zone().clone())
+            .expect("valid tomorrow");
+        let boundary_90k = boundary.timestamp().as_second() * TIME_UNITS_PER_SEC;
 
         // Adjust the first day.
         let first_day_delta = StreamValue {
             recordings: sign,
             duration: Duration(sign * (cmp::min(r.end.0, boundary_90k) - r.start.0)),
         };
-        self.adjust_day(day, first_day_delta);
+        self.adjust_day(start_day, first_day_delta);
 
         if r.end.0 <= boundary_90k {
             return;
@@ -242,13 +230,12 @@ impl Map<StreamValue> {
         // Fill day with the second day. This requires a normalized representation so recalculate.
         // (The C mktime(3) already normalized for us once, but .to_timespec() discarded that
         // result.)
-        let my_tm = time::at(boundary);
-        let day = match Key::new(my_tm) {
+        let day = match Key::new(&boundary) {
             Ok(d) => d,
             Err(ref e) => {
                 error!(
                     "Unable to fill second day key from {:?}: {}; will ignore.",
-                    my_tm, e
+                    boundary, e
                 );
                 return;
             }
@@ -263,35 +250,29 @@ impl Map<StreamValue> {
 
 impl Map<SignalValue> {
     /// Adjusts `self` to reflect the range of the given recording.
-    /// Note that the specified range may span several days (unlike StreamValue).
     ///
-    /// This function swallows/logs date formatting errors because they shouldn't happen and there's
-    /// not much that can be done about them. (The database operation has already gone through.)
+    /// Note that the specified range may span several days (unlike `StreamValue`).
     pub(crate) fn adjust(&mut self, mut r: Range<Time>, old_state: u16, new_state: u16) {
         // Find first day key.
         let sec = r.start.unix_seconds();
-        let mut my_tm = time::at(time::Timespec { sec, nsec: 0 });
-        let mut day = match Key::new(my_tm) {
-            Ok(d) => d,
-            Err(ref e) => {
-                error!(
-                    "Unable to fill first day key from {:?}->{:?}: {}; will ignore.",
-                    r, my_tm, e
-                );
-                return;
-            }
-        };
+        let mut tm = jiff::Zoned::new(
+            jiff::Timestamp::from_second(sec).expect("valid timestamp"),
+            base::time::global_zone(),
+        );
+        let mut day = Key::new(&tm).expect("valid date");
 
-        // Determine the start of the next day.
-        // Use mytm to hold a non-normalized representation of the boundary.
-        my_tm.tm_isdst = -1;
-        my_tm.tm_hour = 0;
-        my_tm.tm_min = 0;
-        my_tm.tm_sec = 0;
+        // Determine the starts of subsequent days.
+        tm = tm
+            .with()
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build()
+            .expect("midnight is valid");
 
         loop {
-            my_tm.tm_mday += 1;
-            let boundary_90k = my_tm.to_timespec().sec * TIME_UNITS_PER_SEC;
+            tm = tm.tomorrow().expect("valid tomorrow");
+            let boundary_90k = tm.timestamp().as_second() * TIME_UNITS_PER_SEC;
 
             // Adjust this day.
             let duration = Duration(cmp::min(r.end.0, boundary_90k) - r.start.0);
@@ -308,23 +289,8 @@ impl Map<SignalValue> {
                 return;
             }
 
-            // Fill day with the next day. This requires a normalized representation so
-            // recalculate. (The C mktime(3) already normalized for us once, but .to_timespec()
-            // discarded that result.)
-            let my_tm = time::at(time::Timespec {
-                sec: Time(boundary_90k).unix_seconds(),
-                nsec: 0,
-            });
-            day = match Key::new(my_tm) {
-                Ok(d) => d,
-                Err(ref e) => {
-                    error!(
-                        "Unable to fill day key from {:?}: {}; will ignore.",
-                        my_tm, e
-                    );
-                    return;
-                }
-            };
+            // Fill day with the next day.
+            day = Key::new(&tm).expect("valid date");
             r.start.0 = boundary_90k;
         }
     }

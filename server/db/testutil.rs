@@ -10,7 +10,6 @@ use crate::dir;
 use crate::writer;
 use base::clock::Clocks;
 use base::FastHashMap;
-use std::env;
 use std::sync::Arc;
 use std::thread;
 use tempfile::TempDir;
@@ -33,14 +32,13 @@ pub const TEST_VIDEO_SAMPLE_ENTRY_DATA: &[u8] =
 /// Performs global initialization for tests.
 ///    * set up logging. (Note the output can be confusing unless `RUST_TEST_THREADS=1` is set in
 ///      the program's environment prior to running.)
-///    * set `TZ=America/Los_Angeles` so that tests that care about calendar time get the expected
-///      results regardless of machine setup.)
+///    * set time zone `America/Los_Angeles` so that tests that care about
+///      calendar time get the expected results regardless of machine setup.)
 ///    * use a fast but insecure password hashing format.
 pub fn init() {
     INIT.call_once(|| {
         base::tracing_setup::install_for_tests();
-        env::set_var("TZ", "America/Los_Angeles");
-        time::tzset();
+        base::time::testutil::init_zone();
         crate::auth::set_test_config();
     });
 }

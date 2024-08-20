@@ -25,6 +25,7 @@ futures = "0.3"
 h264-reader = { workspace = true }
 hashlink = "0.9.1"
 itertools = { workspace = true }
+jiff = { workspace = true }
 libc = "0.2"
 nix = { workspace = true, features = ["dir", "feature", "fs", "mman"] }
 num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
@@ -38,7 +39,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = "1.0"
 tempfile = "3.2.0"
-time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "sync"] }
 tracing = { workspace = true }
 ulid = "1.0.0"

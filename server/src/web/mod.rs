@@ -321,7 +321,7 @@ impl Service {
     ) -> Result<Response<Body>, std::convert::Infallible> {
         let request_id = ulid::Ulid::new();
         let authreq = auth::Request {
-            when_sec: Some(self.db.clocks().realtime().sec),
+            when_sec: Some(self.db.clocks().realtime().as_secs()),
             addr: if self.trust_forward_hdrs {
                 req.headers()
                     .get("X-Real-IP")
@@ -543,22 +543,22 @@ impl Service {
             .user_agent
             .as_ref()
             .map(|u| String::from_utf8_lossy(&u[..]));
+        let when = authreq.when_sec.map(|sec| {
+            jiff::Timestamp::from_second(sec)
+                .expect("valid time")
+                .to_zoned(base::time::global_zone())
+                .strftime("%FT%T%:z")
+        });
         Ok(plain_response(
             StatusCode::OK,
             format!(
-                "when: {}\n\
+                "when: {:?}\n\
                     host: {:?}\n\
                     addr: {:?}\n\
                     user_agent: {:?}\n\
                     secure: {:?}\n\
                     caller: {:?}\n",
-                time::at(time::Timespec {
-                    sec: authreq.when_sec.unwrap(),
-                    nsec: 0
-                })
-                .strftime("%FT%T")
-                .map(|f| f.to_string())
-                .unwrap_or_else(|e| e.to_string()),
+                when,
                 host.as_deref(),
                 &authreq.addr,
                 agent.as_deref(),

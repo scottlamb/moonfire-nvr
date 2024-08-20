@@ -83,7 +83,7 @@ use tracing::{debug, error, trace, warn};
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes or headers to be output for a particular set of `FileBuilder` options. Incrementing this
 /// value will cause the etag to change as well.
-const FORMAT_VERSION: [u8; 1] = [0x09];
+const FORMAT_VERSION: [u8; 1] = [0x0a];
 
 /// An `ftyp` (ISO/IEC 14496-12 section 4.3 `FileType`) box.
 const NORMAL_FTYP_BOX: &[u8] = &[
@@ -1029,7 +1029,7 @@ impl FileBuilder {
                 let start_sec = wall.start.unix_seconds();
                 let end_sec =
                     (wall.end + recording::Duration(TIME_UNITS_PER_SEC - 1)).unix_seconds();
-                s.num_subtitle_samples = (end_sec - start_sec) as u16;
+                s.num_subtitle_samples = (end_sec - start_sec + 1) as u16;
                 self.num_subtitle_samples += s.num_subtitle_samples as u32;
             }
 
@@ -1840,24 +1840,26 @@ impl FileInner {
         let wd = s.wall(md.start)..s.wall(md.end);
         let start_sec =
             (s.recording_start + recording::Duration(i64::from(wd.start))).unix_seconds();
-        let end_sec = (s.recording_start
+        let end_inclusive_sec = (s.recording_start
             + recording::Duration(i64::from(wd.end) + TIME_UNITS_PER_SEC - 1))
         .unix_seconds();
         let len = usize::try_from(len).unwrap();
         let mut v = Vec::with_capacity(len);
-        // TODO(slamb): is this right?!? might have an off-by-one here.
-        for ts in start_sec..end_sec {
+        let mut tm = jiff::Zoned::new(
+            jiff::Timestamp::from_second(start_sec).expect("timestamp is valid"),
+            base::time::global_zone(),
+        );
+        let mut cur_sec = start_sec;
+        loop {
             v.write_u16::<BigEndian>(SUBTITLE_LENGTH as u16)
                 .expect("Vec write shouldn't fail");
-            let tm = time::at(time::Timespec { sec: ts, nsec: 0 });
-            use std::io::Write;
-            write!(
-                v,
-                "{}",
-                tm.strftime(SUBTITLE_TEMPLATE)
-                    .err_kind(ErrorKind::Internal)?
-            )
-            .expect("Vec write shouldn't fail");
+            use std::io::Write as _;
+            write!(v, "{}", tm.strftime(SUBTITLE_TEMPLATE)).expect("Vec write shouldn't fail");
+            if cur_sec == end_inclusive_sec {
+                break;
+            }
+            tm += std::time::Duration::from_secs(1);
+            cur_sec += 1;
         }
         assert_eq!(len, v.len());
         Ok(ARefss::new(v)
@@ -2849,7 +2851,7 @@ mod tests {
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"791114c469130970608dd999b0ecf5861d077ec33fad2f0b040996e4aae4e30f\"";
+            "\"37c89bda9f0513acdc2ab95f48f03b3f797dfa3fb30bbefa6549fdc7296afed2\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2874,11 +2876,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "1f85ec7ea7f061b7d8f696c337a3258abc2bf830e81ac23c1342131669d7bb14",
+            "8f17df9b43dc55654a1e4e00126e7477f43234693d4f1fae72185798a09479d7",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"85703b9abadd4292e119f2f7b0d6a16e99acf8b3ba98fcb6498e60ac5cb0b0b7\"";
+            "\"d4af0554a50f6dfff2f7f95a14e16f720bd5fe36a9570cd4fd32f6664f1487c4\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2907,7 +2909,7 @@ mod tests {
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"3d2031124fb995bf2fc4930e7affdcd51add396e062cfab97e1001224c5ee42c\"";
+            "\"7165c1a866451b7e714a8ad47f4a0022a3749212e945321b35b2f8aaee8aea5c\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2933,11 +2935,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "9c0302294f8f34d14fc8069fea1a65c1593a4c01134c07ab994b7398004f2b63",
+            "caf8b23f3b6ee959981687ff0bcbf8d6b01db9daef35695b2600ffb9f8b54fe1",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"aa9bb2f63787a7d21227981135326c948db3e0b3dae5d0d39c77df69d0baf504\"";
+            "\"167ad6b44502cb09eb15d08fdd2c360e4e54e521251eceeebddf74c4041b0b38\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2966,7 +2968,7 @@ mod tests {
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"0a6accaa7b583c94209eba58b00b39a804a5c4a8c99043e58e72fed7acd8dfc6\"";
+            "\"2c591788cf06f09b55450cd98cb07c670d580413359260f2d18b9595bd0b430d\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()

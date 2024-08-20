@@ -105,8 +105,8 @@ services:
     # - seccomp:unconfined
 
     environment:
-      # Edit zone below to taste. The `:` is functional.
-      TZ: ":America/Los_Angeles"
+      # Edit zone below to taste.
+      TZ: "America/Los_Angeles"
       RUST_BACKTRACE: 1
 
     # docker's default log driver won't rotate logs properly, and will throw
@@ -323,7 +323,6 @@ After=network-online.target
 
 [Service]
 ExecStart=/usr/local/bin/moonfire-nvr run
-Environment=TZ=:/etc/localtime
 Environment=MOONFIRE_FORMAT=systemd
 Environment=MOONFIRE_LOG=info
 Environment=RUST_BACKTRACE=1

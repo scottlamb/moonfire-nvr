@@ -44,89 +44,6 @@ pub struct Args {
     read_only: bool,
 }
 
-// These are used in a hack to get the name of the current time zone (e.g. America/Los_Angeles).
-// They seem to be correct for Linux and macOS at least.
-const LOCALTIME_PATH: &str = "/etc/localtime";
-const TIMEZONE_PATH: &str = "/etc/timezone";
-
-// Some well-known zone paths looks like the following:
-//   /usr/share/zoneinfo/*          for Linux and macOS < High Sierra
-//   /var/db/timezone/zoneinfo/*    for macOS High Sierra
-//   /etc/zoneinfo/*                for NixOS
-fn zoneinfo_name(path: &str) -> Option<&str> {
-    path.rsplit_once("/zoneinfo/").map(|(_, name)| name)
-}
-
-/// Attempt to resolve the timezone of the server.
-/// The Javascript running in the browser needs this to match the server's timezone calculations.
-fn resolve_zone() -> Result<String, Error> {
-    // If the environmental variable `TZ` exists, is valid UTF-8, and doesn't just reference
-    // `/etc/localtime/`, use that.
-    if let Ok(tz) = ::std::env::var("TZ") {
-        let mut p: &str = &tz;
-
-        // Strip of an initial `:` if present. Having `TZ` set in this way is a trick to avoid
-        // repeated `tzset` calls:
-        // https://blog.packagecloud.io/eng/2017/02/21/set-environment-variable-save-thousands-of-system-calls/
-        if p.starts_with(':') {
-            p = &p[1..];
-        }
-
-        if let Some(p) = zoneinfo_name(p) {
-            return Ok(p.to_owned());
-        }
-
-        if !p.starts_with('/') {
-            return Ok(p.to_owned());
-        }
-
-        if p != LOCALTIME_PATH {
-            bail!(
-                FailedPrecondition,
-                msg("unable to resolve env TZ={tz} to a timezone")
-            );
-        }
-    }
-
-    // If `LOCALTIME_PATH` is a symlink, use that. On some systems, it's instead a copy of the
-    // desired timezone, which unfortunately doesn't contain its own name.
-    match ::std::fs::read_link(LOCALTIME_PATH) {
-        Ok(localtime_dest) => {
-            let localtime_dest = match localtime_dest.to_str() {
-                Some(d) => d,
-                None => bail!(
-                    FailedPrecondition,
-                    msg("{LOCALTIME_PATH} symlink destination is invalid UTF-8")
-                ),
-            };
-            if let Some(p) = zoneinfo_name(localtime_dest) {
-                return Ok(p.to_owned());
-            }
-            bail!(
-                FailedPrecondition,
-                msg("unable to resolve {LOCALTIME_PATH} symlink destination {localtime_dest} to a timezone"),
-            );
-        }
-        Err(e) => {
-            use ::std::io::ErrorKind;
-            if e.kind() != ErrorKind::NotFound && e.kind() != ErrorKind::InvalidInput {
-                bail!(e, msg("unable to read {LOCALTIME_PATH} symlink"));
-            }
-        }
-    };
-
-    // If `TIMEZONE_PATH` is a file, use its contents as the zone name, trimming whitespace.
-    match ::std::fs::read_to_string(TIMEZONE_PATH) {
-        Ok(z) => Ok(z.trim().to_owned()),
-        Err(e) => {
-            bail!(
-                e,
-                msg("unable to resolve timezone from TZ env, {LOCALTIME_PATH}, or {TIMEZONE_PATH}"),
-            );
-        }
-    }
-}
-
 struct Syncer {
     dir: Arc<dir::SampleFileDir>,
     channel: writer::SyncerChannel<::std::fs::File>,
@@ -337,7 +254,13 @@ async fn inner(
     }
     info!("Directories are opened.");
 
-    let time_zone_name = resolve_zone()?;
+    let zone = base::time::global_zone();
+    let Some(time_zone_name) = zone.iana_name() else {
+        bail!(
+            Unknown,
+            msg("unable to get IANA time zone name; check your $TZ and /etc/localtime")
+        );
+    };
     info!("Resolved timezone: {}", &time_zone_name);
 
     // Start a streamer for each stream.
@@ -457,7 +380,7 @@ async fn inner(
                 .clone()
                 .map(db::Permissions::from),
             trust_forward_hdrs: bind.trust_forward_headers,
-            time_zone_name: time_zone_name.clone(),
+            time_zone_name: time_zone_name.to_owned(),
             privileged_unix_uid: bind.own_uid_is_privileged.then_some(own_euid),
         })?);
         let mut listener = make_listener(&bind.address, &mut preopened)?;

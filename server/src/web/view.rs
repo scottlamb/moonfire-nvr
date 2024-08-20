@@ -180,10 +180,10 @@ impl Service {
             }
         }
         if let Some(start) = start_time_for_filename {
-            let tm = time::at(time::Timespec {
-                sec: start.unix_seconds(),
-                nsec: 0,
-            });
+            let zone = base::time::global_zone();
+            let tm = jiff::Timestamp::from_second(start.unix_seconds())
+                .expect("valid start")
+                .to_zoned(zone);
             let stream_abbrev = if stream_type == db::StreamType::Main {
                 "main"
             } else {
@@ -196,7 +196,7 @@ impl Service {
             };
             builder.set_filename(&format!(
                 "{}-{}-{}.{}",
-                tm.strftime("%Y%m%d%H%M%S").unwrap(),
+                tm.strftime("%Y%m%d%H%M%S"),
                 camera_name,
                 stream_abbrev,
                 suffix

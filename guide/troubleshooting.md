@@ -13,9 +13,10 @@ need more help.
     * [Docker setup](#docker-setup)
         * [`"/etc/moonfire-nvr.toml" is a directory`](#etcmoonfire-nvrtoml-is-a-directory)
         * [`Error response from daemon: unable to find user UID: no matching entries in passwd file`](#error-response-from-daemon-unable-to-find-user-uid-no-matching-entries-in-passwd-file)
-        * [`clock_gettime failed: EPERM: Operation not permitted`](#clock_gettime-failed-eperm-operation-not-permitted)
+        * [`clock_gettime(CLOCK_MONOTONIC) failed: EPERM: Operation not permitted`](#clock_gettimeclock_monotonic-failed-eperm-operation-not-permitted)
         * [`VFS is unable to determine a suitable directory for temporary files`](#vfs-is-unable-to-determine-a-suitable-directory-for-temporary-files)
     * [Server errors](#server-errors)
+        * [`unable to get IANA time zone name; check your $TZ and /etc/localtime`](#unable-to-get-iana-time-zone-name-check-your-tz-and-etclocaltime)
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
         * [Database or filesystem corruption errors](#database-or-filesystem-corruption-errors)
@@ -217,7 +218,7 @@ If Docker produces this error, look at this section of the docker compose setup:
     user: UID:GID
 ```
 
-#### `clock_gettime failed: EPERM: Operation not permitted`
+#### `clock_gettime(CLOCK_MONOTONIC) failed: EPERM: Operation not permitted`
 
 If commands fail with an error like the following, you're likely running
 Docker with an overly restrictive `seccomp` setup. [This stackoverflow
@@ -227,7 +228,7 @@ the `- seccomp: unconfined` line in your Docker compose file.
 
 ```console
 $ sudo docker compose run --rm moonfire-nvr --version
-clock_gettime failed: EPERM: Operation not permitted
+clock_gettime(CLOCK_MONOTONIC) failed: EPERM: Operation not permitted
 
 This indicates a broken environment. See the troubleshooting guide.
 ```
@@ -249,6 +250,12 @@ The simplest solution is to pass `/var/tmp` through from the host to the Docker
 container in your Docker compose file.
 
 ### Server errors
+
+#### `unable to get IANA time zone name; check your $TZ and /etc/localtime`
+
+Moonfire NVR loads the system time zone via the logic described at
+[`jiff::tz::TimeZone::system`](https://docs.rs/jiff/0.1.8/jiff/tz/struct.TimeZone.html#method.system)
+and expects to be able to get the IANA zone name.
 
 #### `Error: pts not monotonically increasing; got 26615520 then 26539470`
 

@@ -14,24 +14,48 @@ use std::fmt;
 use std::ops;
 use std::str::FromStr;
 
+use super::clock::SystemTime;
+
 type IResult<'a, I, O> = nom::IResult<I, O, nom::error::VerboseError<&'a str>>;
 
 pub const TIME_UNITS_PER_SEC: i64 = 90_000;
+
+/// The zone to use for all time handling.
+///
+/// In normal operation this is assigned from `jiff::tz::TimeZone::system()` at
+/// startup, but tests set it to a known political time zone instead.
+///
+/// Note that while fresh calls to `jiff::tz::TimeZone::system()` might return
+/// new values, this time zone is fixed for the entire run. This is important
+/// for `moonfire_db::days::Map`, where it's expected that adding values and
+/// then later subtracting them will cancel out.
+static GLOBAL_ZONE: std::sync::OnceLock<jiff::tz::TimeZone> = std::sync::OnceLock::new();
+
+pub fn init_zone<F: FnOnce() -> jiff::tz::TimeZone>(f: F) {
+    GLOBAL_ZONE.get_or_init(f);
+}
+
+pub fn global_zone() -> jiff::tz::TimeZone {
+    GLOBAL_ZONE
+        .get()
+        .expect("global zone should be initialized")
+        .clone()
+}
 
 /// A time specified as 90,000ths of a second since 1970-01-01 00:00:00 UTC.
 #[derive(Clone, Copy, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Time(pub i64);
 
-/// Returns a parser for a `len`-digit non-negative number which fits into an i32.
-fn fixed_len_num<'a>(len: usize) -> impl FnMut(&'a str) -> IResult<'a, &'a str, i32> {
+/// Returns a parser for a `len`-digit non-negative number which fits into `T`.
+fn fixed_len_num<'a, T: FromStr>(len: usize) -> impl FnMut(&'a str) -> IResult<'a, &'a str, T> {
     map_res(
         take_while_m_n(len, len, |c: char| c.is_ascii_digit()),
-        |input: &str| input.parse::<i32>(),
+        |input: &str| input.parse(),
     )
 }
 
 /// Parses `YYYY-mm-dd` into pieces.
-fn parse_datepart(input: &str) -> IResult<&str, (i32, i32, i32)> {
+fn parse_datepart(input: &str) -> IResult<&str, (i16, i8, i8)> {
     tuple((
         fixed_len_num(4),
         preceded(tag("-"), fixed_len_num(2)),
@@ -40,7 +64,7 @@ fn parse_datepart(input: &str) -> IResult<&str, (i32, i32, i32)> {
 }
 
 /// Parses `HH:MM[:SS[:FFFFF]]` into pieces.
-fn parse_timepart(input: &str) -> IResult<&str, (i32, i32, i32, i32)> {
+fn parse_timepart(input: &str) -> IResult<&str, (i8, i8, i8, i32)> {
     let (input, (hr, _, min)) = tuple((fixed_len_num(2), tag(":"), fixed_len_num(2)))(input)?;
     let (input, stuff) = opt(tuple((
         preceded(tag(":"), fixed_len_num(2)),
@@ -57,16 +81,16 @@ fn parse_zone(input: &str) -> IResult<&str, i32> {
         map(
             tuple((
                 opt(nom::character::complete::one_of(&b"+-"[..])),
-                fixed_len_num(2),
+                fixed_len_num::<i32>(2),
                 tag(":"),
-                fixed_len_num(2),
+                fixed_len_num::<i32>(2),
             )),
             |(sign, hr, _, min)| {
                 let off = hr * 3600 + min * 60;
                 if sign == Some('-') {
-                    off
-                } else {
                     -off
+                } else {
+                    off
                 }
             },
         ),
@@ -76,10 +100,6 @@ fn parse_zone(input: &str) -> IResult<&str, i32> {
 impl Time {
     pub const MIN: Self = Time(i64::MIN);
     pub const MAX: Self = Time(i64::MAX);
-
-    pub fn new(tm: time::Timespec) -> Self {
-        Time(tm.sec * TIME_UNITS_PER_SEC + tm.nsec as i64 * TIME_UNITS_PER_SEC / 1_000_000_000)
-    }
 
     /// Parses a time as either 90,000ths of a second since epoch or a RFC 3339-like string.
     ///
@@ -114,44 +134,40 @@ impl Time {
             );
         }
         let (tm_hour, tm_min, tm_sec, subsec) = opt_time.unwrap_or((0, 0, 0, 0));
-        let mut tm = time::Tm {
-            tm_sec,
-            tm_min,
-            tm_hour,
-            tm_mday,
-            tm_mon,
-            tm_year,
-            tm_wday: 0,
-            tm_yday: 0,
-            tm_isdst: -1,
-            tm_utcoff: 0,
-            tm_nsec: 0,
-        };
-        if tm.tm_mon == 0 {
-            bail!(InvalidArgument, msg("time {input:?} has month 0"));
-        }
-        tm.tm_mon -= 1;
-        if tm.tm_year < 1900 {
-            bail!(InvalidArgument, msg("time {input:?} has year before 1900"));
-        }
-        tm.tm_year -= 1900;
-
-        // The time crate doesn't use tm_utcoff properly; it just calls timegm() if tm_utcoff == 0,
-        // mktime() otherwise. If a zone is specified, use the timegm path and a manual offset.
-        // If no zone is specified, use the tm_utcoff path. This is pretty lame, but follow the
-        // chrono crate's lead and just use 0 or 1 to choose between these functions.
-        let sec = if let Some(off) = opt_zone {
-            tm.to_timespec().sec + i64::from(off)
-        } else {
-            tm.tm_utcoff = 1;
-            tm.to_timespec().sec
-        };
+        let dt = jiff::civil::DateTime::new(tm_year, tm_mon, tm_mday, tm_hour, tm_min, tm_sec, 0)
+            .map_err(|e| err!(InvalidArgument, source(e)))?;
+        let tz =
+            if let Some(off) = opt_zone {
+                jiff::tz::TimeZone::fixed(jiff::tz::Offset::from_seconds(off).map_err(|e| {
+                    err!(InvalidArgument, msg("invalid time zone offset"), source(e))
+                })?)
+            } else {
+                global_zone()
+            };
+        let sec = tz
+            .into_ambiguous_zoned(dt)
+            .compatible()
+            .map_err(|e| err!(InvalidArgument, source(e)))?
+            .timestamp()
+            .as_second();
         Ok(Time(sec * TIME_UNITS_PER_SEC + i64::from(subsec)))
     }
 
     /// Convert to unix seconds by floor method (rounding down).
     pub fn unix_seconds(&self) -> i64 {
         self.0 / TIME_UNITS_PER_SEC
+    }
+}
+
+impl From<SystemTime> for Time {
+    fn from(tm: SystemTime) -> Self {
+        Time(tm.0.tv_sec() * TIME_UNITS_PER_SEC + tm.0.tv_nsec() * 9 / 100_000)
+    }
+}
+
+impl From<jiff::Timestamp> for Time {
+    fn from(tm: jiff::Timestamp) -> Self {
+        Time((tm.as_nanosecond() * 9 / 100_000) as i64)
     }
 }
 
@@ -199,32 +215,39 @@ impl fmt::Debug for Time {
 
 impl fmt::Display for Time {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let tm = time::at(time::Timespec {
-            sec: self.0 / TIME_UNITS_PER_SEC,
-            nsec: 0,
-        });
-        let zone_minutes = tm.tm_utcoff.abs() / 60;
+        let tm = jiff::Zoned::new(
+            jiff::Timestamp::from_second(self.0 / TIME_UNITS_PER_SEC).map_err(|_| fmt::Error)?,
+            global_zone(),
+        );
         write!(
             f,
-            "{}:{:05}{}{:02}:{:02}",
-            tm.strftime("%FT%T").map_err(|_| fmt::Error)?,
+            "{}:{:05}{}",
+            tm.strftime("%FT%T"),
             self.0 % TIME_UNITS_PER_SEC,
-            if tm.tm_utcoff > 0 { '+' } else { '-' },
-            zone_minutes / 60,
-            zone_minutes % 60
+            tm.strftime("%:z"),
         )
     }
 }
 
 /// A duration specified in 1/90,000ths of a second.
-/// Durations are typically non-negative, but a `moonfire_db::db::CameraDayValue::duration` may be
-/// negative.
+/// Durations are typically non-negative, but a `moonfire_db::db::StreamDayValue::duration` may be
+/// negative when used as a `<StreamDayValue as Value>::Change`.
 #[derive(Clone, Copy, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Duration(pub i64);
 
-impl Duration {
-    pub fn to_tm_duration(&self) -> time::Duration {
-        time::Duration::nanoseconds(self.0 * 100000 / 9)
+impl From<Duration> for jiff::SignedDuration {
+    fn from(d: Duration) -> Self {
+        jiff::SignedDuration::from_nanos(d.0 * 100_000 / 9)
+    }
+}
+
+impl TryFrom<Duration> for std::time::Duration {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+        Ok(std::time::Duration::from_nanos(
+            u64::try_from(value.0)? * 100_000 / 9,
+        ))
     }
 }
 
@@ -327,6 +350,15 @@ impl ops::SubAssign for Duration {
     }
 }
 
+pub mod testutil {
+    pub fn init_zone() {
+        super::init_zone(|| {
+            jiff::tz::TimeZone::get("America/Los_Angeles")
+                .expect("America/Los_Angeles should exist")
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Duration, Time, TIME_UNITS_PER_SEC};
@@ -334,8 +366,7 @@ mod tests {
 
     #[test]
     fn test_parse_time() {
-        std::env::set_var("TZ", "America/Los_Angeles");
-        time::tzset();
+        super::testutil::init_zone();
         #[rustfmt::skip]
         let tests = &[
             ("2006-01-02T15:04:05-07:00",       102261550050000),
@@ -358,8 +389,7 @@ mod tests {
 
     #[test]
     fn test_format_time() {
-        std::env::set_var("TZ", "America/Los_Angeles");
-        time::tzset();
+        super::testutil::init_zone();
         assert_eq!(
             "2006-01-02T15:04:05:00000-08:00",
             format!("{}", Time(102261874050000))

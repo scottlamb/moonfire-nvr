@@ -3,28 +3,91 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 //! Clock interface and implementations for testability.
+//!
+//! Note these types are in a more standard nanosecond-based format, where
+//! [`crate::time`] uses Moonfire's 90 kHz time base.
 
-use std::mem;
+use nix::sys::time::{TimeSpec, TimeValLike as _};
 use std::sync::Mutex;
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration as StdDuration;
-use time::{Duration, Timespec};
+pub use std::time::Duration;
 use tracing::warn;
 
 use crate::error::Error;
 use crate::shutdown::ShutdownError;
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct SystemTime(pub TimeSpec);
+
+impl SystemTime {
+    pub fn new(sec: nix::sys::time::time_t, nsec: i64) -> Self {
+        SystemTime(TimeSpec::new(sec, nsec))
+    }
+
+    pub fn as_secs(&self) -> i64 {
+        self.0.num_seconds()
+    }
+}
+
+impl std::ops::Add<Duration> for SystemTime {
+    type Output = SystemTime;
+
+    fn add(self, rhs: Duration) -> SystemTime {
+        SystemTime(self.0 + TimeSpec::from(rhs))
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Instant(pub TimeSpec);
+
+impl Instant {
+    pub fn from_secs(secs: i64) -> Self {
+        Instant(TimeSpec::seconds(secs))
+    }
+
+    pub fn saturating_sub(&self, o: &Instant) -> Duration {
+        if o > self {
+            Duration::default()
+        } else {
+            Duration::from(self.0 - o.0)
+        }
+    }
+}
+
+impl std::fmt::Debug for Instant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+// TODO: should use saturating always?
+impl std::ops::Sub<Instant> for Instant {
+    type Output = Duration;
+
+    fn sub(self, rhs: Instant) -> Duration {
+        Duration::from(self.0 - rhs.0)
+    }
+}
+
+impl std::ops::Add<Duration> for Instant {
+    type Output = Instant;
+
+    fn add(self, rhs: Duration) -> Instant {
+        Instant(self.0 + TimeSpec::from(rhs))
+    }
+}
+
 /// Abstract interface to the system clocks. This is for testability.
 pub trait Clocks: Send + Sync + 'static {
     /// Gets the current time from `CLOCK_REALTIME`.
-    fn realtime(&self) -> Timespec;
+    fn realtime(&self) -> SystemTime;
 
     /// Gets the current time from a monotonic clock.
     ///
     /// On Linux, this uses `CLOCK_BOOTTIME`, which includes suspended time.
     /// On other systems, it uses `CLOCK_MONOTONIC`.
-    fn monotonic(&self) -> Timespec;
+    fn monotonic(&self) -> Instant;
 
     /// Causes the current thread to sleep for the specified time.
     fn sleep(&self, how_long: Duration);
@@ -33,7 +96,7 @@ pub trait Clocks: Send + Sync + 'static {
     fn recv_timeout<T>(
         &self,
         rcv: &mpsc::Receiver<T>,
-        timeout: StdDuration,
+        timeout: Duration,
     ) -> Result<T, mpsc::RecvTimeoutError>;
 }
 
@@ -52,7 +115,7 @@ where
             Err(e) => e.into(),
         };
         shutdown_rx.check()?;
-        let sleep_time = Duration::seconds(1);
+        let sleep_time = Duration::from_secs(1);
         warn!(
             exception = %e.chain(),
             "sleeping for 1 s after error"
@@ -64,49 +127,38 @@ where
 #[derive(Copy, Clone)]
 pub struct RealClocks {}
 
-impl RealClocks {
-    fn get(&self, clock: libc::clockid_t) -> Timespec {
-        unsafe {
-            let mut ts = mem::MaybeUninit::uninit();
-            assert_eq!(0, libc::clock_gettime(clock, ts.as_mut_ptr()));
-            let ts = ts.assume_init();
-            Timespec::new(
-                // On 32-bit arm builds, `tv_sec` is an `i32` and requires conversion.
-                // On other platforms, the `.into()` is a no-op.
-                #[allow(clippy::useless_conversion)]
-                ts.tv_sec.into(),
-                ts.tv_nsec as i32,
-            )
-        }
-    }
-}
-
 impl Clocks for RealClocks {
-    fn realtime(&self) -> Timespec {
-        self.get(libc::CLOCK_REALTIME)
+    fn realtime(&self) -> SystemTime {
+        SystemTime(
+            nix::time::clock_gettime(nix::time::ClockId::CLOCK_REALTIME)
+                .expect("clock_gettime(REALTIME) should succeed"),
+        )
     }
 
     #[cfg(target_os = "linux")]
-    fn monotonic(&self) -> Timespec {
-        self.get(libc::CLOCK_BOOTTIME)
+    fn monotonic(&self) -> Instant {
+        Instant(
+            nix::time::clock_gettime(nix::time::ClockId::CLOCK_BOOTTIME)
+                .expect("clock_gettime(BOOTTIME) should succeed"),
+        )
     }
 
     #[cfg(not(target_os = "linux"))]
-    fn monotonic(&self) -> Timespec {
-        self.get(libc::CLOCK_MONOTONIC)
+    fn monotonic(&self) -> Instant {
+        Instant(
+            nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC)
+                .expect("clock_gettime(MONOTONIC) should succeed"),
+        )
     }
 
     fn sleep(&self, how_long: Duration) {
-        match how_long.to_std() {
-            Ok(d) => thread::sleep(d),
-            Err(err) => warn!(%err, "invalid duration {:?}", how_long),
-        };
+        thread::sleep(how_long)
     }
 
     fn recv_timeout<T>(
         &self,
         rcv: &mpsc::Receiver<T>,
-        timeout: StdDuration,
+        timeout: Duration,
     ) -> Result<T, mpsc::RecvTimeoutError> {
         rcv.recv_timeout(timeout)
     }
@@ -117,7 +169,7 @@ impl Clocks for RealClocks {
 pub struct TimerGuard<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> {
     clocks: &'a C,
     label_f: Option<F>,
-    start: Timespec,
+    start: Instant,
 }
 
 impl<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
@@ -138,9 +190,9 @@ where
 {
     fn drop(&mut self) {
         let elapsed = self.clocks.monotonic() - self.start;
-        if elapsed.num_seconds() >= 1 {
+        if elapsed.as_secs() >= 1 {
             let label_f = self.label_f.take().unwrap();
-            warn!("{} took {}!", label_f().as_ref(), elapsed);
+            warn!("{} took {:?}!", label_f().as_ref(), elapsed);
         }
     }
 }
@@ -150,42 +202,42 @@ where
 pub struct SimulatedClocks(Arc<SimulatedClocksInner>);
 
 struct SimulatedClocksInner {
-    boot: Timespec,
+    boot: SystemTime,
     uptime: Mutex<Duration>,
 }
 
 impl SimulatedClocks {
-    pub fn new(boot: Timespec) -> Self {
+    pub fn new(boot: SystemTime) -> Self {
         SimulatedClocks(Arc::new(SimulatedClocksInner {
             boot,
-            uptime: Mutex::new(Duration::seconds(0)),
+            uptime: Mutex::new(Duration::from_secs(0)),
         }))
     }
 }
 
 impl Clocks for SimulatedClocks {
-    fn realtime(&self) -> Timespec {
+    fn realtime(&self) -> SystemTime {
         self.0.boot + *self.0.uptime.lock().unwrap()
     }
-    fn monotonic(&self) -> Timespec {
-        Timespec::new(0, 0) + *self.0.uptime.lock().unwrap()
+    fn monotonic(&self) -> Instant {
+        Instant(TimeSpec::from(*self.0.uptime.lock().unwrap()))
     }
 
     /// Advances the clock by the specified amount without actually sleeping.
     fn sleep(&self, how_long: Duration) {
         let mut l = self.0.uptime.lock().unwrap();
-        *l = *l + how_long;
+        *l += how_long;
     }
 
     /// Advances the clock by the specified amount if data is not immediately available.
     fn recv_timeout<T>(
         &self,
         rcv: &mpsc::Receiver<T>,
-        timeout: StdDuration,
+        timeout: Duration,
     ) -> Result<T, mpsc::RecvTimeoutError> {
-        let r = rcv.recv_timeout(StdDuration::new(0, 0));
+        let r = rcv.recv_timeout(Duration::new(0, 0));
         if r.is_err() {
-            self.sleep(Duration::from_std(timeout).unwrap());
+            self.sleep(timeout);
         }
         r
     }
