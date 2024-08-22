@@ -15,6 +15,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 *   bump minimum Rust version to 1.79.
 *   in UI's list view, add a tooltip on the end time which shows why the
     recording ended.
+*   fix [#133](https://github.com/scottlamb/moonfire-nvr/issues/121):
+    iPhone live view.
 
 ## v0.7.16 (2024-05-30)
 

@@ -475,7 +475,7 @@ const LiveCamera = ({ mediaSourceApi, camera, chooser }: LiveCameraProps) => {
           <Alert severity="error">{playbackState.message}</Alert>
         </div>
       )}
-      <video ref={videoRef} muted autoPlay />
+      <video ref={videoRef} muted autoPlay playsInline />
     </Box>
   );
 };
