@@ -9,11 +9,9 @@ use cursive::view::Scrollable;
 use cursive::Cursive;
 use cursive::{views, With};
 use db::writer;
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, trace};
 
 use super::tab_complete::TabCompleteEditView;
@@ -58,10 +56,8 @@ fn update_limits(model: &Model, siv: &mut Cursive) {
     }
 }
 
-fn edit_limit(model: &RefCell<Model>, siv: &mut Cursive, id: i32, content: &str) {
+fn edit_limit(model: &mut Model, siv: &mut Cursive, id: i32, content: &str) {
     debug!("on_edit called for id {}", id);
-    let mut model = model.borrow_mut();
-    let model: &mut Model = &mut model;
     let stream = model.streams.get_mut(&id).unwrap();
     let new_value = decode_size(content).ok();
     let delta = new_value.unwrap_or(0) - stream.retain.unwrap_or(0);
@@ -96,14 +92,12 @@ fn edit_limit(model: &RefCell<Model>, siv: &mut Cursive, id: i32, content: &str)
     }
 }
 
-fn edit_record(model: &RefCell<Model>, id: i32, record: bool) {
-    let mut model = model.borrow_mut();
-    let model: &mut Model = &mut model;
+fn edit_record(model: &mut Model, id: i32, record: bool) {
     let stream = model.streams.get_mut(&id).unwrap();
     stream.record = record;
 }
 
-fn confirm_deletion(model: &RefCell<Model>, siv: &mut Cursive, to_delete: i64) {
+fn confirm_deletion(model: &Mutex<Model>, siv: &mut Cursive, to_delete: i64) {
     let typed = siv
         .find_name::<views::EditView>("confirm")
         .unwrap()
@@ -124,8 +118,8 @@ fn confirm_deletion(model: &RefCell<Model>, siv: &mut Cursive, to_delete: i64) {
     }
 }
 
-fn actually_delete(model: &RefCell<Model>, siv: &mut Cursive) {
-    let model = &*model.borrow();
+fn actually_delete(model: &Mutex<Model>, siv: &mut Cursive) {
+    let model = model.lock().unwrap();
     let new_limits: Vec<_> = model
         .streams
         .iter()
@@ -147,20 +141,21 @@ fn actually_delete(model: &RefCell<Model>, siv: &mut Cursive) {
                 .dismiss_button("Abort"),
         );
     } else {
-        update_limits(model, siv);
+        update_limits(&model, siv);
     }
 }
 
-fn press_change(model: &Rc<RefCell<Model>>, siv: &mut Cursive) {
-    if model.borrow().errors > 0 {
-        return;
-    }
-    let to_delete = model
-        .borrow()
-        .streams
-        .values()
-        .map(|s| ::std::cmp::max(s.used - s.retain.unwrap(), 0))
-        .sum();
+fn press_change(model: &Arc<Mutex<Model>>, siv: &mut Cursive) {
+    let to_delete = {
+        let l = model.lock().unwrap();
+        if l.errors > 0 {
+            return;
+        }
+        l.streams
+            .values()
+            .map(|s| ::std::cmp::max(s.used - s.retain.unwrap(), 0))
+            .sum()
+    };
     debug!("change press, to_delete={}", to_delete);
     if to_delete > 0 {
         let prompt = format!(
@@ -190,7 +185,7 @@ fn press_change(model: &Rc<RefCell<Model>>, siv: &mut Cursive) {
         siv.add_layer(dialog);
     } else {
         siv.pop_layer();
-        update_limits(&model.borrow(), siv);
+        update_limits(&model.lock().unwrap(), siv);
     }
 }
 
@@ -367,7 +362,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
             fs_capacity = stat.block_size() as i64 * stat.blocks_available() as i64 + total_used;
             path = dir.path.clone();
         }
-        Rc::new(RefCell::new(Model {
+        Arc::new(Mutex::new(Model {
             dir_id,
             db: db.clone(),
             fs_capacity,
@@ -389,12 +384,13 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
             .child(views::TextView::new("usage").fixed_width(BYTES_WIDTH))
             .child(views::TextView::new("limit").fixed_width(BYTES_WIDTH)),
     );
-    for (&id, stream) in &model.borrow().streams {
+    let l = model.lock().unwrap();
+    for (&id, stream) in &l.streams {
         let mut record_cb = views::Checkbox::new();
         record_cb.set_checked(stream.record);
         record_cb.set_on_change({
             let model = model.clone();
-            move |_siv, record| edit_record(&model, id, record)
+            move |_siv, record| edit_record(&mut model.lock().unwrap(), id, record)
         });
         list.add_child(
             &stream.label,
@@ -406,7 +402,9 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
                         .content(encode_size(stream.retain.unwrap()))
                         .on_edit({
                             let model = model.clone();
-                            move |siv, content, _pos| edit_limit(&model, siv, id, content)
+                            move |siv, content, _pos| {
+                                edit_limit(&mut model.lock().unwrap(), siv, id, content)
+                            }
                         })
                         .on_submit({
                             let model = model.clone();
@@ -421,17 +419,14 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
                 ),
         );
     }
-    let over = model.borrow().total_retain > model.borrow().fs_capacity;
+    let over = l.total_retain > l.fs_capacity;
     list.add_child(
         "total",
         views::LinearLayout::horizontal()
             .child(views::DummyView {}.fixed_width(RECORD_WIDTH))
+            .child(views::TextView::new(encode_size(l.total_used)).fixed_width(BYTES_WIDTH))
             .child(
-                views::TextView::new(encode_size(model.borrow().total_used))
-                    .fixed_width(BYTES_WIDTH),
-            )
-            .child(
-                views::TextView::new(encode_size(model.borrow().total_retain))
+                views::TextView::new(encode_size(l.total_retain))
                     .with_name("total_retain")
                     .fixed_width(BYTES_WIDTH),
             )
@@ -442,11 +437,9 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
         views::LinearLayout::horizontal()
             .child(views::DummyView {}.fixed_width(RECORD_WIDTH))
             .child(views::DummyView {}.fixed_width(BYTES_WIDTH))
-            .child(
-                views::TextView::new(encode_size(model.borrow().fs_capacity))
-                    .fixed_width(BYTES_WIDTH),
-            ),
+            .child(views::TextView::new(encode_size(l.fs_capacity)).fixed_width(BYTES_WIDTH)),
     );
+    drop(l);
     let mut change_button = views::Button::new("Change", move |siv| press_change(&model, siv));
     change_button.set_enabled(!over);
     let mut buttons = views::LinearLayout::horizontal().child(views::DummyView.full_width());

@@ -189,7 +189,7 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
     ] {
         let mut checkbox = views::Checkbox::new();
         checkbox.set_checked(*b);
-        perms.add_child(name, checkbox.with_name(format!("perm_{name}")));
+        perms.add_child(*name, checkbox.with_name(format!("perm_{name}")));
     }
     layout.add_child(perms);
 
