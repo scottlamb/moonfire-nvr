@@ -29,9 +29,12 @@ itertools = "0.12.0"
 nix = "0.27.0"
 pretty-hex = "0.4.0"
 ring = "0.17.0"
-rusqlite = "0.30.0"
-tracing = { version = "0.1", features = ["log"] }
+rusqlite = "0.32.1"
+tracing = { version = "0.1" }
+tracing-core = "0.1.30"
+tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }
 tracing-log = "0.2"
+tracing-subscriber = { version = "0.3.16" }
 
 [dependencies]
 base = { package = "moonfire-base", path = "base" }
@@ -40,7 +43,6 @@ blake3 = "1.0.0"
 bpaf = { version = "0.9.1", features = ["autocomplete", "bright-color", "derive"]}
 bytes = "1"
 byteorder = "1.0"
-chrono = "0.4.23"
 cursive = { version = "0.20.0", default-features = false, features = ["termion-backend"] }
 db = { package = "moonfire-db", path = "db" }
 futures = "0.3"
@@ -69,7 +71,7 @@ time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = "0.20.0"
 toml = "0.8"
-tracing = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
 tracing-core = "0.1.30"
 tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }
@@ -112,9 +114,12 @@ lto = true
 debug = 1
 
 [patch.crates-io]
-# update to indexmap 2
-protobuf-codegen = { git = "https://github.com/scottlamb/rust-protobuf.git", rev = "a61e09785c957eb9a183d129b426710146bfde38" }
-protobuf-parse = { git = "https://github.com/scottlamb/rust-protobuf.git", rev = "a61e09785c957eb9a183d129b426710146bfde38" }
 
-# This version uses fallible-iterator v0.3 (same one rusqlite 0.30 uses) and hasn't been released yet.
-sdp-types = { git = "https://github.com/sdroege/sdp-types", rev = "e8d0a2c4b8b1fc1ddf1c60a01dc717a2f4e2d514" }
+# Override the `tracing` crate versions with a branch that updates the
+# `matchers` dependency to avoid duplicate `regex-automata` crate versions.
+# This branch is based on tracing's `0.1.x` branch with changes similar to
+# <https://github.com/tokio-rs/tracing/pull/3033> applied.
+tracing = { git = "https://github.com/scottlamb/tracing", rev = "861b443d7b2da400ca7b09111957f33c80135908" }
+tracing-core = { git = "https://github.com/scottlamb/tracing", rev = "861b443d7b2da400ca7b09111957f33c80135908" }
+tracing-log = { git = "https://github.com/scottlamb/tracing", rev = "861b443d7b2da400ca7b09111957f33c80135908" }
+tracing-subscriber = { git = "https://github.com/scottlamb/tracing", rev = "861b443d7b2da400ca7b09111957f33c80135908" }

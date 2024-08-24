@@ -23,7 +23,7 @@ cstr = "0.2.5"
 diff = "0.1.12"
 futures = "0.3"
 h264-reader = { workspace = true }
-hashlink = "0.8.1"
+hashlink = "0.9.1"
 itertools = { workspace = true }
 libc = "0.2"
 nix = { workspace = true, features = ["dir", "feature", "fs", "mman"] }
@@ -40,7 +40,7 @@ smallvec = "1.0"
 tempfile = "3.2.0"
 time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "sync"] }
-tracing = "0.1.37"
+tracing = { workspace = true }
 ulid = "1.0.0"
 url = { version = "2.1.1", features = ["serde"] }
 uuid = { version = "1.1.2", features = ["serde", "std", "v4"] }

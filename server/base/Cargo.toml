@@ -27,6 +27,6 @@ serde_json = "1.0"
 slab = "0.4"
 time = "0.1"
 tracing = { workspace = true }
-tracing-core = "0.1.30"
+tracing-core = { workspace = true }
 tracing-log = { workspace = true }
-tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
