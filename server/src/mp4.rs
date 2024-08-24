@@ -74,6 +74,7 @@ use std::fmt;
 use std::io;
 use std::mem;
 use std::ops::Range;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Once;
 use std::time::SystemTime;
@@ -1971,7 +1972,7 @@ impl http_serve::Entity for File {
     fn get_range(
         &self,
         range: Range<u64>,
-    ) -> Box<dyn Stream<Item = Result<Self::Data, Self::Error>> + Send + Sync> {
+    ) -> Pin<Box<dyn Stream<Item = Result<Self::Data, Self::Error>> + Send + Sync>> {
         self.0.slices.get_range(self, range)
     }
 }

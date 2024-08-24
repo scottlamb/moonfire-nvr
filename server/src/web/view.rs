@@ -28,7 +28,7 @@ use super::{Caller, ResponseResult, Service};
 impl Service {
     pub(super) fn stream_view_mp4(
         &self,
-        req: &Request<::hyper::Body>,
+        req: &Request<::hyper::body::Incoming>,
         caller: Caller,
         uuid: Uuid,
         stream_type: db::StreamType,

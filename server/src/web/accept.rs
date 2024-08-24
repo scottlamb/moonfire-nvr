@@ -2,51 +2,40 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-//! Unified [`hyper::server::accept::Accept`] impl for TCP and Unix sockets.
+//! Unified connection handling for TCP and Unix sockets.
 
 use std::pin::Pin;
-
-use hyper::server::accept::Accept;
 
 pub enum Listener {
     Tcp(tokio::net::TcpListener),
     Unix(tokio::net::UnixListener),
 }
 
-impl Accept for Listener {
-    type Conn = Conn;
-    type Error = std::io::Error;
-
-    fn poll_accept(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Result<Self::Conn, Self::Error>>> {
-        match Pin::into_inner(self) {
-            Listener::Tcp(l) => Pin::new(l).poll_accept(cx)?.map(|(s, a)| {
-                if let Err(e) = s.set_nodelay(true) {
-                    return Some(Err(e));
-                }
-                Some(Ok(Conn {
+impl Listener {
+    pub async fn accept(&mut self) -> std::io::Result<Conn> {
+        match self {
+            Listener::Tcp(l) => {
+                let (s, a) = l.accept().await?;
+                s.set_nodelay(true)?;
+                Ok(Conn {
                     stream: Stream::Tcp(s),
                     data: ConnData {
                         client_unix_uid: None,
                         client_addr: Some(a),
                     },
-                }))
-            }),
-            Listener::Unix(l) => Pin::new(l).poll_accept(cx)?.map(|(s, _a)| {
-                let ucred = match s.peer_cred() {
-                    Err(e) => return Some(Err(e)),
-                    Ok(ucred) => ucred,
-                };
-                Some(Ok(Conn {
+                })
+            }
+            Listener::Unix(l) => {
+                let (s, _a) = l.accept().await?;
+                let ucred = s.peer_cred()?;
+                Ok(Conn {
                     stream: Stream::Unix(s),
                     data: ConnData {
                         client_unix_uid: Some(nix::unistd::Uid::from_raw(ucred.uid())),
                         client_addr: None,
                     },
-                }))
-            }),
+                })
+            }
         }
     }
 }

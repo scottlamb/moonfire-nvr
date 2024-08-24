@@ -132,10 +132,10 @@ where
         &self,
         ctx: &S::Ctx,
         range: Range<u64>,
-    ) -> Box<dyn Stream<Item = Result<S::Chunk, BoxedError>> + Sync + Send> {
+    ) -> Pin<Box<dyn Stream<Item = Result<S::Chunk, BoxedError>> + Sync + Send>> {
         #[allow(clippy::suspicious_operation_groupings)]
         if range.start > range.end || range.end > self.len {
-            return Box::new(stream::once(futures::future::err(wrap_error(err!(
+            return Box::pin(stream::once(futures::future::err(wrap_error(err!(
                 Internal,
                 msg("bad range {:?} for slice of length {}", range, self.len),
             )))));
@@ -173,7 +173,7 @@ where
                 futures::future::ready(Some((Pin::from(body), (c, i + 1, 0, min_end))))
             },
         );
-        Box::new(bodies.flatten().in_current_span())
+        Box::pin(bodies.flatten().in_current_span())
     }
 }
 

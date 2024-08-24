@@ -10,12 +10,16 @@ use http::{Method, Request, StatusCode};
 use crate::json::{self, PutUsersResponse, UserSubset, UserWithId};
 
 use super::{
-    extract_json_body, parse_json_body, plain_response, require_csrf_if_session, serve_json,
-    Caller, ResponseResult, Service,
+    into_json_body, parse_json_body, plain_response, require_csrf_if_session, serve_json, Caller,
+    ResponseResult, Service,
 };
 
 impl Service {
-    pub(super) async fn users(&self, req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
+    pub(super) async fn users(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
         match *req.method() {
             Method::GET | Method::HEAD => self.get_users(req, caller).await,
             Method::POST => self.post_users(req, caller).await,
@@ -26,7 +30,11 @@ impl Service {
         }
     }
 
-    async fn get_users(&self, req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
+    async fn get_users(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
         if !caller.permissions.admin_users {
             bail!(Unauthenticated, msg("must have admin_users permission"));
         }
@@ -42,12 +50,16 @@ impl Service {
         serve_json(&req, &json::GetUsersResponse { users })
     }
 
-    async fn post_users(&self, mut req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
+    async fn post_users(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
         if !caller.permissions.admin_users {
             bail!(Unauthenticated, msg("must have admin_users permission"));
         }
-        let r = extract_json_body(&mut req).await?;
-        let mut r: json::PutUsers = parse_json_body(&r)?;
+        let (parts, b) = into_json_body(req).await?;
+        let mut r: json::PutUsers = parse_json_body(&b)?;
         require_csrf_if_session(&caller, r.csrf)?;
         let username = r
             .user
@@ -69,12 +81,12 @@ impl Service {
         }
         let mut l = self.db.lock();
         let user = l.apply_user_change(change)?;
-        serve_json(&req, &PutUsersResponse { id: user.id })
+        serve_json(&parts, &PutUsersResponse { id: user.id })
     }
 
     pub(super) async fn user(
         &self,
-        req: Request<hyper::Body>,
+        req: Request<hyper::body::Incoming>,
         caller: Caller,
         id: i32,
     ) -> ResponseResult {
@@ -89,7 +101,12 @@ impl Service {
         }
     }
 
-    async fn get_user(&self, req: Request<hyper::Body>, caller: Caller, id: i32) -> ResponseResult {
+    async fn get_user(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        caller: Caller,
+        id: i32,
+    ) -> ResponseResult {
         require_same_or_admin(&caller, id)?;
         let db = self.db.lock();
         let user = db
@@ -101,15 +118,15 @@ impl Service {
 
     async fn delete_user(
         &self,
-        mut req: Request<hyper::Body>,
+        req: Request<hyper::body::Incoming>,
         caller: Caller,
         id: i32,
     ) -> ResponseResult {
         if !caller.permissions.admin_users {
             bail!(Unauthenticated, msg("must have admin_users permission"));
         }
-        let r = extract_json_body(&mut req).await?;
-        let r: json::DeleteUser = parse_json_body(&r)?;
+        let (_parts, b) = into_json_body(req).await?;
+        let r: json::DeleteUser = parse_json_body(&b)?;
         require_csrf_if_session(&caller, r.csrf)?;
         let mut l = self.db.lock();
         l.delete_user(id)?;
@@ -118,13 +135,13 @@ impl Service {
 
     async fn patch_user(
         &self,
-        mut req: Request<hyper::Body>,
+        req: Request<hyper::body::Incoming>,
         caller: Caller,
         id: i32,
     ) -> ResponseResult {
         require_same_or_admin(&caller, id)?;
-        let r = extract_json_body(&mut req).await?;
-        let r: json::PostUser = parse_json_body(&r)?;
+        let (_parts, b) = into_json_body(req).await?;
+        let r: json::PostUser = parse_json_body(&b)?;
         let mut db = self.db.lock();
         let user = db
             .get_user_by_id_mut(id)

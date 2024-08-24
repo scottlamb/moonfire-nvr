@@ -147,12 +147,36 @@ impl<'receiver> Future for ReceiverRefFuture<'receiver> {
     }
 }
 
+impl Drop for ReceiverRefFuture<'_> {
+    fn drop(&mut self) {
+        if self.waker_i == NO_WAKER {
+            return;
+        }
+        let mut l = self.receiver.0.wakers.lock().unwrap();
+        if let Some(wakers) = &mut *l {
+            wakers.remove(self.waker_i);
+        }
+    }
+}
+
 impl Future for ReceiverFuture {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = Pin::into_inner(self);
         poll_impl(&this.receiver, &mut this.waker_i, cx)
+    }
+}
+
+impl Drop for ReceiverFuture {
+    fn drop(&mut self) {
+        if self.waker_i == NO_WAKER {
+            return;
+        }
+        let mut l = self.receiver.wakers.lock().unwrap();
+        if let Some(wakers) = &mut *l {
+            wakers.remove(self.waker_i);
+        }
     }
 }
 

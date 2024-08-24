@@ -10,13 +10,16 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 ## unreleased
 
-*   upgrade to Retina 0.4.9, adding support for recording MJPEG video. Note
+*   upgrade to Retina 0.4.10, adding support for recording MJPEG video. Note
     browser playback is unlikely to work.
 *   bump minimum Rust version to 1.79.
 *   in UI's list view, add a tooltip on the end time which shows why the
     recording ended.
 *   fix [#121](https://github.com/scottlamb/moonfire-nvr/issues/121):
     iPhone live view.
+*   update to hyper and http version 1.0. In the process, no longer wait for
+    pending HTTP requests on shutdown. This just extended the time Moonfire was
+    running without streaming.
 
 ## v0.7.16 (2024-05-30)
 

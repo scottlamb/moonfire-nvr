@@ -99,7 +99,7 @@ pub struct BindConfig {
     pub own_uid_is_privileged: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub enum AddressConfig {
@@ -117,4 +117,15 @@ pub enum AddressConfig {
     /// See [systemd.socket(5) manual
     /// page](https://www.freedesktop.org/software/systemd/man/systemd.socket.html).
     Systemd(#[cfg_attr(not(target_os = "linux"), allow(unused))] String),
+}
+
+impl std::fmt::Display for AddressConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddressConfig::Ipv4(addr) => write!(f, "ipv4:{}", addr),
+            AddressConfig::Ipv6(addr) => write!(f, "ipv6:{}", addr),
+            AddressConfig::Unix(path) => write!(f, "unix:{}", path.display()),
+            AddressConfig::Systemd(name) => write!(f, "systemd:{name}"),
+        }
+    }
 }

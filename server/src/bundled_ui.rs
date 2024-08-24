@@ -6,8 +6,8 @@
 
 use base::FastHashMap;
 use http::{header, HeaderMap, HeaderValue};
-use std::io::Read;
 use std::sync::OnceLock;
+use std::{io::Read, pin::Pin};
 
 use crate::body::{BoxedError, Chunk};
 
@@ -150,9 +150,9 @@ impl http_serve::Entity for Entity {
     fn get_range(
         &self,
         range: std::ops::Range<u64>,
-    ) -> Box<dyn futures::Stream<Item = Result<Self::Data, Self::Error>> + Send + Sync> {
+    ) -> Pin<Box<dyn futures::Stream<Item = Result<Self::Data, Self::Error>> + Send + Sync>> {
         let file = self.file;
-        Box::new(futures::stream::once(async move {
+        Box::pin(futures::stream::once(async move {
             let r = usize::try_from(range.start)?..usize::try_from(range.end)?;
             let Some(data) = file.data.get(r) else {
                 let len = file.data.len();

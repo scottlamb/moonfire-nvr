@@ -23,7 +23,7 @@ bundled-ui = []
 members = ["base", "db"]
 
 [workspace.dependencies]
-base64 = "0.21.0"
+base64 = "0.22.0"
 h264-reader = "0.7.0"
 itertools = "0.12.0"
 nix = "0.27.0"
@@ -47,9 +47,9 @@ cursive = { version = "0.21.1", default-features = false, features = ["termion-b
 db = { package = "moonfire-db", path = "db" }
 futures = "0.3"
 h264-reader = { workspace = true }
-http = "0.2.3"
-http-serve = { version = "0.3.1", features = ["dir"] }
-hyper = { version = "0.14.2", features = ["http1", "server", "stream", "tcp"] }
+http = "1.1.0"
+http-serve = { version = "0.4.0-rc.1", features = ["dir"] }
+hyper = { version = "1.4.1", features = ["http1", "server"] }
 itertools = { workspace = true }
 libc = "0.2"
 log = { version = "0.4" }
@@ -66,10 +66,9 @@ rusqlite = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = { version = "1.7", features = ["union"] }
-sync_wrapper = "0.1.0"
 time = "0.1"
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-tungstenite = "0.20.0"
+tokio-tungstenite = "0.23.1"
 toml = "0.8"
 tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
@@ -81,6 +80,9 @@ url = "2.1.1"
 uuid = { version = "1.1.2", features = ["serde", "std", "v4"] }
 flate2 = "1.0.26"
 git-version = "0.3.5"
+hyper-util = { version = "0.1.7", features = ["server-graceful", "tokio"] }
+http-body = "1.0.1"
+http-body-util = "0.1.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libsystemd = "0.7.0"
@@ -93,7 +95,7 @@ walkdir = "2.3.3"
 [dev-dependencies]
 mp4 = { git = "https://github.com/scottlamb/mp4-rust", branch = "moonfire" }
 num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
-reqwest = { version = "0.11.0", default-features = false, features = ["json"] }
+reqwest = { version = "0.12.0", default-features = false, features = ["json"] }
 tempfile = "3.2.0"
 tracing-test = "0.2.4"
 

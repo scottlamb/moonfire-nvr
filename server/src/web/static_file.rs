@@ -49,7 +49,7 @@ impl Ui {
     async fn serve(
         &self,
         path: &str,
-        req: &Request<hyper::Body>,
+        req: &Request<hyper::body::Incoming>,
         cache_control: &'static str,
         content_type: &'static str,
     ) -> ResponseResult {
@@ -89,7 +89,7 @@ impl Ui {
 
 impl Service {
     /// Serves a static file if possible.
-    pub(super) async fn static_file(&self, req: Request<hyper::Body>) -> ResponseResult {
+    pub(super) async fn static_file(&self, req: Request<hyper::body::Incoming>) -> ResponseResult {
         let Some(static_req) = StaticFileRequest::parse(req.uri().path()) else {
             bail!(NotFound, msg("static file not found"));
         };

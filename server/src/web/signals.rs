@@ -12,8 +12,8 @@ use url::form_urlencoded;
 use crate::json;
 
 use super::{
-    extract_json_body, parse_json_body, plain_response, require_csrf_if_session, serve_json,
-    Caller, ResponseResult, Service,
+    into_json_body, parse_json_body, plain_response, require_csrf_if_session, serve_json, Caller,
+    ResponseResult, Service,
 };
 
 use std::borrow::Borrow;
@@ -21,7 +21,7 @@ use std::borrow::Borrow;
 impl Service {
     pub(super) async fn signals(
         &self,
-        req: Request<hyper::Body>,
+        req: Request<hyper::body::Incoming>,
         caller: Caller,
     ) -> ResponseResult {
         match *req.method() {
@@ -34,12 +34,16 @@ impl Service {
         }
     }
 
-    async fn post_signals(&self, mut req: Request<hyper::Body>, caller: Caller) -> ResponseResult {
+    async fn post_signals(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
         if !caller.permissions.update_signals {
             bail!(PermissionDenied, msg("update_signals required"));
         }
-        let r = extract_json_body(&mut req).await?;
-        let r: json::PostSignalsRequest = parse_json_body(&r)?;
+        let (parts, b) = into_json_body(req).await?;
+        let r: json::PostSignalsRequest = parse_json_body(&b)?;
         require_csrf_if_session(&caller, r.csrf)?;
         let now = recording::Time::new(self.db.clocks().realtime());
         let mut l = self.db.lock();
@@ -52,10 +56,10 @@ impl Service {
             json::PostSignalsTimeBase::Now(d) => now + d,
         };
         l.update_signals(start..end, &r.signal_ids, &r.states)?;
-        serve_json(&req, &json::PostSignalsResponse { time_90k: now })
+        serve_json(&parts, &json::PostSignalsResponse { time_90k: now })
     }
 
-    fn get_signals(&self, req: &Request<hyper::Body>) -> ResponseResult {
+    fn get_signals(&self, req: &Request<hyper::body::Incoming>) -> ResponseResult {
         let mut time = recording::Time::MIN..recording::Time::MAX;
         if let Some(q) = req.uri().query() {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {

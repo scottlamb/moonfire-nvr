@@ -13,15 +13,13 @@ use tracing::{info, warn};
 
 use crate::{json, web::parse_json_body};
 
-use super::{
-    csrf_matches, extract_json_body, extract_sid, plain_response, ResponseResult, Service,
-};
+use super::{csrf_matches, extract_sid, into_json_body, plain_response, ResponseResult, Service};
 use std::convert::TryFrom;
 
 impl Service {
     pub(super) async fn login(
         &self,
-        mut req: Request<::hyper::Body>,
+        req: Request<::hyper::body::Incoming>,
         authreq: auth::Request,
     ) -> ResponseResult {
         if *req.method() != Method::POST {
@@ -30,9 +28,9 @@ impl Service {
                 "POST expected",
             ));
         }
-        let r = extract_json_body(&mut req).await?;
-        let r: json::LoginRequest = parse_json_body(&r)?;
-        let Some(host) = req.headers().get(header::HOST) else {
+        let (parts, b) = into_json_body(req).await?;
+        let r: json::LoginRequest = parse_json_body(&b)?;
+        let Some(host) = parts.headers.get(header::HOST) else {
             bail!(InvalidArgument, msg("missing Host header"));
         };
         let host = host.as_bytes();
@@ -45,7 +43,7 @@ impl Service {
 
         // If the request came in over https, tell the browser to only send the cookie on https
         // requests also.
-        let is_secure = self.is_secure(&req);
+        let is_secure = self.is_secure(&parts.headers);
 
         // Use SameSite=Lax rather than SameSite=Strict. Safari apparently doesn't send
         // SameSite=Strict cookies on WebSocket upgrade requests. There's no real security
@@ -76,7 +74,7 @@ impl Service {
 
     pub(super) async fn logout(
         &self,
-        mut req: Request<hyper::Body>,
+        req: Request<hyper::body::Incoming>,
         authreq: auth::Request,
     ) -> ResponseResult {
         if *req.method() != Method::POST {
@@ -85,11 +83,11 @@ impl Service {
                 "POST expected",
             ));
         }
-        let r = extract_json_body(&mut req).await?;
-        let r: json::LogoutRequest = parse_json_body(&r)?;
+        let (parts, b) = into_json_body(req).await?;
+        let r: json::LogoutRequest = parse_json_body(&b)?;
 
         let mut res = Response::new(b""[..].into());
-        if let Some(sid) = extract_sid(&req) {
+        if let Some(sid) = extract_sid(&parts.headers) {
             let mut l = self.db.lock();
             let hash = sid.hash();
             match l.authenticate_session(authreq.clone(), &hash) {

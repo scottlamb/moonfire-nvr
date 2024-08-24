@@ -11,20 +11,23 @@ use crate::body::Body;
 use base::{bail, err};
 use futures::{Future, SinkExt};
 use http::{header, Request, Response};
-use tokio_tungstenite::{tungstenite, WebSocketStream};
+use tokio_tungstenite::tungstenite;
 use tracing::Instrument;
+
+pub type WebSocketStream =
+    tokio_tungstenite::WebSocketStream<hyper_util::rt::TokioIo<hyper::upgrade::Upgraded>>;
 
 /// Upgrades to WebSocket and runs the supplied stream handler in a separate tokio task.
 ///
 /// Fails on `Origin` mismatch with an HTTP-level error. If the handler returns
 /// an error, tries to send it to the client before dropping the stream.
 pub(super) fn upgrade<H>(
-    req: Request<::hyper::Body>,
+    req: Request<::hyper::body::Incoming>,
     handler: H,
 ) -> Result<Response<Body>, base::Error>
 where
     for<'a> H: FnOnce(
-            &'a mut WebSocketStream<hyper::upgrade::Upgraded>,
+            &'a mut WebSocketStream,
         ) -> Pin<Box<dyn Future<Output = Result<(), base::Error>> + Send + 'a>>
         + Send
         + 'static,
@@ -35,10 +38,8 @@ where
     check_origin(req.headers())?;
 
     // Otherwise, upgrade and handle the rest in a separate task.
-    let response =
-        tungstenite::handshake::server::create_response_with_body(&req, hyper::Body::empty)
-            .map_err(|e| err!(InvalidArgument, source(e)))?;
-    let (parts, _) = response.into_parts();
+    let response = tungstenite::handshake::server::create_response_with_body(&req, Body::empty)
+        .map_err(|e| err!(InvalidArgument, source(e)))?;
     let span = tracing::info_span!("websocket");
     tokio::spawn(
         async move {
@@ -49,7 +50,9 @@ where
                     return;
                 }
             };
-            let mut ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+            let upgraded = hyper_util::rt::TokioIo::new(upgraded);
+
+            let mut ws = WebSocketStream::from_raw_socket(
                 upgraded,
                 tungstenite::protocol::Role::Server,
                 None,
@@ -66,7 +69,7 @@ where
         }
         .instrument(span),
     );
-    Ok(Response::from_parts(parts, Body::from("")))
+    Ok(response)
 }
 
 /// Checks the `Host` and `Origin` headers match, if the latter is supplied.

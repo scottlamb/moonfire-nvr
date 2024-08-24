@@ -11,7 +11,7 @@ use base::FastHashMap;
 use base::{bail, Error};
 use bpaf::Bpaf;
 use db::{dir, writer};
-use hyper::service::{make_service_fn, service_fn};
+use hyper::service::service_fn;
 use itertools::Itertools;
 use retina::client::SessionGroup;
 use std::net::SocketAddr;
@@ -448,35 +448,43 @@ async fn inner(
     // Start the web interface(s).
     let own_euid = nix::unistd::Uid::effective();
     let mut preopened = get_preopened_sockets()?;
-    let web_handles: Result<Vec<_>, Error> = config
-        .binds
-        .iter()
-        .map(|b| {
-            let svc = Arc::new(web::Service::new(web::Config {
-                db: db.clone(),
-                ui_dir: Some(&config.ui_dir),
-                allow_unauthenticated_permissions: b
-                    .allow_unauthenticated_permissions
-                    .clone()
-                    .map(db::Permissions::from),
-                trust_forward_hdrs: b.trust_forward_headers,
-                time_zone_name: time_zone_name.clone(),
-                privileged_unix_uid: b.own_uid_is_privileged.then_some(own_euid),
-            })?);
-            let make_svc = make_service_fn(move |conn: &crate::web::accept::Conn| {
+    for bind in &config.binds {
+        let svc = Arc::new(web::Service::new(web::Config {
+            db: db.clone(),
+            ui_dir: Some(&config.ui_dir),
+            allow_unauthenticated_permissions: bind
+                .allow_unauthenticated_permissions
+                .clone()
+                .map(db::Permissions::from),
+            trust_forward_hdrs: bind.trust_forward_headers,
+            time_zone_name: time_zone_name.clone(),
+            privileged_unix_uid: bind.own_uid_is_privileged.then_some(own_euid),
+        })?);
+        let mut listener = make_listener(&bind.address, &mut preopened)?;
+        let addr = bind.address.clone();
+        tokio::spawn(async move {
+            loop {
+                let conn = match listener.accept().await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!(err = %e, listener = %addr, "accept failed; will retry in 1 sec");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
+                };
+                let svc = Arc::clone(&svc);
                 let conn_data = *conn.data();
-                futures::future::ok::<_, std::convert::Infallible>(service_fn({
-                    let svc = Arc::clone(&svc);
-                    move |req| Arc::clone(&svc).serve(req, conn_data)
-                }))
-            });
-            let listener = make_listener(&b.address, &mut preopened)?;
-            let server = ::hyper::Server::builder(listener).serve(make_svc);
-            let server = server.with_graceful_shutdown(shutdown_rx.future());
-            Ok(tokio::spawn(server))
-        })
-        .collect();
-    let web_handles = web_handles?;
+                let io = hyper_util::rt::TokioIo::new(conn);
+                let svc = Arc::clone(&svc);
+                let svc_fn = service_fn(move |req| Arc::clone(&svc).serve(req, conn_data));
+                tokio::spawn(
+                    hyper::server::conn::http1::Builder::new()
+                        .serve_connection(io, svc_fn)
+                        .with_upgrades(),
+                );
+            }
+        });
+    }
     if !preopened.is_empty() {
         warn!(
             "ignoring systemd sockets not referenced in config: {}",
@@ -523,13 +531,6 @@ async fn inner(
     })
     .await
     .map_err(|e| err!(Unknown, source(e)))?;
-
-    info!("Waiting for HTTP requests to finish.");
-    for h in web_handles {
-        h.await
-            .map_err(|e| err!(Unknown, source(e)))?
-            .map_err(|e| err!(Unknown, source(e)))?;
-    }
 
     info!("Waiting for TEARDOWN requests to complete.");
     for g in session_groups_by_camera.values() {

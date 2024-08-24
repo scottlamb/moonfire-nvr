@@ -66,7 +66,10 @@ struct Caller {
 
 type ResponseResult = Result<Response<Body>, base::Error>;
 
-fn serve_json<T: serde::ser::Serialize>(req: &Request<hyper::Body>, out: &T) -> ResponseResult {
+fn serve_json<R: http_serve::AsRequest, T: serde::ser::Serialize>(
+    req: &R,
+    out: &T,
+) -> ResponseResult {
     let (mut resp, writer) = http_serve::streaming_body(req).build();
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -84,15 +87,14 @@ fn csrf_matches(csrf: &str, session: auth::SessionHash) -> bool {
     ::ring::constant_time::verify_slices_are_equal(&b64[..], csrf.as_bytes()).is_ok()
 }
 
-/// Extracts `s` cookie from the HTTP request. Does not authenticate.
-fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
-    for hdr in req.headers().get_all(header::COOKIE) {
+/// Extracts `s` cookie from the HTTP request headers. Does not authenticate.
+fn extract_sid(req_hdrs: &http::HeaderMap) -> Option<auth::RawSessionId> {
+    for hdr in req_hdrs.get_all(header::COOKIE) {
         for mut cookie in hdr.as_bytes().split(|&b| b == b';') {
             if cookie.starts_with(b" ") {
                 cookie = &cookie[1..];
             }
-            if cookie.starts_with(b"s=") {
-                let s = &cookie[2..];
+            if let Some(s) = cookie.strip_prefix(b"s=") {
                 if let Ok(s) = auth::RawSessionId::decode_base64(s) {
                     return Some(s);
                 }
@@ -107,7 +109,9 @@ fn extract_sid(req: &Request<hyper::Body>) -> Option<auth::RawSessionId> {
 /// This returns the request body as bytes rather than performing
 /// deserialization. Keeping the bytes allows the caller to use a `Deserialize`
 /// that borrows from the bytes.
-async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, base::Error> {
+async fn into_json_body(
+    req: Request<hyper::body::Incoming>,
+) -> Result<(http::request::Parts, Bytes), base::Error> {
     let correct_mime_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(t) if t == "application/json" => true,
         Some(t) if t == "application/json; charset=UTF-8" => true,
@@ -119,10 +123,12 @@ async fn extract_json_body(req: &mut Request<hyper::Body>) -> Result<Bytes, base
             msg("expected application/json request body")
         );
     }
-    let b = ::std::mem::replace(req.body_mut(), hyper::Body::empty());
-    hyper::body::to_bytes(b)
+    let (parts, b) = req.into_parts();
+    let b = http_body_util::BodyExt::collect(b)
         .await
-        .map_err(|e| err!(Unavailable, msg("unable to read request body"), source(e)))
+        .map_err(|e| err!(Unavailable, msg("unable to read request body"), source(e)))?
+        .to_bytes();
+    Ok((parts, b))
 }
 
 fn parse_json_body<'a, T: serde::Deserialize<'a>>(body: &'a [u8]) -> Result<T, base::Error> {
@@ -207,7 +213,7 @@ impl Service {
     /// as well as returning it to the HTTP client.
     async fn serve_inner(
         self: Arc<Self>,
-        req: Request<::hyper::Body>,
+        req: Request<::hyper::body::Incoming>,
         authreq: auth::Request,
         conn_data: ConnData,
     ) -> ResponseResult {
@@ -310,7 +316,7 @@ impl Service {
     /// them to hyper as `Ok` results.
     pub async fn serve(
         self: Arc<Self>,
-        req: Request<::hyper::Body>,
+        req: Request<::hyper::body::Incoming>,
         conn_data: ConnData,
     ) -> Result<Response<Body>, std::convert::Infallible> {
         let request_id = ulid::Ulid::new();
@@ -378,7 +384,7 @@ impl Service {
         Ok(response)
     }
 
-    fn top_level(&self, req: &Request<::hyper::Body>, caller: Caller) -> ResponseResult {
+    fn top_level(&self, req: &Request<::hyper::body::Incoming>, caller: Caller) -> ResponseResult {
         let mut days = false;
         let mut camera_configs = false;
         if let Some(q) = req.uri().query() {
@@ -411,7 +417,7 @@ impl Service {
         )
     }
 
-    fn camera(&self, req: &Request<::hyper::Body>, uuid: Uuid) -> ResponseResult {
+    fn camera(&self, req: &Request<::hyper::body::Incoming>, uuid: Uuid) -> ResponseResult {
         let db = self.db.lock();
         let camera = db
             .get_camera(uuid)
@@ -424,7 +430,7 @@ impl Service {
 
     fn stream_recordings(
         &self,
-        req: &Request<::hyper::Body>,
+        req: &Request<::hyper::body::Incoming>,
         uuid: Uuid,
         type_: db::StreamType,
     ) -> ResponseResult {
@@ -501,7 +507,12 @@ impl Service {
         serve_json(req, &out)
     }
 
-    fn init_segment(&self, id: i32, debug: bool, req: &Request<::hyper::Body>) -> ResponseResult {
+    fn init_segment(
+        &self,
+        id: i32,
+        debug: bool,
+        req: &Request<::hyper::body::Incoming>,
+    ) -> ResponseResult {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
         let db = self.db.lock();
         let Some(ent) = db.video_sample_entries_by_id().get(&id) else {
@@ -520,7 +531,7 @@ impl Service {
 
     fn request(
         &self,
-        req: &Request<::hyper::Body>,
+        req: &Request<::hyper::body::Incoming>,
         authreq: &auth::Request,
         caller: Caller,
     ) -> ResponseResult {
@@ -551,7 +562,7 @@ impl Service {
                 host.as_deref(),
                 &authreq.addr,
                 agent.as_deref(),
-                self.is_secure(req),
+                self.is_secure(req.headers()),
                 &caller,
             ),
         ))
@@ -561,10 +572,9 @@ impl Service {
     /// Moonfire NVR currently doesn't directly serve `https`, but it supports
     /// proxies which set the `X-Forwarded-Proto` header. See `guide/secure.md`
     /// for more information.
-    fn is_secure(&self, req: &Request<::hyper::Body>) -> bool {
+    fn is_secure(&self, hdrs: &http::HeaderMap) -> bool {
         self.trust_forward_hdrs
-            && req
-                .headers()
+            && hdrs
                 .get("X-Forwarded-Proto")
                 .map(|v| v.as_bytes() == b"https")
                 .unwrap_or(false)
@@ -586,12 +596,12 @@ impl Service {
     /// performing.
     fn authenticate(
         &self,
-        req: &Request<hyper::Body>,
+        req: &Request<hyper::body::Incoming>,
         authreq: &auth::Request,
         conn_data: &ConnData,
         unauth_path: bool,
     ) -> Result<Caller, base::Error> {
-        if let Some(sid) = extract_sid(req) {
+        if let Some(sid) = extract_sid(req.headers()) {
             match self
                 .db
                 .lock()
@@ -652,8 +662,9 @@ impl Service {
 #[cfg(test)]
 mod tests {
     use db::testutil::{self, TestDb};
-    use futures::future::FutureExt;
-    use http::{header, Request};
+    // use futures::future::FutureExt;
+    // use http::{header, Request};
+    use http::header;
     use std::sync::Arc;
 
     pub(super) struct Server {
@@ -679,36 +690,43 @@ mod tests {
                 })
                 .unwrap(),
             );
-            let make_svc = hyper::service::make_service_fn(move |_conn| {
-                futures::future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
-                    let s = Arc::clone(&service);
-                    move |req| {
-                        Arc::clone(&s).serve(
-                            req,
-                            super::accept::ConnData {
-                                client_unix_uid: None,
-                                client_addr: None,
-                            },
-                        )
-                    }
-                }))
-            });
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (addr_tx, addr_rx) = std::sync::mpsc::channel();
             let handle = ::std::thread::spawn(move || {
-                let addr = ([127, 0, 0, 1], 0).into();
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                let srv = {
-                    let _guard = rt.enter();
-                    hyper::server::Server::bind(&addr)
-                        .tcp_nodelay(true)
-                        .serve(make_svc)
-                };
-                let addr = srv.local_addr(); // resolve port 0 to a real ephemeral port number.
-                tx.send(addr).unwrap();
-                rt.block_on(srv.with_graceful_shutdown(shutdown_rx.map(|_| ())))
-                    .unwrap();
+                let service = Arc::clone(&service);
+                rt.block_on(async move {
+                    let addr = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0));
+                    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+                    let addr = listener.local_addr().unwrap();
+                    let mut shutdown_rx = std::pin::pin!(shutdown_rx);
+                    addr_tx.send(addr).unwrap();
+                    loop {
+                        let (tcp, _) = tokio::select! {
+                            r = listener.accept() => r.unwrap(),
+                            _ = shutdown_rx.as_mut() => return,
+                        };
+                        tcp.set_nodelay(true).unwrap();
+                        let io = hyper_util::rt::TokioIo::new(tcp);
+                        let service = Arc::clone(&service);
+                        let serve = move |req| {
+                            Arc::clone(&service).serve(
+                                req,
+                                super::accept::ConnData {
+                                    client_unix_uid: None,
+                                    client_addr: None,
+                                },
+                            )
+                        };
+                        tokio::task::spawn(async move {
+                            hyper::server::conn::http1::Builder::new()
+                                .serve_connection(io, hyper::service::service_fn(serve))
+                                .await
+                                .unwrap();
+                        });
+                    }
+                });
             });
-            let addr = rx.recv().unwrap();
+            let addr = addr_rx.recv().unwrap();
 
             // Create a user.
             let mut c = db::UserChange::add_user("slamb".to_owned());
@@ -726,7 +744,7 @@ mod tests {
 
     impl Drop for Server {
         fn drop(&mut self) {
-            self.shutdown_tx.take().unwrap().send(()).unwrap();
+            let _ = self.shutdown_tx.take().unwrap().send(());
             self.handle.take().unwrap().join().unwrap()
         }
     }
@@ -746,15 +764,15 @@ mod tests {
 
     #[test]
     fn test_extract_sid() {
-        let req = Request::builder()
-            .header(header::COOKIE, "foo=asdf; bar=asdf")
-            .header(
-                header::COOKIE,
-                "s=OsL6Cg4ikLw6UIXOT28tI+vPez3qWACovI+nLHWyjsW1ERX83qRrOR3guKedc8IP",
-            )
-            .body(hyper::Body::empty())
-            .unwrap();
-        let sid = super::extract_sid(&req).unwrap();
+        let mut hdrs = http::HeaderMap::new();
+        hdrs.append(header::COOKIE, "foo=asdf; bar=asdf".parse().unwrap());
+        hdrs.append(
+            header::COOKIE,
+            "s=OsL6Cg4ikLw6UIXOT28tI+vPez3qWACovI+nLHWyjsW1ERX83qRrOR3guKedc8IP"
+                .parse()
+                .unwrap(),
+        );
+        let sid = super::extract_sid(&hdrs).unwrap();
         assert_eq!(sid.as_ref(), &b":\xc2\xfa\n\x0e\"\x90\xbc:P\x85\xceOo-#\xeb\xcf{=\xeaX\x00\xa8\xbc\x8f\xa7,u\xb2\x8e\xc5\xb5\x11\x15\xfc\xde\xa4k9\x1d\xe0\xb8\xa7\x9ds\xc2\x0f"[..]);
     }
 }

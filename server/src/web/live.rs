@@ -10,12 +10,12 @@ use base::{bail, err, Error};
 use futures::SinkExt;
 use http::header;
 use tokio::sync::broadcast::error::RecvError;
-use tokio_tungstenite::{tungstenite, WebSocketStream};
+use tokio_tungstenite::tungstenite;
 use uuid::Uuid;
 
 use crate::mp4;
 
-use super::{Caller, Service};
+use super::{websocket::WebSocketStream, Caller, Service};
 
 /// Interval at which to send keepalives if there are no frames.
 ///
@@ -27,7 +27,7 @@ const KEEPALIVE_AFTER_IDLE: tokio::time::Duration = tokio::time::Duration::from_
 impl Service {
     pub(super) async fn stream_live_m4s(
         self: Arc<Self>,
-        ws: &mut WebSocketStream<hyper::upgrade::Upgraded>,
+        ws: &mut WebSocketStream,
         caller: Result<Caller, Error>,
         uuid: Uuid,
         stream_type: db::StreamType,
@@ -111,7 +111,7 @@ impl Service {
         &self,
         open_id: u32,
         stream_id: i32,
-        ws: &mut tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>,
+        ws: &mut WebSocketStream,
         live: db::LiveFrame,
         start_at_key: bool,
     ) -> Result<bool, Error> {

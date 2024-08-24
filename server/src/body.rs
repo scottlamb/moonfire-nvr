@@ -11,20 +11,15 @@
 //! although this is a pretty small optimization.
 //!
 //! Some day I expect [bytes::Bytes] will expose its vtable (see link above),
-//! allowing us to minimize reference-counting while using the standard
-//! [hyper::Body].
+//! allowing us to minimize reference-counting without a custom chunk type.
 
 use base::Error;
-use futures::{stream, Stream};
 use reffers::ARefss;
 use std::error::Error as StdError;
-use std::pin::Pin;
-use sync_wrapper::SyncWrapper;
 
 pub struct Chunk(ARefss<'static, [u8]>);
 
 pub type BoxedError = Box<dyn StdError + Send + Sync>;
-pub type BodyStream = Box<dyn Stream<Item = Result<Chunk, BoxedError>> + Send>;
 
 pub fn wrap_error(e: Error) -> BoxedError {
     Box::new(e)
@@ -72,55 +67,4 @@ impl hyper::body::Buf for Chunk {
     }
 }
 
-// This SyncWrapper stuff is blindly copied from hyper's body type.
-// See <https://github.com/hyperium/hyper/pull/2187>, matched by
-// <https://github.com/scottlamb/http-serve/pull/18>.
-pub struct Body(SyncWrapper<Pin<BodyStream>>);
-
-impl hyper::body::HttpBody for Body {
-    type Data = Chunk;
-    type Error = BoxedError;
-
-    fn poll_data(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context,
-    ) -> std::task::Poll<Option<Result<Self::Data, Self::Error>>> {
-        // This is safe because the pin is not structural.
-        // https://doc.rust-lang.org/std/pin/#pinning-is-not-structural-for-field
-        // (The field _holds_ a pin, but isn't itself pinned.)
-        unsafe { self.get_unchecked_mut() }
-            .0
-            .get_mut()
-            .as_mut()
-            .poll_next(cx)
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        _cx: &mut std::task::Context,
-    ) -> std::task::Poll<Result<Option<http::header::HeaderMap>, Self::Error>> {
-        std::task::Poll::Ready(Ok(None))
-    }
-}
-
-impl From<BodyStream> for Body {
-    fn from(b: BodyStream) -> Self {
-        Body(SyncWrapper::new(Pin::from(b)))
-    }
-}
-
-impl<C: Into<Chunk>> From<C> for Body {
-    fn from(c: C) -> Self {
-        Body(SyncWrapper::new(Box::pin(stream::once(
-            futures::future::ok(c.into()),
-        ))))
-    }
-}
-
-impl From<Error> for Body {
-    fn from(e: Error) -> Self {
-        Body(SyncWrapper::new(Box::pin(stream::once(
-            futures::future::err(wrap_error(e)),
-        ))))
-    }
-}
+pub type Body = http_serve::Body<Chunk>;
