@@ -93,7 +93,10 @@ fn main() {
         .run_inner(bpaf::Args::current_args().set_name(progname))
     {
         Ok(a) => a,
-        Err(e) => std::process::exit(e.exit_code()),
+        Err(e) => {
+            e.print_mesage(100);
+            std::process::exit(e.exit_code())
+        }
     };
     tracing::trace!("Parsed command-line arguments: {args:#?}");
 
