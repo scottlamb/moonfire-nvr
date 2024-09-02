@@ -208,6 +208,46 @@ impl Service {
         }
         Ok(http_serve::serve(mp4, req))
     }
+
+    pub(super) fn delete_view_mp4(
+        &self,
+        req: &Request<::hyper::Body>,
+        caller: Caller,
+        uuid: Uuid,
+        stream_type: db::StreamType,
+    ) -> ResponseResult {
+        if !caller.permissions.view_video {
+            bail!(PermissionDenied, msg("view_video required"));
+        }
+        let stream_id;
+
+        {
+            let db = self.db.lock();
+            let camera = db
+                .get_camera(uuid)
+                .ok_or_else(|| err!(NotFound, msg("no such camera {uuid}")))?;
+            stream_id = camera.streams[stream_type.index()]
+                .ok_or_else(|| err!(NotFound, msg("no such stream {uuid}/{stream_type}")))?;
+        };
+        if let Some(q) = req.uri().query() {
+            for (key, value) in form_urlencoded::parse(q.as_bytes()) {
+                let (key, value) = (key.borrow(), value.borrow());
+                match key {
+                    "s" => {
+                        let s = Segments::from_str(value).map_err(|()| {
+                            err!(InvalidArgument, msg("invalid s parameter: {value}"))
+                        })?;
+                        trace!("delete_view_mp4: deleting s={:?}", s);
+                        let mut db = self.db.lock();
+                        db.delete_recordings(stream_id, s.ids)?;
+                    }
+                    _ => bail!(InvalidArgument, msg("parameter {key} not understood")),
+                }
+            }
+        }
+
+        Ok(plain_response(StatusCode::OK, format!("OK")))
+    }
 }
 
 /// Represents a single `s=` (segments) query parameter as supplied to `/view.mp4`.

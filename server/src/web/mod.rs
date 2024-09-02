@@ -28,7 +28,7 @@ use core::str::FromStr;
 use db::dir::SampleFileDir;
 use db::{auth, recording};
 use http::header::{self, HeaderValue};
-use http::{status::StatusCode, Request, Response};
+use http::{status::StatusCode, Request, Response, Method};
 use hyper::body::Bytes;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -254,7 +254,10 @@ impl Service {
             ),
             Path::StreamViewMp4(uuid, type_, debug) => (
                 CacheControl::PrivateStatic,
-                self.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::Normal, debug)?,
+                match req.method() {
+                  &Method::DELETE => self.delete_view_mp4(&req, caller, uuid, type_)?,
+                  _ => self.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::Normal, debug)?,
+                },
             ),
             Path::StreamViewMp4Segment(uuid, type_, debug) => (
                 CacheControl::PrivateStatic,

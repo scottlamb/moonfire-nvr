@@ -11,6 +11,7 @@ Status: **current**.
     * [`GET /api/cameras/<uuid>/`](#get-apicamerasuuid)
     * [`GET /api/cameras/<uuid>/<stream>/recordings`](#get-apicamerasuuidstreamrecordings)
     * [`GET /api/cameras/<uuid>/<stream>/view.mp4`](#get-apicamerasuuidstreamviewmp4)
+    * [`DELETE /api/cameras/<uuid>/<stream>/view.mp4`](#delete-apicamerasuuidstreamviewmp4)
     * [`GET /api/cameras/<uuid>/<stream>/view.mp4.txt`](#get-apicamerasuuidstreamviewmp4txt)
     * [`GET /api/cameras/<uuid>/<stream>/view.m4s`](#get-apicamerasuuidstreamviewm4s)
     * [`GET /api/cameras/<uuid>/<stream>/view.m4s.txt`](#get-apicamerasuuidstreamviewm4stxt)
@@ -505,6 +506,38 @@ Bugs and limitations:
     recording 2/16672 after recording 2/16671 with trailing zero`. See also
     `hasTrailingZero` above, and
     [#178](https://github.com/scottlamb/moonfire-nvr/issues/178).
+
+### `DELETE /api/cameras/<uuid>/<stream>/view.mp4`
+
+Requires the `viewVideo` permission.
+
+Returns a `.mp4` file, with an etag and support for range requests. The MIME
+type will be `video/mp4`, with a `codecs` parameter as specified in
+[RFC 6381][rfc-6381].
+
+Expected query parameters:
+
+*   `s` (one or more): a string of the form `START_ID[-END_ID]`. This
+    specifies *recordings* to delete. The ids to retrieve are as returned by
+    the `/recordings` URL.
+
+Example request URI to delete recording id 1 from the given camera:
+
+```
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1
+```
+
+Example request URI to delete recording ids 1–5 from the given camera
+
+```
+    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1-5
+```
+
+Bugs and limitations:
+
+*   If the `s=` parameter references a recording id that doesn't exist when the
+    server starts processing the `/view.mp4` request, the server will return a
+    `500` with a text error message.
 
 ### `GET /api/cameras/<uuid>/<stream>/view.mp4.txt`
 

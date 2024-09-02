@@ -1523,6 +1523,37 @@ impl LockedDatabase {
         }
     }
 
+    /// Transfer given recordings to garbage and refresh in-memory map
+    /// of files to garbage collect.
+    pub fn delete_recordings(
+        &mut self,
+        stream_id: i32,
+        recording_ids: Range<i32>,
+    ) -> Result<(), Error> {
+        let s = match self.streams_by_id.get_mut(&stream_id) {
+            None => bail!(Internal, msg("no stream {stream_id}")),
+            Some(s) => s,
+        };
+        let dir_id = match s.sample_file_dir_id {
+            None => bail!(Internal, msg("stream {stream_id} has no directory!")),
+            Some(d) => d,
+        };
+
+        let composite_ids = CompositeId::new(stream_id, recording_ids.start)..CompositeId::new(stream_id, recording_ids.end);
+
+        {
+            let tx = self.conn.transaction()?;
+            match raw::delete_recordings(&tx, dir_id, composite_ids)? {
+                0 => bail!(Internal, msg("zero recordings deleted from {stream_id}/{recording_ids:?}")),
+                _ => {},
+            };
+            tx.commit()?;
+        };
+        self.init_sample_file_dirs_garbage_needs_unlink()?;
+
+        Ok(())
+    }
+
     /// Queues for deletion the oldest recordings that aren't already queued.
     /// `f` should return true for each row that should be deleted.
     pub(crate) fn delete_oldest_recordings(
@@ -1599,47 +1630,57 @@ impl LockedDatabase {
     /// To be called during construction.
     fn init_sample_file_dirs(&mut self) -> Result<(), Error> {
         info!("Loading sample file dirs");
-        let mut stmt = self.conn.prepare(
-            r#"
-            select
-              d.id,
-              d.config,
-              d.uuid,
-              d.last_complete_open_id,
-              o.uuid
-            from
-              sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
-            "#,
-        )?;
-        let mut rows = stmt.query(params![])?;
-        while let Some(row) = rows.next()? {
-            let id = row.get(0)?;
-            let config: SampleFileDirConfig = row.get(1)?;
-            let dir_uuid: SqlUuid = row.get(2)?;
-            let open_id: Option<u32> = row.get(3)?;
-            let open_uuid: Option<SqlUuid> = row.get(4)?;
-            let last_complete_open = match (open_id, open_uuid) {
-                (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0 }),
-                (None, None) => None,
-                _ => bail!(Internal, msg("open table missing id {id}")),
-            };
-            self.sample_file_dirs_by_id.insert(
-                id,
-                SampleFileDir {
+        {
+            let mut stmt = self.conn.prepare(
+                r#"
+                select
+                  d.id,
+                  d.config,
+                  d.uuid,
+                  d.last_complete_open_id,
+                  o.uuid
+                from
+                  sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
+                "#,
+            )?;
+            let mut rows = stmt.query(params![])?;
+            while let Some(row) = rows.next()? {
+                let id = row.get(0)?;
+                let config: SampleFileDirConfig = row.get(1)?;
+                let dir_uuid: SqlUuid = row.get(2)?;
+                let open_id: Option<u32> = row.get(3)?;
+                let open_uuid: Option<SqlUuid> = row.get(4)?;
+                let last_complete_open = match (open_id, open_uuid) {
+                    (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0 }),
+                    (None, None) => None,
+                    _ => bail!(Internal, msg("open table missing id {id}")),
+                };
+                self.sample_file_dirs_by_id.insert(
                     id,
-                    uuid: dir_uuid.0,
-                    path: config.path,
-                    dir: None,
-                    last_complete_open,
-                    garbage_needs_unlink: raw::list_garbage(&self.conn, id)?,
-                    garbage_unlinked: Vec::new(),
-                },
-            );
-        }
+                    SampleFileDir {
+                        id,
+                        uuid: dir_uuid.0,
+                        path: config.path,
+                        dir: None,
+                        last_complete_open,
+                        garbage_unlinked: Vec::new(),
+                        garbage_needs_unlink: base::FastHashSet::default(),
+                    },
+                );
+            }
+        };
+        self.init_sample_file_dirs_garbage_needs_unlink()?;
         info!(
             "Loaded {} sample file dirs",
             self.sample_file_dirs_by_id.len()
         );
+        Ok(())
+    }
+
+    fn init_sample_file_dirs_garbage_needs_unlink(&mut self) -> Result<(), Error> {
+        for (id, value) in &mut self.sample_file_dirs_by_id {
+            value.garbage_needs_unlink = raw::list_garbage(&self.conn, *id)?;
+        }
         Ok(())
     }
 
@@ -2756,45 +2797,7 @@ mod tests {
 
         // TODO: assert_eq!(db.lock().list_garbage(sample_file_dir_id).unwrap(), &[]);
 
-        let vse_id = db
-            .lock()
-            .insert_video_sample_entry(VideoSampleEntryToInsert {
-                width: 1920,
-                height: 1080,
-                pasp_h_spacing: 1,
-                pasp_v_spacing: 1,
-                data: include_bytes!("testdata/avc1").to_vec(),
-                rfc6381_codec: "avc1.4d0029".to_owned(),
-            })
-            .unwrap();
-        assert!(vse_id > 0, "vse_id = {vse_id}");
-
-        // Inserting a recording should succeed and advance the next recording id.
-        let start = recording::Time(1430006400 * TIME_UNITS_PER_SEC);
-        let recording = RecordingToInsert {
-            sample_file_bytes: 42,
-            run_offset: 0,
-            flags: 0,
-            start,
-            prev_media_duration: recording::Duration(0),
-            prev_runs: 0,
-            wall_duration_90k: TIME_UNITS_PER_SEC.try_into().unwrap(),
-            media_duration_90k: TIME_UNITS_PER_SEC.try_into().unwrap(),
-            local_time_delta: recording::Duration(0),
-            video_samples: 1,
-            video_sync_samples: 1,
-            video_sample_entry_id: vse_id,
-            video_index: [0u8; 100].to_vec(),
-            sample_file_blake3: None,
-            end_reason: None,
-        };
-        let id = {
-            let mut db = db.lock();
-            let (id, _) = db.add_recording(main_stream_id, recording.clone()).unwrap();
-            db.mark_synced(id).unwrap();
-            db.flush("add test").unwrap();
-            id
-        };
+        let (id, recording) = assert_can_insert_recording(&db, main_stream_id);
         assert_eq!(
             db.lock()
                 .streams_by_id()
@@ -2870,6 +2873,56 @@ mod tests {
             .copied()
             .collect();
         assert_eq!(&g, &[]);
+
+        // Create a new recording and deleting it by stream_id/recording_id..recording_id
+        let (id, recording) = assert_can_insert_recording(&db, main_stream_id);
+        assert_single_recording(&db, main_stream_id, &recording);
+        {
+            let mut db = db.lock();
+            db.delete_recordings(main_stream_id, id.recording()..id.recording()+1).expect("failed to delete recording");
+        };
+        assert_no_recordings(&db, camera_uuid);
+    }
+
+    fn assert_can_insert_recording(db: &Database, stream_id: i32) -> (CompositeId, RecordingToInsert) {
+        let vse_id = db
+            .lock()
+            .insert_video_sample_entry(VideoSampleEntryToInsert {
+                width: 1920,
+                height: 1080,
+                pasp_h_spacing: 1,
+                pasp_v_spacing: 1,
+                data: include_bytes!("testdata/avc1").to_vec(),
+                rfc6381_codec: "avc1.4d0029".to_owned(),
+            })
+            .unwrap();
+        assert!(vse_id > 0, "vse_id = {vse_id}");
+
+        let start = recording::Time(1440006400 * TIME_UNITS_PER_SEC);
+
+        let recording = RecordingToInsert {
+            sample_file_bytes: 42,
+            run_offset: 0,
+            flags: 0,
+            start,
+            prev_media_duration: recording::Duration(0),
+            prev_runs: 0,
+            wall_duration_90k: TIME_UNITS_PER_SEC.try_into().unwrap(),
+            media_duration_90k: TIME_UNITS_PER_SEC.try_into().unwrap(),
+            local_time_delta: recording::Duration(0),
+            video_samples: 1,
+            video_sync_samples: 1,
+            video_sample_entry_id: vse_id,
+            video_index: [0u8; 100].to_vec(),
+            sample_file_blake3: None,
+            end_reason: None,
+        };
+
+        let mut db = db.lock();
+        let (id, _) = db.add_recording(stream_id, recording.clone()).unwrap();
+        db.mark_synced(id).unwrap();
+        db.flush("add test").unwrap();
+        (id, recording)
     }
 
     #[test]
