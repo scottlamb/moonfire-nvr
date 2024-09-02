@@ -204,7 +204,7 @@ where
             let frame = match frame {
                 Ok(f) => f,
                 Err(e) => {
-                    let _ = w.close(None, Some(e.to_string()));
+                    let _ = w.close(None, Some(e.chain().to_string()));
                     return Err(e);
                 }
             };

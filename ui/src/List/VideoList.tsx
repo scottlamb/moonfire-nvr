@@ -12,7 +12,8 @@ import TableRow, { TableRowProps } from "@mui/material/TableRow";
 import Skeleton from "@mui/material/Skeleton";
 import Alert from "@mui/material/Alert";
 import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
+import ErrorIcon from "@mui/icons-material/Error";
+import Icon from "@mui/material/Icon";
 
 interface Props {
   stream: Stream;
@@ -153,12 +154,15 @@ const Row = ({
   <TableRow {...rest}>
     <TableCell align="right">{start}</TableCell>
     <TableCell align="right">
+      {end}
       {endReason !== undefined ? (
         <Tooltip title={endReason}>
-          <Typography>{end}</Typography>
+          <Icon sx={{ verticalAlign: "bottom", marginLeft: ".5em" }}>
+            <ErrorIcon />
+          </Icon>
         </Tooltip>
       ) : (
-        end
+        <Icon sx={{ verticalAlign: "bottom", marginLeft: ".5em" }} />
       )}
     </TableCell>
     <TableCell align="right" className="opt">
