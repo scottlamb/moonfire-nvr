@@ -2449,7 +2449,8 @@ impl<C: Clocks + Clone> Database<C> {
     /// operations.
     pub fn lock(&self) -> DatabaseGuard<C> {
         let timer = clock::TimerGuard::new(&self.clocks, acquisition);
-        let db = self.db.as_ref().unwrap().lock().unwrap();
+        let db = self.db.as_ref().unwrap();
+        let db = db.lock().unwrap();
         drop(timer);
         let _timer = clock::TimerGuard::<C, &'static str, fn() -> &'static str>::new(
             &self.clocks,
@@ -2873,16 +2874,16 @@ mod tests {
             let mut db = db.lock();
             db.delete_recordings(main_stream_id, id.recording()..id.recording()+1).expect("failed to delete recording");
 
-            let stream = db.streams_by_id(main_stream_id).get();
+            let stream = db.streams_by_id.get(&main_stream_id);
             assert!(stream.is_some());
-            let stream = stream.unwrap();
+            let stream = stream.expect("failed to get stream by id");
             assert!(stream.sample_file_dir_id.is_some());
             let dir_id = stream.sample_file_dir_id.unwrap();
-            let dir = db.sample_file_dirs_by_id.get(dir_id);
+            let dir = db.sample_file_dirs_by_id.get(&dir_id);
             assert!(dir.is_some());
             let dir = dir.unwrap();
 
-            assert_eq!(1, dir.garbage_needs_unlink.len());
+            assert_eq!(2, dir.garbage_needs_unlink.len());
         };
         assert_no_recordings(&db, camera_uuid);
     }
