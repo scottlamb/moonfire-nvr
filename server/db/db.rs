@@ -1543,11 +1543,11 @@ impl LockedDatabase {
             Some(d) => d,
         };
 
-        let composite_ids = CompositeId::new(stream_id, recording_ids.start)..CompositeId::new(stream_id, recording_ids.end);
-
         {
             let tx = self.conn.transaction()?;
-            raw::delete_recordings(&tx, dir_id, composite_ids)?;
+            for recording_id in recording_ids {
+               raw::delete_recordings(&tx, dir_id, CompositeId::new(stream_id, recording_id)..CompositeId::new(stream_id, recording_id+1))?;
+            }
             let new_garbage_needs_unlink = raw::list_garbage(&tx, dir_id)?;
             tx.commit()?;
             dir.garbage_needs_unlink = new_garbage_needs_unlink;
