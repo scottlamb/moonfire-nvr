@@ -22,8 +22,9 @@ use uuid::Uuid;
 
 use crate::mp4;
 use crate::web::plain_response;
+use crate::json;
 
-use super::{Caller, ResponseResult, Service};
+use super::{Caller, ResponseResult, Service, extract_json_body, parse_json_body, require_csrf_if_session};
 
 impl Service {
     pub(super) fn stream_view_mp4(
@@ -209,9 +210,9 @@ impl Service {
         Ok(http_serve::serve(mp4, req))
     }
 
-    pub(super) fn delete_view_mp4(
+    pub(super) async fn delete_view_mp4(
         &self,
-        req: &Request<::hyper::Body>,
+        mut req: Request<::hyper::Body>,
         caller: Caller,
         uuid: Uuid,
         stream_type: db::StreamType,
@@ -219,6 +220,11 @@ impl Service {
         if !caller.permissions.admin_storage {
             bail!(PermissionDenied, msg("admin_storage required"));
         }
+
+        let r = extract_json_body(&mut req).await?;
+        let r: json::DeleteRecordings = parse_json_body(&r)?;
+        require_csrf_if_session(&caller, r.csrf)?;
+
         let stream_id;
 
         {
@@ -229,22 +235,13 @@ impl Service {
             stream_id = camera.streams[stream_type.index()]
                 .ok_or_else(|| err!(NotFound, msg("no such stream {uuid}/{stream_type}")))?;
         };
-        if let Some(q) = req.uri().query() {
-            for (key, value) in form_urlencoded::parse(q.as_bytes()) {
-                let (key, value) = (key.borrow(), value.borrow());
-                match key {
-                    "s" => {
-                        let s = Segments::from_str(value).map_err(|()| {
-                            err!(InvalidArgument, msg("invalid s parameter: {value}"))
-                        })?;
-                        trace!("delete_view_mp4: deleting s={:?}", s);
-                        let mut db = self.db.lock();
-                        db.delete_recordings(stream_id, s.ids)?;
-                    }
-                    _ => bail!(InvalidArgument, msg("parameter {key} not understood")),
-                }
-            }
-        }
+
+        let s = Segments::from_str(r.s).map_err(|()| {
+            err!(InvalidArgument, msg("invalid s parameter: {}", r.s))
+        })?;
+        trace!("delete_view_mp4: deleting s={:?}", s);
+        let mut db = self.db.lock();
+        db.delete_recordings(stream_id, s.ids)?;
 
         Ok(plain_response(StatusCode::OK, format!("OK")))
     }

@@ -525,6 +525,15 @@ pub struct ToplevelUser {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
+pub struct DeleteRecordings<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub s: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct PutUsers<'a> {
     #[serde(borrow)]
     pub csrf: Option<&'a str>,

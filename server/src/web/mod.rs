@@ -255,7 +255,7 @@ impl Service {
             Path::StreamViewMp4(uuid, type_, debug) => (
                 CacheControl::PrivateStatic,
                 match req.method() {
-                  &Method::DELETE => self.delete_view_mp4(&req, caller, uuid, type_)?,
+                  &Method::DELETE => self.delete_view_mp4(req, caller, uuid, type_).await?,
                   _ => self.stream_view_mp4(&req, caller, uuid, type_, mp4::Type::Normal, debug)?,
                 },
             ),
