@@ -509,7 +509,7 @@ Bugs and limitations:
 
 ### `DELETE /api/cameras/<uuid>/<stream>/view.mp4`
 
-Requires the `viewVideo` permission.
+Requires the `adminStorage` permission.
 
 Asynchronously deletes recordings.
 
@@ -957,6 +957,7 @@ A JSON object of permissions to perform various actions:
 *   `readCameraConfigs`: bool, read camera configs including credentials
 *   `updateSignals`: bool
 *   `viewVideo`: bool
+*   `adminStorage`: bool
 
 See endpoints above for more details on the contexts in which these are
 required.

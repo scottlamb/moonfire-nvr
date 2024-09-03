@@ -216,8 +216,8 @@ impl Service {
         uuid: Uuid,
         stream_type: db::StreamType,
     ) -> ResponseResult {
-        if !caller.permissions.view_video {
-            bail!(PermissionDenied, msg("view_video required"));
+        if !caller.permissions.admin_storage {
+            bail!(PermissionDenied, msg("admin_storage required"));
         }
         let stream_id;
 

@@ -628,6 +628,7 @@ impl Service {
                     read_camera_configs: true,
                     update_signals: true,
                     admin_users: true,
+                    admin_storage: true,
                     ..Default::default()
                 },
                 user: None,

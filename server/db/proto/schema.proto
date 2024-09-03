@@ -68,4 +68,5 @@ message Permissions {
   bool read_camera_configs = 2;
   bool update_signals = 3;
   bool admin_users = 4;
+  bool admin_storage = 5;
 }

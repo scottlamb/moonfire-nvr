@@ -608,6 +608,9 @@ pub struct Permissions {
 
     #[serde(default)]
     pub admin_users: bool,
+
+    #[serde(default)]
+    pub admin_storage: bool,
 }
 
 impl From<Permissions> for db::schema::Permissions {
@@ -617,6 +620,7 @@ impl From<Permissions> for db::schema::Permissions {
             read_camera_configs: p.read_camera_configs,
             update_signals: p.update_signals,
             admin_users: p.admin_users,
+            admin_storage: p.admin_storage,
             special_fields: Default::default(),
         }
     }
@@ -629,6 +633,7 @@ impl From<db::schema::Permissions> for Permissions {
             read_camera_configs: p.read_camera_configs,
             update_signals: p.update_signals,
             admin_users: p.admin_users,
+            admin_storage: p.admin_storage,
         }
     }
 }
