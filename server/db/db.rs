@@ -1632,57 +1632,47 @@ impl LockedDatabase {
     /// To be called during construction.
     fn init_sample_file_dirs(&mut self) -> Result<(), Error> {
         info!("Loading sample file dirs");
-        {
-            let mut stmt = self.conn.prepare(
-                r#"
-                select
-                  d.id,
-                  d.config,
-                  d.uuid,
-                  d.last_complete_open_id,
-                  o.uuid
-                from
-                  sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
-                "#,
-            )?;
-            let mut rows = stmt.query(params![])?;
-            while let Some(row) = rows.next()? {
-                let id = row.get(0)?;
-                let config: SampleFileDirConfig = row.get(1)?;
-                let dir_uuid: SqlUuid = row.get(2)?;
-                let open_id: Option<u32> = row.get(3)?;
-                let open_uuid: Option<SqlUuid> = row.get(4)?;
-                let last_complete_open = match (open_id, open_uuid) {
-                    (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0 }),
-                    (None, None) => None,
-                    _ => bail!(Internal, msg("open table missing id {id}")),
-                };
-                self.sample_file_dirs_by_id.insert(
+        let mut stmt = self.conn.prepare(
+            r#"
+            select
+              d.id,
+              d.config,
+              d.uuid,
+              d.last_complete_open_id,
+              o.uuid
+            from
+              sample_file_dir d left join open o on (d.last_complete_open_id = o.id);
+            "#,
+        )?;
+        let mut rows = stmt.query(params![])?;
+        while let Some(row) = rows.next()? {
+            let id = row.get(0)?;
+            let config: SampleFileDirConfig = row.get(1)?;
+            let dir_uuid: SqlUuid = row.get(2)?;
+            let open_id: Option<u32> = row.get(3)?;
+            let open_uuid: Option<SqlUuid> = row.get(4)?;
+            let last_complete_open = match (open_id, open_uuid) {
+                (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0 }),
+                (None, None) => None,
+                _ => bail!(Internal, msg("open table missing id {id}")),
+            };
+            self.sample_file_dirs_by_id.insert(
+                id,
+                SampleFileDir {
                     id,
-                    SampleFileDir {
-                        id,
-                        uuid: dir_uuid.0,
-                        path: config.path,
-                        dir: None,
-                        last_complete_open,
-                        garbage_unlinked: Vec::new(),
-                        garbage_needs_unlink: base::FastHashSet::default(),
-                    },
-                );
-            }
-        };
-        self.init_sample_file_dirs_garbage_needs_unlink()?;
+                    uuid: dir_uuid.0,
+                    path: config.path,
+                    dir: None,
+                    last_complete_open,
+                    garbage_needs_unlink: raw::list_garbage(&self.conn, id)?,
+                    garbage_unlinked: Vec::new(),
+                },
+            );
+        }
         info!(
             "Loaded {} sample file dirs",
             self.sample_file_dirs_by_id.len()
         );
-        Ok(())
-    }
-
-    fn init_sample_file_dirs_garbage_needs_unlink(&mut self) -> Result<(), Error> {
-        for (id, value) in &mut self.sample_file_dirs_by_id {
-            value.garbage_needs_unlink = raw::list_garbage(&self.conn, *id)?;
-        }
         Ok(())
     }
 
@@ -2882,6 +2872,17 @@ mod tests {
         {
             let mut db = db.lock();
             db.delete_recordings(main_stream_id, id.recording()..id.recording()+1).expect("failed to delete recording");
+
+            let stream = db.streams_by_id(main_stream_id).get();
+            assert!(stream.is_some());
+            let stream = stream.unwrap();
+            assert!(stream.sample_file_dir_id.is_some());
+            let dir_id = stream.sample_file_dir_id.unwrap();
+            let dir = db.sample_file_dirs_by_id.get(dir_id);
+            assert!(dir.is_some());
+            let dir = dir.unwrap();
+
+            assert_eq!(1, dir.garbage_needs_unlink.len());
         };
         assert_no_recordings(&db, camera_uuid);
     }
