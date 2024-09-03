@@ -511,9 +511,7 @@ Bugs and limitations:
 
 Requires the `viewVideo` permission.
 
-Returns a `.mp4` file, with an etag and support for range requests. The MIME
-type will be `video/mp4`, with a `codecs` parameter as specified in
-[RFC 6381][rfc-6381].
+Asynchronously deletes recordings.
 
 Expected query parameters:
 
@@ -532,12 +530,6 @@ Example request URI to delete recording ids 1–5 from the given camera
 ```
     /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4?s=1-5
 ```
-
-Bugs and limitations:
-
-*   If the `s=` parameter references a recording id that doesn't exist when the
-    server starts processing the `/view.mp4` request, the server will return a
-    `500` with a text error message.
 
 ### `GET /api/cameras/<uuid>/<stream>/view.mp4.txt`
 
