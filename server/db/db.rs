@@ -1538,18 +1538,20 @@ impl LockedDatabase {
             None => bail!(Internal, msg("stream {stream_id} has no directory!")),
             Some(d) => d,
         };
+        let dir = match self.sample_file_dirs_by_id.get_mut(&dir_id) {
+            None => bail!(Internal, msg("dir {dir_id} has no directory!")),
+            Some(d) => d,
+        };
 
         let composite_ids = CompositeId::new(stream_id, recording_ids.start)..CompositeId::new(stream_id, recording_ids.end);
 
         {
             let tx = self.conn.transaction()?;
-            match raw::delete_recordings(&tx, dir_id, composite_ids)? {
-                0 => bail!(Internal, msg("zero recordings deleted from {stream_id}/{recording_ids:?}")),
-                _ => {},
-            };
+            raw::delete_recordings(&tx, dir_id, composite_ids)?;
+            let new_garbage_needs_unlink = raw::list_garbage(&tx, dir_id)?;
             tx.commit()?;
+            dir.garbage_needs_unlink = new_garbage_needs_unlink;
         };
-        self.init_sample_file_dirs_garbage_needs_unlink()?;
 
         Ok(())
     }
