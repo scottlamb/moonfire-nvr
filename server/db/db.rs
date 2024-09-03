@@ -1523,7 +1523,7 @@ impl LockedDatabase {
         }
     }
 
-    /// Transfer given recordings to garbage and refresh in-memory map
+    /// Transfers given recordings to garbage and refresh in-memory map
     /// of files to garbage collect.
     pub fn delete_recordings(
         &mut self,
