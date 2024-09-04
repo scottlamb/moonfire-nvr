@@ -236,12 +236,9 @@ impl Service {
                 .ok_or_else(|| err!(NotFound, msg("no such stream {uuid}/{stream_type}")))?;
         };
 
-        let s = Segments::from_str(r.s).map_err(|()| {
-            err!(InvalidArgument, msg("invalid s parameter: {}", r.s))
-        })?;
-        trace!("delete_view_mp4: deleting s={:?}", s);
+        trace!("delete_view_mp4: deleting s={:?}", r.run_start_id);
         let mut db = self.db.lock();
-        db.delete_recordings(stream_id, s.ids)?;
+        db.delete_recording(stream_id, r.run_start_id)?;
 
         Ok(plain_response(StatusCode::OK, format!("OK")))
     }

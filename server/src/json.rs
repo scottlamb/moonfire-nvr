@@ -528,7 +528,7 @@ pub struct ToplevelUser {
 pub struct DeleteRecordings<'a> {
     #[serde(borrow)]
     pub csrf: Option<&'a str>,
-    pub s: &'a str,
+    pub run_start_id: i32,
 }
 
 #[derive(Debug, Deserialize)]

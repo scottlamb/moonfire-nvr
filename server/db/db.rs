@@ -1525,10 +1525,10 @@ impl LockedDatabase {
 
     /// Transfers given recordings to garbage and refresh in-memory map
     /// of files to garbage collect.
-    pub fn delete_recordings(
+    pub fn delete_recording(
         &mut self,
         stream_id: i32,
-        recording_ids: Range<i32>,
+        run_start_id: i32,
     ) -> Result<(), Error> {
         let s = match self.streams_by_id.get_mut(&stream_id) {
             None => bail!(Internal, msg("no stream {stream_id}")),
@@ -1538,12 +1538,27 @@ impl LockedDatabase {
             None => bail!(Internal, msg("stream {stream_id} has no directory!")),
             Some(d) => d,
         };
+
+        let time = recording::Time::MIN..recording::Time::MAX;
+        let split = recording::Duration(i64::MAX);
+        let mut end_id = None;
+        self.list_aggregated_recordings(stream_id, time, split, &mut |row| {
+            if row.run_start_id == run_start_id {
+               end_id = Some(row.ids.end);
+            }
+            Ok(())
+        })?;
+        let end_id = match end_id {
+            None => bail!(Internal, msg("no end_id found for {run_start_id}")),
+            Some(end_id) => end_id,
+        };
+
         let dir = match self.sample_file_dirs_by_id.get_mut(&dir_id) {
             None => bail!(Internal, msg("dir {dir_id} has no directory!")),
             Some(d) => d,
         };
 
-        let composite_ids = CompositeId::new(stream_id, recording_ids.start)..CompositeId::new(stream_id, recording_ids.end);
+        let composite_ids = CompositeId::new(stream_id, run_start_id)..CompositeId::new(stream_id, end_id);
 
         {
             let tx = self.conn.transaction()?;
@@ -2872,7 +2887,7 @@ mod tests {
         assert_single_recording(&db, main_stream_id, &recording);
         {
             let mut db = db.lock();
-            db.delete_recordings(main_stream_id, id.recording()..id.recording()+1).expect("failed to delete recording");
+            db.delete_recording(main_stream_id, id.recording()).expect("failed to delete recording");
 
             let stream = db.streams_by_id.get(&main_stream_id);
             assert!(stream.is_some());

@@ -511,12 +511,11 @@ Bugs and limitations:
 
 Requires the `adminStorage` permission.
 
-Asynchronously deletes recordings.
+Asynchronously deletes a recording.
 
 Expected request parameters:
 
-*   `s` (one or more): a string of the form `START_ID[-END_ID]`. This
-    specifies *recordings* to delete. The ids to retrieve are as returned by
+*   `runStartId` (one or more): a number as returned by
     the `/recordings` URL.
 
 Example request to delete recording id 1 from the given camera:
@@ -524,16 +523,7 @@ Example request to delete recording id 1 from the given camera:
 ```
     /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4
     {
-      "s": "1"
-    }
-```
-
-Example request URI to delete recording ids 1–5 from the given camera
-
-```
-    /api/cameras/fd20f7a2-9d69-4cb3-94ed-d51a20c3edfe/main/view.mp4
-    {
-      "s": "1-5"
+      "runStartId": 1
     }
 ```
 
