@@ -96,7 +96,7 @@ Service=moonfire-nvr.service
 
 ## Reference
 
-At the top level, before any `[[bind]]` lines, the following
+At the top level, before any `[[binds]]` lines, the following
 keys are understood:
 
 *   `dbDir`: path to the SQLite database directory. Defaults to `/var/lib/moonfire-nvr/db`.
