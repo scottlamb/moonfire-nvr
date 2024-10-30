@@ -118,7 +118,7 @@ should start with a `[[binds]]` line and specify one of the following:
 *   `ipv4`: an IPv4 socket address. `0.0.0.0:8080` would allow connections from outside the machine;
     `127.0.0.1:8080` would allow connections only from the local host.
 *   `ipv6`: an IPv6 socket address. `[::0]:8080` would allow connections from outside the machine;
-    `[[::1]:8080` would allow connections from only the local host.
+    `[::1]:8080` would allow connections from only the local host.
 *   `unix`: a path in the local filesystem where a UNIX-domain socket can be created. Permissions on the
     enclosing directories control which users are allowed to connect to it. Web browsers typically don't
     support directly connecting to UNIX domain sockets, but other tools do, e.g.:
