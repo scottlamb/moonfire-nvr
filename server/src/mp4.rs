@@ -1881,7 +1881,7 @@ impl File {
                 ),
             )
         })?);
-        let mut b = std::pin::Pin::from(self.get_range(0..self.len()));
+        let mut b = self.get_range(0..self.len());
         loop {
             use futures::stream::StreamExt;
             match b.next().await {

@@ -90,7 +90,7 @@ where
 /// This means it includes a timestamp, follows [OpenTelemetry Semantic
 /// Conventions for Exceptions](https://opentelemetry.io/docs/reference/specification/logs/semantic_conventions/exceptions/),
 /// etc.
-fn panic_hook(p: &std::panic::PanicInfo) {
+fn panic_hook(p: &std::panic::PanicHookInfo) {
     let payload: Option<&str> = if let Some(s) = p.payload().downcast_ref::<&str>() {
         Some(*s)
     } else if let Some(s) = p.payload().downcast_ref::<String>() {

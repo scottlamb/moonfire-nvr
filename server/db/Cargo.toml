@@ -5,7 +5,7 @@ authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
 edition = "2021"
 license-file = "../../LICENSE.txt"
-rust-version = "1.79"
+rust-version = "1.81"
 publish = false
 
 [features]

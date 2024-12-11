@@ -8,6 +8,10 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   bump minimum Rust version to 1.81.
+
 ## v0.7.17 (2024-09-03)
 
 *   bump minimum Rust version to 1.79.
