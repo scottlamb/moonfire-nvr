@@ -111,7 +111,13 @@ impl Opener for RealOpener {
                 ),
             )
             .expect("RetinaStream::play task panicked, see earlier error")
-            .map_err(|e| err!(Unknown, source(e)))??;
+            .map_err(|e| {
+                err!(
+                    DeadlineExceeded,
+                    msg("unable to play stream and get first frame within {RETINA_TIMEOUT:?}"),
+                    source(e),
+                )
+            })??;
         Ok(Box::new(RetinaStream {
             inner: Some(inner),
             rt_handle,
@@ -302,7 +308,7 @@ impl Stream for RetinaStream {
                     .map_err(|e| {
                         err!(
                             DeadlineExceeded,
-                            msg("timeout getting next frame"),
+                            msg("unable to get next frame within {RETINA_TIMEOUT:?}"),
                             source(e)
                         )
                     })??;

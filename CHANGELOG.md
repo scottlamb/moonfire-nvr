@@ -11,6 +11,7 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 ## unreleased
 
 *   bump minimum Rust version to 1.81.
+*   improve error message on timeout opening stream.
 
 ## v0.7.17 (2024-09-03)
 
