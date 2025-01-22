@@ -2444,7 +2444,7 @@ pub struct DatabaseGuard<'db, C: Clocks> {
     _timer: clock::TimerGuard<'db, C, &'static str, fn() -> &'static str>,
 }
 
-impl<'db, C: Clocks + Clone> DatabaseGuard<'db, C> {
+impl<C: Clocks + Clone> DatabaseGuard<'_, C> {
     /// Tries to flush unwritten changes from the stream directories.
     ///
     ///    * commits any recordings added with `add_recording` that have since been marked as
@@ -2459,14 +2459,14 @@ impl<'db, C: Clocks + Clone> DatabaseGuard<'db, C> {
     }
 }
 
-impl<'db, C: Clocks + Clone> ::std::ops::Deref for DatabaseGuard<'db, C> {
+impl<C: Clocks + Clone> ::std::ops::Deref for DatabaseGuard<'_, C> {
     type Target = LockedDatabase;
     fn deref(&self) -> &LockedDatabase {
         &self.db
     }
 }
 
-impl<'db, C: Clocks + Clone> ::std::ops::DerefMut for DatabaseGuard<'db, C> {
+impl<C: Clocks + Clone> ::std::ops::DerefMut for DatabaseGuard<'_, C> {
     fn deref_mut(&mut self) -> &mut LockedDatabase {
         &mut self.db
     }

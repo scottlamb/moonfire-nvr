@@ -129,10 +129,7 @@ impl<'a> StaticFileRequest<'a> {
             p => (p, true),
         };
 
-        let last_dot = match path.rfind('.') {
-            None => return None,
-            Some(d) => d,
-        };
+        let last_dot = path.rfind('.')?;
         let ext = &path[last_dot + 1..];
         let mime = match ext {
             "css" => "text/css",

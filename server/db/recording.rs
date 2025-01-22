@@ -395,10 +395,7 @@ impl Segment {
             if let Err(e) = f(&it) {
                 return Err(e);
             }
-            have_frame = match it.next(data) {
-                Err(e) => return Err(e),
-                Ok(hf) => hf,
-            };
+            have_frame = it.next(data)?;
         }
         if key_frame < self.key_frames {
             bail!(

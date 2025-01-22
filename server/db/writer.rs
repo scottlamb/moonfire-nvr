@@ -985,7 +985,7 @@ impl<F: FileWriter> InnerWriter<F> {
     }
 }
 
-impl<'a, C: Clocks + Clone, D: DirWriter> Drop for Writer<'a, C, D> {
+impl<C: Clocks + Clone, D: DirWriter> Drop for Writer<'_, C, D> {
     fn drop(&mut self) {
         if ::std::thread::panicking() {
             // This will probably panic again. Don't do it.

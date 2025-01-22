@@ -376,7 +376,7 @@ struct SignalDayValue<'a> {
     pub states: &'a [u64],
 }
 
-impl<'a> TopLevel<'a> {
+impl TopLevel<'_> {
     /// Serializes cameras as a list (rather than a map), optionally including the `days` and
     /// `cameras` fields.
     fn serialize_cameras<S>(
@@ -440,7 +440,7 @@ pub struct ListRecordings<'a> {
     pub video_sample_entries: (&'a db::LockedDatabase, Vec<i32>),
 }
 
-impl<'a> ListRecordings<'a> {
+impl ListRecordings<'_> {
     fn serialize_video_sample_entries<S>(
         video_sample_entries: &(&db::LockedDatabase, Vec<i32>),
         serializer: S,

@@ -139,7 +139,7 @@ fn poll_impl(inner: &Inner, waker_i: &mut usize, cx: &mut Context<'_>) -> Poll<(
     Poll::Pending
 }
 
-impl<'receiver> Future for ReceiverRefFuture<'receiver> {
+impl Future for ReceiverRefFuture<'_> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
