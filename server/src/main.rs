@@ -94,7 +94,7 @@ fn main() {
     {
         Ok(a) => a,
         Err(e) => {
-            e.print_mesage(100);
+            e.print_message(100);
             std::process::exit(e.exit_code())
         }
     };

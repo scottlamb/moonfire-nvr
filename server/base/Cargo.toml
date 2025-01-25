@@ -6,6 +6,7 @@ readme = "../README.md"
 edition = "2021"
 license-file = "../../LICENSE.txt"
 publish = false
+rust-version = "1.82"
 
 [features]
 nightly = []

@@ -9,7 +9,6 @@
 use crate::db::SqlUuid;
 use crate::{dir, schema};
 use base::{bail, err, Error};
-use cstr::cstr;
 use nix::fcntl::{FlockArg, OFlag};
 use nix::sys::stat::Mode;
 use protobuf::Message;
@@ -24,8 +23,8 @@ const FIXED_DIR_META_LEN: usize = 512;
 
 /// Maybe upgrades the `meta` file, returning if an upgrade happened (and thus a sync is needed).
 fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, Error> {
-    let tmp_path = cstr!("meta.tmp");
-    let meta_path = cstr!("meta");
+    let tmp_path = c"meta.tmp";
+    let meta_path = c"meta";
     let mut f = crate::fs::openat(
         dir.as_fd().as_raw_fd(),
         meta_path,

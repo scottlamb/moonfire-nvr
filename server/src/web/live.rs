@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use base::{bail, err, Error};
+use bytes::Bytes;
 use futures::SinkExt;
 use http::header;
 use tokio::sync::broadcast::error::RecvError;
@@ -97,7 +98,7 @@ impl Service {
                 }
 
                 _ = keepalive.tick() => {
-                    if ws.send(tungstenite::Message::Ping(Vec::new())).await.is_err() {
+                    if ws.send(tungstenite::Message::Ping(Bytes::new())).await.is_err() {
                         return Ok(());
                     }
                 }
@@ -154,6 +155,9 @@ impl Service {
         );
         let mut v = hdr.into_bytes();
         mp4.append_into_vec(&mut v).await?;
-        Ok(ws.send(tungstenite::Message::Binary(v)).await.is_ok())
+        Ok(ws
+            .send(tungstenite::Message::Binary(v.into()))
+            .await
+            .is_ok())
     }
 }

@@ -10,7 +10,7 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 ## unreleased
 
-*   bump minimum Rust version to 1.81.
+*   bump minimum Rust version to 1.82.
 *   improve error message on timeout opening stream.
 *   use `jiff` for time manipulations.
 

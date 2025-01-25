@@ -13,7 +13,6 @@ use crate::coding;
 use crate::db::CompositeId;
 use crate::schema;
 use base::{bail, err, Error};
-use cstr::cstr;
 use nix::sys::statvfs::Statvfs;
 use nix::{
     fcntl::{FlockArg, OFlag},
@@ -134,7 +133,7 @@ impl Fd {
 /// Reads `dir`'s metadata. If none is found, returns an empty proto.
 pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
     let mut meta = schema::DirMeta::default();
-    let mut f = match crate::fs::openat(dir.0, cstr!("meta"), OFlag::O_RDONLY, Mode::empty()) {
+    let mut f = match crate::fs::openat(dir.0, c"meta", OFlag::O_RDONLY, Mode::empty()) {
         Err(e) => {
             if e == nix::Error::ENOENT {
                 return Ok(meta);
@@ -184,7 +183,7 @@ pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Err
     data.resize(FIXED_DIR_META_LEN, 0); // pad to required length.
     let mut f = crate::fs::openat(
         dirfd,
-        cstr!("meta"),
+        c"meta",
         OFlag::O_CREAT | OFlag::O_WRONLY,
         Mode::S_IRUSR | Mode::S_IWUSR,
     )
