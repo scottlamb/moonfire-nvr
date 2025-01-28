@@ -133,7 +133,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
             )
         })?;
         let sps = ctx
-            .sps_by_id(h264_reader::nal::pps::ParamSetId::from_u32(0).unwrap())
+            .sps_by_id(h264_reader::nal::sps::SeqParamSetId::from_u32(0).unwrap())
             .ok_or_else(|| {
                 err!(
                     Unimplemented,

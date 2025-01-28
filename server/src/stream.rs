@@ -170,7 +170,7 @@ fn params_to_sample_entry(
             .with_aspect_ratio(aspect)
             .build()
             .map_err(|e| err!(Unknown, source(e)))?,
-        rfc6381_codec: "avc1.4d401e".to_string(),
+        rfc6381_codec: params.rfc6381_codec().to_owned(),
         width,
         height,
         pasp_h_spacing: aspect.0,
@@ -192,7 +192,9 @@ impl RetinaStreamInner {
         let video_i = session
             .streams()
             .iter()
-            .position(|s| s.media() == "video" && matches!(s.encoding_name(), "h264" | "jpeg"))
+            .position(|s| {
+                s.media() == "video" && matches!(s.encoding_name(), "h264" | "h265" | "jpeg")
+            })
             .ok_or_else(|| {
                 err!(
                     FailedPrecondition,
