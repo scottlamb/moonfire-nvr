@@ -8,13 +8,17 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## v0.7.18 (2025-01-28)
+## v0.7.19 (2025-01-28)
 
 *   support recording H.265 ([#33](https://github.com/scottlamb/moonfire-nvr/issues/33)).
     Browser support may vary.
 *   bump minimum Rust version to 1.82.
 *   improve error message on timeout opening stream.
 *   use `jiff` for time manipulations.
+
+## v0.7.18 (2025-01-28)
+
+This release was skipped due to build problems on `armv7-unknown-linux-musleabif`.
 
 ## v0.7.17 (2024-09-03)
 

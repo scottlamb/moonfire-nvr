@@ -161,7 +161,8 @@ impl Time {
 
 impl From<SystemTime> for Time {
     fn from(tm: SystemTime) -> Self {
-        Time(tm.0.tv_sec() * TIME_UNITS_PER_SEC + tm.0.tv_nsec() * 9 / 100_000)
+        #[allow(clippy::unnecessary_cast)]
+        Time((tm.0.tv_sec() as i64) * TIME_UNITS_PER_SEC + (tm.0.tv_nsec() as i64) * 9 / 100_000)
     }
 }
 

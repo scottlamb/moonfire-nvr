@@ -21,8 +21,11 @@ use crate::shutdown::ShutdownError;
 pub struct SystemTime(pub TimeSpec);
 
 impl SystemTime {
-    pub fn new(sec: nix::sys::time::time_t, nsec: i64) -> Self {
-        SystemTime(TimeSpec::new(sec, nsec))
+    pub fn new(sec: u64, nsec: i64) -> Self {
+        // `TimeSpec::new`'s arguments vary by platform.
+        // * currently uses 32-bit time_t on musl <https://github.com/rust-lang/libc/issues/1848>
+        // * nsec likewise can vary.
+        SystemTime(TimeSpec::new(sec as _, nsec as _))
     }
 
     pub fn as_secs(&self) -> i64 {
