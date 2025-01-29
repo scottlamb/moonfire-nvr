@@ -67,7 +67,6 @@ use http::header::HeaderValue;
 use hyper::body::Buf;
 use reffers::ARefss;
 use smallvec::SmallVec;
-use std::cell::UnsafeCell;
 use std::cmp;
 use std::convert::TryFrom;
 use std::fmt;
@@ -75,8 +74,7 @@ use std::io;
 use std::mem;
 use std::ops::Range;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::Once;
+use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
 use tracing::{debug, error, trace, warn};
 
@@ -329,19 +327,18 @@ struct Segment {
     /// *   _media_ time: as described in design/glossary.md and design/time.md.
     rel_media_range_90k: Range<i32>,
 
-    /// If generated, the `.mp4`-format sample indexes, accessed only through `get_index`:
+    /// If generated, the `.mp4`-format sample indexes, accessed only through `index`:
     ///    1. stts: `slice[.. stsz_start]`
     ///    2. stsz: `slice[stsz_start .. stss_start]`
     ///    3. stss: `slice[stss_start ..]`
-    index: UnsafeCell<Result<Box<[u8]>, ()>>,
-    index_once: Once,
+    index: OnceLock<Result<Box<[u8]>, ()>>,
 
     /// The 1-indexed frame number in the `File` of the first frame in this segment.
     first_frame_num: u32,
     num_subtitle_samples: u16,
 }
 
-// Manually implement Debug because `index` and `index_once` are not Debug.
+// Manually implement `Debug` skipping the obnoxiously-long `index` field.
 impl fmt::Debug for Segment {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("mp4::Segment")
@@ -362,8 +359,6 @@ impl fmt::Debug for Segment {
     }
 }
 
-unsafe impl Sync for Segment {}
-
 impl Segment {
     fn new(
         db: &db::LockedDatabase,
@@ -379,8 +374,7 @@ impl Segment {
             recording_wall_duration_90k: row.wall_duration_90k,
             recording_media_duration_90k: row.media_duration_90k,
             rel_media_range_90k,
-            index: UnsafeCell::new(Err(())),
-            index_once: Once::new(),
+            index: OnceLock::new(),
             first_frame_num,
             num_subtitle_samples: 0,
         })
@@ -402,24 +396,18 @@ impl Segment {
         )
     }
 
-    fn get_index<'a, F>(&'a self, db: &db::Database, f: F) -> Result<&'a [u8], Error>
-    where
-        F: FnOnce(&[u8], SegmentLengths) -> &[u8],
-    {
-        self.index_once.call_once(|| {
-            let index = unsafe { &mut *self.index.get() };
-            *index = db
+    fn index<'a>(&'a self, db: &db::Database) -> Result<&'a [u8], Error> {
+        self.index
+            .get_or_init(|| {
+                db
                 .lock()
                 .with_recording_playback(self.s.id, &mut |playback| self.build_index(playback))
                 .map_err(|err| {
                     error!(%err, recording_id = %self.s.id, "unable to build index for segment");
-                });
-        });
-        let index: &'a _ = unsafe { &*self.index.get() };
-        match *index {
-            Ok(ref b) => Ok(f(&b[..], self.lens())),
-            Err(()) => bail!(Unknown, msg("unable to build index; see logs")),
-        }
+                })
+            })
+            .as_deref()
+            .map_err(|()| err!(Unknown, msg("unable to build index; see logs")))
     }
 
     fn lens(&self) -> SegmentLengths {
@@ -728,7 +716,9 @@ impl Slice {
         let p = self.p();
         Ok(mp4
             .try_map(|mp4| {
-                let i = mp4.segments[p].get_index(&mp4.db, f)?;
+                let segment = &mp4.segments[p];
+                let i = segment.index(&mp4.db)?;
+                let i = f(i, segment.lens());
                 if u64::try_from(i.len()).unwrap() != len {
                     bail!(Internal, msg("expected len {} got {}", len, i.len()));
                 }
