@@ -62,7 +62,7 @@ password-hash = "0.5.0"
 pretty-hex = { workspace = true }
 protobuf = "3.0"
 reffers = "0.7.0"
-retina = "0.4.12"
+retina = "0.4.13"
 ring = { workspace = true }
 rusqlite = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
