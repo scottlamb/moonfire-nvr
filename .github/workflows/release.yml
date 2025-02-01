@@ -33,12 +33,12 @@ jobs:
       - run: cd ui && pnpm run build
       - run: cd ui && pnpm run test
       # Upload the UI and changelog as *job* artifacts (not *release* artifacts), used below.
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: moonfire-nvr-ui-${{ github.ref_name }}
           path: ui/dist
           if-no-files-found: error
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: CHANGELOG-${{ github.ref_name }}
           path: CHANGELOG-${{ github.ref_name }}.md
@@ -68,7 +68,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Download UI
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: moonfire-nvr-ui-${{ github.ref_name }}
           path: ui/dist
@@ -108,7 +108,7 @@ jobs:
           EOF
       # Upload as a *job* artifact (not *release* artifact), used below.
       - name: Upload Job Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: moonfire-nvr-${{ github.ref_name }}-${{ matrix.arch }}
           path: output/moonfire-nvr
@@ -121,7 +121,7 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: ls before rearranging
