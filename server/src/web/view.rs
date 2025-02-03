@@ -288,7 +288,7 @@ mod tests {
         testutil::init();
         let mut permissions = db::Permissions::new();
         permissions.view_video = true;
-        let s = Server::new(Some(permissions));
+        let s = Server::new(Some(permissions)).await;
         let cli = reqwest::Client::new();
         let resp = cli
             .get(format!(

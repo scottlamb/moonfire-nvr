@@ -28,6 +28,10 @@ pub struct Args {
     db_dir: PathBuf,
 }
 
+fn block_on<O>(f: impl std::future::Future<Output = O>) -> O {
+    tokio::runtime::Handle::current().block_on(f)
+}
+
 pub fn run(args: Args) -> Result<i32, Error> {
     let (_db_dir, conn) = super::open_conn(&args.db_dir, super::OpenMode::ReadWrite)?;
     let clocks = clock::RealClocks {};

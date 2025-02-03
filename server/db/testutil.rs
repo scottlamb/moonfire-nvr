@@ -11,7 +11,6 @@ use crate::writer;
 use base::clock::Clocks;
 use base::FastHashMap;
 use std::sync::Arc;
-use std::thread;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -46,22 +45,22 @@ pub fn init() {
 
 pub struct TestDb<C: Clocks + Clone> {
     pub db: Arc<db::Database<C>>,
-    pub dirs_by_stream_id: Arc<FastHashMap<i32, Arc<dir::SampleFileDir>>>,
+    pub dirs_by_stream_id: Arc<FastHashMap<i32, dir::Pool>>,
     pub shutdown_tx: base::shutdown::Sender,
     pub shutdown_rx: base::shutdown::Receiver,
-    pub syncer_channel: writer::SyncerChannel<::std::fs::File>,
-    pub syncer_join: thread::JoinHandle<()>,
+    pub syncer_channel: writer::SyncerChannel<dir::writer::WriteStream>,
+    pub syncer_join: tokio::task::JoinHandle<()>,
     pub tmpdir: TempDir,
     pub test_camera_uuid: Uuid,
 }
 
 impl<C: Clocks + Clone> TestDb<C> {
     /// Creates a test database with one camera.
-    pub fn new(clocks: C) -> Self {
-        Self::new_with_flush_if_sec(clocks, 0)
+    pub async fn new(clocks: C) -> Self {
+        Self::new_with_flush_if_sec(clocks, 0).await
     }
 
-    pub(crate) fn new_with_flush_if_sec(clocks: C, flush_if_sec: u32) -> Self {
+    pub(crate) async fn new_with_flush_if_sec(clocks: C, flush_if_sec: u32) -> Self {
         let tmpdir = tempfile::Builder::new()
             .prefix("moonfire-nvr-test")
             .tempdir()
@@ -70,12 +69,12 @@ impl<C: Clocks + Clone> TestDb<C> {
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         db::init(&mut conn).unwrap();
         let db = Arc::new(db::Database::new(clocks, conn, true).unwrap());
-        let (test_camera_uuid, sample_file_dir_id);
+        let test_camera_uuid;
         let path = tmpdir.path().to_owned();
         let dir;
+        let sample_file_dir_id = db.add_sample_file_dir(path).await.unwrap();
         {
             let mut l = db.lock();
-            sample_file_dir_id = l.add_sample_file_dir(path).unwrap();
             assert_eq!(
                 TEST_CAMERA_ID,
                 l.add_camera(db::CameraChange {
@@ -112,14 +111,16 @@ impl<C: Clocks + Clone> TestDb<C> {
                 .sample_file_dirs_by_id()
                 .get(&sample_file_dir_id)
                 .unwrap()
-                .get()
-                .unwrap();
+                .pool()
+                .clone();
         }
         let mut dirs_by_stream_id = FastHashMap::default();
         dirs_by_stream_id.insert(TEST_STREAM_ID, dir);
         let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
         let (syncer_channel, syncer_join) =
-            writer::start_syncer(db.clone(), shutdown_rx.clone(), sample_file_dir_id).unwrap();
+            writer::start_syncer(db.clone(), shutdown_rx.clone(), sample_file_dir_id)
+                .await
+                .unwrap();
         TestDb {
             db,
             dirs_by_stream_id: Arc::new(dirs_by_stream_id),

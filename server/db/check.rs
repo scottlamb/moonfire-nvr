@@ -10,12 +10,11 @@ use crate::dir;
 use crate::json::SampleFileDirConfig;
 use crate::raw;
 use crate::recording;
-use crate::schema;
-use base::{err, Error};
+use base::Error;
 use base::{FastHashMap, FastHashSet};
-use nix::fcntl::AtFlags;
+use futures::TryStreamExt as _;
 use rusqlite::params;
-use std::os::unix::io::AsRawFd;
+use std::num::NonZeroUsize;
 use tracing::{error, info, warn};
 
 pub struct Options {
@@ -73,7 +72,9 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
     }
 
     if printed_error {
-        warn!("The following analysis may be incorrect or encounter errors due to schema differences.");
+        warn!(
+            "The following analysis may be incorrect or encounter errors due to schema differences."
+        );
     }
 
     let (db_uuid, _config) = raw::read_meta(conn)?;
@@ -90,25 +91,28 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
         let mut garbage_stmt =
             conn.prepare_cached("select composite_id from garbage where sample_file_dir_id = ?")?;
         let mut rows = dir_stmt.query(params![])?;
+        let dirs = futures::stream::FuturesUnordered::new();
         while let Some(row) = rows.next()? {
-            let mut meta = schema::DirMeta::default();
             let dir_id: i32 = row.get(0)?;
             let config: SampleFileDirConfig = row.get(1)?;
-            let dir_uuid: SqlUuid = row.get(2)?;
+            let SqlUuid(dir_uuid) = row.get(2)?;
             let open_id = row.get(3)?;
-            let open_uuid: SqlUuid = row.get(4)?;
-            meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
-            meta.dir_uuid.extend_from_slice(&dir_uuid.0.as_bytes()[..]);
-            {
-                let o = meta.last_complete_open.mut_or_insert_default();
-                o.id = open_id;
-                o.uuid.extend_from_slice(&open_uuid.0.as_bytes()[..]);
-            }
-
-            // Open the directory (checking its metadata) and hold it open (for the lock).
-            let dir = dir::SampleFileDir::open(&config.path, &meta)
-                .map_err(|e| err!(e, msg("unable to open dir {}", config.path.display())))?;
-            let mut streams = read_dir(&dir, opts)?;
+            let SqlUuid(open_uuid) = row.get(4)?;
+            let config = dir::Config {
+                path: config.path,
+                db_uuid,
+                dir_uuid,
+                last_complete_open: Some(db::Open {
+                    id: open_id,
+                    uuid: open_uuid,
+                }),
+                current_open: None,
+            };
+            dirs.push(read_dir(dir_id, config, opts.compare_lens));
+        }
+        let mut dirs_by_id: FastHashMap<i32, Dir> =
+            futures::executor::block_on(dirs.try_collect())?;
+        for (dir_id, streams) in dirs_by_id.iter_mut() {
             let mut rows = garbage_stmt.query(params![dir_id])?;
             while let Some(row) = rows.next()? {
                 let id = CompositeId(row.get(0)?);
@@ -118,7 +122,6 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
                     .or_insert_with(Recording::default)
                     .garbage_row = true;
             }
-            dirs_by_id.insert(dir_id, streams);
         }
     }
 
@@ -263,40 +266,35 @@ fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
 /// Reads through the given sample file directory.
 /// Logs unexpected files and creates a hash map of the files found there.
 /// If `opts.compare_lens` is set, the values are lengths; otherwise they're insignificant.
-fn read_dir(d: &dir::SampleFileDir, opts: &Options) -> Result<Dir, Error> {
-    let mut dir = Dir::default();
-    let mut d = d.opendir()?;
-    let fd = d.as_raw_fd();
-    for e in d.iter() {
-        let e = e?;
-        let f = e.file_name();
-        match f.to_bytes() {
-            b"." | b".." | b"meta" => continue,
-            _ => {}
-        };
-        let id = match dir::parse_id(f.to_bytes()) {
-            Ok(id) => id,
-            Err(_) => {
-                error!(
-                    "sample file directory contains file {:?} which isn't an id",
-                    f
-                );
-                continue;
-            }
-        };
-        let len = if opts.compare_lens {
-            nix::sys::stat::fstatat(fd, f, AtFlags::empty())?.st_size as u64
-        } else {
-            0
-        };
-        let stream = dir.entry(id.stream()).or_insert_with(Stream::default);
-        stream
-            .recordings
-            .entry(id.recording())
-            .or_insert_with(Recording::default)
-            .file = Some(len);
-    }
-    Ok(dir)
+async fn read_dir(id: i32, config: dir::Config, compare_lens: bool) -> Result<(i32, Dir), Error> {
+    let dir = dir::Pool::new(config);
+    dir.open(const { NonZeroUsize::new(1).unwrap() }).await?;
+    let (tx, mut rx) = tokio::sync::oneshot::channel();
+    dir.run("inventory", move |ctx| {
+        let mut dir = Dir::default();
+        let mut it = ctx.iterator()?;
+        while let Some(e) = it.next() {
+            let e = e?;
+            let id = match e.recording_id() {
+                Ok(id) => id,
+                Err(f) => {
+                    error!("sample file directory contains file {f:?} which isn't an id");
+                    continue;
+                }
+            };
+            let len = if compare_lens { e.size()? } else { 0 };
+            let stream = dir.entry(id.stream()).or_insert_with(Stream::default);
+            stream
+                .recordings
+                .entry(id.recording())
+                .or_insert_with(Recording::default)
+                .file = Some(len);
+        }
+        let _ = tx.send(dir);
+        Ok(())
+    })
+    .await?;
+    Ok((id, rx.try_recv().expect("scan should have finished")))
 }
 
 /// Looks through a known stream for errors.

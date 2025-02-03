@@ -6,8 +6,8 @@
 use crate::db;
 use crate::recording;
 use base::Error;
+use base::FastHashMap;
 use rusqlite::{named_params, params};
-use std::collections::HashMap;
 use tracing::warn;
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
@@ -106,7 +106,7 @@ fn has_trailing_zero(video_index: &[u8]) -> Result<bool, Error> {
 
 /// Fills the `recording` and `recording_playback` tables from `old_recording`, returning
 /// the `camera_state` map for use by a following call to `fill_cameras`.
-fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState>, Error> {
+fn fill_recording(tx: &rusqlite::Transaction) -> Result<FastHashMap<i32, CameraState>, Error> {
     let mut select = tx.prepare(
         r#"
       select
@@ -141,7 +141,7 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
     "#,
     )?;
     let mut rows = select.query(params![])?;
-    let mut camera_state: HashMap<i32, CameraState> = HashMap::new();
+    let mut camera_state: FastHashMap<i32, CameraState> = FastHashMap::default();
     while let Some(row) = rows.next()? {
         let camera_id: i32 = row.get(0)?;
         let camera_state = camera_state
@@ -214,7 +214,7 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<HashMap<i32, CameraState
 
 fn update_camera(
     tx: &rusqlite::Transaction,
-    camera_state: HashMap<i32, CameraState>,
+    camera_state: FastHashMap<i32, CameraState>,
 ) -> Result<(), Error> {
     let mut stmt = tx.prepare(
         r#"

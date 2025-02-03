@@ -9,8 +9,8 @@
 
 use crate::Mutex;
 use nix::sys::time::{TimeSpec, TimeValLike as _};
-use std::sync::{mpsc, Arc};
-use std::thread;
+use std::future::Future;
+use std::sync::Arc;
 pub use std::time::Duration;
 use tracing::warn;
 
@@ -82,7 +82,7 @@ impl std::ops::Add<Duration> for Instant {
 }
 
 /// Abstract interface to the system clocks. This is for testability.
-pub trait Clocks: Send + Sync + 'static {
+pub trait Clocks: Clone + Send + Sync + 'static {
     /// Gets the current time from `CLOCK_REALTIME`.
     fn realtime(&self) -> SystemTime;
 
@@ -93,37 +93,79 @@ pub trait Clocks: Send + Sync + 'static {
     fn monotonic(&self) -> Instant;
 
     /// Causes the current thread to sleep for the specified time.
-    fn sleep(&self, how_long: Duration);
-
-    /// Calls `rcv.recv_timeout` or substitutes a test implementation.
-    fn recv_timeout<T>(
-        &self,
-        rcv: &mpsc::Receiver<T>,
-        timeout: Duration,
-    ) -> Result<T, mpsc::RecvTimeoutError>;
+    fn sleep(&self, how_long: Duration) -> impl Future<Output = ()> + Send;
 }
 
-pub fn retry<C, T, E>(
+/// Waits a bit before retrying an operation.
+///
+/// Use as follows (for an operation that returns `()` on success):
+///
+/// ```no_compile
+/// while let Err(e) = fallible_operation().await {
+///    retry_wait(clocks, shutdown_rx, e).await?;
+/// }
+/// ```
+///
+/// or (for an operation that returns a value on success):
+///
+/// ```no_compile
+/// let result = loop {
+///     match fallible_operation().await {
+///         Ok(result) => break result,
+///         Err(e) => retry_wait(clocks, shutdown_rx, e).await?,
+///     }
+/// };
+/// ```
+///
+/// # Interface note
+///
+/// The synchronous version of this method took a lambda and encompassed the
+/// retry loop, as follows:
+///
+/// ```no_compile
+/// fn retry<C: Clocks, E: Into<Error>>(
+///     clocks: &C,
+///     shutdown_rx: &crate::shutdown::Receiver,
+///     f: &mut FnMut() -> Result<T, E>,,
+/// ) -> Result<T, ShutdownError> { todo!() }
+/// ```
+///
+/// Unfortunately it does not seem trivial to match this with async as of
+/// Rust 1.85. The following attempt with async closures is close, but
+/// critically the `F(..): Send + 'a` bound is not yet supported. Alternatively,
+/// we could use a `FnMut -> Future<Output = Result<T, E>>` approach, but it's
+/// not possible to allow the future to borrow from the `FnMut`.
+///
+/// ```no_compile
+/// pub fn retry<'a, C, T, E, F>(
+///     clocks: &'a C,
+///     shutdown_rx: &'a crate::shutdown::Receiver,
+///     mut f: F,
+/// ) -> impl Future<Output = Result<T, ShutdownError>> + Send + 'a
+/// where
+///     C: Clocks,
+///     E: Into<Error>,
+///     F: AsyncFnMut() -> Result<T, E> + Send + 'a,
+///     F(..): Send + 'a,
+/// { todo!() }
+/// ```
+///
+/// Alternatively, we could use a `FnMut -> Future<Output = Result<T, E>>`
+/// approach, but it's not possible to allow the future to borrow from the
+/// `FnMut`.
+pub async fn retry_wait<C: Clocks>(
     clocks: &C,
     shutdown_rx: &crate::shutdown::Receiver,
-    f: &mut dyn FnMut() -> Result<T, E>,
-) -> Result<T, ShutdownError>
-where
-    C: Clocks,
-    E: Into<Error>,
-{
-    loop {
-        let e = match f() {
-            Ok(t) => return Ok(t),
-            Err(e) => e.into(),
-        };
-        shutdown_rx.check()?;
-        let sleep_time = Duration::from_secs(1);
-        warn!(
-            exception = %e.chain(),
-            "sleeping for 1 s after error"
-        );
-        clocks.sleep(sleep_time);
+    e: Error,
+) -> Result<(), ShutdownError> {
+    warn!(
+        exception = %e.chain(),
+        "sleeping for 1 s after error"
+    );
+    tokio::select! {
+        biased;
+        _ = shutdown_rx.as_future() => Err(ShutdownError),
+        _ = clocks.sleep(Duration::from_secs(1)) => Ok(()),
     }
 }
 
@@ -154,28 +196,20 @@ impl Clocks for RealClocks {
         )
     }
 
-    fn sleep(&self, how_long: Duration) {
-        thread::sleep(how_long)
-    }
-
-    fn recv_timeout<T>(
-        &self,
-        rcv: &mpsc::Receiver<T>,
-        timeout: Duration,
-    ) -> Result<T, mpsc::RecvTimeoutError> {
-        rcv.recv_timeout(timeout)
+    fn sleep(&self, how_long: Duration) -> impl Future<Output = ()> + Send {
+        tokio::time::sleep(how_long)
     }
 }
 
 /// Logs a warning if the TimerGuard lives "too long", using the label created by a supplied
 /// function.
-pub struct TimerGuard<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> {
+pub struct TimerGuard<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> {
     clocks: &'a C,
     label_f: Option<F>,
     start: Instant,
 }
 
-impl<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
+impl<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
     pub fn new(clocks: &'a C, label_f: F) -> Self {
         TimerGuard {
             clocks,
@@ -187,7 +221,7 @@ impl<'a, C: Clocks + ?Sized, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a
 
 impl<'a, C, S, F> Drop for TimerGuard<'a, C, S, F>
 where
-    C: Clocks + ?Sized,
+    C: Clocks,
     S: AsRef<str>,
     F: FnOnce() -> S + 'a,
 {
@@ -227,21 +261,8 @@ impl Clocks for SimulatedClocks {
     }
 
     /// Advances the clock by the specified amount without actually sleeping.
-    fn sleep(&self, how_long: Duration) {
+    async fn sleep(&self, how_long: Duration) {
         let mut l = self.0.uptime.lock();
         *l += how_long;
-    }
-
-    /// Advances the clock by the specified amount if data is not immediately available.
-    fn recv_timeout<T>(
-        &self,
-        rcv: &mpsc::Receiver<T>,
-        timeout: Duration,
-    ) -> Result<T, mpsc::RecvTimeoutError> {
-        let r = rcv.recv_timeout(Duration::new(0, 0));
-        if r.is_err() {
-            self.sleep(timeout);
-        }
-        r
     }
 }

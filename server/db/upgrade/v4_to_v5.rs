@@ -16,13 +16,14 @@ use rusqlite::params;
 use std::io::{Read, Write};
 use std::os::fd::AsFd as _;
 use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use tracing::info;
 use uuid::Uuid;
 
 const FIXED_DIR_META_LEN: usize = 512;
 
 /// Maybe upgrades the `meta` file, returning if an upgrade happened (and thus a sync is needed).
-fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, Error> {
+fn maybe_upgrade_meta(dir: &crate::fs::Dir, cfg: &dir::Config) -> Result<bool, Error> {
     let tmp_path = c"meta.tmp";
     let meta_path = c"meta";
     let mut f = crate::fs::openat(
@@ -46,13 +47,7 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
             source(e)
         )
     })?;
-    if let Err(e) = dir::SampleFileDir::check_consistent(db_meta, &dir_meta) {
-        bail!(
-            FailedPrecondition,
-            msg("inconsistent db_meta={db_meta:?} dir_meta={dir_meta:?}"),
-            source(e),
-        );
-    }
+    cfg.check_consistent(&dir_meta)?;
     let mut f = crate::fs::openat(
         dir.as_fd().as_raw_fd(),
         tmp_path,
@@ -91,7 +86,7 @@ fn maybe_upgrade_meta(dir: &dir::Fd, db_meta: &schema::DirMeta) -> Result<bool, 
 /// at v5.
 ///
 /// Returns true if something was done (and thus a sync is needed).
-fn maybe_cleanup_garbage_uuids(dir: &dir::Fd) -> Result<bool, Error> {
+fn maybe_cleanup_garbage_uuids(dir: &crate::fs::Dir) -> Result<bool, Error> {
     let mut need_sync = false;
     let mut dir2 = nix::dir::Dir::openat(
         dir.as_fd().as_raw_fd(),
@@ -122,7 +117,7 @@ fn maybe_cleanup_garbage_uuids(dir: &dir::Fd) -> Result<bool, Error> {
 }
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let db_uuid: SqlUuid =
+    let SqlUuid(db_uuid) =
         tx.query_row_and_then(r"select uuid from meta", params![], |row| row.get(0))?;
     let mut stmt = tx.prepare(
         r#"
@@ -138,39 +133,35 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     )?;
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
-        let path = row.get_ref(0)?.as_str()?;
-        info!("path: {}", path);
-        let dir_uuid: SqlUuid = row.get(1)?;
-        let open_id: Option<u32> = row.get(2)?;
-        let open_uuid: Option<SqlUuid> = row.get(3)?;
-        let mut db_meta = schema::DirMeta::new();
-        db_meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
-        db_meta
-            .dir_uuid
-            .extend_from_slice(&dir_uuid.0.as_bytes()[..]);
-        match (open_id, open_uuid) {
-            (Some(id), Some(uuid)) => {
-                let o = db_meta.last_complete_open.mut_or_insert_default();
-                o.id = id;
-                o.uuid.extend_from_slice(&uuid.0.as_bytes()[..]);
-            }
-            (None, None) => {}
-            _ => bail!(Internal, msg("open table missing id")),
-        }
+        let path = PathBuf::from(row.get_ref(0)?.as_str()?);
+        info!("path: {}", path.display());
+        let SqlUuid(dir_uuid) = row.get(1)?;
+        let open_id = row.get(2)?;
+        let SqlUuid(open_uuid) = row.get(3)?;
+        let cfg = crate::dir::Config {
+            path,
+            db_uuid,
+            dir_uuid,
+            last_complete_open: Some(crate::db::Open {
+                id: open_id,
+                uuid: open_uuid,
+            }),
+            current_open: None,
+        };
 
-        let dir = dir::Fd::open(path, false)?;
+        let dir = crate::fs::Dir::open(&cfg.path, false)?;
         dir.lock(FlockArg::LockExclusiveNonblock)
-            .map_err(|e| err!(e, msg("unable to lock dir {path}")))?;
+            .map_err(|e| err!(e, msg("unable to lock dir {}", cfg.path.display())))?;
 
-        let mut need_sync = maybe_upgrade_meta(&dir, &db_meta)?;
+        let mut need_sync = maybe_upgrade_meta(&dir, &cfg)?;
         if maybe_cleanup_garbage_uuids(&dir)? {
             need_sync = true;
         }
 
         if need_sync {
-            dir.sync()?;
+            nix::unistd::fsync(dir.0)?;
         }
-        info!("done with path: {}", path);
+        info!("done with path: {}", cfg.path.display());
     }
     Ok(())
 }

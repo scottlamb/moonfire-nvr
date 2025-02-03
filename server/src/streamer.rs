@@ -8,7 +8,7 @@ use base::{bail, err, Error};
 use db::{dir, recording, writer, Camera, Database, Stream};
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::{debug, info, trace, warn, Instrument};
+use tracing::{debug, info, trace, warn};
 use url::Url;
 
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
@@ -35,8 +35,8 @@ where
     rotate_offset_sec: i64,
     rotate_interval_sec: i64,
     db: Arc<Database<C>>,
-    dir: Arc<dir::SampleFileDir>,
-    syncer_channel: writer::SyncerChannel<::std::fs::File>,
+    dir: dir::Pool,
+    syncer_channel: writer::SyncerChannel<db::dir::WriteStream>,
     opener: &'a dyn stream::Opener,
     transport: retina::client::Transport,
     stream_id: i32,
@@ -54,8 +54,8 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new<'tmp>(
         env: &Environment<'a, 'tmp, C>,
-        dir: Arc<dir::SampleFileDir>,
-        syncer_channel: writer::SyncerChannel<::std::fs::File>,
+        dir: dir::Pool,
+        syncer_channel: writer::SyncerChannel<db::dir::WriteStream>,
         stream_id: i32,
         c: &Camera,
         s: &Stream,
@@ -112,29 +112,25 @@ where
         &self.short_name
     }
 
-    /// Runs the streamer; blocks.
-    ///
-    /// Note: despite the blocking interface, this expects to be called from
-    /// the context of a multithreaded tokio runtime with IO and time enabled.
-    pub fn run(&mut self) {
+    /// Runs the streamer, retrying after errors, until shutdown.
+    pub async fn run(&mut self) {
         while self.shutdown_rx.check().is_ok() {
-            if let Err(err) = self.run_once() {
+            if let Err(err) = self.run_once().await {
                 let sleep_time = base::clock::Duration::from_secs(1);
                 warn!(
                     err = %err.chain(),
                     "sleeping for 1 s after error"
                 );
-                self.db.clocks().sleep(sleep_time);
+                self.db.clocks().sleep(sleep_time).await;
             }
         }
         info!("shutting down");
     }
 
-    fn run_once(&mut self) -> Result<(), Error> {
+    async fn run_once(&mut self) -> Result<(), Error> {
         info!(url = %self.url, "opening input");
         let clocks = self.db.clocks();
 
-        let handle = tokio::runtime::Handle::current();
         let mut waited = false;
         loop {
             let status = self.session_group.stale_sessions();
@@ -144,15 +140,10 @@ where
                     max_expires.saturating_duration_since(tokio::time::Instant::now()),
                     status.num_sessions
                 );
-                handle.block_on(
-                    async {
-                        tokio::select! {
-                            _ = self.session_group.await_stale_sessions(&status) => Ok(()),
-                            _ = self.shutdown_rx.as_future() => Err(base::shutdown::ShutdownError),
-                        }
-                    }
-                    .in_current_span(),
-                ).map_err(|e| err!(Unknown, source(e)))?;
+                tokio::select! {
+                    _ = self.session_group.await_stale_sessions(&status) => {},
+                    _ = self.shutdown_rx.as_future() => bail!(Cancelled, msg("shutdown")),
+                }
                 waited = true;
             } else {
                 if waited {
@@ -177,8 +168,11 @@ where
                     .session_group(self.session_group.clone()),
                 setup: retina::client::SetupOptions::default().transport(self.transport.clone()),
             };
-            self.opener
-                .open(self.short_name.clone(), self.url.clone(), options)?
+            tokio::select! {
+                biased;
+                _ = self.shutdown_rx.as_future() => bail!(Cancelled, msg("shutdown")),
+                r = self.opener.open(self.short_name.clone(), self.url.clone(), options) => r?,
+            }
         };
         let realtime_offset = self.db.clocks().realtime().0 - clocks.monotonic().0;
         let mut video_sample_entry_id = {
@@ -193,14 +187,18 @@ where
         // of while loop.
         let mut rotate: Option<i64> = None;
         let mut w = writer::Writer::new(&self.dir, &self.db, &self.syncer_channel, self.stream_id);
-        while self.shutdown_rx.check().is_ok() {
+        loop {
             // `rotate` should now be set iff `w` has an open recording.
 
-            let frame = {
+            let r = {
                 let _t = TimerGuard::new(&clocks, || "getting next packet");
-                stream.next()
+                tokio::select! {
+                    biased;
+                    _ = self.shutdown_rx.as_future() => break,
+                    r = stream.next() => r,
+                }
             };
-            let frame = match frame {
+            let frame = match r {
                 Ok(f) => f,
                 Err(e) => {
                     let _ = w.close(None, Some(e.chain().to_string()));
@@ -265,15 +263,17 @@ where
                     r
                 }
             };
-            let _t = TimerGuard::new(&clocks, || format!("writing {} bytes", frame.data.len()));
+            let len = frame.data.len();
+            let _t = TimerGuard::new(&clocks, || format!("writing {} bytes", len));
             w.write(
                 &mut self.shutdown_rx,
-                &frame.data[..],
+                frame.data,
                 local_time,
                 frame.pts,
                 frame.is_key,
                 video_sample_entry_id,
-            )?;
+            )
+            .await?;
             rotate = Some(r);
         }
         if rotate.is_some() {
@@ -287,6 +287,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::stream::{self, Stream};
+    use async_trait::async_trait;
     use base::clock::{self, Clocks};
     use base::Mutex;
     use base::{bail, Error};
@@ -307,12 +308,12 @@ mod tests {
     }
 
     impl ProxyingStream {
-        fn new(
+        async fn new(
             clocks: clock::SimulatedClocks,
             buffered: base::clock::Duration,
             inner: Box<dyn stream::Stream>,
         ) -> ProxyingStream {
-            clocks.sleep(buffered);
+            clocks.sleep(buffered).await;
             ProxyingStream {
                 clocks,
                 inner,
@@ -325,6 +326,7 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl Stream for ProxyingStream {
         fn tool(&self) -> Option<&retina::client::Tool> {
             self.inner.tool()
@@ -334,13 +336,13 @@ mod tests {
             self.inner.video_sample_entry()
         }
 
-        fn next(&mut self) -> Result<stream::VideoFrame, Error> {
+        async fn next(&mut self) -> Result<stream::VideoFrame, Error> {
             if self.pkts_left == 0 {
                 bail!(OutOfRange, msg("end of stream"));
             }
             self.pkts_left -= 1;
 
-            let mut frame = self.inner.next()?;
+            let mut frame = self.inner.next().await?;
 
             // XXX: comment wrong.
             // Emulate the behavior of real cameras that send some pre-buffered frames immediately
@@ -356,7 +358,7 @@ mod tests {
                 let duration = goal - self.slept;
                 let buf_part = cmp::min(self.buffered, duration);
                 self.buffered -= buf_part;
-                self.clocks.sleep(duration - buf_part);
+                self.clocks.sleep(duration - buf_part).await;
                 self.slept = goal;
             }
 
@@ -380,8 +382,9 @@ mod tests {
         shutdown_tx: Mutex<Option<base::shutdown::Sender>>,
     }
 
+    #[async_trait]
     impl stream::Opener for MockOpener {
-        fn open(
+        async fn open(
             &self,
             _label: String,
             url: url::Url,
@@ -431,14 +434,15 @@ mod tests {
         testutil::init();
         // 2015-04-25 00:00:00 UTC
         let clocks = clock::SimulatedClocks::new(clock::SystemTime::new(1429920000, 0));
-        clocks.sleep(clock::Duration::from_secs(86400)); // to 2015-04-26 00:00:00 UTC
+        clocks.sleep(clock::Duration::from_secs(86400)).await; // to 2015-04-26 00:00:00 UTC
 
         let stream = stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
         let mut stream = ProxyingStream::new(
             clocks.clone(),
             clock::Duration::from_secs(2),
             Box::new(stream),
-        );
+        )
+        .await;
         stream.ts_offset = 123456; // starting pts of the input should be irrelevant
         stream.ts_offset_pkts_left = u32::MAX;
         stream.pkts_left = u32::MAX;
@@ -448,7 +452,7 @@ mod tests {
             streams: Mutex::new(vec![Box::new(stream)]),
             shutdown_tx: Mutex::new(Some(shutdown_tx)),
         };
-        let db = testutil::TestDb::new(clocks);
+        let db = testutil::TestDb::new(clocks).await;
         let env = super::Environment {
             opener: &opener,
             db: &db.db,
@@ -477,9 +481,9 @@ mod tests {
             )
             .unwrap();
         }
-        stream.run();
+        stream.run().await;
         assert!(opener.streams.lock().is_empty());
-        db.syncer_channel.flush();
+        db.syncer_channel.flush().await;
         let db = db.db.lock();
 
         // Compare frame-by-frame. Note below that while the rotation is scheduled to happen near

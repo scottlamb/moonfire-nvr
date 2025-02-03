@@ -6,8 +6,7 @@
 use crate::dir;
 use crate::schema::DirMeta;
 use base::{bail, Error};
-use nix::fcntl::{FlockArg, OFlag};
-use nix::sys::stat::Mode;
+use nix::fcntl::FlockArg;
 use rusqlite::{named_params, params};
 use std::os::unix::io::AsRawFd;
 use uuid::Uuid;
@@ -20,13 +19,9 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         );
     };
 
-    let mut d = nix::dir::Dir::open(
-        sample_file_path,
-        OFlag::O_DIRECTORY | OFlag::O_RDONLY,
-        Mode::empty(),
-    )?;
-    nix::fcntl::flock(d.as_raw_fd(), FlockArg::LockExclusiveNonblock)?;
-    verify_dir_contents(sample_file_path, &mut d, tx)?;
+    let d = crate::fs::Dir::open(sample_file_path, false)?;
+    nix::fcntl::flock(d.0, FlockArg::LockExclusiveNonblock)?;
+    verify_dir_contents(sample_file_path, d.opendir()?, tx)?;
 
     // These create statements match the schema.sql when version 2 was the latest.
     tx.execute_batch(
@@ -102,7 +97,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         open.id = open_id;
         open.uuid.extend_from_slice(open_uuid_bytes);
     }
-    dir::write_meta(d.as_raw_fd(), &meta)?;
+    dir::write_meta(&d, &meta)?;
 
     let Some(sample_file_path) = sample_file_path.to_str() else {
         bail!(
@@ -293,7 +288,7 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
 /// *   forbidden: anything else.
 fn verify_dir_contents(
     sample_file_path: &std::path::Path,
-    dir: &mut nix::dir::Dir,
+    mut dir: nix::dir::Dir,
     tx: &rusqlite::Transaction,
 ) -> Result<(), Error> {
     // Build a hash of the uuids found in the directory.

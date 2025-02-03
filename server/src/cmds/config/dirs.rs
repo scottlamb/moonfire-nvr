@@ -15,6 +15,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, trace};
 
+use super::block_on;
 use super::tab_complete::TabCompleteEditView;
 
 struct Stream {
@@ -131,11 +132,12 @@ fn actually_delete(model: &Mutex<Model>, siv: &mut Cursive) {
         .collect();
     siv.pop_layer(); // deletion confirmation
     siv.pop_layer(); // retention dialog
-    {
-        let mut l = model.db.lock();
-        l.open_sample_file_dirs(&[model.dir_id]).unwrap(); // TODO: don't unwrap.
-    }
-    if let Err(e) = writer::lower_retention(&model.db, model.dir_id, &new_limits[..]) {
+    block_on(model.db.open_sample_file_dirs(&[model.dir_id])).unwrap(); // TODO: don't unwrap.
+    if let Err(e) = block_on(writer::lower_retention(
+        model.db.clone(),
+        model.dir_id,
+        &new_limits[..],
+    )) {
         siv.add_layer(
             views::Dialog::text(format!("Unable to delete excess video: {}", e.chain()))
                 .title("Error")
@@ -206,7 +208,7 @@ pub fn top_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
                     db.lock()
                         .sample_file_dirs_by_id()
                         .iter()
-                        .map(|(&id, d)| (d.path.display().to_string(), Some(id))),
+                        .map(|(&id, d)| (d.pool().path().display().to_string(), Some(id))),
                 )
                 .full_width(),
         )
@@ -276,7 +278,7 @@ fn add_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive) {
 }
 
 fn add_dir(db: &Arc<db::Database>, siv: &mut Cursive, path: &Path) {
-    if let Err(e) = db.lock().add_sample_file_dir(path.to_owned()) {
+    if let Err(e) = block_on(db.add_sample_file_dir(path.to_owned())) {
         siv.add_layer(
             views::Dialog::text(format!(
                 "Unable to add path {}: {}",
@@ -310,7 +312,7 @@ fn delete_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
 }
 
 fn delete_dir(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
-    if let Err(e) = db.lock().delete_sample_file_dir(dir_id) {
+    if let Err(e) = block_on(db.delete_sample_file_dir(dir_id)) {
         siv.add_layer(
             views::Dialog::text(format!("Unable to delete dir id {dir_id}: {}", e.chain()))
                 .dismiss_button("Back")
@@ -331,9 +333,8 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
         let mut streams = BTreeMap::new();
         let mut total_used = 0;
         let mut total_retain = 0;
-        let fs_capacity;
-        {
-            let mut l = db.lock();
+        let pool = {
+            let l = db.lock();
             for (&id, s) in l.streams_by_id() {
                 let c = l
                     .cameras_by_id()
@@ -357,12 +358,16 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
             if streams.is_empty() {
                 return delete_dir_dialog(db, siv, dir_id);
             }
-            l.open_sample_file_dirs(&[dir_id]).unwrap(); // TODO: don't unwrap.
-            let dir = l.sample_file_dirs_by_id().get(&dir_id).unwrap();
-            let stat = dir.get().unwrap().statfs().unwrap();
-            fs_capacity = stat.block_size() as i64 * stat.blocks_available() as i64 + total_used;
-            path = dir.path.clone();
-        }
+            l.sample_file_dirs_by_id()
+                .get(&dir_id)
+                .unwrap()
+                .pool()
+                .clone()
+        };
+        block_on(db.open_sample_file_dirs(&[dir_id])).unwrap(); // TODO: don't unwrap.
+        let stat = block_on(pool.run("statfs", |ctx| ctx.statfs())).unwrap();
+        let fs_capacity = stat.block_size() as i64 * stat.blocks_available() as i64 + total_used;
+        path = pool.path().to_owned();
         Arc::new(Mutex::new(Model {
             dir_id,
             db: db.clone(),

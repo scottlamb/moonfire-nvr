@@ -15,6 +15,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use url::Url;
 
+use super::block_on;
+
 #[derive(Debug)]
 struct Camera {
     short_name: String,
@@ -244,7 +246,7 @@ fn press_test_inner(
         }),
         setup: retina::client::SetupOptions::default().transport(transport),
     };
-    let stream = stream::OPENER.open("test stream".to_owned(), url, options)?;
+    let stream = block_on(stream::OPENER.open("test stream".to_owned(), url, options))?;
     let video_sample_entry = stream.video_sample_entry();
     Ok(format!(
         "codec: {}\n\
@@ -397,7 +399,7 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
                 }
             }
         }
-        if let Err(e) = lower_retention(db, zero_limits) {
+        if let Err(e) = lower_retention(db.clone(), zero_limits) {
             siv.add_layer(
                 views::Dialog::text(format!("Unable to delete recordings: {}", e.chain()))
                     .title("Error")
@@ -416,13 +418,13 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
 }
 
 fn lower_retention(
-    db: &Arc<db::Database>,
+    db: Arc<db::Database>,
     zero_limits: BTreeMap<i32, Vec<writer::NewLimit>>,
 ) -> Result<(), Error> {
     let dirs_to_open: Vec<_> = zero_limits.keys().copied().collect();
-    db.lock().open_sample_file_dirs(&dirs_to_open[..])?;
+    block_on(db.open_sample_file_dirs(&dirs_to_open[..]))?;
     for (&dir_id, l) in &zero_limits {
-        writer::lower_retention(db, dir_id, l)?;
+        block_on(writer::lower_retention(db.clone(), dir_id, l))?;
     }
     Ok(())
 }
@@ -462,7 +464,7 @@ fn load_camera_values(
             db.lock()
                 .sample_file_dirs_by_id()
                 .iter()
-                .map(|(&id, d)| (d.path.to_owned(), Some(id))),
+                .map(|(&id, d)| (d.pool().path().to_owned(), Some(id))),
         )
         .collect();
     let l = db.lock();
@@ -603,7 +605,7 @@ fn edit_camera_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: &Option<i
             db.lock()
                 .sample_file_dirs_by_id()
                 .iter()
-                .map(|(&id, d)| (d.path.to_owned(), Some(id))),
+                .map(|(&id, d)| (d.pool().path().to_owned(), Some(id))),
         )
         .collect();
     for &type_ in &db::ALL_STREAM_TYPES {

@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use base::{err, Error};
-use db::dir;
 use nix::fcntl::FlockArg;
 use std::path::Path;
 use tracing::info;
@@ -26,8 +25,8 @@ enum OpenMode {
 
 /// Locks the directory without opening the database.
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
-fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
-    let dir = dir::Fd::open(db_dir, mode == OpenMode::Create).map_err(|e| {
+fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<db::fs::Dir, Error> {
+    let dir = db::fs::Dir::open(db_dir, mode == OpenMode::Create).map_err(|e| {
         if mode == OpenMode::Create {
             err!(e, msg("unable to create db dir {}", db_dir.display()))
         } else if e == nix::Error::ENOENT {
@@ -63,7 +62,7 @@ fn open_dir(db_dir: &Path, mode: OpenMode) -> Result<dir::Fd, Error> {
 
 /// Locks and opens the database.
 /// The returned `dir::Fd` holds the lock and should be kept open as long as the `Connection` is.
-fn open_conn(db_dir: &Path, mode: OpenMode) -> Result<(dir::Fd, rusqlite::Connection), Error> {
+fn open_conn(db_dir: &Path, mode: OpenMode) -> Result<(db::fs::Dir, rusqlite::Connection), Error> {
     let dir = open_dir(db_dir, mode)?;
     let db_path = db_dir.join("db");
     info!(

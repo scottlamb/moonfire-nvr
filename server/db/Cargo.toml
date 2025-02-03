@@ -19,6 +19,7 @@ base = { package = "moonfire-base", path = "../base" }
 base64 = { workspace = true }
 blake3 = "1.0.0"
 byteorder = "1.0"
+bytes = { workspace = true }
 diff = "0.1.12"
 futures = "0.3"
 h264-reader = { workspace = true }
@@ -39,7 +40,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = "1.0"
 tempfile = "3.2.0"
-tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { workspace = true }
 tracing = { workspace = true }
 url = { version = "2.1.1", features = ["serde"] }
 uuid = { workspace = true }

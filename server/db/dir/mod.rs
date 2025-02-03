@@ -8,49 +8,221 @@
 //! Updates to the directory happen through [crate::writer].
 
 pub mod reader;
+pub mod scan;
+pub mod writer;
 
-use crate::coding;
 use crate::db::CompositeId;
 use crate::schema;
+use crate::{coding, fs};
 use base::{bail, err, Error};
-use nix::sys::statvfs::Statvfs;
+use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::{FutureExt as _, TryFutureExt as _};
 use nix::{
     fcntl::{FlockArg, OFlag},
     sys::stat::Mode,
     NixPath,
 };
-use protobuf::Message;
+use protobuf::{Message, MessageField};
+use reader::get_page_mask;
+use std::collections::VecDeque;
 use std::ffi::CStr;
-use std::fs;
+use std::future::Future;
 use std::io::{Read, Write};
-use std::ops::Range;
-use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::path::Path;
-use std::sync::Arc;
-use tracing::warn;
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex};
+use tracing::{error, info_span};
+use uuid::Uuid;
+
+pub use writer::WriteStream;
 
 /// The fixed length of a directory's `meta` file.
 ///
 /// See `DirMeta` comments within `proto/schema.proto` for more explanation.
 const FIXED_DIR_META_LEN: usize = 512;
 
-/// A sample file directory. Typically one per physical disk drive.
+#[derive(Debug)]
+pub(crate) struct Config {
+    pub path: PathBuf,
+    pub db_uuid: Uuid,
+    pub dir_uuid: Uuid,
+
+    /// The last complete open; this should be specified unless the directory is
+    /// being created.
+    pub last_complete_open: Option<crate::db::Open>,
+
+    /// The current open, iff the database is open for writing.
+    pub current_open: Option<crate::db::Open>,
+}
+
+impl Config {
+    /// Checks that the config and existing metadata are consistent; the
+    /// directory is then openable.
+    pub(crate) fn check_consistent(&self, actual_meta: &schema::DirMeta) -> Result<(), Error> {
+        self.check_consistent_helper(actual_meta).map_err(|msg| {
+            err!(
+                FailedPrecondition,
+                msg("{msg}\n\nconfig: {self:?}\nmeta: {actual_meta:?}"),
+            )
+            .build()
+        })
+    }
+
+    fn check_consistent_helper(&self, actual_meta: &schema::DirMeta) -> Result<(), String> {
+        if let Some(o) = self.last_complete_open.as_ref() {
+            // If we're expecting the database has ever been completely opened,
+            // the directory's metadata must reflect this. It can still say
+            // that it was "partially opened" at that version, because updating
+            // the database and directory is not atomic.
+            if actual_meta.db_uuid != self.db_uuid.as_bytes() {
+                return Err("db uuid mismatch".into());
+            }
+            if actual_meta.dir_uuid != self.dir_uuid.as_bytes() {
+                return Err("dir uuid mismatch".into());
+            }
+            if !matches!(actual_meta.last_complete_open.as_ref(), Some(o2) if o.matches(o2))
+                && !matches!(actual_meta.in_progress_open.as_ref(), Some(o2) if o.matches(o2))
+            {
+                return Err(format!(
+                    "not at expected last open {:?}",
+                    &self.last_complete_open
+                ));
+            }
+        } else if actual_meta.last_complete_open.is_some() {
+            return Err("unexpectedly opened".into());
+        }
+
+        Ok(())
+    }
+}
+
+/// Handle to a sample file directory pool. Typically one pool per physical disk drive.
 ///
-/// If the directory is used for writing, [crate::writer::start_syncer] should be
+/// If the directory is used for writing, [`crate::writer::start_syncer`] should be
 /// called to start a background thread. This thread manages deleting files and
 /// writing new files. It synces the directory and commits these operations to
 /// the database in the correct order to maintain the invariants described in
 /// `design/schema.md`.
-#[derive(Debug)]
-pub struct SampleFileDir {
-    /// The open file descriptor for the directory. The worker created by
-    /// [crate::writer::start_syncer] uses it to create files and sync the
-    /// directory. Other threads use it to open sample files for reading during
-    /// video serving.
-    pub(crate) fd: Arc<Fd>,
+#[derive(Clone)]
+pub struct Pool(Arc<Shared>);
 
-    reader: reader::Reader,
+/// State shared between handles and workers.
+struct Shared {
+    config: Config,
+
+    /// Notifies workers that work is available.
+    worker_notify: std::sync::Condvar,
+
+    inner: Mutex<Inner>,
+}
+
+/// Mutable state shared between handles and workers.
+#[derive(Default)]
+struct Inner {
+    state: State,
+
+    /// The number of currently spawned workers, which may be idle.
+    live_workers: usize,
+
+    /// The number of workers actually doing work.
+    active_workers: usize,
+
+    /// The number of active write streams. Write streams are always closed by
+    /// workers to prevent blocking other threads. To allow this, worker threads
+    /// are never shut down while there are active write streams.
+    write_streams: usize,
+
+    /// The work to be performed.
+    work: VecDeque<IoCommand>,
+}
+
+struct Worker {
+    dir: fs::Dir,
+    shared: Arc<Shared>,
+    page_mask: usize,
+}
+
+/// Command to be performed by a worker thread.
+///
+/// Arbitrary operations can be performed via the `Run` variant. The writer
+/// and reader hot paths have their own enum variants to avoid the
+/// allocation/dispatch overhead of `Box<dyn FnOnce>`.
+enum IoCommand {
+    CollectGarbage {
+        span: tracing::Span,
+        garbage: Vec<CompositeId>,
+        tx: tokio::sync::oneshot::Sender<Result<Vec<CompositeId>, Error>>,
+    },
+
+    Run(Box<dyn FnOnce(WorkerCtx<'_>) + Send + 'static>),
+
+    // writer.rs
+    CreateFile {
+        span: tracing::Span,
+        composite_id: CompositeId,
+        tx: tokio::sync::oneshot::Sender<Result<writer::WriteStream, Error>>,
+    },
+    Write {
+        span: tracing::Span,
+        file: std::fs::File,
+        data: Bytes,
+        tx: tokio::sync::oneshot::Sender<(std::fs::File, Bytes, Result<usize, std::io::Error>)>,
+    },
+    Abandon {
+        file: std::fs::File,
+    },
+    SyncAll {
+        span: tracing::Span,
+        file: std::fs::File,
+        tx: tokio::sync::oneshot::Sender<(std::fs::File, Result<(), std::io::Error>)>,
+    },
+
+    // reader.rs
+    /// Opens a file and reads the first chunk.
+    OpenForReading {
+        span: tracing::Span,
+        composite_id: CompositeId,
+        range: std::ops::Range<u64>,
+        reply_tx: reader::Sender,
+    },
+    /// Reads the next chunk of the file.
+    ReadNextChunk {
+        file: reader::OpenReader,
+    },
+}
+
+#[derive(Debug, Default)]
+pub(crate) enum State {
+    /// Closed. No workers are running, no file descriptor is open, and thus no lock.
+    #[default]
+    Closed,
+
+    /// Transitioning from `Closed` to `OpenStage1` or `Open`. See [`Pool::open`].
+    OpeningStage1 {
+        completion: futures::future::Shared<futures::future::BoxFuture<'static, Result<(), Error>>>,
+    },
+
+    /// Partially opened for writing. Workers are running; file descriptor is open; locked exclusively;
+    /// metadata reflects an in-progress open.
+    OpenStage1,
+
+    /// Transitioning from `OpenStage1` to `Open`; see [`Pool::complete_open_for_write`].
+    OpeningStage2,
+
+    /// Fully open for either reading or writing. Workers are running; file descriptor is open; locked in
+    /// the appropriate mode.
+    Open,
+
+    /// Transitioning from `Open` to `Closed` with a metadata update between guaranteeing the directory is empty
+    /// (last_completed_open is None).
+    Deleting,
+
+    /// Transitioning to state `Closed`.
+    Closing {
+        /// All active waiters will be notified when all workers have completed.
+        done: Arc<tokio::sync::Notify>,
+    },
 }
 
 /// The on-disk filename of a recording file within the sample file directory.
@@ -83,57 +255,10 @@ impl NixPath for CompositeIdPath {
     }
 }
 
-/// A file descriptor associated with a directory (not necessarily the sample file dir).
-#[derive(Debug)]
-pub struct Fd(std::os::unix::io::RawFd);
-
-impl AsFd for Fd {
-    fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
-        unsafe { BorrowedFd::borrow_raw(self.0) }
-    }
-}
-
-impl Drop for Fd {
-    fn drop(&mut self) {
-        if let Err(err) = nix::unistd::close(self.0) {
-            warn!(%err, "unable to close sample file dir");
-        }
-    }
-}
-
-impl Fd {
-    /// Opens the given path as a directory.
-    pub fn open<P: ?Sized + NixPath>(path: &P, mkdir: bool) -> Result<Fd, nix::Error> {
-        if mkdir {
-            match nix::unistd::mkdir(path, nix::sys::stat::Mode::S_IRWXU) {
-                Ok(()) | Err(nix::Error::EEXIST) => {}
-                Err(e) => return Err(e),
-            }
-        }
-        let fd = nix::fcntl::open(path, OFlag::O_DIRECTORY | OFlag::O_RDONLY, Mode::empty())?;
-        Ok(Fd(fd))
-    }
-
-    /// `fsync`s this directory, causing all file metadata to be committed to permanent storage.
-    pub(crate) fn sync(&self) -> Result<(), nix::Error> {
-        nix::unistd::fsync(self.0)
-    }
-
-    /// Locks the directory with the specified `flock` operation.
-    pub fn lock(&self, arg: FlockArg) -> Result<(), nix::Error> {
-        nix::fcntl::flock(self.0, arg)
-    }
-
-    /// Returns information about the filesystem on which this directory lives.
-    pub fn statfs(&self) -> Result<nix::sys::statvfs::Statvfs, nix::Error> {
-        nix::sys::statvfs::fstatvfs(self)
-    }
-}
-
 /// Reads `dir`'s metadata. If none is found, returns an empty proto.
-pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
+pub(crate) fn read_meta(dir: &fs::Dir) -> Result<schema::DirMeta, Error> {
     let mut meta = schema::DirMeta::default();
-    let mut f = match crate::fs::openat(dir.0, c"meta", OFlag::O_RDONLY, Mode::empty()) {
+    let mut f = match fs::openat(dir.0, c"meta", OFlag::O_RDONLY, Mode::empty()) {
         Err(e) => {
             if e == nix::Error::ENOENT {
                 return Ok(meta);
@@ -166,7 +291,9 @@ pub(crate) fn read_meta(dir: &Fd) -> Result<schema::DirMeta, Error> {
 }
 
 /// Writes `dirfd`'s metadata, clobbering existing data.
-pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Error> {
+///
+/// This is used both by the pool and by the upgrade code.
+pub(crate) fn write_meta(dir: &fs::Dir, meta: &schema::DirMeta) -> Result<(), Error> {
     let mut data = meta
         .write_length_delimited_to_bytes()
         .expect("proto3->vec is infallible");
@@ -181,8 +308,8 @@ pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Err
         );
     }
     data.resize(FIXED_DIR_META_LEN, 0); // pad to required length.
-    let mut f = crate::fs::openat(
-        dirfd,
+    let mut f = fs::openat(
+        dir.0,
         c"meta",
         OFlag::O_CREAT | OFlag::O_WRONLY,
         Mode::S_IRUSR | Mode::S_IWUSR,
@@ -197,7 +324,7 @@ pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Err
             .map_err(|e| err!(e, msg("unable to write to meta file")))?;
         f.sync_all()
             .map_err(|e| err!(e, msg("unable to sync meta file")))?;
-        nix::unistd::fsync(dirfd).map_err(|e| err!(e, msg("unable to sync dir")))?;
+        nix::unistd::fsync(dir.0).map_err(|e| err!(e, msg("unable to sync dir")))?;
     } else if stat.len() == FIXED_DIR_META_LEN as u64 {
         // Just syncing the data will suffice; existing metadata and dirent are fine.
         f.write_all(&data)
@@ -217,115 +344,494 @@ pub(crate) fn write_meta(dirfd: RawFd, meta: &schema::DirMeta) -> Result<(), Err
     Ok(())
 }
 
-impl SampleFileDir {
-    /// Opens the directory using the given metadata.
+pub(crate) fn is_open(state: &State) -> bool {
+    matches!(state, State::Open)
+}
+
+impl Pool {
+    /// Returns a closed `Pool` for the given configuration.
+    pub(crate) fn new(config: Config) -> Self {
+        Self(Arc::new(Shared {
+            config,
+            worker_notify: Condvar::new(),
+            inner: Mutex::new(Inner {
+                state: State::Closed,
+                live_workers: 0,
+                active_workers: 0,
+                work: VecDeque::new(),
+                write_streams: 0,
+            }),
+        }))
+    }
+
+    pub(crate) fn config(&self) -> &Config {
+        &self.0.config
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0.config.path
+    }
+
+    /// Opens the directory, partially or completely.
     ///
-    /// `db_meta.in_progress_open` should be filled if the directory should be opened in read/write
-    /// mode; absent in read-only mode.
-    pub fn open(path: &Path, expected_meta: &schema::DirMeta) -> Result<Arc<SampleFileDir>, Error> {
-        let read_write = expected_meta.in_progress_open.is_some();
-        let s = SampleFileDir::open_self(path, false)?;
-        s.fd.lock(if read_write {
+    /// If the database is open for reading only
+    /// (`config.current_open.is_none()`), on success the directory will be in
+    /// state `Open`. If the database is open for writing, a previously closed
+    /// directory will be in state `OpenStage1`. A directory that was already
+    /// partially open could remain in state `OpeningStage2` or reach state
+    /// `Open`.
+    pub(crate) fn open(&self, workers: NonZeroUsize) -> BoxFuture<'static, Result<(), Error>> {
+        if self.0.config.last_complete_open.is_none() && self.0.config.current_open.is_none() {
+            return futures::future::err(
+                err!(
+                    FailedPrecondition,
+                    msg("can't create a directory in read-only mode")
+                )
+                .build(),
+            )
+            .boxed();
+        }
+        let mut l = self.0.inner.lock().expect("dir is not poisoned");
+        match &l.state {
+            State::Closed => {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let completion = async move { rx.await.expect("worker should send completion") }
+                    .boxed()
+                    .shared();
+                l.state = State::OpeningStage1 {
+                    completion: completion.clone(),
+                };
+                l.live_workers = workers.get();
+                drop(l);
+                let shared = self.0.clone();
+
+                // Start the workers. To make CPU flame graphs easier to read, start them all with
+                // exactly the same stack including the outer closure, using a `LazyLock` to make
+                // one of them handle the startup stuff.
+                let lazy = Arc::new(std::sync::LazyLock::new(|| Worker::create(shared, tx)));
+                for _ in 0..workers.get() {
+                    let lazy = lazy.clone();
+                    std::thread::Builder::new()
+                        .name(format!("dir-{}", self.0.config.path.display()))
+                        .spawn(move || Worker::run(lazy))
+                        .expect("spawning a thread should succeed");
+                }
+                completion.boxed()
+            }
+            State::OpeningStage1 { completion, .. } => completion.clone().boxed(),
+            State::OpenStage1 | State::OpeningStage2 | State::Open => {
+                futures::future::ok(()).boxed()
+            }
+            State::Deleting => {
+                futures::future::err(err!(FailedPrecondition, msg("directory is deleting")).build())
+                    .boxed()
+            }
+            State::Closing { .. } => {
+                futures::future::err(err!(FailedPrecondition, msg("directory is closing")).build())
+                    .boxed()
+            }
+        }
+    }
+
+    /// Transitions from state `OpenStage1` to `Open`.
+    pub(crate) fn complete_open_for_write(&self) -> BoxFuture<'static, Result<(), Error>> {
+        let Some(open) = &self.0.config.current_open else {
+            return futures::future::err(err!(FailedPrecondition, msg("read-only")).build())
+                .boxed();
+        };
+        let mut l = self.0.inner.lock().expect("dir is not poisoned");
+        match &mut l.state {
+            State::OpenStage1 => {}
+            State::Open => return futures::future::ok(()).boxed(),
+            o => {
+                return futures::future::err(
+                    err!(
+                        FailedPrecondition,
+                        msg("directory is in unexpected state {o:?}")
+                    )
+                    .build(),
+                )
+                .boxed();
+            }
+        };
+        l.state = State::OpeningStage2;
+        drop(l);
+        let mut meta = schema::DirMeta::new();
+        meta.db_uuid
+            .extend_from_slice(self.0.config.db_uuid.as_bytes());
+        meta.dir_uuid
+            .extend_from_slice(self.0.config.dir_uuid.as_bytes());
+        let o = meta.in_progress_open.mut_or_insert_default();
+        o.id = open.id;
+        o.uuid.extend_from_slice(open.uuid.as_bytes());
+        self.run_inner(
+            "open_stage2",
+            |s| matches!(s, State::OpeningStage2),
+            move |ctx| {
+                write_meta(&ctx.0.dir, &meta)?;
+                let mut l = ctx.0.shared.inner.lock().expect("dir is not poisoned");
+                assert!(matches!(l.state, State::OpeningStage2));
+                l.state = State::Open;
+                Ok(())
+            },
+        )
+        .boxed()
+    }
+
+    /// Transitions to state `Closed`.
+    ///
+    /// Must be in one of: `OpenStage1`, `Open`, `Deleting`, `Closing`, `Closed.`
+    pub(crate) async fn close(&self) -> Result<(), Error> {
+        let done;
+        let done_notify = {
+            let mut l = self.0.inner.lock().expect("dir is not poisoned");
+            done = match &mut l.state {
+                State::OpenStage1 | State::Open => {
+                    let done = Arc::new(tokio::sync::Notify::new());
+                    l.state = State::Closing { done: done.clone() };
+                    if l.write_streams == 0 {
+                        self.0.worker_notify.notify_all();
+                    }
+                    done
+                }
+                State::Closing { done } => done.clone(),
+                o @ State::OpeningStage1 { .. }
+                | o @ State::OpeningStage2
+                | o @ State::Deleting => {
+                    return Err(err!(
+                        FailedPrecondition,
+                        msg("directory is in unexpected state {o:?}")
+                    )
+                    .build());
+                }
+                State::Closed => return Ok(()),
+            };
+
+            // Because `Notify::notify_waiters` only notifies *current* waiter futures,
+            // create said future *before* dropping the lock and allowing the
+            // workers to proceed.
+            done.notified()
+        };
+        done_notify.await;
+        Ok(())
+    }
+
+    /// Marks the directory as deleted.
+    ///
+    /// Fails immediately unless open for writing and quiescent (no queued/active commands or write streams).
+    /// The returned future may fail later due to IO error. Regardless of the outcome, or if
+    /// the returned future is dropped, the directory should eventually reach state `OpenStage1` on
+    /// success or `Open` on failure.
+    pub(crate) fn mark_deleted(&self) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+        let Some(open) = self.0.config.current_open else {
+            bail!(
+                FailedPrecondition,
+                msg(
+                    "can only delete directory {} when database is open for write",
+                    self.0.config.path.display(),
+                )
+            );
+        };
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let span = info_span!("run", operation_name = "mark_deleted");
+        let inner = move |ctx: WorkerCtx<'_>| {
+            if !ctx.is_empty()? {
+                bail!(
+                    FailedPrecondition,
+                    msg(
+                        "sample file directory {} is not empty",
+                        ctx.0.shared.config.path.display(),
+                    )
+                );
+            }
+            let mut meta = schema::DirMeta::new();
+            meta.db_uuid
+                .extend_from_slice(ctx.0.shared.config.db_uuid.as_bytes());
+            meta.dir_uuid
+                .extend_from_slice(ctx.0.shared.config.dir_uuid.as_bytes());
+            let o = meta.last_complete_open.mut_or_insert_default();
+            o.uuid = open.uuid.as_bytes().into();
+            o.id = open.id;
+            write_meta(&ctx.0.dir, &meta)
+        };
+        let f = move |ctx: WorkerCtx<'_>| {
+            let _enter = span.enter();
+            let result = inner(ctx);
+            {
+                let mut l = ctx.0.shared.inner.lock().expect("not poisoned");
+                assert!(matches!(l.state, State::Deleting));
+                l.state = match result {
+                    Ok(_) => State::OpenStage1,
+                    Err(_) => State::Open,
+                };
+            }
+            let _ = tx.send(result);
+        };
+        {
+            let mut l = self.0.inner.lock().expect("not poisoned");
+            let State::Open = l.state else {
+                bail!(
+                    FailedPrecondition,
+                    msg(
+                        "can only delete directory {} when open for write",
+                        self.0.config.path.display(),
+                    )
+                );
+            };
+            if !l.work.is_empty() || l.active_workers != 0 || l.write_streams > 0 {
+                bail!(
+                    FailedPrecondition,
+                    msg(
+                        "can only delete directory {} when quiescent",
+                        self.0.config.path.display(),
+                    )
+                );
+            }
+            l.state = State::Deleting;
+            l.work.push_back(IoCommand::Run(Box::new(f)));
+        }
+        use futures::FutureExt as _;
+        Ok(
+            rx.map(|r: Result<_, tokio::sync::oneshot::error::RecvError>| {
+                r.expect("worker should not panic")
+            }),
+        )
+    }
+
+    /// Unlinks the given recordings, which have been marked as deleted in the database.
+    ///
+    /// Returns the ones that were successfully unlinked.
+    pub fn collect_garbage(
+        &self,
+        garbage: Vec<CompositeId>,
+    ) -> impl Future<Output = Result<Vec<CompositeId>, Error>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let r = self.send(
+            is_open,
+            IoCommand::CollectGarbage {
+                span: tracing::info_span!("collect_garbage"),
+                garbage,
+                tx,
+            },
+        );
+        async {
+            r?;
+            rx.await
+                .unwrap_or_else(|_| panic!("worker should not panic"))
+        }
+    }
+
+    /// Runs a function, which can batch several operations and return an arbitrary result.
+    ///
+    /// Fails if the pool is not in state `Open`.
+    pub fn run<T: Send + 'static>(
+        &self,
+        operation_name: &str,
+        f: impl FnOnce(WorkerCtx<'_>) -> Result<T, Error> + Send + 'static,
+    ) -> impl Future<Output = Result<T, Error>> + 'static {
+        self.run_inner(operation_name, is_open, f)
+    }
+
+    /// Like [`run`] but supports states other than `Open`.
+    fn run_inner<T: Send + 'static>(
+        &self,
+        operation_name: &str,
+        state_fn: impl FnOnce(&State) -> bool,
+        f: impl FnOnce(WorkerCtx<'_>) -> Result<T, Error> + Send + 'static,
+    ) -> impl Future<Output = Result<T, Error>> + 'static {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let span = info_span!("run", operation_name);
+        let f = move |ctx: WorkerCtx<'_>| {
+            if tx.is_closed() {
+                return;
+            }
+            let _enter = span.enter();
+            let result = f(ctx);
+            let _ = tx.send(result);
+        };
+        let r = self.send(state_fn, IoCommand::Run(Box::new(f)));
+        async {
+            r?;
+            rx.unwrap_or_else(|_| panic!("worker should not panic"))
+                .await
+        }
+    }
+
+    /// Sends a command to a worker.
+    fn send(&self, state_okay: impl FnOnce(&State) -> bool, cmd: IoCommand) -> Result<(), Error> {
+        let mut l = self.0.inner.lock().expect("not poisoned");
+        if !state_okay(&l.state) {
+            bail!(
+                FailedPrecondition,
+                msg("worker in unexpected state {:?}", &l.state),
+            );
+        }
+        l.work.push_back(cmd);
+        drop(l);
+        self.0.worker_notify.notify_one();
+        Ok(())
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        matches!(
+            self.0.inner.lock().expect("dir is not poisoned").state,
+            State::Open
+        )
+    }
+}
+
+impl Worker {
+    /// Opens the directory or fails, reporting to the supplied channel.
+    fn create(
+        shared: Arc<Shared>,
+        tx: tokio::sync::oneshot::Sender<Result<(), Error>>,
+    ) -> Result<Self, ()> {
+        let dir = match Self::open(&shared) {
+            Ok(d) => d,
+            Err(e) => {
+                let _ = tx.send(Err(e));
+                let mut l = shared.inner.lock().expect("dir is not poisoned");
+                assert!(matches!(l.state, State::OpeningStage1 { .. }));
+                l.state = State::Closed;
+                return Err(());
+            }
+        };
+        let _ = tx.send(Ok(()));
+
+        let mut l = shared.inner.lock().expect("dir is not poisoned");
+        let State::OpeningStage1 { .. } = l.state else {
+            panic!("unexpected state: {:?}", l.state);
+        };
+        l.state = if shared.config.current_open.is_some() {
+            State::OpenStage1
+        } else {
+            State::Open
+        };
+        drop(l);
+        Ok(Self {
+            dir,
+            shared,
+            page_mask: get_page_mask(),
+        })
+    }
+
+    fn run<F: FnOnce() -> Result<Self, ()>>(lazy: Arc<std::sync::LazyLock<Result<Self, ()>, F>>) {
+        let Ok(self_) = std::sync::LazyLock::force(&lazy) else {
+            return;
+        };
+
+        let shared = self_.shared.clone();
+        let mut active_now = false;
+        loop {
+            let mut l = shared.inner.lock().expect("not poisoned");
+            if active_now {
+                l.active_workers = l
+                    .active_workers
+                    .checked_sub(1)
+                    .expect("active count is consistent");
+            }
+            let cmd = loop {
+                let inner = &mut *l;
+                let Some(cmd) = inner.work.pop_front() else {
+                    if let State::Closing { done } = &mut inner.state {
+                        if inner.write_streams > 0 {
+                            // Can't shut down the pool until the write streams are closed.
+                            continue;
+                        }
+                        drop(lazy);
+                        inner.live_workers = inner
+                            .live_workers
+                            .checked_sub(1)
+                            .expect("live_workers is consistent");
+                        if inner.live_workers == 0 {
+                            done.notify_waiters();
+                            l.state = State::Closed;
+                        };
+                        return;
+                    }
+                    l = self_.shared.worker_notify.wait(l).expect("not poisoned");
+                    continue;
+                };
+                inner.active_workers += 1;
+                active_now = true;
+                break cmd;
+            };
+            drop(l);
+            self_.cmd(cmd);
+        }
+    }
+
+    fn open(shared: &Arc<Shared>) -> Result<fs::Dir, Error> {
+        let create = shared.config.last_complete_open.is_none();
+        let read_write = shared.config.current_open.is_some();
+        let dir = fs::Dir::open(&shared.config.path, create)?;
+        dir.lock(if read_write {
             FlockArg::LockExclusiveNonblock
         } else {
             FlockArg::LockSharedNonblock
         })
-        .map_err(|e| err!(e, msg("unable to lock dir {}", path.display())))?;
-        let dir_meta = read_meta(&s.fd).map_err(|e| err!(e, msg("unable to read meta file")))?;
-        if let Err(e) = SampleFileDir::check_consistent(expected_meta, &dir_meta) {
-            bail!(
-                Internal,
-                msg(
-                    "metadata mismatch\nexpected:\n{expected_meta:#?}\n\nactual:\n\
-                    {dir_meta:#?}",
-                ),
-                source(e),
-            );
-        }
-        if expected_meta.in_progress_open.is_some() {
-            s.write_meta(expected_meta)?;
-        }
-        Ok(s)
-    }
-
-    /// Checks that the existing directory and database metadata are consistent; the directory
-    /// is then openable.
-    pub(crate) fn check_consistent(
-        expected_meta: &schema::DirMeta,
-        actual_meta: &schema::DirMeta,
-    ) -> Result<(), String> {
-        if actual_meta.db_uuid != expected_meta.db_uuid {
-            return Err("db uuid mismatch".into());
-        }
-        if actual_meta.dir_uuid != expected_meta.dir_uuid {
-            return Err("dir uuid mismatch".into());
-        }
-
-        if expected_meta.last_complete_open.is_some()
-            && (expected_meta.last_complete_open != actual_meta.last_complete_open
-                && expected_meta.last_complete_open != actual_meta.in_progress_open)
-        {
-            return Err(format!(
-                "expected open {:?}; but got {:?} (complete) or {:?} (in progress)",
-                &expected_meta.last_complete_open,
-                &actual_meta.last_complete_open,
-                &actual_meta.in_progress_open,
-            ));
-        }
-
-        if expected_meta.last_complete_open.is_none() && actual_meta.last_complete_open.is_some() {
-            return Err("expected never opened".into());
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn create(
-        path: &Path,
-        db_meta: &schema::DirMeta,
-    ) -> Result<Arc<SampleFileDir>, Error> {
-        let s = SampleFileDir::open_self(path, true)?;
-        s.fd.lock(FlockArg::LockExclusiveNonblock)
-            .map_err(|e| err!(e, msg("unable to lock dir {}", path.display())))?;
-        let old_meta = read_meta(&s.fd)?;
-
-        // Verify metadata. We only care that it hasn't been completely opened.
-        // Partial opening by this or another database is fine; we won't overwrite anything.
-        if old_meta.last_complete_open.is_some() {
-            bail!(
-                FailedPrecondition,
-                msg(
-                    "can't create dir at path {}: is already in use:\n{:?}",
-                    path.display(),
-                    old_meta,
-                ),
-            );
-        }
-        if !s.is_empty()? {
+        .map_err(|e| {
+            err!(
+                e,
+                msg("unable to lock dir {}", shared.config.path.display())
+            )
+        })?;
+        let dir_meta = read_meta(&dir).map_err(|e| err!(e, msg("unable to read meta file")))?;
+        shared.config.check_consistent(&dir_meta)?;
+        if create && !Self::is_empty(&dir)? {
             bail!(
                 FailedPrecondition,
                 msg(
                     "can't create dir at path {} with existing files",
-                    path.display(),
+                    shared.config.path.display(),
                 ),
             );
         }
-        s.write_meta(db_meta)?;
-        Ok(s)
+        if let Some(o) = shared.config.current_open {
+            let mut meta = schema::DirMeta::new();
+            meta.db_uuid
+                .extend_from_slice(shared.config.db_uuid.as_bytes());
+            meta.dir_uuid
+                .extend_from_slice(shared.config.dir_uuid.as_bytes());
+            meta.in_progress_open = MessageField::some(o.into());
+            meta.last_complete_open = shared.config.last_complete_open.map(Into::into).into();
+            write_meta(&dir, &meta)?;
+        }
+        Ok(dir)
     }
 
-    pub(crate) fn opendir(&self) -> Result<nix::dir::Dir, nix::Error> {
-        nix::dir::Dir::openat(
-            self.fd.as_fd().as_raw_fd(),
-            ".",
-            OFlag::O_DIRECTORY | OFlag::O_RDONLY,
-            Mode::empty(),
-        )
+    fn cmd(&self, cmd: IoCommand) {
+        match cmd {
+            IoCommand::Run(f) => f(WorkerCtx(self)),
+            IoCommand::CollectGarbage { span, garbage, tx } => {
+                self.collect_garbage(span, garbage, tx)
+            }
+            IoCommand::OpenForReading {
+                span,
+                composite_id,
+                range,
+                reply_tx,
+            } => self.open_for_reading(span, composite_id, range, reply_tx),
+            IoCommand::ReadNextChunk { file } => self.read_chunk(file),
+            IoCommand::CreateFile {
+                span,
+                composite_id,
+                tx,
+            } => self.create_file(span, composite_id, tx),
+            IoCommand::Write {
+                span,
+                file,
+                data,
+                tx,
+            } => self.write(span, file, data, tx),
+            IoCommand::Abandon { file } => drop(file),
+            IoCommand::SyncAll { span, file, tx } => self.sync_all(span, file, tx),
+        }
     }
 
-    /// Determines if the directory is empty, aside form metadata.
-    pub(crate) fn is_empty(&self) -> Result<bool, Error> {
-        let mut dir = self.opendir()?;
+    /// Determines if the directory is empty, aside from metadata.
+    fn is_empty(dir: &fs::Dir) -> Result<bool, Error> {
+        let mut dir = dir.opendir()?;
         for e in dir.iter() {
             let e = e?;
             match e.file_name().to_bytes() {
@@ -337,44 +843,74 @@ impl SampleFileDir {
         Ok(true)
     }
 
-    fn open_self(path: &Path, create: bool) -> Result<Arc<SampleFileDir>, Error> {
-        let fd = Arc::new(Fd::open(path, create)?);
-        let reader = reader::Reader::spawn(path, fd.clone());
-        Ok(Arc::new(SampleFileDir { fd, reader }))
+    fn collect_garbage(
+        &self,
+        span: tracing::Span,
+        mut garbage: Vec<CompositeId>,
+        tx: tokio::sync::oneshot::Sender<Result<Vec<CompositeId>, Error>>,
+    ) {
+        if tx.is_closed() {
+            return;
+        }
+        let _enter = span.enter();
+        garbage.retain(|&id| {
+            match self.unlink(id) {
+                Ok(()) | Err(nix::Error::ENOENT) => true,
+                Err(err) => {
+                    error!(%err, "dir {}: unable to unlink recording {}", self.shared.config.path.display(), id);
+                    false
+                },
+            }
+        });
+        if !garbage.is_empty() {
+            if let Err(err) = nix::unistd::fsync(self.dir.0) {
+                let _ = tx.send(Err(err.into()));
+                return;
+            }
+        }
+        let _ = tx.send(Ok(garbage));
     }
 
-    /// Opens the given sample file for reading.
-    pub fn open_file(&self, composite_id: CompositeId, range: Range<u64>) -> reader::FileStream {
-        self.reader.open_file(composite_id, range)
-    }
-
-    pub fn create_file(&self, composite_id: CompositeId) -> Result<fs::File, nix::Error> {
-        let p = CompositeIdPath::from(composite_id);
-        crate::fs::openat(
-            self.fd.0,
-            &p,
-            OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_CREAT,
-            Mode::S_IRUSR | Mode::S_IWUSR,
+    fn unlink(&self, id: CompositeId) -> Result<(), nix::Error> {
+        nix::unistd::unlinkat(
+            Some(self.dir.0),
+            &CompositeIdPath::from(id),
+            nix::unistd::UnlinkatFlags::NoRemoveDir,
         )
     }
+}
 
-    pub(crate) fn write_meta(&self, meta: &schema::DirMeta) -> Result<(), Error> {
-        write_meta(self.fd.0, meta)
+#[derive(Copy, Clone)]
+pub struct WorkerCtx<'w>(&'w Worker);
+
+impl WorkerCtx<'_> {
+    pub fn path(&self) -> &Path {
+        &self.0.shared.config.path
     }
 
-    pub fn statfs(&self) -> Result<Statvfs, nix::Error> {
-        self.fd.statfs()
+    pub fn unlink(&self, id: CompositeId) -> Result<(), Error> {
+        self.0.unlink(id).map_err(Into::into)
     }
 
-    /// Unlinks the given sample file within this directory.
-    pub(crate) fn unlink_file(&self, id: CompositeId) -> Result<(), nix::Error> {
-        let p = CompositeIdPath::from(id);
-        nix::unistd::unlinkat(Some(self.fd.0), &p, nix::unistd::UnlinkatFlags::NoRemoveDir)
+    pub fn rename<P1: ?Sized + NixPath, P2: ?Sized + NixPath>(
+        &self,
+        from: &P1,
+        to: &P2,
+    ) -> Result<(), Error> {
+        nix::fcntl::renameat(Some(self.0.dir.0), from, Some(self.0.dir.0), to).map_err(Into::into)
     }
 
-    /// Syncs the directory itself.
-    pub(crate) fn sync(&self) -> Result<(), nix::Error> {
-        self.fd.sync()
+    pub(crate) fn sync(&self) -> Result<(), Error> {
+        nix::unistd::fsync(self.0.dir.0).map_err(|e| err!(e, msg("unable to sync dir")).build())
+    }
+
+    pub(crate) fn is_empty(&self) -> Result<bool, Error> {
+        Worker::is_empty(&self.0.dir)
+    }
+
+    /// Returns information about the filesystem on which this directory lives.
+    pub fn statfs(&self) -> Result<nix::sys::statvfs::Statvfs, Error> {
+        nix::sys::statvfs::fstatvfs(&self.0.dir).map_err(Into::into)
     }
 }
 

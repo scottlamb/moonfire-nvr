@@ -2,13 +2,14 @@
 // Copyright (C) 2016 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
+use async_trait::async_trait;
 use base::{bail, err, Error};
 use bytes::Bytes;
 use futures::StreamExt;
 use retina::client::Demuxed;
 use retina::codec::CodecItem;
 use std::pin::Pin;
-use tracing::Instrument;
+use std::result::Result;
 use url::Url;
 
 static RETINA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -56,12 +57,15 @@ pub struct Options {
 }
 
 /// Opens a RTSP stream. This is a trait for test injection.
+#[async_trait]
 pub trait Opener: Send + Sync {
     /// Opens the given RTSP URL.
-    ///
-    /// Note: despite the blocking interface, this expects to be called from
-    /// the context of a multithreaded tokio runtime with IO and time enabled.
-    fn open(&self, label: String, url: Url, options: Options) -> Result<Box<dyn Stream>, Error>;
+    async fn open(
+        &self,
+        label: String,
+        url: Url,
+        options: Options,
+    ) -> Result<Box<dyn Stream>, Error>;
 }
 
 pub struct VideoFrame {
@@ -78,18 +82,20 @@ pub struct VideoFrame {
     pub new_video_sample_entry: bool,
 }
 
+#[async_trait]
 pub trait Stream: Send {
     fn tool(&self) -> Option<&retina::client::Tool>;
     fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert;
-    fn next(&mut self) -> Result<VideoFrame, Error>;
+    async fn next(&mut self) -> Result<VideoFrame, Error>;
 }
 
 pub struct RealOpener;
 
 pub const OPENER: RealOpener = RealOpener;
 
+#[async_trait]
 impl Opener for RealOpener {
-    fn open(
+    async fn open(
         &self,
         label: String,
         url: Url,
@@ -98,18 +104,8 @@ impl Opener for RealOpener {
         options.session = options
             .session
             .user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
-        let rt_handle = tokio::runtime::Handle::current();
-        let (inner, first_frame) = rt_handle
-            .block_on(
-                rt_handle.spawn(
-                    tokio::time::timeout(
-                        RETINA_TIMEOUT,
-                        RetinaStreamInner::play(label, url, options),
-                    )
-                    .in_current_span(),
-                ),
-            )
-            .expect("RetinaStream::play task panicked, see earlier error")
+        let stream = tokio::time::timeout(RETINA_TIMEOUT, RetinaStream::play(label, url, options))
+            .await
             .map_err(|e| {
                 err!(
                     DeadlineExceeded,
@@ -117,11 +113,7 @@ impl Opener for RealOpener {
                     source(e),
                 )
             })??;
-        Ok(Box::new(RetinaStream {
-            inner: Some(inner),
-            rt_handle,
-            first_frame: Some(first_frame),
-        }))
+        Ok(Box::new(stream))
     }
 }
 
@@ -135,25 +127,15 @@ impl Opener for RealOpener {
 /// `handle.spawn(...)`. See
 /// [#206](https://github.com/scottlamb/moonfire-nvr/issues/206).
 struct RetinaStream {
-    /// The actual stream details used from within the tokio reactor.
-    ///
-    /// Spawned tokio tasks must be `'static`, so ownership is passed to the
-    /// task, and then returned when it completes.
-    inner: Option<Box<RetinaStreamInner>>,
-
-    rt_handle: tokio::runtime::Handle,
+    label: String,
+    session: Demuxed,
+    video_sample_entry: db::VideoSampleEntryToInsert,
 
     /// The first frame, if not yet returned from `next`.
     ///
     /// This frame is special because we sometimes need to fetch it as part of getting the video
     /// parameters.
     first_frame: Option<retina::codec::VideoFrame>,
-}
-
-struct RetinaStreamInner {
-    label: String,
-    session: Demuxed,
-    video_sample_entry: db::VideoSampleEntryToInsert,
 }
 
 fn params_to_sample_entry(
@@ -177,13 +159,9 @@ fn params_to_sample_entry(
     })
 }
 
-impl RetinaStreamInner {
+impl RetinaStream {
     /// Plays to first frame. No timeout; that's the caller's responsibility.
-    async fn play(
-        label: String,
-        url: Url,
-        options: Options,
-    ) -> Result<(Box<Self>, retina::codec::VideoFrame), Error> {
+    async fn play(label: String, url: Url, options: Options) -> Result<Self, Error> {
         let mut session = retina::client::Session::describe(url, options.session)
             .await
             .map_err(|e| err!(Unknown, source(e)))?;
@@ -229,20 +207,19 @@ impl RetinaStreamInner {
             None => bail!(Unknown, msg("couldn't find video parameters")),
         };
         let video_sample_entry = params_to_sample_entry(&video_params)?;
-        let self_ = Box::new(Self {
+        Ok(Self {
             label,
             session,
             video_sample_entry,
-        });
-        Ok((self_, first_frame))
+            first_frame: Some(first_frame),
+        })
     }
 
     /// Fetches a non-initial frame.
     async fn fetch_next_frame(
-        mut self: Box<Self>,
+        &mut self,
     ) -> Result<
         (
-            Box<Self>,
             retina::codec::VideoFrame,
             Option<retina::codec::VideoParameters>,
         ),
@@ -273,7 +250,7 @@ impl RetinaStreamInner {
                     } else {
                         None
                     };
-                    return Ok((self, v, p));
+                    return Ok((v, p));
                 }
                 Some(_) => {}
             }
@@ -281,55 +258,47 @@ impl RetinaStreamInner {
     }
 }
 
+#[async_trait]
 impl Stream for RetinaStream {
     fn tool(&self) -> Option<&retina::client::Tool> {
-        self.inner.as_ref().unwrap().session.tool()
+        self.session.tool()
     }
 
     fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert {
-        &self.inner.as_ref().unwrap().video_sample_entry
+        &self.video_sample_entry
     }
 
-    fn next(&mut self) -> Result<VideoFrame, Error> {
-        let (frame, new_video_sample_entry) = self
-            .first_frame
-            .take()
-            .map(|f| Ok((f, false)))
-            .unwrap_or_else(move || {
-                let inner = self.inner.take().unwrap();
-                let (mut inner, frame, new_parameters) = self
-                    .rt_handle
-                    .block_on(
-                        self.rt_handle.spawn(
-                            tokio::time::timeout(RETINA_TIMEOUT, inner.fetch_next_frame())
-                                .in_current_span(),
-                        ),
-                    )
-                    .expect("fetch_next_frame task panicked, see earlier error")
-                    .map_err(|e| {
-                        err!(
-                            DeadlineExceeded,
-                            msg("unable to get next frame within {RETINA_TIMEOUT:?}"),
-                            source(e)
-                        )
-                    })??;
+    async fn next(&mut self) -> Result<VideoFrame, Error> {
+        let (frame, new_video_sample_entry) = match self.first_frame.take() {
+            Some(f) => (f, false),
+            None => {
+                let (frame, new_parameters) =
+                    tokio::time::timeout(RETINA_TIMEOUT, self.fetch_next_frame())
+                        .await
+                        .map_err(|e| {
+                            err!(
+                                DeadlineExceeded,
+                                msg("unable to get next frame within {RETINA_TIMEOUT:?}"),
+                                source(e)
+                            )
+                        })??;
                 let mut new_video_sample_entry = false;
                 if let Some(p) = new_parameters {
                     let video_sample_entry = params_to_sample_entry(&p)?;
-                    if video_sample_entry != inner.video_sample_entry {
+                    if video_sample_entry != self.video_sample_entry {
                         tracing::debug!(
                             "{}: parameter change:\nold: {:?}\nnew: {:?}",
-                            &inner.label,
-                            &inner.video_sample_entry,
+                            &self.label,
+                            &self.video_sample_entry,
                             &video_sample_entry
                         );
-                        inner.video_sample_entry = video_sample_entry;
+                        self.video_sample_entry = video_sample_entry;
                         new_video_sample_entry = true;
                     }
                 };
-                self.inner = Some(inner);
-                Ok::<_, Error>((frame, new_video_sample_entry))
-            })?;
+                (frame, new_video_sample_entry)
+            }
+        };
         Ok(VideoFrame {
             pts: frame.timestamp().elapsed(),
             #[cfg(test)]
@@ -425,12 +394,13 @@ pub mod testutil {
         }
     }
 
+    #[async_trait]
     impl Stream for Mp4Stream {
         fn tool(&self) -> Option<&retina::client::Tool> {
             None
         }
 
-        fn next(&mut self) -> Result<VideoFrame, Error> {
+        async fn next(&mut self) -> Result<VideoFrame, Error> {
             let sample = self
                 .reader
                 .read_sample(self.h264_track_id, self.next_sample_id)

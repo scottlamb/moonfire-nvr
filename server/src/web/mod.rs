@@ -25,7 +25,7 @@ use base::ResultExt;
 use base::{bail, clock::Clocks, ErrorKind};
 use core::borrow::Borrow;
 use core::str::FromStr;
-use db::dir::SampleFileDir;
+use db::dir::Pool;
 use db::{auth, recording};
 use http::header::{self, HeaderValue};
 use http::{status::StatusCode, Request, Response};
@@ -159,7 +159,7 @@ pub struct Config<'a> {
 pub struct Service {
     db: Arc<db::Database>,
     ui: Ui,
-    dirs_by_stream_id: Arc<FastHashMap<i32, Arc<SampleFileDir>>>,
+    dirs_by_stream_id: Arc<FastHashMap<i32, Pool>>,
     time_zone_name: String,
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
@@ -192,7 +192,14 @@ impl Service {
                     Some(d) => d,
                     None => continue,
                 };
-                d.insert(id, l.sample_file_dirs_by_id().get(&dir_id).unwrap().get()?);
+                d.insert(
+                    id,
+                    l.sample_file_dirs_by_id()
+                        .get(&dir_id)
+                        .unwrap()
+                        .pool()
+                        .clone(),
+                );
             }
             Arc::new(d)
         };
@@ -677,8 +684,10 @@ mod tests {
     }
 
     impl Server {
-        pub(super) fn new(allow_unauthenticated_permissions: Option<db::Permissions>) -> Server {
-            let db = TestDb::new(base::clock::RealClocks {});
+        pub(super) async fn new(
+            allow_unauthenticated_permissions: Option<db::Permissions>,
+        ) -> Server {
+            let db = TestDb::new(base::clock::RealClocks {}).await;
             let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel::<()>();
             let service = Arc::new(
                 super::Service::new(super::Config {
@@ -753,7 +762,7 @@ mod tests {
     #[tokio::test]
     async fn unauthorized_without_cookie() {
         testutil::init();
-        let s = Server::new(None);
+        let s = Server::new(None).await;
         let cli = reqwest::Client::new();
         let resp = cli
             .get(format!("{}/api/", &s.base_url))
@@ -797,25 +806,26 @@ mod bench {
 
     impl Server {
         fn new() -> Server {
-            let db = TestDb::new(::base::clock::RealClocks {});
-            let test_camera_uuid = db.test_camera_uuid;
-            testutil::add_dummy_recordings_to_db(&db.db, 1440);
-            let service = Arc::new(
-                super::Service::new(super::Config {
-                    db: db.db.clone(),
-                    ui_dir: None,
-                    allow_unauthenticated_permissions: Some(db::Permissions::default()),
-                    trust_forward_hdrs: false,
-                    time_zone_name: "".to_owned(),
-                    privileged_unix_uid: None,
-                })
-                .unwrap(),
-            );
+            let (uuid_tx, uuid_rx) = std::sync::mpsc::sync_channel(1);
             let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
             let listener = std::net::TcpListener::bind(addr).unwrap();
             listener.set_nonblocking(true).unwrap();
             let addr = listener.local_addr().unwrap(); // resolve port 0 to a real ephemeral port number.
             let srv = async move {
+                let db = TestDb::new(::base::clock::RealClocks {}).await;
+                uuid_tx.try_send(db.test_camera_uuid).unwrap();
+                testutil::add_dummy_recordings_to_db(&db.db, 1440);
+                let service = Arc::new(
+                    super::Service::new(super::Config {
+                        db: db.db.clone(),
+                        ui_dir: None,
+                        allow_unauthenticated_permissions: Some(db::Permissions::default()),
+                        trust_forward_hdrs: false,
+                        time_zone_name: "".to_owned(),
+                        privileged_unix_uid: None,
+                    })
+                    .unwrap(),
+                );
                 let listener = tokio::net::TcpListener::from_std(listener).unwrap();
                 loop {
                     let (conn, _remote_addr) = listener.accept().await.unwrap();
@@ -848,7 +858,7 @@ mod bench {
                 .unwrap();
             Server {
                 base_url: format!("http://{}:{}", addr.ip(), addr.port()),
-                test_camera_uuid,
+                test_camera_uuid: uuid_rx.recv().unwrap(),
             }
         }
     }

@@ -41,36 +41,38 @@ where
     let response = tungstenite::handshake::server::create_response_with_body(&req, Body::empty)
         .map_err(|e| err!(InvalidArgument, source(e)))?;
     let span = tracing::info_span!("websocket");
-    tokio::spawn(
-        async move {
-            let upgraded = match hyper::upgrade::on(req).await {
-                Ok(u) => u,
-                Err(err) => {
-                    tracing::error!(%err, "upgrade failed");
-                    return;
-                }
-            };
-            let upgraded = hyper_util::rt::TokioIo::new(upgraded);
-
-            let mut ws = WebSocketStream::from_raw_socket(
-                upgraded,
-                tungstenite::protocol::Role::Server,
-                None,
-            )
-            .await;
-            if let Err(err) = handler(&mut ws).await {
-                // TODO: use a nice JSON message format for errors.
-                tracing::error!(err = %err.chain(), "closing with error");
-                let _ = ws
-                    .send(tungstenite::Message::Text(err.to_string().into()))
-                    .await;
-            } else {
-                tracing::info!("closing");
-            };
-            let _ = ws.close(None).await;
-        }
-        .instrument(span),
-    );
+    tokio::task::Builder::new()
+        .name("websocket")
+        .spawn(
+            async move {
+                let upgraded = match hyper::upgrade::on(req).await {
+                    Ok(u) => u,
+                    Err(err) => {
+                        tracing::error!(%err, "upgrade failed");
+                        return;
+                    }
+                };
+                let upgraded = hyper_util::rt::TokioIo::new(upgraded);
+                let mut ws = WebSocketStream::from_raw_socket(
+                    upgraded,
+                    tungstenite::protocol::Role::Server,
+                    None,
+                )
+                .await;
+                if let Err(err) = handler(&mut ws).await {
+                    // TODO: use a nice JSON message format for errors.
+                    tracing::error!(err = %err.chain(), "closing with error");
+                    let _ = ws
+                        .send(tungstenite::Message::Text(err.to_string().into()))
+                        .await;
+                } else {
+                    tracing::info!("closing");
+                };
+                let _ = ws.close(None).await;
+            }
+            .instrument(span),
+        )
+        .expect("spawning should succeed");
     Ok(response)
 }
 

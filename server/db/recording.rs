@@ -542,8 +542,8 @@ mod tests {
 
     /// Tests that a `Segment` correctly can clip at the beginning and end.
     /// This is a simpler case; all sync samples means we can start on any frame.
-    #[test]
-    fn test_segment_clipping_with_all_sync() {
+    #[tokio::test]
+    async fn test_segment_clipping_with_all_sync() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::default();
@@ -552,7 +552,7 @@ mod tests {
             let bytes = 3 * i;
             encoder.add_sample(duration_90k, bytes, true, &mut r);
         }
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let row = db.insert_recording_from_encoder(r);
         // Time range [2, 2 + 4 + 6 + 8) means the 2nd, 3rd, 4th samples should be
         // included.
@@ -564,8 +564,8 @@ mod tests {
     }
 
     /// Half sync frames means starting from the last sync frame <= desired point.
-    #[test]
-    fn test_segment_clipping_with_half_sync() {
+    #[tokio::test]
+    async fn test_segment_clipping_with_half_sync() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::default();
@@ -574,7 +574,7 @@ mod tests {
             let bytes = 3 * i;
             encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let row = db.insert_recording_from_encoder(r);
         // Time range [2 + 4 + 6, 2 + 4 + 6 + 8) means the 4th sample should be included.
         // The 3rd also gets pulled in because it is a sync frame and the 4th is not.
@@ -582,28 +582,28 @@ mod tests {
         assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[6, 8]);
     }
 
-    #[test]
-    fn test_segment_clipping_with_trailing_zero() {
+    #[tokio::test]
+    async fn test_segment_clipping_with_trailing_zero() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(1, 2, true, &mut r);
         encoder.add_sample(0, 3, true, &mut r);
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 1..2, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[2, 3]);
     }
 
     /// Even if the desired duration is 0, there should still be a frame.
-    #[test]
-    fn test_segment_zero_desired_duration() {
+    #[tokio::test]
+    async fn test_segment_zero_desired_duration() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 0..0, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1]);
@@ -611,8 +611,8 @@ mod tests {
 
     /// Test a `Segment` which uses the whole recording.
     /// This takes a fast path which skips scanning the index in `new()`.
-    #[test]
-    fn test_segment_fast_path() {
+    #[tokio::test]
+    async fn test_segment_fast_path() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::default();
@@ -621,7 +621,7 @@ mod tests {
             let bytes = 3 * i;
             encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 0..2 + 4 + 6 + 8 + 10, true).unwrap();
         assert_eq!(
@@ -630,15 +630,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_segment_fast_path_with_trailing_zero() {
+    #[tokio::test]
+    async fn test_segment_fast_path_with_trailing_zero() {
         testutil::init();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(1, 2, true, &mut r);
         encoder.add_sample(0, 3, true, &mut r);
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let row = db.insert_recording_from_encoder(r);
         let segment = Segment::new(&db.db.lock(), &row, 0..2, true).unwrap();
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1, 2, 3]);

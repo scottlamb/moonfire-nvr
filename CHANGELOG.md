@@ -8,6 +8,22 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   Major changes to sample file directory IO.
+    *   All IO happens on each directory's two-thread pool with threads named
+        `dir-<PATH>`. Formerly, IO could happen on the per-stream writer
+        threads, per-directory reader threads, and occasionally on even the
+        tokio worker threads.
+    *   Stream shutdowns are more responsive now. Before they could wait up to
+        30 seconds for a connect/frame timeout; now the shutdown request aborts
+        these operations.
+    *   Multiple sample file directories are scanned in parallel, speeding
+        program startup.
+    *   The recording path uses more CPU than before due to extra thread
+        hand-offs. This is temporary; an upcoming change to the buffering
+        model will reclaim this performance and more.
+
 ## v0.7.25 (2026-02-14)
 
 *   fix release workflow error

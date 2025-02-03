@@ -14,13 +14,14 @@ use db::{dir, writer};
 use hyper::service::service_fn;
 use itertools::Itertools;
 use retina::client::SessionGroup;
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread;
 use tokio::signal::unix::{signal, SignalKind};
 use tracing::error;
+use tracing::Instrument as _;
 use tracing::{info, warn};
 
 #[cfg(target_os = "linux")]
@@ -45,9 +46,9 @@ pub struct Args {
 }
 
 struct Syncer {
-    dir: Arc<dir::SampleFileDir>,
-    channel: writer::SyncerChannel<::std::fs::File>,
-    join: thread::JoinHandle<()>,
+    dir: dir::Pool,
+    channel: writer::SyncerChannel<db::dir::WriteStream>,
+    join: tokio::task::JoinHandle<()>,
 }
 
 #[cfg(target_os = "linux")]
@@ -244,15 +245,13 @@ async fn inner(
     let db = Arc::new(db::Database::new(clocks, conn, !read_only)?);
     info!("Database is loaded.");
 
-    {
-        let mut l = db.lock();
-        let dirs_to_open: Vec<_> = l
-            .streams_by_id()
-            .values()
-            .filter_map(|s| s.sample_file_dir_id)
-            .collect();
-        l.open_sample_file_dirs(&dirs_to_open)?;
-    }
+    let dirs_to_open: Vec<_> = db
+        .lock()
+        .streams_by_id()
+        .values()
+        .filter_map(|s| s.sample_file_dir_id)
+        .collect();
+    db.open_sample_file_dirs(&dirs_to_open).await?;
     info!("Directories are opened.");
 
     let zone = base::time::global_zone();
@@ -289,8 +288,7 @@ async fn inner(
             if let Some(id) = stream.sample_file_dir_id {
                 dirs.entry(id).or_insert_with(|| {
                     let d = l.sample_file_dirs_by_id().get(&id).unwrap();
-                    info!("Starting syncer for path {}", d.path.display());
-                    d.get().unwrap()
+                    d.pool().clone()
                 });
             } else {
                 warn!(
@@ -304,12 +302,11 @@ async fn inner(
         drop(l);
         let mut syncers = FastHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
         for (id, dir) in dirs.drain() {
-            let (channel, join) = writer::start_syncer(db.clone(), shutdown_rx.clone(), id)?;
+            let (channel, join) = writer::start_syncer(db.clone(), shutdown_rx.clone(), id).await?;
             syncers.insert(id, Syncer { dir, channel, join });
         }
 
         // Then start up streams.
-        let handle = tokio::runtime::Handle::current();
         let l = db.lock();
         for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
             if stream.config.mode != db::json::STREAM_MODE_RECORD {
@@ -348,18 +345,17 @@ async fn inner(
                 streamer::ROTATE_INTERVAL_SEC,
             )?;
             let span = tracing::info_span!("streamer", stream = streamer.short_name());
-            let thread_name = format!("s-{}", streamer.short_name());
-            let handle = handle.clone();
             streamers.push(
-                thread::Builder::new()
-                    .name(thread_name)
-                    .spawn(move || {
-                        span.in_scope(|| {
-                            let _enter_tokio = handle.enter();
+                tokio::task::Builder::new()
+                    .name(&format!("s-{}", streamer.short_name()))
+                    .spawn(
+                        async move {
                             info!("starting");
-                            streamer.run();
-                        })
-                    })
+                            streamer.run().await;
+                            info!("ending");
+                        }
+                        .instrument(span),
+                    )
                     .expect("can't create thread"),
             );
         }
@@ -386,28 +382,36 @@ async fn inner(
         })?);
         let mut listener = make_listener(&bind.address, &mut preopened)?;
         let addr = bind.address.clone();
-        tokio::spawn(async move {
-            loop {
-                let conn = match listener.accept().await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        error!(err = %e, listener = %addr, "accept failed; will retry in 1 sec");
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        continue;
+        tokio::task::Builder::new()
+            .name(&format!("listener-{addr}"))
+            .spawn(async move {
+                loop {
+                    let conn = match listener.accept().await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error!(err = %e, listener = %addr, "accept failed; will retry in 1 sec");
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            continue;
+                        }
+                    };
+                    let svc = Arc::clone(&svc);
+                    let conn_data = *conn.data();
+                    let io = hyper_util::rt::TokioIo::new(conn);
+                    let svc = Arc::clone(&svc);
+                    let svc_fn = service_fn(move |req| Arc::clone(&svc).serve(req, conn_data));
+
+                    let mut task_name = format!("httpconn-{addr}");
+                    if let Some(addr) = conn_data.client_addr.as_ref() {
+                        let _ = write!(&mut task_name, "-{addr}");
                     }
-                };
-                let svc = Arc::clone(&svc);
-                let conn_data = *conn.data();
-                let io = hyper_util::rt::TokioIo::new(conn);
-                let svc = Arc::clone(&svc);
-                let svc_fn = service_fn(move |req| Arc::clone(&svc).serve(req, conn_data));
-                tokio::spawn(
-                    hyper::server::conn::http1::Builder::new()
-                        .serve_connection(io, svc_fn)
-                        .with_upgrades(),
-                );
-            }
-        });
+                    tokio::task::Builder::new()
+                        .name(&task_name)
+                        .spawn(hyper::server::conn::http1::Builder::new()
+                            .serve_connection(io, svc_fn)
+                            .with_upgrades(),
+                        ).expect("spawn should succeed");
+                }
+            }).expect("spawn should succeed");
     }
     if !preopened.is_empty() {
         warn!(
@@ -434,27 +438,18 @@ async fn inner(
     }
 
     info!("Shutting down streamers and syncers.");
-    tokio::task::spawn_blocking({
-        let db = db.clone();
-        move || {
-            for streamer in streamers.drain(..) {
-                if streamer.join().is_err() {
-                    tracing::error!("streamer panicked; look for previous panic message");
-                }
-            }
-            if let Some(mut ss) = syncers {
-                // The syncers shut down when all channels to them have been dropped.
-                // The database maintains one; and `ss` holds one. Drop both.
-                db.lock().clear_on_flush();
-                for (_, s) in ss.drain() {
-                    drop(s.channel);
-                    s.join.join().unwrap();
-                }
-            }
+    for streamer in streamers.drain(..) {
+        if streamer.await.is_err() {
+            tracing::error!("streamer panicked; look for previous panic message");
         }
-    })
-    .await
-    .map_err(|e| err!(Unknown, source(e)))?;
+    }
+    if let Some(mut ss) = syncers {
+        // The syncers shut down when all channels to them have been dropped.
+        for (_, s) in ss.drain() {
+            drop(s.channel);
+            s.join.await.unwrap();
+        }
+    }
 
     info!("Waiting for TEARDOWN requests to complete.");
     for g in session_groups_by_camera.values() {

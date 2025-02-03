@@ -25,6 +25,7 @@ members = ["base", "db"]
 
 [workspace.dependencies]
 base64 = "0.22.0"
+bytes = "1"
 h264-reader = "0.8.0"
 itertools = "0.14.0"
 jiff = "0.2.1"
@@ -32,6 +33,14 @@ nix = "0.27.0"
 pretty-hex = "0.4.0"
 ring = "0.17.0"
 rusqlite = "0.37.0"
+tokio = { version = "1.43", features = [
+    "macros",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+    "tracing",
+] }
 tracing = { version = "0.1" }
 tracing-core = "0.1.30"
 tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }
@@ -44,6 +53,8 @@ protobuf = { git = "https://github.com/scottlamb/rust-protobuf", rev = "593aa7f2
 protobuf-codegen = { git = "https://github.com/scottlamb/rust-protobuf", rev = "593aa7f26bb5fc736c2e61d410afa34efb914ecb" }
 
 [dependencies]
+
+async-trait = "0.1.86"
 base = { package = "moonfire-base", path = "base" }
 base64 = { workspace = true }
 blake3 = "1.0.0"
@@ -52,8 +63,8 @@ bpaf = { version = "0.9.15", features = [
     "bright-color",
     "derive",
 ] }
-bytes = "1"
 byteorder = "1.0"
+bytes = { workspace = true }
 cursive = { version = "0.21.1", default-features = false, features = [
     "termion-backend",
 ] }
@@ -81,13 +92,7 @@ rusqlite = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = { version = "1.7", features = ["union"] }
-tokio = { version = "1.24", features = [
-    "macros",
-    "rt-multi-thread",
-    "signal",
-    "sync",
-    "time",
-] }
+tokio = { workspace = true }
 tokio-tungstenite = "0.26.1"
 toml = "0.9"
 tracing = { workspace = true, features = ["log"] }

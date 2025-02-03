@@ -760,7 +760,7 @@ impl Slice {
 #[pin_project(project = SliceStreamProj)]
 enum SliceStream {
     Once(Option<Result<Chunk, Error>>),
-    File(#[pin] db::dir::reader::FileStream),
+    File(#[pin] db::dir::reader::Stream),
 }
 
 impl futures::stream::Stream for SliceStream {
@@ -988,7 +988,7 @@ impl FileBuilder {
     pub fn build(
         mut self,
         db: Arc<db::Database>,
-        dirs_by_stream_id: Arc<::base::FastHashMap<i32, Arc<dir::SampleFileDir>>>,
+        dirs_by_stream_id: Arc<::base::FastHashMap<i32, dir::Pool>>,
     ) -> Result<File, Error> {
         let mut max_end = None;
         let mut etag = blake3::Hasher::new();
@@ -1780,7 +1780,7 @@ impl BodyState {
 
 struct FileInner {
     db: Arc<db::Database>,
-    dirs_by_stream_id: Arc<::base::FastHashMap<i32, Arc<dir::SampleFileDir>>>,
+    dirs_by_stream_id: Arc<::base::FastHashMap<i32, dir::Pool>>,
     segments: Vec<Segment>,
     slices: Slices<Slice>,
     buf: Vec<u8>,
@@ -1820,7 +1820,9 @@ impl FileInner {
                 )
                 .into())))
             }
-            Some(d) => d.open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start)),
+            Some(d) => d
+                .clone()
+                .open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start)),
         };
         SliceStream::File(f)
     }
@@ -2285,7 +2287,7 @@ mod tests {
         }
     }
 
-    fn copy_mp4_to_db(db: &mut TestDb<RealClocks>) {
+    async fn copy_mp4_to_db(db: &mut TestDb<RealClocks>) {
         let input = stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
         let mut input: Box<dyn stream::Stream> = Box::new(input);
 
@@ -2309,7 +2311,7 @@ mod tests {
         let mut frame_time = START_TIME;
 
         loop {
-            let pkt = match input.next() {
+            let frame = match input.next().await {
                 Ok(p) => p,
                 Err(e) if e.kind() == ErrorKind::OutOfRange => {
                     break;
@@ -2318,21 +2320,22 @@ mod tests {
                     panic!("unexpected input error: {}", e);
                 }
             };
-            frame_time += recording::Duration(i64::from(pkt.duration));
+            frame_time += recording::Duration(i64::from(frame.duration));
             output
                 .write(
                     &mut db.shutdown_rx,
-                    &pkt.data[..],
+                    frame.data,
                     frame_time,
-                    pkt.pts,
-                    pkt.is_key,
+                    frame.pts,
+                    frame.is_key,
                     video_sample_entry_id,
                 )
+                .await
                 .unwrap();
-            end_pts = Some(pkt.pts + i64::from(pkt.duration));
+            end_pts = Some(frame.pts + i64::from(frame.duration));
         }
         output.close(end_pts, None).unwrap();
-        db.syncer_channel.flush();
+        db.syncer_channel.flush().await;
     }
 
     pub fn create_mp4_from_db(
@@ -2394,7 +2397,7 @@ mod tests {
         filename.to_str().unwrap().to_string()
     }
 
-    fn compare_mp4s(new_filename: &str, pts_offset: i64, shorten: i64) {
+    async fn compare_mp4s(new_filename: &str, pts_offset: i64, shorten: i64) {
         let orig = stream::testutil::Mp4Stream::open("src/testdata/clip.mp4").unwrap();
         let new = stream::testutil::Mp4Stream::open(new_filename).unwrap();
 
@@ -2416,14 +2419,14 @@ mod tests {
         assert_eq!(orig.video_sample_entry(), new.video_sample_entry());
         let mut final_durations = None;
         for i in 0.. {
-            let orig_pkt = match orig.next() {
+            let orig_pkt = match orig.next().await {
                 Ok(p) => Some(p),
                 Err(e) if e.msg().unwrap() == "end of file" => None,
                 Err(e) => {
                     panic!("unexpected input error: {}", e);
                 }
             };
-            let new_pkt = match new.next() {
+            let new_pkt = match new.next().await {
                 Ok(p) => Some(p),
                 Err(e) if e.msg().unwrap() == "end of file" => {
                     break;
@@ -2494,7 +2497,7 @@ mod tests {
     #[tokio::test]
     async fn test_all_sync_frames() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::default();
         for i in 1..6 {
@@ -2554,7 +2557,7 @@ mod tests {
     #[tokio::test]
     async fn test_half_sync_frames() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::default();
         for i in 1..6 {
@@ -2629,7 +2632,7 @@ mod tests {
     #[tokio::test]
     async fn test_no_segments() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let e = make_mp4_from_encoders(Type::Normal, &db, vec![], 0..0, true)
             .err()
             .unwrap();
@@ -2640,7 +2643,7 @@ mod tests {
     #[tokio::test]
     async fn test_multi_segment() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let mut encoders = Vec::new();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::default();
@@ -2679,7 +2682,7 @@ mod tests {
     #[tokio::test]
     async fn test_zero_duration_recording() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let mut encoders = Vec::new();
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::default();
@@ -2706,7 +2709,7 @@ mod tests {
     #[tokio::test]
     async fn test_init_segment() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let ent = {
             let mut l = db.db.lock();
             let id = l
@@ -2735,7 +2738,7 @@ mod tests {
     #[tokio::test]
     async fn test_media_segment() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::default();
         for i in 1..6 {
@@ -2789,7 +2792,7 @@ mod tests {
     #[tokio::test]
     async fn test_single_frame_media_segment() {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let db = TestDb::new(RealClocks {}).await;
         let mut r = db::RecordingToInsert::default();
         let mut encoder = recording::SampleIndexEncoder::default();
         for i in 1..6 {
@@ -2824,12 +2827,12 @@ mod tests {
     #[tokio::test]
     async fn test_round_trip() {
         testutil::init();
-        let mut db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&mut db);
+        let mut db = TestDb::new(RealClocks {}).await;
+        copy_mp4_to_db(&mut db).await;
         let mp4 = create_mp4_from_db(&db, 0, 0, false);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
-        compare_mp4s(&new_filename, 0, 0);
+        compare_mp4s(&new_filename, 0, 0).await;
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
@@ -2846,19 +2849,18 @@ mod tests {
             mp4.etag()
         );
         drop(db.syncer_channel);
-        db.db.lock().clear_on_flush();
-        db.syncer_join.join().unwrap();
+        db.syncer_join.await.unwrap();
     }
 
     #[tokio::test]
     async fn test_round_trip_with_subtitles() {
         testutil::init();
-        let mut db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&mut db);
+        let mut db = TestDb::new(RealClocks {}).await;
+        copy_mp4_to_db(&mut db).await;
         let mp4 = create_mp4_from_db(&db, 0, 0, true);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
-        compare_mp4s(&new_filename, 0, 0);
+        compare_mp4s(&new_filename, 0, 0).await;
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
@@ -2875,19 +2877,18 @@ mod tests {
             mp4.etag()
         );
         drop(db.syncer_channel);
-        db.db.lock().clear_on_flush();
-        db.syncer_join.join().unwrap();
+        db.syncer_join.await.unwrap();
     }
 
     #[tokio::test]
     async fn test_round_trip_with_edit_list() {
         testutil::init();
-        let mut db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&mut db);
+        let mut db = TestDb::new(RealClocks {}).await;
+        copy_mp4_to_db(&mut db).await;
         let mp4 = create_mp4_from_db(&db, 1, 0, false);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
-        compare_mp4s(&new_filename, 1, 0);
+        compare_mp4s(&new_filename, 1, 0).await;
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
@@ -2904,20 +2905,19 @@ mod tests {
             mp4.etag()
         );
         drop(db.syncer_channel);
-        db.db.lock().clear_on_flush();
-        db.syncer_join.join().unwrap();
+        db.syncer_join.await.unwrap();
     }
 
     #[tokio::test]
     async fn test_round_trip_with_edit_list_and_subtitles() {
         testutil::init();
-        let mut db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&mut db);
+        let mut db = TestDb::new(RealClocks {}).await;
+        copy_mp4_to_db(&mut db).await;
         let off = 2 * TIME_UNITS_PER_SEC;
         let mp4 = create_mp4_from_db(&db, i32::try_from(off).unwrap(), 0, true);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
-        compare_mp4s(&new_filename, off, 0);
+        compare_mp4s(&new_filename, off, 0).await;
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
@@ -2934,19 +2934,18 @@ mod tests {
             mp4.etag()
         );
         drop(db.syncer_channel);
-        db.db.lock().clear_on_flush();
-        db.syncer_join.join().unwrap();
+        db.syncer_join.await.unwrap();
     }
 
     #[tokio::test]
     async fn test_round_trip_with_shorten() {
         testutil::init();
-        let mut db = TestDb::new(RealClocks {});
-        copy_mp4_to_db(&mut db);
+        let mut db = TestDb::new(RealClocks {}).await;
+        copy_mp4_to_db(&mut db).await;
         let mp4 = create_mp4_from_db(&db, 0, 1, false);
         traverse(mp4.clone()).await;
         let new_filename = write_mp4(&mp4, db.tmpdir.path()).await;
-        compare_mp4s(&new_filename, 0, 1);
+        compare_mp4s(&new_filename, 0, 1).await;
 
         // Test the metadata. This is brittle, which is the point. Any time the digest comparison
         // here fails, it can be updated, but the etag must change as well! Otherwise clients may
@@ -2963,8 +2962,7 @@ mod tests {
             mp4.etag()
         );
         drop(db.syncer_channel);
-        db.db.lock().clear_on_flush();
-        db.syncer_join.join().unwrap();
+        db.syncer_join.await.unwrap();
     }
 }
 
@@ -2998,15 +2996,16 @@ mod bench {
 
     impl BenchServer {
         fn new() -> BenchServer {
-            let db = TestDb::new(RealClocks {});
-            testutil::add_dummy_recordings_to_db(&db.db, 60);
-            let mp4 = create_mp4_from_db(&db, 0, 0, false);
-            let p = mp4.0.initial_sample_byte_pos;
             let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
             let listener = std::net::TcpListener::bind(addr).unwrap();
             listener.set_nonblocking(true).unwrap();
             let addr = listener.local_addr().unwrap(); // resolve port 0 to a real ephemeral port number.
+            let (p_tx, p_rx) = std::sync::mpsc::sync_channel(1);
             let srv = async move {
+                let db = TestDb::new(RealClocks {}).await;
+                testutil::add_dummy_recordings_to_db(&db.db, 60);
+                let mp4 = create_mp4_from_db(&db, 0, 0, false);
+                p_tx.try_send(mp4.0.initial_sample_byte_pos).unwrap();
                 let listener = tokio::net::TcpListener::from_std(listener).unwrap();
                 loop {
                     let (conn, _remote_addr) = listener.accept().await.unwrap();
@@ -3033,7 +3032,7 @@ mod bench {
                 .unwrap();
             BenchServer {
                 url: Url::parse(&format!("http://{}:{}/", addr.ip(), addr.port())).unwrap(),
-                generated_len: p,
+                generated_len: p_rx.recv().unwrap(),
             }
         }
     }
@@ -3043,7 +3042,11 @@ mod bench {
     #[bench]
     fn build_index(b: &mut test::Bencher) {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let db = rt.block_on(TestDb::new(RealClocks {}));
         testutil::add_dummy_recordings_to_db(&db.db, 1);
 
         let db = db.db.lock();
@@ -3108,7 +3111,11 @@ mod bench {
     #[bench]
     fn mp4_construction(b: &mut test::Bencher) {
         testutil::init();
-        let db = TestDb::new(RealClocks {});
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let db = rt.block_on(TestDb::new(RealClocks {}));
         testutil::add_dummy_recordings_to_db(&db.db, 60);
         b.iter(|| {
             for _i in 0..100 {

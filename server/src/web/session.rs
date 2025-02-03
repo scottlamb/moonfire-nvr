@@ -151,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn login() {
         testutil::init();
-        let s = Server::new(None);
+        let s = Server::new(None).await;
         let cli = reqwest::Client::new();
         let login_url = format!("{}/api/login", &s.base_url);
 
@@ -186,7 +186,7 @@ mod tests {
     #[tokio::test]
     async fn logout() {
         testutil::init();
-        let s = Server::new(None);
+        let s = Server::new(None).await;
         let cli = reqwest::Client::new();
         let mut p = FastHashMap::default();
         p.insert("username", "slamb");

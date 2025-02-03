@@ -2,12 +2,12 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-//! Reads sample files in a dedicated thread.
+//! Reads sample files in a dedicated thread pool.
 //!
 //! Typically sample files are on spinning disk where IO operations take
 //! ~10 ms on success. When disks fail, operations can stall for arbitrarily
 //! long. POSIX doesn't have good support for asynchronous disk IO,
-//! so it's desirable to do this from a dedicated thread for each disk rather
+//! so it's desirable to do this from a dedicated pool for each disk rather
 //! than stalling the tokio IO threads or (as when using `tokio::fs`) creating
 //! unbounded numbers of workers.
 //!
@@ -21,12 +21,9 @@
 //!     (memcpy last chunk, munmap).
 
 use std::convert::TryFrom;
-use std::future::Future;
-use std::path::Path;
 use std::{
     ops::Range,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -34,153 +31,110 @@ use base::bail;
 use base::clock::{RealClocks, TimerGuard};
 use base::{err, Error, ErrorKind, ResultExt};
 use nix::{fcntl::OFlag, sys::stat::Mode};
+use tokio::sync::mpsc;
 
 use crate::CompositeId;
 
-/// Handle for a reader thread, used to send it commands.
-///
-/// The reader will shut down after the last handle is closed.
-#[derive(Clone, Debug)]
-pub(super) struct Reader(tokio::sync::mpsc::UnboundedSender<ReaderCommand>);
+use super::{IoCommand, Pool, Worker};
 
-impl Reader {
-    pub(super) fn spawn(path: &Path, dir: Arc<super::Fd>) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let page_size = usize::try_from(
-            nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)
-                .expect("PAGE_SIZE fetch must succeed")
-                .expect("PAGE_SIZE must be defined"),
-        )
-        .expect("PAGE_SIZE fits in usize");
-        assert_eq!(page_size.count_ones(), 1, "invalid page size {page_size}");
-        let span = tracing::info_span!("reader", path = %path.display());
-        std::thread::Builder::new()
-            .name(format!("r-{}", path.display()))
-            .spawn(move || {
-                let _guard = span.enter();
-                ReaderInt { dir, page_size }.run(rx)
-            })
-            .expect("unable to create reader thread");
-        Self(tx)
-    }
+pub(super) type Sender = mpsc::Sender<Result<SuccessfulRead, Error>>;
+pub(super) type Receiver = mpsc::Receiver<Result<SuccessfulRead, Error>>;
 
-    pub(super) fn open_file(&self, composite_id: CompositeId, range: Range<u64>) -> FileStream {
-        if range.is_empty() {
-            return FileStream {
-                state: FileStreamState::Invalid,
-                reader: Reader(self.0.clone()),
-            };
-        }
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.send(ReaderCommand::OpenFile {
-            span: tracing::Span::current(),
-            composite_id,
-            range,
-            tx,
-        });
-        FileStream {
-            state: FileStreamState::Reading(rx),
-            reader: Reader(self.0.clone()),
-        }
-    }
-
-    fn send(&self, cmd: ReaderCommand) {
-        self.0
-            .send(cmd)
-            .map_err(|_| ())
-            .expect("reader thread panicked; see logs.");
-    }
+pub struct Stream {
+    state: StreamState,
+    reply_rx: Receiver,
+    pool: Pool,
 }
 
-pub struct FileStream {
-    state: FileStreamState,
-    reader: Reader,
+enum StreamState {
+    Idle(OpenReader),
+    Reading,
+    Error(Error),
+    Fused,
 }
 
-type ReadReceiver = tokio::sync::oneshot::Receiver<Result<SuccessfulRead, Error>>;
-
-enum FileStreamState {
-    Idle(OpenFile),
-    Reading(ReadReceiver),
-    Invalid,
-}
-
-impl FileStream {
+impl Stream {
     /// Helper for reading during `poll_next`.
     fn read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        mut rx: ReadReceiver,
     ) -> Poll<Option<Result<Vec<u8>, Error>>> {
-        match Pin::new(&mut rx).poll(cx) {
-            Poll::Ready(Err(_)) => {
-                self.state = FileStreamState::Invalid;
+        match Pin::new(&mut self.reply_rx).poll_recv(cx) {
+            Poll::Ready(None) => {
+                self.state = StreamState::Fused;
                 Poll::Ready(Some(Err(err!(
                     Internal,
                     msg("reader thread panicked; see logs")
                 )
                 .build())))
             }
-            Poll::Ready(Ok(Err(e))) => {
-                self.state = FileStreamState::Invalid;
+            Poll::Ready(Some(Err(e))) => {
+                self.state = StreamState::Fused;
                 Poll::Ready(Some(Err(e)))
             }
-            Poll::Ready(Ok(Ok(SuccessfulRead {
+            Poll::Ready(Some(Ok(SuccessfulRead {
                 chunk,
                 file: Some(file),
             }))) => {
-                self.state = FileStreamState::Idle(file);
+                self.state = StreamState::Idle(file);
                 Poll::Ready(Some(Ok(chunk)))
             }
-            Poll::Ready(Ok(Ok(SuccessfulRead { chunk, file: None }))) => {
-                self.state = FileStreamState::Invalid;
+            Poll::Ready(Some(Ok(SuccessfulRead { chunk, file: None }))) => {
+                self.state = StreamState::Fused;
                 Poll::Ready(Some(Ok(chunk)))
             }
             Poll::Pending => {
-                self.state = FileStreamState::Reading(rx);
+                self.state = StreamState::Reading;
                 Poll::Pending
             }
         }
     }
 }
 
-impl futures::stream::Stream for FileStream {
+impl futures::stream::Stream for Stream {
     type Item = Result<Vec<u8>, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match std::mem::replace(&mut self.state, FileStreamState::Invalid) {
-            FileStreamState::Idle(file) => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                self.reader.send(ReaderCommand::ReadNextChunk { file, tx });
+        match std::mem::replace(&mut self.state, StreamState::Fused) {
+            StreamState::Idle(file) => {
+                if let Err(e) = self
+                    .pool
+                    .send(super::is_open, IoCommand::ReadNextChunk { file })
+                {
+                    return Poll::Ready(Some(Err(e)));
+                }
 
                 // Try reading right away. It probably will return pending, but Receiver
                 // needs to see the waker.
-                self.read(cx, rx)
+                self.read(cx)
             }
-            FileStreamState::Reading(rx) => self.read(cx, rx),
-            FileStreamState::Invalid => Poll::Ready(None),
+            StreamState::Error(e) => Poll::Ready(Some(Err(e))),
+            StreamState::Reading => self.read(cx),
+            StreamState::Fused => Poll::Ready(None),
         }
     }
 }
 
-impl Drop for FileStream {
-    fn drop(&mut self) {
-        use FileStreamState::{Idle, Invalid};
-        if let Idle(file) = std::mem::replace(&mut self.state, Invalid) {
-            // This will succeed unless reader has panicked. If that happened,
-            // the logfiles will be loud anyway; no need to add additional
-            // error messages.
-            let _ = self.reader.0.send(ReaderCommand::CloseFile(file));
-        }
-    }
+pub(super) fn get_page_mask() -> usize {
+    let page_size = usize::try_from(
+        nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)
+            .expect("PAGE_SIZE fetch must succeed")
+            .expect("PAGE_SIZE must be defined"),
+    )
+    .expect("PAGE_SIZE fits in usize");
+    assert_eq!(page_size.count_ones(), 1, "invalid page size {page_size}");
+    page_size - 1
 }
 
-/// An open, `mmap()`ed file.
+/// An open, `mmap()`ed file for reading.
 ///
-/// This is only actually used by the reader thread, but ownership is passed
-/// around between it and the [FileStream] to avoid maintaining extra data
+/// This is only actually used by the IO threads, but ownership is passed
+/// around between them and the [`ReadStream`] to avoid maintaining extra data
 /// structures.
-struct OpenFile {
+///
+/// At present, no effort is made to ensure this is *dropped* from a worker
+/// thread; the assumption is the `munmap` call will not block.
+pub(super) struct OpenReader {
     span: tracing::Span,
 
     composite_id: CompositeId,
@@ -194,13 +148,15 @@ struct OpenFile {
     /// The length of the memory mapping. This may be less than the length of
     /// the file.
     map_len: usize,
+
+    pub(super) reply_tx: Sender,
 }
 
 // Rust makes us manually state these because of the `*mut` ptr above.
-unsafe impl Send for OpenFile {}
-unsafe impl Sync for OpenFile {}
+unsafe impl Send for OpenReader {}
+unsafe impl Sync for OpenReader {}
 
-impl Drop for OpenFile {
+impl Drop for OpenReader {
     fn drop(&mut self) {
         if let Err(e) = unsafe { nix::sys::mman::munmap(self.map_ptr, self.map_len) } {
             // This should never happen.
@@ -215,92 +171,72 @@ impl Drop for OpenFile {
     }
 }
 
-struct SuccessfulRead {
+pub(super) struct SuccessfulRead {
     chunk: Vec<u8>,
 
     /// If this is not the final requested chunk, the `OpenFile` for next time.
-    file: Option<OpenFile>,
+    file: Option<OpenReader>,
 }
 
-enum ReaderCommand {
-    /// Opens a file and reads the first chunk.
-    OpenFile {
-        span: tracing::Span,
-        composite_id: CompositeId,
-        range: std::ops::Range<u64>,
-        tx: tokio::sync::oneshot::Sender<Result<SuccessfulRead, Error>>,
-    },
-
-    /// Reads the next chunk of the file.
-    ReadNextChunk {
-        file: OpenFile,
-        tx: tokio::sync::oneshot::Sender<Result<SuccessfulRead, Error>>,
-    },
-
-    /// Closes the file early, as when the [FileStream] is dropped before completing.
-    CloseFile(OpenFile),
-}
-
-struct ReaderInt {
-    /// File descriptor of the sample file directory.
-    dir: Arc<super::Fd>,
-
-    /// The page size as returned by `sysconf`; guaranteed to be a power of two.
-    page_size: usize,
-}
-
-impl ReaderInt {
-    fn run(self, mut rx: tokio::sync::mpsc::UnboundedReceiver<ReaderCommand>) {
-        while let Some(cmd) = rx.blocking_recv() {
-            // OpenFile's Drop implementation takes care of closing the file on error paths and
-            // the CloseFile operation.
-            match cmd {
-                ReaderCommand::OpenFile {
-                    span,
-                    composite_id,
-                    range,
-                    tx,
-                } => {
-                    if tx.is_closed() {
-                        // avoid spending effort on expired commands
-                        continue;
-                    }
-                    let span2 = span.clone();
-                    let _span_enter = span2.enter();
-                    let _timer_guard =
-                        TimerGuard::new(&RealClocks {}, || format!("open {composite_id}"));
-                    let _ = tx.send(self.open(span, composite_id, range));
-                }
-                ReaderCommand::ReadNextChunk { file, tx } => {
-                    if tx.is_closed() {
-                        // avoid spending effort on expired commands
-                        continue;
-                    }
-                    let composite_id = file.composite_id;
-                    let span2 = file.span.clone();
-                    let _span_enter = span2.enter();
-                    let _guard =
-                        TimerGuard::new(&RealClocks {}, || format!("read from {composite_id}"));
-                    let _ = tx.send(Ok(self.chunk(file)));
-                }
-                ReaderCommand::CloseFile(mut file) => {
-                    let composite_id = file.composite_id;
-                    let span = std::mem::replace(&mut file.span, tracing::Span::none());
-                    let _span_enter = span.enter();
-                    let _guard =
-                        TimerGuard::new(&RealClocks {}, || format!("close {composite_id}"));
-                    drop(file);
-                }
-            }
+impl Pool {
+    /// Opens the given sample file for reading.
+    pub fn open_file(self, composite_id: CompositeId, range: Range<u64>) -> Stream {
+        let (reply_tx, reply_rx) = mpsc::channel(1);
+        if range.is_empty() {
+            return Stream {
+                state: StreamState::Fused,
+                pool: self,
+                reply_rx,
+            };
+        }
+        if let Err(e) = self.send(
+            super::is_open,
+            IoCommand::OpenForReading {
+                span: tracing::Span::current(),
+                composite_id,
+                range,
+                reply_tx,
+            },
+        ) {
+            return Stream {
+                state: StreamState::Error(e),
+                pool: self,
+                reply_rx,
+            };
+        }
+        Stream {
+            state: StreamState::Reading,
+            pool: self,
+            reply_rx,
         }
     }
+}
 
-    fn open(
+impl Worker {
+    pub(super) fn open_for_reading(
         &self,
         span: tracing::Span,
         composite_id: CompositeId,
         range: Range<u64>,
+        reply_tx: Sender,
+    ) {
+        if reply_tx.is_closed() {
+            return;
+        }
+        let tx = reply_tx.clone();
+        let _ = tx.try_send(self.open_for_reading_inner(span, composite_id, range, reply_tx));
+    }
+
+    pub(super) fn open_for_reading_inner(
+        &self,
+        span: tracing::Span,
+        composite_id: CompositeId,
+        range: Range<u64>,
+        reply_tx: Sender,
     ) -> Result<SuccessfulRead, Error> {
+        let span2 = span.clone();
+        let _span_enter = span2.enter();
+        let _timer_guard = TimerGuard::new(&RealClocks {}, || format!("open {composite_id}"));
         let p = super::CompositeIdPath::from(composite_id);
 
         // Reader::open_file checks for an empty range, but check again right
@@ -308,7 +244,7 @@ impl ReaderInt {
         assert!(range.start < range.end);
 
         // mmap offsets must be aligned to page size boundaries.
-        let unaligned = (range.start as usize) & (self.page_size - 1);
+        let unaligned = (range.start as usize) & self.page_mask;
         let offset = libc::off_t::try_from(range.start).expect("range.start fits in off_t")
             - libc::off_t::try_from(unaligned).expect("usize fits in off_t");
 
@@ -380,16 +316,29 @@ impl ReaderInt {
             );
         }
 
-        Ok(self.chunk(OpenFile {
+        Ok(self.read_chunk_inner(OpenReader {
             span,
             composite_id,
             map_ptr,
             map_pos: unaligned,
             map_len: map_len.get(),
+            reply_tx,
         }))
     }
 
-    fn chunk(&self, mut file: OpenFile) -> SuccessfulRead {
+    pub(super) fn read_chunk(&self, file: OpenReader) {
+        if file.reply_tx.is_closed() {
+            return;
+        }
+        let composite_id = file.composite_id;
+        let _guard = TimerGuard::new(&RealClocks {}, || format!("read from {composite_id}"));
+        let tx = file.reply_tx.clone();
+        let span2 = file.span.clone();
+        let _enter = span2.enter();
+        let _ = tx.try_send(Ok(self.read_chunk_inner(file)));
+    }
+
+    pub(super) fn read_chunk_inner(&self, mut file: OpenReader) -> SuccessfulRead {
         // Read a chunk that's large enough to minimize thread handoffs but
         // short enough to keep memory usage under control. It's hopefully
         // unnecessary to worry about disk seeks; the madvise call should cause
@@ -427,6 +376,7 @@ impl ReaderInt {
 #[cfg(test)]
 mod tests {
     use futures::TryStreamExt;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn basic() {
@@ -435,10 +385,24 @@ mod tests {
             .prefix("moonfire-db-test-reader")
             .tempdir()
             .unwrap();
-        let fd = std::sync::Arc::new(super::super::Fd::open(tmpdir.path(), false).unwrap());
-        let reader = super::Reader::spawn(tmpdir.path(), fd);
+        let one = const { std::num::NonZeroUsize::new(1).unwrap() };
+        let pool = crate::dir::Pool::new(crate::dir::Config {
+            path: tmpdir.path().to_owned(),
+            db_uuid: Uuid::now_v7(),
+            dir_uuid: Uuid::now_v7(),
+            last_complete_open: None,
+            current_open: Some(crate::db::Open {
+                uuid: Uuid::now_v7(),
+                id: 1,
+            }),
+        });
+        pool.open(one).await.unwrap();
+        pool.complete_open_for_write().await.unwrap();
         std::fs::write(tmpdir.path().join("0123456789abcdef"), b"blah blah").unwrap();
-        let f = reader.open_file(crate::CompositeId(0x0123_4567_89ab_cdef), 1..8);
+        let f = pool
+            .clone()
+            .open_file(crate::CompositeId(0x0123_4567_89ab_cdef), 1..8);
         assert_eq!(f.try_concat().await.unwrap(), b"lah bla");
+        pool.close().await.unwrap();
     }
 }

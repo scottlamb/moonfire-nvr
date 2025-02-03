@@ -13,7 +13,6 @@
 //! Some day I expect [bytes::Bytes] will expose its vtable (see link above),
 //! allowing us to minimize reference-counting without a custom chunk type.
 
-use base::Error;
 use reffers::ARefss;
 use std::error::Error as StdError;
 

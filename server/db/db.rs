@@ -48,6 +48,7 @@ use std::cmp;
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Write as _;
 use std::mem;
+use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::str;
@@ -97,6 +98,8 @@ const UPDATE_STREAM_COUNTERS_SQL: &str = r#"
         cum_runs = :cum_runs
     where id = :stream_id
 "#;
+
+const DIR_POOL_WORKERS: NonZeroUsize = const { NonZeroUsize::new(2).unwrap() };
 
 /// The size of a filesystem block, to use in disk space accounting.
 /// This should really be obtained by a stat call on the sample file directory in question,
@@ -326,13 +329,9 @@ pub(crate) struct ListOldestRecordingsRow {
     pub sample_file_bytes: i32,
 }
 
-#[derive(Debug)]
 pub struct SampleFileDir {
     pub id: i32,
-    pub path: PathBuf,
-    pub uuid: Uuid,
-    dir: Option<Arc<dir::SampleFileDir>>,
-    last_complete_open: Option<Open>,
+    pool: dir::Pool,
 
     /// ids which are in the `garbage` database table (rather than `recording`) as of last commit
     /// but may still exist on disk. These can't be safely removed from the database yet.
@@ -345,33 +344,24 @@ pub struct SampleFileDir {
 }
 
 impl SampleFileDir {
-    /// Returns a cloned copy of the directory, or Err if closed.
-    ///
-    /// Use `LockedDatabase::open_sample_file_dirs` prior to calling this method.
-    pub fn get(&self) -> Result<Arc<dir::SampleFileDir>, base::Error> {
-        Ok(self
-            .dir
-            .as_ref()
-            .ok_or_else(|| {
-                err!(
-                    FailedPrecondition,
-                    msg("sample file dir {} is closed", self.id)
-                )
-            })?
-            .clone())
+    /// Returns a worker pool handle; the pool is not guaranteed to be open.
+    pub fn pool(&self) -> &dir::Pool {
+        &self.pool
     }
 
-    /// Returns expected existing metadata when opening this directory.
-    fn expected_meta(&self, db_uuid: &Uuid) -> schema::DirMeta {
-        let mut meta = schema::DirMeta::default();
-        meta.db_uuid.extend_from_slice(&db_uuid.as_bytes()[..]);
-        meta.dir_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
-        if let Some(o) = self.last_complete_open {
-            let open = meta.last_complete_open.mut_or_insert_default();
-            open.id = o.id;
-            open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
+    /// Marks the given garbage recordings as successfully unlinked from disk.
+    fn mark_unlinked(&mut self, ids: &mut Vec<CompositeId>) {
+        self.garbage_unlinked.reserve(ids.len());
+        ids.retain(|id| {
+            if !self.garbage_needs_unlink.remove(id) {
+                return true;
+            }
+            self.garbage_unlinked.push(*id);
+            false
+        });
+        if !ids.is_empty() {
+            warn!("mark_unlinked with non-garbage ids {:?}", &ids[..]);
         }
-        meta
     }
 }
 
@@ -448,6 +438,8 @@ pub const ALL_STREAM_TYPES: [StreamType; NUM_STREAM_TYPES] =
 pub struct Stream {
     pub id: i32,
     pub camera_id: i32,
+
+    /// Invariant: if `sample_file_dir` is `Some`, the directory id exists in [`LockedDatabase::sample_file_dirs_by_id`].
     pub sample_file_dir_id: Option<i32>,
     pub type_: StreamType,
     pub config: crate::json::StreamConfig,
@@ -615,7 +607,7 @@ fn init_recordings(
 pub struct LockedDatabase {
     conn: rusqlite::Connection,
     uuid: Uuid,
-    flush_count: usize,
+    flush_count: u64,
 
     /// If the database is open in read-write mode, the information about the current Open row.
     pub open: Option<Open>,
@@ -633,14 +625,31 @@ pub struct LockedDatabase {
     cameras_by_uuid: BTreeMap<Uuid, i32>, // values are ids.
     video_sample_entries_by_id: BTreeMap<i32, Arc<VideoSampleEntry>>,
     video_index_cache: RefCell<LinkedHashMap<i64, Box<[u8]>, base::RandomState>>,
-    on_flush: Vec<Box<dyn Fn() + Send>>,
+    on_flush: tokio::sync::watch::Sender<u64>,
 }
 
-/// Represents a row of the `open` database table.
+/// Represents a row of the `open` database table, representing a time the
+/// database has been opened in read/write mode.
 #[derive(Copy, Clone, Debug)]
 pub struct Open {
     pub id: u32,
     pub(crate) uuid: Uuid,
+}
+
+impl Open {
+    pub(crate) fn matches(&self, o: &schema::dir_meta::Open) -> bool {
+        o.uuid == self.uuid.as_bytes() && o.id == self.id
+    }
+}
+
+impl From<Open> for schema::dir_meta::Open {
+    fn from(o: Open) -> Self {
+        schema::dir_meta::Open {
+            id: o.id,
+            uuid: o.uuid.as_bytes().to_vec(),
+            ..Default::default()
+        }
+    }
 }
 
 /// A combination of a stream id and recording id into a single 64-bit int.
@@ -867,7 +876,7 @@ impl LockedDatabase {
     }
 
     /// Returns the number of completed database flushes since startup.
-    pub fn flushes(&self) -> usize {
+    pub fn flushes(&self) -> u64 {
         self.flush_count
     }
 
@@ -955,20 +964,7 @@ impl LockedDatabase {
             None => bail!(FailedPrecondition, msg("no such dir {dir_id}")),
             Some(d) => d,
         };
-        dir.garbage_unlinked.reserve(ids.len());
-        ids.retain(|id| {
-            if !dir.garbage_needs_unlink.remove(id) {
-                return true;
-            }
-            dir.garbage_unlinked.push(*id);
-            false
-        });
-        if !ids.is_empty() {
-            bail!(
-                FailedPrecondition,
-                msg("delete_garbage with non-garbage ids {:?}", &ids[..])
-            );
-        }
+        dir.mark_unlinked(ids);
         Ok(())
     }
 
@@ -1167,7 +1163,7 @@ impl LockedDatabase {
                 &mut log_msg,
                 "\n{}: added {}B in {} recordings ({}), deleted {}B in {} ({}), \
                    GCed {} recordings ({}).",
-                dir.path.display(),
+                dir.pool.path().display(),
                 &encode_size(log.added_bytes),
                 log.added.len(),
                 log.added.iter().join(", "),
@@ -1183,97 +1179,13 @@ impl LockedDatabase {
             log_msg.push_str(" no recording changes");
         }
         info!("flush complete: {log_msg}");
-        for cb in &self.on_flush {
-            cb();
-        }
+        let _ = self.on_flush.send(self.flush_count);
         Ok(())
     }
 
-    /// Sets a watcher which will receive an (empty) event on successful flush.
-    /// The lock will be held while this is run, so it should not do any I/O.
-    pub(crate) fn on_flush(&mut self, run: Box<dyn Fn() + Send>) {
-        self.on_flush.push(run);
-    }
-
-    // TODO: find a cleaner way to do this. Seems weird for src/cmds/run.rs to clear the on flush
-    // handlers given that it didn't add them.
-    pub fn clear_on_flush(&mut self) {
-        self.on_flush.clear();
-    }
-
-    /// Opens the given sample file directories.
-    ///
-    /// `ids` is implicitly de-duplicated.
-    ///
-    /// When the database is in read-only mode, this simply opens all the directories after
-    /// locking and verifying their metadata matches the database state. In read-write mode, it
-    /// performs a single database transaction to update metadata for all dirs, then performs a like
-    /// update to the directories' on-disk metadata.
-    ///
-    /// Note this violates the principle of never accessing disk while holding the database lock.
-    /// Currently this only happens at startup (or during configuration), so this isn't a problem
-    /// in practice.
-    pub fn open_sample_file_dirs(&mut self, ids: &[i32]) -> Result<(), Error> {
-        let mut in_progress = FastHashMap::with_capacity_and_hasher(ids.len(), Default::default());
-        for &id in ids {
-            let e = in_progress.entry(id);
-            use ::std::collections::hash_map::Entry;
-            let e = match e {
-                Entry::Occupied(_) => continue, // suppress duplicate.
-                Entry::Vacant(e) => e,
-            };
-            let dir = self
-                .sample_file_dirs_by_id
-                .get_mut(&id)
-                .ok_or_else(|| err!(NotFound, msg("no such dir {id}")))?;
-            if dir.dir.is_some() {
-                continue;
-            }
-            let mut expected_meta = dir.expected_meta(&self.uuid);
-            if let Some(o) = self.open.as_ref() {
-                let open = expected_meta.in_progress_open.mut_or_insert_default();
-                open.id = o.id;
-                open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
-            }
-            let d = dir::SampleFileDir::open(&dir.path, &expected_meta)
-                .map_err(|e| err!(e, msg("Failed to open dir {}", dir.path.display())))?;
-            if self.open.is_none() {
-                // read-only mode; it's already fully opened.
-                dir.dir = Some(d);
-            } else {
-                // read-write mode; there are more steps to do.
-                e.insert((expected_meta, d));
-            }
-        }
-
-        let o = match self.open.as_ref() {
-            None => return Ok(()), // read-only mode; all done.
-            Some(o) => o,
-        };
-
-        let tx = self.conn.transaction()?;
-        {
-            let mut stmt = tx.prepare_cached(
-                r#"
-                update sample_file_dir set last_complete_open_id = ? where id = ?
-                "#,
-            )?;
-            for &id in in_progress.keys() {
-                if stmt.execute(params![o.id, id])? != 1 {
-                    bail!(Internal, msg("unable to update dir {id}"));
-                }
-            }
-        }
-        tx.commit()?;
-
-        for (id, (mut meta, d)) in in_progress.drain() {
-            let dir = self.sample_file_dirs_by_id.get_mut(&id).unwrap();
-            meta.last_complete_open = meta.in_progress_open.take().into();
-            d.write_meta(&meta)?;
-            dir.dir = Some(d);
-        }
-
-        Ok(())
+    /// Sets a watcher which will receive the current flush count whenever a flush completes.
+    pub(crate) fn on_flush(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.on_flush.subscribe()
     }
 
     pub fn streams_by_id(&self) -> &BTreeMap<i32, Stream> {
@@ -1619,22 +1531,26 @@ impl LockedDatabase {
         while let Some(row) = rows.next()? {
             let id = row.get(0)?;
             let config: SampleFileDirConfig = row.get(1)?;
-            let dir_uuid: SqlUuid = row.get(2)?;
-            let open_id: Option<u32> = row.get(3)?;
-            let open_uuid: Option<SqlUuid> = row.get(4)?;
+            let SqlUuid(dir_uuid) = row.get(2)?;
+            let open_id = row.get(3)?;
+            let open_uuid = row.get(4)?;
             let last_complete_open = match (open_id, open_uuid) {
-                (Some(id), Some(uuid)) => Some(Open { id, uuid: uuid.0 }),
+                (Some(id), Some(SqlUuid(uuid))) => Some(Open { id, uuid }),
                 (None, None) => None,
                 _ => bail!(Internal, msg("open table missing id {id}")),
+            };
+            let config = dir::Config {
+                path: config.path,
+                db_uuid: self.uuid,
+                dir_uuid,
+                last_complete_open,
+                current_open: self.open,
             };
             self.sample_file_dirs_by_id.insert(
                 id,
                 SampleFileDir {
                     id,
-                    uuid: dir_uuid.0,
-                    path: config.path,
-                    dir: None,
-                    last_complete_open,
+                    pool: dir::Pool::new(config),
                     garbage_needs_unlink: raw::list_garbage(&self.conn, id)?,
                     garbage_unlinked: Vec::new(),
                 },
@@ -1795,115 +1711,6 @@ impl LockedDatabase {
         );
 
         Ok(id)
-    }
-
-    pub fn add_sample_file_dir(&mut self, path: PathBuf) -> Result<i32, Error> {
-        let mut meta = schema::DirMeta::default();
-        let uuid = Uuid::now_v7();
-        let uuid_bytes = &uuid.as_bytes()[..];
-        let o = self
-            .open
-            .as_ref()
-            .ok_or_else(|| err!(FailedPrecondition, msg("database is read-only")))?;
-
-        // Populate meta.
-        {
-            meta.db_uuid.extend_from_slice(&self.uuid.as_bytes()[..]);
-            meta.dir_uuid.extend_from_slice(uuid_bytes);
-            let open = meta.in_progress_open.mut_or_insert_default();
-            open.id = o.id;
-            open.uuid.extend_from_slice(&o.uuid.as_bytes()[..]);
-        }
-
-        let dir = dir::SampleFileDir::create(&path, &meta)?;
-        let config = SampleFileDirConfig {
-            path: path.clone(),
-            ..Default::default()
-        };
-        self.conn.execute(
-            r#"
-            insert into sample_file_dir (config, uuid, last_complete_open_id)
-                                 values (?,      ?,    ?)
-            "#,
-            params![&config, uuid_bytes, o.id],
-        )?;
-        let id = self.conn.last_insert_rowid() as i32;
-        use ::std::collections::btree_map::Entry;
-        let e = self.sample_file_dirs_by_id.entry(id);
-        let d = match e {
-            Entry::Vacant(e) => e.insert(SampleFileDir {
-                id,
-                path,
-                uuid,
-                dir: Some(dir),
-                last_complete_open: Some(*o),
-                garbage_needs_unlink: FastHashSet::default(),
-                garbage_unlinked: Vec::new(),
-            }),
-            Entry::Occupied(_) => bail!(Internal, msg("duplicate sample file dir id {id}")),
-        };
-        meta.last_complete_open = meta.in_progress_open.take().into();
-        d.dir.as_ref().unwrap().write_meta(&meta)?;
-        Ok(id)
-    }
-
-    pub fn delete_sample_file_dir(&mut self, dir_id: i32) -> Result<(), Error> {
-        for (&id, s) in self.streams_by_id.iter() {
-            if s.sample_file_dir_id == Some(dir_id) {
-                bail!(
-                    FailedPrecondition,
-                    msg("can't delete dir referenced by stream {id}")
-                );
-            }
-        }
-        let mut d = match self.sample_file_dirs_by_id.entry(dir_id) {
-            ::std::collections::btree_map::Entry::Occupied(e) => e,
-            _ => bail!(NotFound, msg("no such dir {dir_id} to remove")),
-        };
-        if !d.get().garbage_needs_unlink.is_empty() || !d.get().garbage_unlinked.is_empty() {
-            bail!(
-                FailedPrecondition,
-                msg(
-                    "must collect garbage before deleting directory {}",
-                    d.get().path.display(),
-                ),
-            );
-        }
-        let dir = match d.get_mut().dir.take() {
-            None => dir::SampleFileDir::open(&d.get().path, &d.get().expected_meta(&self.uuid))?,
-            Some(arc) => match Arc::strong_count(&arc) {
-                1 => arc, // LockedDatabase is only reference
-                c => {
-                    // a writer::Syncer also has a reference.
-                    d.get_mut().dir = Some(arc); // put it back.
-                    bail!(
-                        FailedPrecondition,
-                        msg("can't delete directory {dir_id} with active syncer (refcnt {c})"),
-                    );
-                }
-            },
-        };
-        if !dir.is_empty()? {
-            bail!(
-                FailedPrecondition,
-                msg(
-                    "can't delete sample file directory {} which still has files",
-                    &d.get().path.display(),
-                ),
-            );
-        }
-        let mut meta = d.get().expected_meta(&self.uuid);
-        meta.in_progress_open = meta.last_complete_open.take().into();
-        dir.write_meta(&meta)?;
-        if self
-            .conn
-            .execute("delete from sample_file_dir where id = ?", params![dir_id])?
-            != 1
-        {
-            bail!(Internal, msg("missing database row for dir {dir_id}"));
-        }
-        d.remove_entry();
-        Ok(())
     }
 
     /// Adds a camera.
@@ -2305,7 +2112,7 @@ pub(crate) fn check_schema_version(conn: &rusqlite::Connection) -> Result<(), Er
 /// The recording database. Abstracts away SQLite queries. Also maintains in-memory state
 /// (loaded on startup, and updated on successful commit) to avoid expensive scans over the
 /// recording table on common queries.
-pub struct Database<C: Clocks + Clone = clock::RealClocks> {
+pub struct Database<C: Clocks = clock::RealClocks> {
     /// This is wrapped in an `Option` to allow the `Drop` implementation and `close` to coexist.
     db: Option<Mutex<LockedDatabase>>,
 
@@ -2315,7 +2122,7 @@ pub struct Database<C: Clocks + Clone = clock::RealClocks> {
     clocks: C,
 }
 
-impl<C: Clocks + Clone> Drop for Database<C> {
+impl<C: Clocks> Drop for Database<C> {
     fn drop(&mut self) {
         if ::std::thread::panicking() {
             return; // don't flush while panicking.
@@ -2392,7 +2199,7 @@ impl<C: Clocks + Clone> Database<C> {
                     VIDEO_INDEX_CACHE_LEN + 1,
                     Default::default(),
                 )),
-                on_flush: Vec::new(),
+                on_flush: tokio::sync::watch::channel(0).0,
             })),
             clocks,
         };
@@ -2433,6 +2240,191 @@ impl<C: Clocks + Clone> Database<C> {
         }
     }
 
+    /// Opens the given sample file directories.
+    ///
+    /// `ids` is implicitly de-duplicated.
+    ///
+    /// When the database is in read-only mode, this simply opens all the directories after
+    /// locking and verifying their metadata matches the database state. In read-write mode, it
+    /// performs a single database transaction to update metadata for all dirs, then performs a like
+    /// update to the directories' on-disk metadata.
+    ///
+    /// Note this violates the principle of never accessing disk while holding the database lock.
+    /// Currently this only happens at startup (or during configuration), so this isn't a problem
+    /// in practice.
+    pub async fn open_sample_file_dirs(&self, ids: &[i32]) -> Result<(), Error> {
+        let mut in_progress = FastHashMap::with_capacity_and_hasher(ids.len(), Default::default());
+        let open = {
+            let mut l = self.lock();
+            for &id in ids {
+                let e = in_progress.entry(id);
+                use ::std::collections::hash_map::Entry;
+                let e = match e {
+                    Entry::Occupied(_) => continue, // suppress duplicate.
+                    Entry::Vacant(e) => e,
+                };
+                let dir = l
+                    .sample_file_dirs_by_id
+                    .get_mut(&id)
+                    .ok_or_else(|| err!(NotFound, msg("no such dir {id}")))?;
+
+                if dir.pool.is_open() {
+                    continue;
+                }
+                e.insert((dir.pool.clone(), dir.pool.open(DIR_POOL_WORKERS)));
+            }
+            l.open
+        };
+
+        // Now, with lock released, wait for the open futures.
+        for (pool, f) in &mut in_progress.values_mut() {
+            f.await
+                .map_err(|e| err!(e, msg("Failed to open dir {}", pool.path().display())))?;
+        }
+
+        let Some(o) = open.as_ref() else {
+            return Ok(()); // read-only mode; all done.
+        };
+
+        {
+            let mut l = self.lock();
+            let tx = l.conn.transaction()?;
+            let mut stmt = tx.prepare_cached(
+                r#"
+                update sample_file_dir set last_complete_open_id = ? where id = ?
+                "#,
+            )?;
+            for &id in in_progress.keys() {
+                if stmt.execute(params![o.id, id])? != 1 {
+                    bail!(Internal, msg("unable to update dir {id}"));
+                }
+            }
+            drop(stmt);
+            tx.commit()?;
+        }
+
+        for (pool, f) in in_progress.values_mut() {
+            *f = pool.complete_open_for_write();
+        }
+
+        for (pool, f) in in_progress.values_mut() {
+            f.await.map_err(|e| {
+                err!(
+                    e,
+                    msg(
+                        "Failed to complete open for write on dir {}",
+                        pool.path().display()
+                    )
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn add_sample_file_dir(&self, path: PathBuf) -> Result<i32, Error> {
+        let open;
+        let cfg = {
+            let l = self.lock();
+            let Some(o) = l.open else {
+                bail!(FailedPrecondition, msg("database is read-only"));
+            };
+            open = o;
+            dir::Config {
+                path: path.clone(),
+                db_uuid: l.uuid,
+                dir_uuid: Uuid::now_v7(),
+                last_complete_open: None,
+                current_open: Some(o),
+            }
+        };
+
+        let pool = dir::Pool::new(cfg);
+        pool.open(DIR_POOL_WORKERS).await?;
+
+        let id;
+        {
+            let mut l = self.lock();
+            let config = SampleFileDirConfig {
+                path,
+                ..Default::default()
+            };
+            l.conn.execute(
+                r#"
+                insert into sample_file_dir (config, uuid, last_complete_open_id)
+                                     values (?,      ?,    ?)
+                "#,
+                params![&config, SqlUuid(pool.config().dir_uuid), open.id],
+            )?;
+            id = l.conn.last_insert_rowid() as i32;
+            use ::std::collections::btree_map::Entry;
+            let e = l.sample_file_dirs_by_id.entry(id);
+            match e {
+                Entry::Vacant(e) => e.insert(SampleFileDir {
+                    id,
+                    pool: pool.clone(),
+                    garbage_needs_unlink: FastHashSet::default(),
+                    garbage_unlinked: Vec::new(),
+                }),
+                Entry::Occupied(_) => bail!(Internal, msg("duplicate sample file dir id {id}")),
+            };
+        }
+        pool.complete_open_for_write().await?;
+        Ok(id)
+    }
+
+    /// Deletes a sample file directory—marks the directory's metadata as deleted and removes the entry from the database.
+    ///
+    /// XXX: This may not be not robust against concurrent access or failure. It's good enough for the current use from
+    /// the separate `moonfire-nvr config` command but needs some additional thought to handle online
+    /// reconfiguration.
+    pub async fn delete_sample_file_dir(&self, dir_id: i32) -> Result<(), Error> {
+        let f = {
+            let l = self.lock();
+            for (&id, s) in l.streams_by_id.iter() {
+                if s.sample_file_dir_id == Some(dir_id) {
+                    bail!(
+                        FailedPrecondition,
+                        msg("can't delete dir referenced by stream {id}")
+                    );
+                }
+            }
+            let Some(d) = l.sample_file_dirs_by_id.get(&dir_id) else {
+                bail!(NotFound, msg("no such dir {dir_id} to remove"));
+            };
+
+            // Make some effort to fail if the directory is in use.
+            // XXX: These conditions could become true right after `l` is
+            // dropped. Possibly we should also fail here if an active syncer,
+            // rather than having it fail later.
+            if !d.garbage_needs_unlink.is_empty()
+                || !d.garbage_unlinked.is_empty()
+                || l.streams_by_id
+                    .values()
+                    .any(|s| s.sample_file_dir_id == Some(dir_id) && !s.uncommitted.is_empty())
+            {
+                bail!(
+                    FailedPrecondition,
+                    msg(
+                        "must not have in-progress operations when deleting directory {}",
+                        d.pool.path().display(),
+                    ),
+                );
+            }
+            d.pool.mark_deleted()?
+        };
+        f.await?;
+        let mut l = self.lock();
+        if l.conn
+            .execute("delete from sample_file_dir where id = ?", [dir_id])?
+            != 1
+        {
+            bail!(FailedPrecondition, msg("failed to delete sample file dir"));
+        }
+        l.sample_file_dirs_by_id.remove(&dir_id);
+        Ok(())
+    }
+
     /// For testing: closes the database (without flushing) and returns the connection.
     /// This allows verification that a newly opened database is in an acceptable state.
     #[cfg(test)]
@@ -2442,7 +2434,7 @@ impl<C: Clocks + Clone> Database<C> {
 }
 
 /// Reference to a locked database returned by [Database::lock].
-pub struct DatabaseGuard<'db, C: Clocks> {
+pub struct DatabaseGuard<'db, C: Clocks + Clone> {
     clocks: &'db C,
     db: MutexGuard<'db, LockedDatabase>,
     _timer: clock::TimerGuard<'db, C, &'static str, fn() -> &'static str>,
@@ -2642,8 +2634,8 @@ mod tests {
     }
 
     /// Basic test of the full lifecycle of recording. Does not exercise error cases.
-    #[test]
-    fn test_full_lifecycle() {
+    #[tokio::test]
+    async fn test_full_lifecycle() {
         testutil::init();
         let conn = setup_conn();
         let db = Database::new(clock::RealClocks {}, conn, true).unwrap();
@@ -2652,7 +2644,7 @@ mod tests {
             .tempdir()
             .unwrap();
         let path = tmpdir.path().to_owned();
-        let sample_file_dir_id = { db.lock() }.add_sample_file_dir(path).unwrap();
+        let sample_file_dir_id = db.add_sample_file_dir(path).await.unwrap();
         let mut c = CameraChange {
             short_name: "testcam".to_owned(),
             config: crate::json::CameraConfig {

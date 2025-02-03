@@ -7,22 +7,19 @@
 /// completed, and possibly an upgrade from 2 to 3 is half-finished.
 use crate::db::{self, SqlUuid};
 use crate::dir;
-use crate::schema;
-use base::Error;
+use base::{Error, ErrorKind};
 use rusqlite::params;
-use std::os::fd::AsFd as _;
-use std::os::unix::io::AsRawFd;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 /// Opens the sample file dir.
 ///
 /// Makes a couple simplifying assumptions valid for version 2:
 /// *   there's only one dir.
 /// *   it has a last completed open.
-fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFileDir>, Error> {
-    let (p, s_uuid, o_id, o_uuid, db_uuid): (String, SqlUuid, i32, SqlUuid, SqlUuid) = tx
-        .query_row(
+fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<dir::Pool, Error> {
+    let (p, SqlUuid(dir_uuid), o_id, SqlUuid(o_uuid), SqlUuid(db_uuid)): (String, _, i32, _, _) =
+        tx.query_row(
             r#"
             select
               s.path, s.uuid, s.last_complete_open_id, o.uuid, m.uuid
@@ -42,20 +39,42 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<Arc<dir::SampleFil
                 ))
             },
         )?;
-    let mut meta = schema::DirMeta::default();
-    meta.db_uuid.extend_from_slice(&db_uuid.0.as_bytes()[..]);
-    meta.dir_uuid.extend_from_slice(&s_uuid.0.as_bytes()[..]);
-    {
-        let open = meta.last_complete_open.mut_or_insert_default();
-        open.id = o_id as u32;
-        open.uuid.extend_from_slice(&o_uuid.0.as_bytes()[..]);
-    }
-    let p = PathBuf::from(p);
-    dir::SampleFileDir::open(&p, &meta)
+    let pool = crate::dir::Pool::new(crate::dir::Config {
+        path: PathBuf::from(p),
+        db_uuid,
+        dir_uuid,
+        last_complete_open: Some(crate::db::Open {
+            id: o_id as u32,
+            uuid: o_uuid,
+        }),
+        current_open: None,
+    });
+    futures::executor::block_on(pool.open(const { NonZeroUsize::new(1).unwrap() }))?;
+    Ok(pool)
 }
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
-    let d = open_sample_file_dir(tx)?;
+    let pool = open_sample_file_dir(tx)?;
+
+    let (rename_tx, rename_rx) = std::sync::mpsc::sync_channel(16);
+
+    // In a pool worker, run the renames. Note that `run` starts working
+    // eagerly, before waiting on the future.
+    let rename_fut = pool.run("rename", |ctx| {
+        for (from, to) in rename_rx {
+            let from = super::UuidPath::from(from);
+            let to = crate::dir::CompositeIdPath::from(to);
+            match ctx.rename(&from, &to) {
+                Err(e) if e.kind() == ErrorKind::NotFound => {
+                    // assume already renamed.
+                }
+                Err(e) => return Err(e),
+                Ok(()) => {}
+            }
+        }
+        Ok(())
+    });
+
     let mut stmt = tx.prepare(
         r#"
         select
@@ -68,21 +87,14 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
     let mut rows = stmt.query(params![])?;
     while let Some(row) = rows.next()? {
         let id = db::CompositeId(row.get(0)?);
-        let sample_file_uuid: SqlUuid = row.get(1)?;
-        let from_path = super::UuidPath::from(sample_file_uuid.0);
-        let to_path = crate::dir::CompositeIdPath::from(id);
-        if let Err(e) = nix::fcntl::renameat(
-            Some(d.fd.as_fd().as_raw_fd()),
-            &from_path,
-            Some(d.fd.as_fd().as_raw_fd()),
-            &to_path,
-        ) {
-            if e == nix::Error::ENOENT {
-                continue; // assume it was already moved.
-            }
-            return Err(e.into());
-        }
+        let SqlUuid(sample_file_uuid) = row.get(1)?;
+        rename_tx
+            .send((sample_file_uuid, id))
+            .expect("rename_rx not closed");
     }
+    drop(rename_tx);
+    futures::executor::block_on(rename_fut)?;
+    futures::executor::block_on(pool.close())?;
 
     // These create statements match the schema.sql when version 3 was the latest.
     tx.execute_batch(
