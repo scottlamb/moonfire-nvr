@@ -19,7 +19,6 @@ base = { package = "moonfire-base", path = "../base" }
 base64 = { workspace = true }
 blake3 = "1.0.0"
 byteorder = "1.0"
-cstr = "0.2.5"
 diff = "0.1.12"
 futures = "0.3"
 h264-reader = { workspace = true }
