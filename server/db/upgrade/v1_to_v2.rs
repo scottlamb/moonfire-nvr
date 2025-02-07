@@ -80,17 +80,17 @@ pub fn run(args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> 
         create index user_session_uid on user_session (user_id);
         "#,
     )?;
-    let db_uuid = ::uuid::Uuid::new_v4();
+    let db_uuid = ::uuid::Uuid::now_v7();
     let db_uuid_bytes = &db_uuid.as_bytes()[..];
     tx.execute("insert into meta (uuid) values (?)", params![db_uuid_bytes])?;
-    let open_uuid = ::uuid::Uuid::new_v4();
+    let open_uuid = ::uuid::Uuid::now_v7();
     let open_uuid_bytes = &open_uuid.as_bytes()[..];
     tx.execute(
         "insert into open (uuid) values (?)",
         params![open_uuid_bytes],
     )?;
     let open_id = tx.last_insert_rowid() as u32;
-    let dir_uuid = ::uuid::Uuid::new_v4();
+    let dir_uuid = ::uuid::Uuid::now_v7();
     let dir_uuid_bytes = &dir_uuid.as_bytes()[..];
 
     // Write matching metadata to the directory.

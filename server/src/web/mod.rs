@@ -319,7 +319,7 @@ impl Service {
         req: Request<::hyper::body::Incoming>,
         conn_data: ConnData,
     ) -> Result<Response<Body>, std::convert::Infallible> {
-        let request_id = ulid::Ulid::new();
+        let request_id = uuid::Uuid::now_v7();
         let authreq = auth::Request {
             when_sec: Some(self.db.clocks().realtime().as_secs()),
             addr: if self.trust_forward_hdrs {
@@ -340,7 +340,7 @@ impl Service {
         // https://opentelemetry.io/docs/reference/specification/trace/semantic_conventions/http/
         let span = tracing::info_span!(
             "request",
-            %request_id,
+            request_id = %data_encoding::BASE32_NOPAD.encode_display(request_id.as_bytes()),
             net.sock.peer.uid = conn_data.client_unix_uid.map(tracing::field::display),
             http.client_ip = authreq.addr.map(tracing::field::display),
             http.method = %req.method(),

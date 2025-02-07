@@ -1797,7 +1797,7 @@ impl LockedDatabase {
 
     pub fn add_sample_file_dir(&mut self, path: PathBuf) -> Result<i32, Error> {
         let mut meta = schema::DirMeta::default();
-        let uuid = Uuid::new_v4();
+        let uuid = Uuid::now_v7();
         let uuid_bytes = &uuid.as_bytes()[..];
         let o = self
             .open
@@ -1906,7 +1906,7 @@ impl LockedDatabase {
 
     /// Adds a camera.
     pub fn add_camera(&mut self, mut camera: CameraChange) -> Result<i32, Error> {
-        let uuid = Uuid::new_v4();
+        let uuid = Uuid::now_v7();
         let uuid_bytes = &uuid.as_bytes()[..];
         let tx = self.conn.transaction()?;
         let streams;
@@ -2227,7 +2227,7 @@ pub fn init(conn: &mut rusqlite::Connection) -> Result<(), Error> {
     tx.execute_batch(include_str!("schema.sql"))
         .map_err(|e| err!(e, msg("unable to create database schema")))?;
     {
-        let uuid = ::uuid::Uuid::new_v4();
+        let uuid = ::uuid::Uuid::now_v7();
         let uuid_bytes = &uuid.as_bytes()[..];
         tx.execute("insert into meta (uuid) values (?)", params![uuid_bytes])?;
     }
@@ -2353,7 +2353,7 @@ impl<C: Clocks + Clone> Database<C> {
             let real = recording::Time::from(clocks.realtime());
             let mut stmt = conn
                 .prepare(" insert into open (uuid, start_time_90k, boot_uuid) values (?, ?, ?)")?;
-            let open_uuid = SqlUuid(Uuid::new_v4());
+            let open_uuid = SqlUuid(Uuid::now_v7());
             let boot_uuid = match get_boot_uuid() {
                 Err(e) => {
                     warn!(err = %e.chain(), "unable to get boot uuid");

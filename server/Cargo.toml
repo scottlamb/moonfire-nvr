@@ -36,6 +36,7 @@ tracing-core = "0.1.30"
 tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }
 tracing-log = "0.2"
 tracing-subscriber = { version = "0.3.16" }
+uuid = { version = "1.1.2", features = ["serde", "std", "v7", "fast-rng"] }
 
 [dependencies]
 base = { package = "moonfire-base", path = "base" }
@@ -45,6 +46,7 @@ bpaf = { version = "0.9.15", features = ["autocomplete", "bright-color", "derive
 bytes = "1"
 byteorder = "1.0"
 cursive = { version = "0.21.1", default-features = false, features = ["termion-backend"] }
+data-encoding = "2.7.0"
 db = { package = "moonfire-db", path = "db" }
 futures = "0.3"
 h264-reader = { workspace = true }
@@ -76,9 +78,8 @@ tracing-subscriber = { version = "0.3.16", features = ["env-filter", "json"] }
 tracing-core = "0.1.30"
 tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }
 tracing-log = { workspace = true }
-ulid = "1.0.0"
 url = "2.1.1"
-uuid = { version = "1.1.2", features = ["serde", "std", "v4"] }
+uuid = { workspace = true }
 flate2 = "1.0.26"
 hyper-util = { version = "0.1.7", features = ["server-graceful", "tokio"] }
 http-body = "1.0.1"
