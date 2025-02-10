@@ -9,10 +9,7 @@
 # testing
 /coverage
 
-# production, current path
-/build
-
-# production, old path
+# production
 /dist
 
 # misc

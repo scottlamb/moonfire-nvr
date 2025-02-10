@@ -21,10 +21,10 @@
     "react-router-dom": "^6.22.3"
   },
   "scripts": {
-    "check-format": "prettier --check --ignore-path .gitignore .",
+    "check-format": "prettier --check --ignore-path .prettierignore .",
     "dev": "vite",
     "build": "tsc && vite build",
-    "format": "prettier --write --ignore-path .gitignore .",
+    "format": "prettier --write --ignore-path .prettierignore .",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest"
