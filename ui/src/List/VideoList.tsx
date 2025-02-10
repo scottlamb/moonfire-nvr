@@ -78,7 +78,9 @@ export function combine(
       (split90k === undefined || cur.endTime90k - r.startTime90k <= split90k)
     ) {
       cur.startId = r.startId;
-      cur.firstUncommitted == r.firstUncommitted ?? cur.firstUncommitted;
+      if (r.firstUncommitted !== undefined) {
+        cur.firstUncommitted = r.firstUncommitted;
+      }
       cur.startTime90k = r.startTime90k;
       cur.videoSamples += r.videoSamples;
       cur.sampleFileBytes += r.sampleFileBytes;
