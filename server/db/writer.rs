@@ -219,6 +219,12 @@ pub fn lower_retention(
                 let Some(stream) = db.streams_by_id().get(&l.stream_id) else {
                     bail!(NotFound, msg("no such stream {}", l.stream_id));
                 };
+                if stream.sample_file_dir_id != Some(dir_id) {
+                    bail!(
+                        InvalidArgument,
+                        msg("stream {} not in dir {}", l.stream_id, dir_id)
+                    );
+                }
                 fs_bytes_before =
                     stream.fs_bytes + stream.fs_bytes_to_add - stream.fs_bytes_to_delete;
                 extra = stream.config.retain_bytes - l.limit;
@@ -373,8 +379,13 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
     /// Rotates files for all streams and deletes stale files from previous runs.
     /// Called from main thread.
     fn initial_rotation(&mut self) -> Result<(), Error> {
+        let dir_id = self.dir_id;
         self.do_rotation(|db| {
-            let streams: Vec<i32> = db.streams_by_id().keys().copied().collect();
+            let streams: Vec<i32> = db
+                .streams_by_id()
+                .iter()
+                .filter_map(|(&id, s)| (s.sample_file_dir_id == Some(dir_id)).then_some(id))
+                .collect();
             for &stream_id in &streams {
                 delete_recordings(db, stream_id, 0)?;
             }
@@ -392,30 +403,27 @@ impl<C: Clocks + Clone> Syncer<C, Arc<dir::SampleFileDir>> {
             delete_recordings(&mut db)?;
             db.flush("synchronous deletion")?;
         }
-        let mut garbage: Vec<_> = {
+        let garbage: Vec<_> = {
             let l = self.db.lock();
             let d = l.sample_file_dirs_by_id().get(&self.dir_id).unwrap();
             d.garbage_needs_unlink.iter().copied().collect()
         };
         if !garbage.is_empty() {
-            // Try to delete files; retain ones in `garbage` that don't exist.
-            let mut errors = 0;
-            for &id in &garbage {
-                if let Err(err) = self.dir.unlink_file(id) {
-                    if err != nix::Error::ENOENT {
-                        warn!(%err, "dir: unable to unlink {}", id);
-                        errors += 1;
-                    }
+            // Try to delete files; retain those successfully deleted.
+            let mut unlinked = garbage;
+            unlinked.retain(|&id| match self.dir.unlink_file(id) {
+                Ok(()) => true,
+                Err(nix::Error::ENOENT) => {
+                    warn!("dir: recording {} already deleted!", id);
+                    true
                 }
-            }
-            if errors > 0 {
-                bail!(
-                    Unknown,
-                    msg("unable to unlink {errors} files (see earlier warning messages for details)"),
-                );
-            }
+                Err(e) => {
+                    warn!(%e, "dir: unable to unlink {}", id);
+                    false
+                }
+            });
             self.dir.sync()?;
-            self.db.lock().delete_garbage(self.dir_id, &mut garbage)?;
+            self.db.lock().mark_unlinked(self.dir_id, &mut unlinked)?;
             self.db.lock().flush("synchronous garbage collection")?;
         }
         Ok(())
@@ -474,7 +482,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         true
     }
 
-    /// Collects garbage (without forcing a sync). Called from worker thread.
+    /// Collects garbage (without forcing a database flush). Called from worker thread.
     fn collect_garbage(&mut self) -> Result<(), ShutdownError> {
         trace!("Collecting garbage");
         let mut garbage: Vec<_> = {
@@ -500,7 +508,7 @@ impl<C: Clocks + Clone, D: DirWriter> Syncer<C, D> {
         }
         clock::retry(c, &self.shutdown_rx, &mut || self.dir.sync())?;
         clock::retry(c, &self.shutdown_rx, &mut || {
-            self.db.lock().delete_garbage(self.dir_id, &mut garbage)
+            self.db.lock().mark_unlinked(self.dir_id, &mut garbage)
         })?;
         Ok(())
     }

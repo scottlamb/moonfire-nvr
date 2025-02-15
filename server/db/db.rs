@@ -912,7 +912,7 @@ impl LockedDatabase {
         Ok((id, recording))
     }
 
-    /// Marks the given uncomitted recording as synced and ready to flush.
+    /// Marks the given uncommitted recording as synced and ready to flush.
     /// This must be the next unsynced recording.
     pub(crate) fn mark_synced(&mut self, id: CompositeId) -> Result<(), Error> {
         let stream = match self.streams_by_id.get_mut(&id.stream()) {
@@ -945,7 +945,8 @@ impl LockedDatabase {
         Ok(())
     }
 
-    pub(crate) fn delete_garbage(
+    /// Marks the given garbage recordings as successfully unlinked from disk.
+    pub(crate) fn mark_unlinked(
         &mut self,
         dir_id: i32,
         ids: &mut Vec<CompositeId>,
