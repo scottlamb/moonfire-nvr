@@ -659,10 +659,12 @@ mod bench {
         let data = include_bytes!("testdata/video_sample_index.bin");
         b.bytes = data.len() as u64;
         b.iter(|| {
-            let mut it = SampleIndexIterator::default();
-            while it.next(data).unwrap() {}
-            assert_eq!(30104460, it.pos);
-            assert_eq!(5399985, it.start_90k);
+            for _i in 0..100 {
+                let mut it = SampleIndexIterator::default();
+                while it.next(data).unwrap() {}
+                assert_eq!(30104460, it.pos);
+                assert_eq!(5399985, it.start_90k);
+            }
         });
     }
 }

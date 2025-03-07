@@ -782,8 +782,11 @@ mod bench {
     extern crate test;
 
     use db::testutil::{self, TestDb};
-    use hyper;
-    use std::sync::{Arc, OnceLock};
+    use hyper::{self, service::service_fn};
+    use std::{
+        net::SocketAddr,
+        sync::{Arc, OnceLock},
+    };
     use uuid::Uuid;
 
     struct Server {
@@ -807,32 +810,41 @@ mod bench {
                 })
                 .unwrap(),
             );
-            let make_svc = hyper::service::make_service_fn(move |_conn| {
-                futures::future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
-                    let s = Arc::clone(&service);
-                    move |req| {
-                        Arc::clone(&s).serve(
+            let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
+            let listener = std::net::TcpListener::bind(addr).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let addr = listener.local_addr().unwrap(); // resolve port 0 to a real ephemeral port number.
+            let srv = async move {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                loop {
+                    let (conn, _remote_addr) = listener.accept().await.unwrap();
+                    conn.set_nodelay(true).unwrap();
+                    let io = hyper_util::rt::TokioIo::new(conn);
+                    let service = Arc::clone(&service);
+                    let svc_fn = service_fn(move |req| {
+                        Arc::clone(&service).serve(
                             req,
                             super::accept::ConnData {
                                 client_unix_uid: None,
                                 client_addr: None,
                             },
                         )
-                    }
-                }))
-            });
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let srv = {
-                let _guard = rt.enter();
-                let addr = ([127, 0, 0, 1], 0).into();
-                hyper::server::Server::bind(&addr)
-                    .tcp_nodelay(true)
-                    .serve(make_svc)
+                    });
+                    tokio::spawn(
+                        hyper::server::conn::http1::Builder::new().serve_connection(io, svc_fn),
+                    );
+                }
             };
-            let addr = srv.local_addr(); // resolve port 0 to a real ephemeral port number.
-            ::std::thread::spawn(move || {
-                rt.block_on(srv).unwrap();
-            });
+            std::thread::Builder::new()
+                .name("bench-server".to_owned())
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+                    rt.block_on(srv)
+                })
+                .unwrap();
             Server {
                 base_url: format!("http://{}:{}", addr.ip(), addr.port()),
                 test_camera_uuid,
@@ -852,13 +864,18 @@ mod bench {
         ))
         .unwrap();
         let client = reqwest::Client::new();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let f = || {
-            rt.block_on(async {
-                let resp = client.get(url.clone()).send().await.unwrap();
-                assert_eq!(resp.status(), reqwest::StatusCode::OK);
-                let _b = resp.bytes().await.unwrap();
-            });
+            for _i in 0..100 {
+                rt.block_on(async {
+                    let resp = client.get(url.clone()).send().await.unwrap();
+                    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+                    let _b = resp.bytes().await.unwrap();
+                });
+            }
         };
         f(); // warm.
         b.iter(f);

@@ -2973,13 +2973,16 @@ mod tests {
 mod bench {
     extern crate test;
 
+    use std::convert::Infallible;
+    use std::net::SocketAddr;
+
     use super::tests::create_mp4_from_db;
     use base::clock::RealClocks;
     use db::recording;
     use db::testutil::{self, TestDb};
-    use futures::future;
     use http_serve;
     use hyper;
+    use hyper::service::service_fn;
     use url::Url;
 
     /// An HTTP server for benchmarking.
@@ -3000,28 +3003,35 @@ mod bench {
             testutil::add_dummy_recordings_to_db(&db.db, 60);
             let mp4 = create_mp4_from_db(&db, 0, 0, false);
             let p = mp4.0.initial_sample_byte_pos;
-            let make_svc = hyper::service::make_service_fn(move |_conn| {
-                future::ok::<_, std::convert::Infallible>(hyper::service::service_fn({
+            let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
+            let listener = std::net::TcpListener::bind(addr).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let addr = listener.local_addr().unwrap(); // resolve port 0 to a real ephemeral port number.
+            let srv = async move {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                loop {
+                    let (conn, _remote_addr) = listener.accept().await.unwrap();
+                    conn.set_nodelay(true).unwrap();
+                    let io = hyper_util::rt::TokioIo::new(conn);
                     let mp4 = mp4.clone();
-                    move |req| {
-                        future::ok::<hyper::Response<crate::body::Body>, hyper::Error>(
-                            http_serve::serve(mp4.clone(), &req),
-                        )
-                    }
-                }))
-            });
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let srv = {
-                let _guard = rt.enter();
-                let addr = ([127, 0, 0, 1], 0).into();
-                hyper::server::Server::bind(&addr)
-                    .tcp_nodelay(true)
-                    .serve(make_svc)
+                    let svc_fn = service_fn(move |req| {
+                        futures::future::ok::<_, Infallible>(http_serve::serve(mp4.clone(), &req))
+                    });
+                    tokio::spawn(
+                        hyper::server::conn::http1::Builder::new().serve_connection(io, svc_fn),
+                    );
+                }
             };
-            let addr = srv.local_addr(); // resolve port 0 to a real ephemeral port number.
-            ::std::thread::spawn(move || {
-                rt.block_on(srv).unwrap();
-            });
+            std::thread::Builder::new()
+                .name("bench-server".to_owned())
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+                    rt.block_on(srv)
+                })
+                .unwrap();
             BenchServer {
                 url: Url::parse(&format!("http://{}:{}/", addr.ip(), addr.port())).unwrap(),
                 generated_len: p,
@@ -3053,7 +3063,11 @@ mod bench {
         db.with_recording_playback(segment.s.id, &mut |playback| {
             let v = segment.build_index(playback).unwrap(); // warm.
             b.bytes = v.len() as u64; // define the benchmark performance in terms of output bytes.
-            b.iter(|| segment.build_index(playback).unwrap());
+            b.iter(|| {
+                for _i in 0..100 {
+                    segment.build_index(playback).unwrap();
+                }
+            });
             Ok(())
         })
         .unwrap();
@@ -3067,17 +3081,25 @@ mod bench {
         let p = server.generated_len;
         b.bytes = p;
         let client = reqwest::Client::new();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let run = || {
             rt.block_on(async {
-                let resp = client
-                    .get(server.url.clone())
-                    .header(reqwest::header::RANGE, format!("bytes=0-{}", p - 1))
-                    .send()
-                    .await
-                    .unwrap();
-                let b = resp.bytes().await.unwrap();
-                assert_eq!(p, b.len() as u64);
+                for _i in 0..100 {
+                    let mut resp = client
+                        .get(server.url.clone())
+                        .header(reqwest::header::RANGE, format!("bytes=0-{}", p - 1))
+                        .send()
+                        .await
+                        .unwrap();
+                    let mut size = 0u64;
+                    while let Some(b) = resp.chunk().await.unwrap() {
+                        size += u64::try_from(b.len()).unwrap();
+                    }
+                    assert_eq!(p, size);
+                }
             });
         };
         run(); // warm.
@@ -3090,7 +3112,9 @@ mod bench {
         let db = TestDb::new(RealClocks {});
         testutil::add_dummy_recordings_to_db(&db.db, 60);
         b.iter(|| {
-            create_mp4_from_db(&db, 0, 0, false);
+            for _i in 0..100 {
+                create_mp4_from_db(&db, 0, 0, false);
+            }
         });
     }
 }
