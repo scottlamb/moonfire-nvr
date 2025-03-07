@@ -403,7 +403,7 @@ impl Segment {
                 .lock()
                 .with_recording_playback(self.s.id, &mut |playback| self.build_index(playback))
                 .map_err(|err| {
-                    error!(%err, recording_id = %self.s.id, "unable to build index for segment");
+                    error!(err = %err.chain(), recording_id = %self.s.id, "unable to build index for segment");
                 })
             })
             .as_deref()

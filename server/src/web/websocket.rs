@@ -60,7 +60,7 @@ where
             .await;
             if let Err(err) = handler(&mut ws).await {
                 // TODO: use a nice JSON message format for errors.
-                tracing::error!(%err, "closing with error");
+                tracing::error!(err = %err.chain(), "closing with error");
                 let _ = ws
                     .send(tungstenite::Message::Text(err.to_string().into()))
                     .await;
