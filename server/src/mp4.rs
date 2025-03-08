@@ -61,10 +61,10 @@ use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use bytes::BytesMut;
 use db::dir;
 use db::recording::{self, rescale, TIME_UNITS_PER_SEC};
-use futures::stream::{self, TryStreamExt};
 use futures::Stream;
 use http::header::HeaderValue;
 use hyper::body::Buf;
+use pin_project::pin_project;
 use reffers::ARefss;
 use smallvec::SmallVec;
 use std::cmp;
@@ -758,19 +758,37 @@ impl Slice {
     }
 }
 
+#[pin_project(project = SliceStreamProj)]
+enum SliceStream {
+    Once(Option<Result<Chunk, Error>>),
+    File(#[pin] db::dir::reader::FileStream),
+}
+
+impl futures::stream::Stream for SliceStream {
+    type Item = Result<Chunk, BoxedError>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.project() {
+            SliceStreamProj::Once(o) => {
+                std::task::Poll::Ready(o.take().map(|r| r.map_err(wrap_error)))
+            }
+            SliceStreamProj::File(f) => f.poll_next(cx).map_ok(Chunk::from).map_err(wrap_error),
+        }
+    }
+}
+
 impl slices::Slice for Slice {
     type Ctx = File;
     type Chunk = Chunk;
+    type Stream = SliceStream;
 
     fn end(&self) -> u64 {
         self.0 & 0xFF_FF_FF_FF_FF
     }
-    fn get_range(
-        &self,
-        f: &File,
-        range: Range<u64>,
-        len: u64,
-    ) -> Box<dyn Stream<Item = Result<Self::Chunk, BoxedError>> + Send + Sync> {
+    fn get_range(&self, f: &File, range: Range<u64>, len: u64) -> SliceStream {
         trace!("getting mp4 slice {:?}'s range {:?} / {}", self, range, len);
         let p = self.p();
         let res = match self.t() {
@@ -802,22 +820,20 @@ impl slices::Slice for Slice {
             SliceType::SubtitleSampleData => f.0.get_subtitle_sample_data(p, range.clone(), len),
             SliceType::Truns => self.wrap_truns(f, range.clone(), len as usize),
         };
-        Box::new(stream::once(futures::future::ready(
-            res.map_err(wrap_error).and_then(move |c| {
-                if c.remaining() != (range.end - range.start) as usize {
-                    return Err(wrap_error(err!(
-                        Internal,
-                        msg(
-                            "{:?} range {:?} produced incorrect len {}",
-                            self,
-                            range,
-                            c.remaining()
-                        )
-                    )));
-                }
-                Ok(c)
-            }),
-        )))
+        SliceStream::Once(Some(res.and_then(move |c| {
+            if c.remaining() != (range.end - range.start) as usize {
+                bail!(
+                    Internal,
+                    msg(
+                        "{:?} range {:?} produced incorrect len {}",
+                        self,
+                        range,
+                        c.remaining()
+                    )
+                );
+            }
+            Ok(c)
+        })))
     }
 
     fn get_slices(ctx: &File) -> &Slices<Self> {
@@ -1796,32 +1812,20 @@ impl FileInner {
             .into())
     }
 
-    /// Gets a `Chunk` of video sample data from disk.
-    /// This works by `mmap()`ing in the data. There are a couple caveats:
-    ///
-    ///    * The thread which reads the resulting slice is likely to experience major page faults.
-    ///      Eventually this will likely be rewritten to `mmap()` the memory in another thread, and
-    ///      `mlock()` and send chunks of it to be read and `munlock()`ed to avoid this problem.
-    ///
-    ///    * If the backing file is truncated, the program will crash with `SIGBUS`. This shouldn't
-    ///      happen because nothing should be touching Moonfire NVR's files but itself.
-    fn get_video_sample_data(
-        &self,
-        i: usize,
-        r: Range<u64>,
-    ) -> Box<dyn Stream<Item = Result<Chunk, BoxedError>> + Send + Sync> {
+    /// Gets a stream representing a range of segment `i`'s sample data from disk.
+    fn get_video_sample_data(&self, i: usize, r: Range<u64>) -> SliceStream {
         let s = &self.segments[i];
         let sr = s.s.sample_file_range();
         let f = match self.dirs_by_stream_id.get(&s.s.id.stream()) {
             None => {
-                return Box::new(stream::iter(std::iter::once(Err(wrap_error(err!(
+                return SliceStream::Once(Some(Err(err!(
                     NotFound,
                     msg("{}: stream not found", s.s.id)
-                ))))))
+                ))))
             }
             Some(d) => d.open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start)),
         };
-        Box::new(f.map_ok(Chunk::from).map_err(wrap_error))
+        SliceStream::File(f)
     }
 
     fn get_subtitle_sample_data(&self, i: usize, r: Range<u64>, len: u64) -> Result<Chunk, Error> {

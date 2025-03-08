@@ -17,7 +17,8 @@ use tracing_futures::Instrument;
 /// Each `Slice` instance belongs to a single `Slices`.
 pub trait Slice: fmt::Debug + Sized + Sync + 'static {
     type Ctx: Send + Sync + Clone;
-    type Chunk: Send + Sync;
+    type Chunk: Send + Sync + 'static;
+    type Stream: Stream<Item = Result<Self::Chunk, BoxedError>> + Send + Sync;
 
     /// The byte position (relative to the start of the `Slices`) of the end of this slice,
     /// exclusive. Note the starting position (and thus length) are inferred from the previous
@@ -27,12 +28,10 @@ pub trait Slice: fmt::Debug + Sized + Sync + 'static {
     /// Gets the body bytes indicated by `r`, which is relative to this slice's start.
     /// The additional argument `ctx` is as supplied to the `Slices`.
     /// The additional argument `l` is the length of this slice, as determined by the `Slices`.
-    fn get_range(
-        &self,
-        ctx: &Self::Ctx,
-        r: Range<u64>,
-        len: u64,
-    ) -> Box<dyn Stream<Item = Result<Self::Chunk, BoxedError>> + Sync + Send>;
+    ///
+    /// Note that unlike [`http_entity::Entity::get_range`], this is called many times per request,
+    /// so it's worth defining a custom stream type to avoid allocation overhead.
+    fn get_range(&self, ctx: &Self::Ctx, r: Range<u64>, len: u64) -> Self::Stream;
 
     fn get_slices(ctx: &Self::Ctx) -> &Slices<Self>;
 }
@@ -127,7 +126,7 @@ where
     }
 
     /// Writes `range` to `out`.
-    /// This interface mirrors `http_serve::Entity::write_to`, with the additional `ctx` argument.
+    /// This interface mirrors `http_serve::Entity::get_range`, with the additional `ctx` argument.
     pub fn get_range(
         &self,
         ctx: &S::Ctx,
@@ -170,7 +169,7 @@ where
                     let l = s_end - slice_start;
                     body = s.get_range(&c, start_pos..min_end - slice_start, l);
                 };
-                futures::future::ready(Some((Pin::from(body), (c, i + 1, 0, min_end))))
+                futures::future::ready(Some((body, (c, i + 1, 0, min_end))))
             },
         );
         Box::pin(bodies.flatten().in_current_span())
@@ -182,7 +181,7 @@ mod tests {
     use super::{Slice, Slices};
     use crate::body::BoxedError;
     use db::testutil;
-    use futures::stream::{self, Stream, TryStreamExt};
+    use futures::stream::{self, TryStreamExt};
     use std::ops::Range;
     use std::pin::Pin;
 
@@ -201,6 +200,7 @@ mod tests {
     impl Slice for FakeSlice {
         type Ctx = &'static Slices<FakeSlice>;
         type Chunk = FakeChunk;
+        type Stream = stream::Once<futures::future::Ready<Result<FakeChunk, BoxedError>>>;
 
         fn end(&self) -> u64 {
             self.end
@@ -211,11 +211,11 @@ mod tests {
             _ctx: &&'static Slices<FakeSlice>,
             r: Range<u64>,
             _l: u64,
-        ) -> Box<dyn Stream<Item = Result<FakeChunk, BoxedError>> + Send + Sync> {
-            Box::new(stream::once(futures::future::ok(FakeChunk {
+        ) -> Self::Stream {
+            stream::once(futures::future::ok(FakeChunk {
                 slice: self.name,
                 range: r,
-            })))
+            }))
         }
 
         fn get_slices(ctx: &&'static Slices<FakeSlice>) -> &'static Slices<Self> {

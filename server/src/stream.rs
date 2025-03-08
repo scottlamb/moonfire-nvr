@@ -8,7 +8,6 @@ use futures::StreamExt;
 use retina::client::Demuxed;
 use retina::codec::CodecItem;
 use std::pin::Pin;
-use std::result::Result;
 use tracing::Instrument;
 use url::Url;
 

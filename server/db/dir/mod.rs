@@ -7,7 +7,7 @@
 //! This mostly includes opening a directory and looking for recordings within it.
 //! Updates to the directory happen through [crate::writer].
 
-mod reader;
+pub mod reader;
 
 use crate::coding;
 use crate::db::CompositeId;

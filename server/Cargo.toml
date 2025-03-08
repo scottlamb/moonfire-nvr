@@ -84,6 +84,7 @@ flate2 = "1.0.26"
 hyper-util = { version = "0.1.7", features = ["server-graceful", "tokio"] }
 http-body = "1.0.1"
 http-body-util = "0.1.2"
+pin-project = "1.1.10"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libsystemd = "0.7.0"

@@ -6,7 +6,6 @@ use crate::stream;
 use base::clock::{Clocks, TimerGuard};
 use base::{bail, err, Error};
 use db::{dir, recording, writer, Camera, Database, Stream};
-use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{debug, info, trace, warn, Instrument};
