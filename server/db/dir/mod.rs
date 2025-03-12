@@ -421,12 +421,12 @@ mod tests {
         meta.dir_uuid.extend_from_slice(fake_uuid);
         {
             let o = meta.last_complete_open.mut_or_insert_default();
-            o.id = u32::max_value();
+            o.id = u32::MAX;
             o.uuid.extend_from_slice(fake_uuid);
         }
         {
             let o = meta.in_progress_open.mut_or_insert_default();
-            o.id = u32::max_value();
+            o.id = u32::MAX;
             o.uuid.extend_from_slice(fake_uuid);
         }
         let data = meta

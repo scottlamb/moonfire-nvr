@@ -650,7 +650,7 @@ pub struct CompositeId(pub i64);
 
 impl CompositeId {
     pub fn new(stream_id: i32, recording_id: i32) -> Self {
-        CompositeId((stream_id as i64) << 32 | recording_id as i64)
+        CompositeId(((stream_id as i64) << 32) | recording_id as i64)
     }
 
     pub fn stream(self) -> i32 {
@@ -2519,7 +2519,7 @@ mod tests {
         rows = 0;
         {
             let db = db.lock();
-            let all_time = recording::Time(i64::min_value())..recording::Time(i64::max_value());
+            let all_time = recording::Time(i64::MIN)..recording::Time(i64::MAX);
             db.list_recordings_by_time(stream_id, all_time, &mut |_row| {
                 rows += 1;
                 Ok(())
@@ -2546,7 +2546,7 @@ mod tests {
         let mut recording_id = None;
         {
             let db = db.lock();
-            let all_time = recording::Time(i64::min_value())..recording::Time(i64::max_value());
+            let all_time = recording::Time(i64::MIN)..recording::Time(i64::MAX);
             db.list_recordings_by_time(stream_id, all_time, &mut |row| {
                 rows += 1;
                 recording_id = Some(row.id);
@@ -2868,9 +2868,8 @@ mod tests {
             .get(&sample_file_dir_id)
             .unwrap()
             .garbage_unlinked
-            .iter()
-            .copied()
-            .collect();
+            .to_vec();
+
         assert_eq!(&g, &[]);
     }
 

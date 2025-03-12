@@ -355,7 +355,7 @@ mod tests {
                 );
                 let duration = goal - self.slept;
                 let buf_part = cmp::min(self.buffered, duration);
-                self.buffered = self.buffered - buf_part;
+                self.buffered -= buf_part;
                 self.clocks.sleep(duration - buf_part);
                 self.slept = goal;
             }
@@ -440,8 +440,8 @@ mod tests {
             Box::new(stream),
         );
         stream.ts_offset = 123456; // starting pts of the input should be irrelevant
-        stream.ts_offset_pkts_left = u32::max_value();
-        stream.pkts_left = u32::max_value();
+        stream.ts_offset_pkts_left = u32::MAX;
+        stream.pkts_left = u32::MAX;
         let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
         let opener = MockOpener {
             expected_url: url::Url::parse("rtsp://test-camera/main").unwrap(),
@@ -516,7 +516,6 @@ mod tests {
         assert_eq!(recording::Time(128700576719993), recordings[1].start);
         assert_eq!(db::RecordingFlags::TrailingZero as i32, recordings[1].flags);
 
-        drop(env);
         drop(opener);
     }
 }

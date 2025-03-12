@@ -1106,6 +1106,8 @@ mod tests {
 
     enum MockFileAction {
         SyncAll(Box<dyn Fn() -> Result<(), io::Error> + Send>),
+
+        #[allow(clippy::type_complexity)]
         Write(Box<dyn Fn(&[u8]) -> Result<usize, io::Error> + Send>),
     }
 
@@ -1263,7 +1265,7 @@ mod tests {
                 &mut h.shutdown_rx,
                 b"2",
                 recording::Time(2),
-                i32::max_value() as i64 + 1,
+                i64::from(i32::MAX) + 1,
                 true,
                 video_sample_entry_id,
             )

@@ -175,7 +175,7 @@ mod tests {
         info!("header: {}", cookie.header());
 
         let resp = cli
-            .get(&format!("{}/api/", &s.base_url))
+            .get(format!("{}/api/", &s.base_url))
             .header(reqwest::header::COOKIE, cookie.header())
             .send()
             .await
@@ -192,7 +192,7 @@ mod tests {
         p.insert("username", "slamb");
         p.insert("password", "hunter2");
         let resp = cli
-            .post(&format!("{}/api/login", &s.base_url))
+            .post(format!("{}/api/login", &s.base_url))
             .json(&p)
             .send()
             .await
@@ -202,7 +202,7 @@ mod tests {
 
         // A GET shouldn't work.
         let resp = cli
-            .get(&format!("{}/api/logout", &s.base_url))
+            .get(format!("{}/api/logout", &s.base_url))
             .header(reqwest::header::COOKIE, cookie.header())
             .send()
             .await
@@ -211,7 +211,7 @@ mod tests {
 
         // Neither should a POST without a csrf token.
         let resp = cli
-            .post(&format!("{}/api/logout", &s.base_url))
+            .post(format!("{}/api/logout", &s.base_url))
             .header(reqwest::header::COOKIE, cookie.header())
             .send()
             .await
@@ -221,7 +221,7 @@ mod tests {
         // But it should work with the csrf token.
         // Retrieve that from the toplevel API request.
         let toplevel: serde_json::Value = cli
-            .post(&format!("{}/api/", &s.base_url))
+            .post(format!("{}/api/", &s.base_url))
             .header(reqwest::header::COOKIE, cookie.header())
             .send()
             .await
@@ -240,7 +240,7 @@ mod tests {
         let mut p = FastHashMap::default();
         p.insert("csrf", csrf);
         let resp = cli
-            .post(&format!("{}/api/logout", &s.base_url))
+            .post(format!("{}/api/logout", &s.base_url))
             .header(reqwest::header::COOKIE, cookie.header())
             .json(&p)
             .send()
@@ -255,7 +255,7 @@ mod tests {
 
         // It should also be invalidated server-side.
         let resp = cli
-            .get(&format!("{}/api/", &s.base_url))
+            .get(format!("{}/api/", &s.base_url))
             .header(reqwest::header::COOKIE, cookie.header())
             .send()
             .await

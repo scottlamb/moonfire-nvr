@@ -1073,8 +1073,8 @@ mod tests {
             .unwrap();
         assert_eq!(s.use_count, 1);
 
-        let mut tx = conn.transaction().unwrap();
-        state.flush(&mut tx).unwrap();
+        let tx = conn.transaction().unwrap();
+        state.flush(&tx).unwrap();
         tx.commit().unwrap();
         state.post_flush();
 
@@ -1224,8 +1224,8 @@ mod tests {
         c.username = "foo".to_owned();
         state.apply(&conn, c).unwrap();
 
-        assert!(state.users_by_name.get("slamb").is_none());
-        assert!(state.users_by_name.get("foo").is_some());
+        assert!(!state.users_by_name.contains_key("slamb"));
+        assert!(state.users_by_name.contains_key("foo"));
     }
 
     #[test]

@@ -2009,7 +2009,6 @@ mod tests {
     use std::fs;
     use std::ops::Range;
     use std::path::Path;
-    use std::pin::Pin;
     use std::str;
     use tracing::info;
 
@@ -2018,7 +2017,7 @@ mod tests {
         E::Error: ::std::fmt::Debug,
     {
         let mut p = 0;
-        Pin::from(e.get_range(start..start + slice.len() as u64))
+        e.get_range(start..start + slice.len() as u64)
             .try_for_each(|mut chunk| {
                 let len = chunk.remaining();
                 chunk.copy_to_slice(&mut slice[p..p + len]);
@@ -2044,7 +2043,7 @@ mod tests {
             hasher.update(&b"\r\n"[..]);
         }
         hasher.update(&b"\r\n"[..]);
-        Pin::from(e.get_range(0..e.len()))
+        e.get_range(0..e.len())
             .try_fold(hasher, |mut hasher, mut chunk| {
                 while chunk.has_remaining() {
                     let c = chunk.chunk();
@@ -2157,8 +2156,7 @@ mod tests {
             let interior = self.stack.last().expect("at root").interior.clone();
             let len = (interior.end - interior.start) as usize;
             trace!("get_all: start={}, len={}", interior.start, len);
-            let mut out = Vec::with_capacity(len);
-            unsafe { out.set_len(len) };
+            let mut out = vec![0; len];
             fill_slice(&mut out[..], &self.mp4, interior.start).await;
             out
         }
@@ -2350,7 +2348,7 @@ mod tests {
         builder
             .include_timestamp_subtitle_track(include_subtitles)
             .unwrap();
-        let all_time = recording::Time(i64::min_value())..recording::Time(i64::max_value());
+        let all_time = recording::Time(i64::MIN)..recording::Time(i64::MAX);
         {
             let db = tdb.db.lock();
             db.list_recordings_by_time(TEST_STREAM_ID, all_time, &mut |r| {
@@ -2381,7 +2379,7 @@ mod tests {
             .open(&filename)
             .unwrap();
         use ::std::io::Write;
-        Pin::from(mp4.get_range(0..mp4.len()))
+        mp4.get_range(0..mp4.len())
             .try_for_each(|mut chunk| {
                 while chunk.has_remaining() {
                     let c = chunk.chunk();

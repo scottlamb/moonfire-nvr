@@ -755,7 +755,7 @@ mod tests {
         let s = Server::new(None);
         let cli = reqwest::Client::new();
         let resp = cli
-            .get(&format!("{}/api/", &s.base_url))
+            .get(format!("{}/api/", &s.base_url))
             .send()
             .await
             .unwrap();

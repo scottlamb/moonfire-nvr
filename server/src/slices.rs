@@ -183,7 +183,6 @@ mod tests {
     use db::testutil;
     use futures::stream::{self, TryStreamExt};
     use std::ops::Range;
-    use std::pin::Pin;
 
     #[derive(Debug, Eq, PartialEq)]
     pub struct FakeChunk {
@@ -241,10 +240,7 @@ mod tests {
 
     async fn get_range(r: Range<u64>) -> Vec<FakeChunk> {
         let slices = slices();
-        Pin::from(slices.get_range(&slices, r))
-            .try_collect()
-            .await
-            .unwrap()
+        slices.get_range(&slices, r).try_collect().await.unwrap()
     }
 
     #[test]

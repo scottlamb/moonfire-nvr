@@ -291,7 +291,7 @@ mod tests {
         let s = Server::new(Some(permissions));
         let cli = reqwest::Client::new();
         let resp = cli
-            .get(&format!(
+            .get(format!(
                 "{}/api/cameras/{}/main/view.mp4",
                 &s.base_url, s.db.test_camera_uuid
             ))

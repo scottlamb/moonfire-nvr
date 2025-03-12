@@ -198,7 +198,7 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
         wall_duration_90k: 5399985,
         video_samples: 1800,
         video_sync_samples: 60,
-        video_sample_entry_id: video_sample_entry_id,
+        video_sample_entry_id,
         video_index: data,
         run_offset: 0,
         ..Default::default()
