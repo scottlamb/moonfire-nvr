@@ -1521,7 +1521,7 @@ impl LockedDatabase {
                     }
                     return result;
                 }
-                Err(err!(Internal, msg("no such recording {id}")))
+                bail!(Internal, msg("no such recording {id}"))
             }
         }
     }

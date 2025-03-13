@@ -210,6 +210,7 @@ fn make_listener(
                         preopened.keys().join(", ")
                     )
                 )
+                .build()
             });
         }
         #[cfg(not(target_os = "linux"))]

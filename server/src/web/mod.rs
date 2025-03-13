@@ -134,7 +134,7 @@ async fn into_json_body(
 
 fn parse_json_body<'a, T: serde::Deserialize<'a>>(body: &'a [u8]) -> Result<T, base::Error> {
     serde_json::from_slice(body)
-        .map_err(|e| err!(InvalidArgument, msg("bad request body"), source(e)))
+        .map_err(|e| err!(InvalidArgument, msg("bad request body"), source(e)).build())
 }
 
 fn require_csrf_if_session(caller: &Caller, csrf: Option<&str>) -> Result<(), base::Error> {
@@ -270,7 +270,7 @@ impl Service {
             Path::StreamLiveMp4Segments(..) => {
                 unreachable!("StreamLiveMp4Segments should have already been handled")
             }
-            Path::NotFound => return Err(err!(NotFound, msg("path not understood"))),
+            Path::NotFound => bail!(NotFound, msg("path not understood")),
             Path::Login => (
                 CacheControl::PrivateDynamic,
                 self.login(req, authreq).await?,

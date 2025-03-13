@@ -8,6 +8,8 @@ use std::fmt::{Debug, Display};
 //use std::num::NonZeroU16;
 
 pub use coded::ErrorKind;
+use rc_box::ArcBox;
+use std::sync::Arc;
 
 /// Like [`coded::ToErrKind`] but with more third-party implementations.
 ///
@@ -126,7 +128,8 @@ impl ToErrKind for nix::Error {
     }
 }
 
-pub struct Error(Box<ErrorInner>);
+#[derive(Clone)]
+pub struct Error(Arc<ErrorInner>);
 
 struct ErrorInner {
     kind: ErrorKind,
@@ -136,12 +139,12 @@ struct ErrorInner {
     source: Option<Box<dyn StdError + Sync + Send>>,
 }
 
-pub struct ErrorBuilder(Box<ErrorInner>);
+pub struct ErrorBuilder(rc_box::ArcBox<ErrorInner>);
 
 impl Default for ErrorBuilder {
     #[inline]
     fn default() -> Self {
-        Self(Box::new(ErrorInner {
+        Self(ArcBox::new(ErrorInner {
             kind: ErrorKind::Unknown,
             msg: None,
             // http_status: None,
@@ -185,7 +188,12 @@ impl ErrorBuilder {
 
     #[inline]
     pub fn build(self) -> Error {
-        Error(self.0)
+        Error(self.0.into())
+    }
+
+    #[inline]
+    pub fn boxed(self) -> Box<dyn StdError + Send + Sync + 'static> {
+        Box::new(ArcBox::into_inner(self.0))
     }
 }
 
@@ -200,7 +208,7 @@ macro_rules! cvt {
         impl From<$t> for Error {
             #[inline(always)]
             fn from(t: $t) -> Self {
-                Self($crate::ErrorBuilder::from(t).0)
+                Self($crate::ErrorBuilder::from(t).0.into())
             }
         }
     };
@@ -213,9 +221,14 @@ cvt!(nix::Error);
 impl From<Error> for ErrorBuilder {
     #[inline]
     fn from(value: Error) -> Self {
-        Self::default()
-            .kind(ToErrKind::err_kind(&value))
-            .source(value)
+        Self::default().kind(value.kind()).source(value)
+    }
+}
+
+impl From<ErrorBuilder> for Error {
+    #[inline]
+    fn from(value: ErrorBuilder) -> Self {
+        Self(value.0.into())
     }
 }
 
@@ -232,19 +245,13 @@ fn maybe_backtrace(kind: ErrorKind) -> Option<Backtrace> {
 impl Error {
     #[inline]
     pub fn wrap<E: StdError + Sync + Send + 'static>(kind: ErrorKind, e: E) -> Self {
-        Self(Box::new(ErrorInner {
+        Self(Arc::new(ErrorInner {
             kind,
             msg: None,
             // http_status: None,
             backtrace: maybe_backtrace(kind),
             source: Some(Box::new(e)),
         }))
-    }
-
-    #[inline]
-    pub fn map<F: FnOnce(ErrorKind) -> ErrorKind>(mut self, f: F) -> Self {
-        self.0.kind = f(self.0.kind);
-        self
     }
 
     #[inline]
@@ -264,18 +271,37 @@ impl Error {
     /// the current error but not any of the sources.
     #[inline]
     pub fn chain(&self) -> impl Display + '_ {
-        ErrorChain(self)
+        ErrorChain(&self.0)
+    }
+
+    #[inline]
+    pub fn boxed(self) -> Box<dyn StdError + Send + Sync + 'static> {
+        Box::new(self)
     }
 }
 
 /// Formats this error alone (*not* its full chain).
 impl Display for Error {
+    #[inline(always)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0.msg {
-            None => std::fmt::Display::fmt(self.0.kind.grpc_name(), f)?,
-            Some(ref msg) => write!(f, "{}: {}", self.0.kind.grpc_name(), msg)?,
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl Display for ErrorBuilder {
+    #[inline(always)]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl Display for ErrorInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.msg {
+            None => std::fmt::Display::fmt(self.kind.grpc_name(), f)?,
+            Some(ref msg) => write!(f, "{}: {}", self.kind.grpc_name(), msg)?,
         }
-        if let Some(ref bt) = self.0.backtrace {
+        if let Some(ref bt) = self.backtrace {
             // TODO: only with "alternate"/# modifier?
             // Shorten this, maybe by switching to `backtrace` + using
             // `backtrace_ext::short_frames_strict` or similar.
@@ -285,14 +311,29 @@ impl Display for Error {
     }
 }
 
-impl Debug for Error {
+impl Debug for ErrorInner {
+    #[inline(always)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&ErrorChain(self), f)
     }
 }
 
+impl Debug for Error {
+    #[inline(always)]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl Debug for ErrorBuilder {
+    #[inline(always)]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
 /// Value returned by [`Error::chain`].
-struct ErrorChain<'a>(&'a Error);
+struct ErrorChain<'a>(&'a ErrorInner);
 
 impl Display for ErrorChain<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -306,10 +347,17 @@ impl Display for ErrorChain<'_> {
     }
 }
 
-impl StdError for Error {
+impl StdError for ErrorInner {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         // https://users.rust-lang.org/t/question-about-error-source-s-static-return-type/34515/8
-        self.0.source.as_ref().map(|e| e.as_ref() as &_)
+        self.source.as_ref().map(|e| e.as_ref() as &_)
+    }
+}
+
+impl StdError for Error {
+    #[inline(always)]
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
     }
 }
 
@@ -429,7 +477,7 @@ macro_rules! err {
     // <https://veykril.github.io/tlborm/decl-macros/patterns/push-down-acc.html>.
 
     (@accum $body:tt $(,)?) => {
-        $body.build()
+        $body
     };
 
     (@accum ($($body:tt)*), source($src:expr) $($tail:tt)*) => {

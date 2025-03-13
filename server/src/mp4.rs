@@ -54,7 +54,7 @@
 //! * mdat (media data container)
 //! ```
 
-use crate::body::{wrap_error, BoxedError, Chunk};
+use crate::body::{BoxedError, Chunk};
 use crate::slices::{self, Slices};
 use base::{bail, err, Error, ErrorKind, ResultExt};
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
@@ -76,7 +76,7 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, trace, warn};
 
 /// This value should be incremented any time a change is made to this file that causes different
 /// bytes or headers to be output for a particular set of `FileBuilder` options. Incrementing this
@@ -331,8 +331,8 @@ struct Segment {
     ///    1. stts: `slice[.. stsz_start]`
     ///    2. stsz: `slice[stsz_start .. stss_start]`
     ///    3. stss: `slice[stss_start ..]`
-    index: OnceLock<Result<Box<[u8]>, ()>>,
-
+    index: OnceLock<Result<Box<[u8]>, Error>>,
+    // index: OnceLock<Result<Box<[u8]>, ()>>,
     /// The 1-indexed frame number in the `File` of the first frame in this segment.
     first_frame_num: u32,
     num_subtitle_samples: u16,
@@ -399,15 +399,14 @@ impl Segment {
     fn index<'a>(&'a self, db: &db::Database) -> Result<&'a [u8], Error> {
         self.index
             .get_or_init(|| {
-                db
-                .lock()
-                .with_recording_playback(self.s.id, &mut |playback| self.build_index(playback))
-                .map_err(|err| {
-                    error!(err = %err.chain(), recording_id = %self.s.id, "unable to build index for segment");
-                })
+                db.lock()
+                    .with_recording_playback(self.s.id, &mut |playback| self.build_index(playback))
+                    .map_err(|err| {
+                        err!(err, msg("unable to build index for segment {}", self.s.id)).build()
+                    })
             })
             .as_deref()
-            .map_err(|()| err!(Unknown, msg("unable to build index; see logs")))
+            .map_err(Error::clone)
     }
 
     fn lens(&self) -> SegmentLengths {
@@ -773,9 +772,9 @@ impl futures::stream::Stream for SliceStream {
     ) -> std::task::Poll<Option<Self::Item>> {
         match self.project() {
             SliceStreamProj::Once(o) => {
-                std::task::Poll::Ready(o.take().map(|r| r.map_err(wrap_error)))
+                std::task::Poll::Ready(o.take().map(|r| r.map_err(Error::boxed)))
             }
-            SliceStreamProj::File(f) => f.poll_next(cx).map_ok(Chunk::from).map_err(wrap_error),
+            SliceStreamProj::File(f) => f.poll_next(cx).map_ok(Chunk::from).map_err(Error::boxed),
         }
     }
 }
@@ -795,10 +794,7 @@ impl slices::Slice for Slice {
             SliceType::Static => {
                 let s = STATIC_BYTESTRINGS[p];
                 if u64::try_from(s.len()).unwrap() != len {
-                    Err(err!(
-                        Internal,
-                        msg("expected len {} got len {}", len, s.len())
-                    ))
+                    Err(err!(Internal, msg("expected len {} got len {}", len, s.len())).build())
                 } else {
                     let part = &s[range.start as usize..range.end as usize];
                     Ok(part.into())
@@ -1821,7 +1817,8 @@ impl FileInner {
                 return SliceStream::Once(Some(Err(err!(
                     NotFound,
                     msg("{}: stream not found", s.s.id)
-                ))))
+                )
+                .into())))
             }
             Some(d) => d.open_file(s.s.id, (r.start + sr.start)..(r.end + sr.start)),
         };

@@ -111,11 +111,11 @@ impl User {
                 self.password_failure_count += 1;
                 Ok(false)
             }
-            Err(e) => Err(err!(
+            Err(e) => bail!(
                 Internal,
                 msg("unable to verify password for user {:?}", self.username),
                 source(e),
-            )),
+            ),
         }
     }
 }
@@ -365,10 +365,9 @@ impl rusqlite::types::FromSql for Seed {
     fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
         let b = value.as_blob()?;
         if b.len() != 32 {
-            return Err(rusqlite::types::FromSqlError::Other(Box::new(err!(
-                Internal,
-                msg("expected a 32-byte seed")
-            ))));
+            return Err(rusqlite::types::FromSqlError::Other(Box::new(
+                err!(Internal, msg("expected a 32-byte seed")).build(),
+            )));
         }
         let mut s = Seed::default();
         s.0.copy_from_slice(b);
@@ -863,7 +862,7 @@ impl State {
     }
 }
 
-fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, base::Error> {
+fn lookup_session(conn: &Connection, hash: &SessionHash) -> Result<Session, base::ErrorBuilder> {
     let mut stmt = conn.prepare_cached(
         r#"
         select

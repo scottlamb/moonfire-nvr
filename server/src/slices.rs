@@ -8,7 +8,7 @@ use std::fmt;
 use std::ops::Range;
 use std::pin::Pin;
 
-use crate::body::{wrap_error, BoxedError};
+use crate::body::BoxedError;
 use base::{bail, err, Error};
 use futures::{stream, stream::StreamExt, Stream};
 use tracing_futures::Instrument;
@@ -134,10 +134,13 @@ where
     ) -> Pin<Box<dyn Stream<Item = Result<S::Chunk, BoxedError>> + Sync + Send>> {
         #[allow(clippy::suspicious_operation_groupings)]
         if range.start > range.end || range.end > self.len {
-            return Box::pin(stream::once(futures::future::err(wrap_error(err!(
-                Internal,
-                msg("bad range {:?} for slice of length {}", range, self.len),
-            )))));
+            return Box::pin(stream::once(futures::future::err(
+                err!(
+                    Internal,
+                    msg("bad range {:?} for slice of length {}", range, self.len),
+                )
+                .boxed(),
+            )));
         }
 
         // Binary search for the first slice of the range to write, determining its index and

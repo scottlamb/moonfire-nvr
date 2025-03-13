@@ -118,7 +118,8 @@ impl FileStream {
                 Poll::Ready(Some(Err(err!(
                     Internal,
                     msg("reader thread panicked; see logs")
-                ))))
+                )
+                .build())))
             }
             Poll::Ready(Ok(Err(e))) => {
                 self.state = FileStreamState::Invalid;

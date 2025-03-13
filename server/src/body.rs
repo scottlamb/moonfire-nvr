@@ -21,10 +21,6 @@ pub struct Chunk(ARefss<'static, [u8]>);
 
 pub type BoxedError = Box<dyn StdError + Send + Sync>;
 
-pub fn wrap_error(e: Error) -> BoxedError {
-    Box::new(e)
-}
-
 impl From<ARefss<'static, [u8]>> for Chunk {
     fn from(r: ARefss<'static, [u8]>) -> Self {
         Chunk(r)

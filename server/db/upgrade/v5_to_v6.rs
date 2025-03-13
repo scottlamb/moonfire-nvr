@@ -53,7 +53,7 @@ fn parse(data: &[u8]) -> Result<AvcDecoderConfigurationRecord<'_>, Error> {
         );
     }
     AvcDecoderConfigurationRecord::try_from(&data[94..])
-        .map_err(|e| err!(DataLoss, msg("Bad AvcDecoderConfigurationRecord: {:?}", e)))
+        .map_err(|e| err!(DataLoss, msg("Bad AvcDecoderConfigurationRecord: {:?}", e)).build())
 }
 
 pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error> {
