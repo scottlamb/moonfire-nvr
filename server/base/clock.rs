@@ -10,6 +10,7 @@
 use crate::Mutex;
 use nix::sys::time::{TimeSpec, TimeValLike as _};
 use std::future::Future;
+use std::panic::Location;
 use std::sync::Arc;
 pub use std::time::Duration;
 use tracing::warn;
@@ -203,16 +204,22 @@ impl Clocks for RealClocks {
 
 /// Logs a warning if the TimerGuard lives "too long", using the label created by a supplied
 /// function.
-pub struct TimerGuard<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> {
+pub struct TimerGuard<'a, C: Clocks, S: AsRef<str>, F: FnOnce(&'static Location<'static>) -> S + 'a>
+{
     clocks: &'a C,
+    location: &'static Location<'static>,
     label_f: Option<F>,
     start: Instant,
 }
 
-impl<'a, C: Clocks, S: AsRef<str>, F: FnOnce() -> S + 'a> TimerGuard<'a, C, S, F> {
+impl<'a, C: Clocks, S: AsRef<str>, F: FnOnce(&'static Location<'static>) -> S + 'a>
+    TimerGuard<'a, C, S, F>
+{
+    #[track_caller]
     pub fn new(clocks: &'a C, label_f: F) -> Self {
         TimerGuard {
             clocks,
+            location: Location::caller(),
             label_f: Some(label_f),
             start: clocks.monotonic(),
         }
@@ -223,13 +230,13 @@ impl<'a, C, S, F> Drop for TimerGuard<'a, C, S, F>
 where
     C: Clocks,
     S: AsRef<str>,
-    F: FnOnce() -> S + 'a,
+    F: FnOnce(&'static Location<'static>) -> S + 'a,
 {
     fn drop(&mut self) {
         let elapsed = self.clocks.monotonic() - self.start;
         if elapsed.as_secs() >= 1 {
             let label_f = self.label_f.take().unwrap();
-            warn!("{} took {:?}!", label_f().as_ref(), elapsed);
+            warn!("{} took {:?}!", label_f(self.location).as_ref(), elapsed);
         }
     }
 }
@@ -240,7 +247,7 @@ pub struct SimulatedClocks(Arc<SimulatedClocksInner>);
 
 struct SimulatedClocksInner {
     boot: SystemTime,
-    uptime: Mutex<Duration>,
+    uptime: Mutex<Duration, 3>,
 }
 
 impl SimulatedClocks {

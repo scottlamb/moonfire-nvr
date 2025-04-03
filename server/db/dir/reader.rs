@@ -179,7 +179,10 @@ pub(super) struct SuccessfulRead {
 }
 
 impl Pool {
-    /// Opens the given sample file for reading.
+    /// Returns a handle for reading `range` from the given recording.
+    ///
+    /// The actual OS-level `open` call occurs asynchronously from the directory thread;
+    /// thus any errors will be returned on the `Stream` later.
     pub fn open_file(self, composite_id: CompositeId, range: Range<u64>) -> Stream {
         let (reply_tx, reply_rx) = mpsc::channel(1);
         if range.is_empty() {
@@ -236,7 +239,9 @@ impl Worker {
     ) -> Result<SuccessfulRead, Error> {
         let span2 = span.clone();
         let _span_enter = span2.enter();
-        let _timer_guard = TimerGuard::new(&RealClocks {}, || format!("open {composite_id}"));
+        let _timer_guard = TimerGuard::new(&RealClocks {}, |location| {
+            format!("open {composite_id} at {location}")
+        });
         let p = super::CompositeIdPath::from(composite_id);
 
         // Reader::open_file checks for an empty range, but check again right
@@ -264,8 +269,13 @@ impl Worker {
         })?;
         let map_len = std::num::NonZeroUsize::new(map_len).expect("range is non-empty");
 
-        let file = crate::fs::openat(self.dir.0, &p, OFlag::O_RDONLY, Mode::empty())
-            .err_kind(ErrorKind::Unknown)?;
+        let file =
+            crate::fs::openat(self.dir.0, &p, OFlag::O_RDONLY, Mode::empty()).map_err(|e| {
+                err!(
+                    e,
+                    msg("unable to open recording {composite_id} for reading")
+                )
+            })?;
 
         // Check the actual on-disk file length. It's an error (a bug or filesystem corruption)
         // for it to be less than the requested read. Check for this now rather than crashing
@@ -331,7 +341,9 @@ impl Worker {
             return;
         }
         let composite_id = file.composite_id;
-        let _guard = TimerGuard::new(&RealClocks {}, || format!("read from {composite_id}"));
+        let _guard = TimerGuard::new(&RealClocks {}, |location| {
+            format!("read from {composite_id} at {location}")
+        });
         let tx = file.reply_tx.clone();
         let span2 = file.span.clone();
         let _enter = span2.enter();
@@ -375,6 +387,8 @@ impl Worker {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use futures::TryStreamExt;
     use uuid::Uuid;
 
@@ -386,16 +400,20 @@ mod tests {
             .tempdir()
             .unwrap();
         let one = const { std::num::NonZeroUsize::new(1).unwrap() };
-        let pool = crate::dir::Pool::new(crate::dir::Config {
-            path: tmpdir.path().to_owned(),
-            db_uuid: Uuid::now_v7(),
-            dir_uuid: Uuid::now_v7(),
-            last_complete_open: None,
-            current_open: Some(crate::db::Open {
-                uuid: Uuid::now_v7(),
-                id: 1,
-            }),
-        });
+        let pool = crate::dir::Pool::new(
+            crate::dir::Config {
+                path: tmpdir.path().to_owned(),
+                db_uuid: Uuid::now_v7(),
+                dir_uuid: Uuid::now_v7(),
+                last_complete_open: None,
+                current_open: Some(crate::db::Open {
+                    uuid: Uuid::now_v7(),
+                    id: 1,
+                }),
+                flusher_notify: Arc::new(tokio::sync::Notify::new()),
+            },
+            base::FastHashSet::default(),
+        );
         pool.open(one).await.unwrap();
         pool.complete_open_for_write().await.unwrap();
         std::fs::write(tmpdir.path().join("0123456789abcdef"), b"blah blah").unwrap();

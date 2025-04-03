@@ -5,7 +5,7 @@ authors = ["Scott Lamb <slamb@slamb.org>"]
 edition = "2021"
 resolver = "2"
 license-file = "../LICENSE.txt"
-rust-version = "1.88"
+rust-version = "1.91"
 publish = false
 
 [features]
@@ -26,11 +26,13 @@ members = ["base", "db"]
 [workspace.dependencies]
 base64 = "0.22.0"
 bytes = "1"
+derive_more = { version = "2.1.0", features = ["debug"] }
 h264-reader = "0.8.0"
 itertools = "0.14.0"
 jiff = "0.2.1"
 nix = "0.27.0"
 pretty-hex = "0.4.0"
+reffers = "0.7.0"
 ring = "0.17.0"
 rusqlite = "0.37.0"
 tokio = { version = "1.43", features = [
@@ -84,8 +86,8 @@ nix = { workspace = true, features = ["time", "user"] }
 nom = "7.0.0"
 password-hash = "0.5.0"
 pretty-hex = { workspace = true }
-protobuf = { workspace = true }
-reffers = "0.7.0"
+protobuf.workspace = true
+reffers.workspace = true
 retina = "0.4.14"
 ring = { workspace = true }
 rusqlite = { workspace = true }

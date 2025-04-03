@@ -67,12 +67,12 @@ pub struct Camera<'a> {
     pub config: Option<&'a db::json::CameraConfig>,
 
     #[serde(serialize_with = "Camera::serialize_streams")]
-    pub streams: [Option<Stream<'a>>; db::db::NUM_STREAM_TYPES],
+    pub streams: [Option<Stream>; db::stream::NUM_STREAM_TYPES],
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Stream<'a> {
+pub struct Stream {
     pub id: i32,
     pub retain_bytes: i64,
     pub min_start_time_90k: Option<Time>,
@@ -82,12 +82,16 @@ pub struct Stream<'a> {
     pub fs_bytes: i64,
     pub record: bool,
 
+    pub num_recent_recordings: usize,
+    pub num_recent_frames: usize,
+    pub recent_frame_bytes: usize,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
     pub days: Option<db::days::Map<db::days::StreamValue>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<&'a db::json::StreamConfig>,
+    pub config: Option<db::json::StreamConfig>,
 }
 
 #[derive(Serialize)]
@@ -195,7 +199,7 @@ impl<'a> Camera<'a> {
     }
 
     fn serialize_streams<S>(
-        streams: &[Option<Stream>; db::db::NUM_STREAM_TYPES],
+        streams: &[Option<Stream>; db::stream::NUM_STREAM_TYPES],
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -216,9 +220,9 @@ impl<'a> Camera<'a> {
     }
 }
 
-impl<'a> Stream<'a> {
+impl Stream {
     fn wrap(
-        db: &'a db::LockedDatabase,
+        db: &db::LockedDatabase,
         id: Option<i32>,
         include_days: bool,
         include_config: bool,
@@ -231,20 +235,21 @@ impl<'a> Stream<'a> {
             .streams_by_id()
             .get(&id)
             .ok_or_else(|| err!(Internal, msg("missing stream {id}")))?;
+        let s = s.inner.lock();
         Ok(Some(Stream {
             id: s.id,
             retain_bytes: s.config.retain_bytes,
-            min_start_time_90k: s.range.as_ref().map(|r| r.start),
-            max_end_time_90k: s.range.as_ref().map(|r| r.end),
-            total_duration_90k: s.duration,
-            total_sample_file_bytes: s.sample_file_bytes,
-            fs_bytes: s.fs_bytes,
+            min_start_time_90k: s.committed.range.as_ref().map(|r| r.start),
+            max_end_time_90k: s.committed.range.as_ref().map(|r| r.end),
+            total_duration_90k: s.committed.duration,
+            total_sample_file_bytes: s.committed.sample_file_bytes,
+            fs_bytes: s.committed.fs_bytes,
             record: s.config.mode == db::json::STREAM_MODE_RECORD,
             days: if include_days { Some(s.days()) } else { None },
-            config: match include_config {
-                false => None,
-                true => Some(&s.config),
-            },
+            config: include_config.then(|| s.config.clone()),
+            num_recent_recordings: s.recent_recordings.len(),
+            num_recent_frames: s.recent_frames.len(),
+            recent_frame_bytes: s.recent_frames.bytes(),
         }))
     }
 

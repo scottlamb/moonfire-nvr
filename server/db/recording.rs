@@ -6,7 +6,9 @@
 
 use crate::coding::{append_varint32, decode_varint32, unzigzag32, zigzag32};
 use crate::db;
+use crate::stream::BytePos;
 use base::{bail, Error};
+use reffers::ARefss;
 use std::convert::TryFrom;
 use std::ops::Range;
 use tracing::trace;
@@ -53,7 +55,7 @@ pub struct SampleIndexIterator {
     i_and_is_key: u32,
 
     /// The starting data byte position of this sample within the segment.
-    pub pos: i32,
+    pub pos: u32,
 
     /// The starting time of this sample within the segment (in 90 kHz units).
     pub start_90k: i32,
@@ -62,11 +64,11 @@ pub struct SampleIndexIterator {
     pub duration_90k: i32,
 
     /// The byte length of this frame.
-    pub bytes: i32,
+    pub bytes: u32,
 
     /// The byte length of the last frame of the "other" type: if this one is key, the last
     /// non-key; if this one is non-key, the last key.
-    bytes_other: i32,
+    bytes_other: u32,
 }
 
 impl SampleIndexIterator {
@@ -112,21 +114,24 @@ impl SampleIndexIterator {
         };
         self.i_and_is_key = (i2 as u32) | ((raw1 & 1) << 31);
         let bytes_delta = unzigzag32(raw2);
+        let prev;
         if self.is_key() {
-            self.bytes = prev_bytes_key + bytes_delta;
             self.bytes_other = prev_bytes_nonkey;
+            prev = prev_bytes_key;
+            self.bytes = prev_bytes_key.checked_add_signed(bytes_delta).unwrap_or(0);
         } else {
-            self.bytes = prev_bytes_nonkey + bytes_delta;
             self.bytes_other = prev_bytes_key;
+            prev = prev_bytes_nonkey;
         }
-        if self.bytes <= 0 {
+        self.bytes = prev.checked_add_signed(bytes_delta).unwrap_or(0);
+        if self.bytes == 0 {
             bail!(
                 DataLoss,
                 msg(
-                    "non-positive bytes {} after applying delta {} to key={} frame at ts {}",
-                    self.bytes,
+                    "non-positive bytes after applying delta {} to key={} frame bytes={} at ts {}",
                     bytes_delta,
                     self.is_key(),
+                    prev,
                     self.start_90k,
                 ),
             );
@@ -152,15 +157,16 @@ impl SampleIndexEncoder {
     pub fn add_sample(
         &mut self,
         duration_90k: i32,
-        bytes: i32,
+        bytes: u32,
         is_key: bool,
-        r: &mut db::RecordingToInsert,
+        r: &mut db::RecentRecording,
     ) {
         let duration_delta = duration_90k - self.prev_duration_90k;
         self.prev_duration_90k = duration_90k;
         r.media_duration_90k += duration_90k;
         r.sample_file_bytes += bytes;
         r.video_samples += 1;
+        let bytes = bytes as i32;
         let bytes_delta = bytes
             - if is_key {
                 let prev = self.prev_bytes_key;
@@ -193,7 +199,7 @@ pub struct Segment {
     /// positioned at the beginning of the recording, so this is an optional box to shrink a long
     /// of segments. `None` is equivalent to `SampleIndexIterator::default()`.
     begin: Option<Box<SampleIndexIterator>>,
-    pub file_end: i32,
+    pub file_end: u32,
 
     pub frames: u16,
     pub key_frames: u16,
@@ -228,8 +234,7 @@ impl Segment {
             frames: recording.video_samples as u16,
             key_frames: recording.video_sync_samples as u16,
             video_sample_entry_id_and_trailing_zero: recording.video_sample_entry_id
-                | ((((recording.flags & db::RecordingFlags::TrailingZero as i32) != 0) as i32)
-                    << 31),
+                | ((recording.flags.contains(db::RecordingFlags::TRAILING_ZERO) as i32) << 31),
         };
 
         #[allow(clippy::suspicious_operation_groupings)]
@@ -264,7 +269,7 @@ impl Segment {
             desired_media_range_90k,
             recording
         );
-        db.with_recording_playback(self_.id, &mut |playback| {
+        recording.with_playback(db, &mut |playback| {
             let mut begin = Box::<SampleIndexIterator>::default();
             let data = &playback.video_index;
             let mut it = SampleIndexIterator::default();
@@ -322,6 +327,60 @@ impl Segment {
     /// Returns the byte range within the sample file of data associated with this segment.
     pub fn sample_file_range(&self) -> Range<u64> {
         self.begin.as_ref().map(|b| b.pos as u64).unwrap_or(0)..self.file_end as u64
+    }
+
+    /// Partitions the supplied byte range (relative to the start of this segment) into `(disk_prefix, memory_suffix)`.
+    ///
+    /// * The `Range<u64>` represents a byte range prefix which is not available in-memory; it may be length-0.
+    ///   It is adjusted to be relative to the start of the file as expected by `Pool::open_file`.
+    /// * The `Vec<Chunk>` is a suffix which is available in-memory via `Stream::recent_frames`.
+    ///
+    /// Panics if `recent_frames` is not a (possibly empty) suffix of the requested range; it is a logic error to construct
+    /// `Segment`s referring to data that does not yet exist.
+    pub fn partition_range(
+        &self,
+        stream: &crate::stream::LockedStream,
+        r: Range<u64>,
+    ) -> (Range<u64>, Vec<ARefss<'static, [u8]>>) {
+        let sr = self.sample_file_range();
+        assert!(r.end <= sr.end - sr.start);
+        let mut disk_r = (r.start + sr.start)..(r.end + sr.start);
+        let end = disk_r.end;
+        let mut recent_byte_len = 0;
+        let mut recent_last_frame_start = 0;
+        let mut frames: Vec<_> = stream
+            .recent_frames
+            .iter_from_byte_pos(BytePos {
+                recording_id: self.id.recording(),
+                byte_pos: disk_r.start as u32,
+            })
+            .take_while(|(_, f)| {
+                f.recording_id == self.id.recording() && (f.sample_start as u64) < disk_r.end
+            })
+            .map(|(_, f)| {
+                recent_byte_len += f.sample.len();
+                recent_last_frame_start = f.sample_start;
+                ARefss::new(f.sample.clone()).map(Vec::as_slice)
+            })
+            .collect();
+        if let Some(last_frame) = frames.last_mut() {
+            let skip_at_end = (recent_last_frame_start as usize + last_frame.len())
+                .checked_sub(end as usize)
+                .expect("recent_frames should not end before requested range");
+            fn subslice(
+                f: &mut ARefss<'static, [u8]>,
+                r: impl std::slice::SliceIndex<[u8], Output = [u8]>,
+            ) {
+                *f = ::std::mem::replace(f, ARefss::new(&[][..])).map(|f| &f[r]);
+            }
+            subslice(last_frame, ..last_frame.len() - skip_at_end);
+            recent_byte_len -= skip_at_end;
+            let skip_at_start = disk_r.start.saturating_sub(end - recent_byte_len as u64) as usize;
+            subslice(&mut frames[0], skip_at_start..);
+            recent_byte_len -= skip_at_start;
+            disk_r.end = end - recent_byte_len as u64;
+        };
+        (disk_r, frames)
     }
 
     /// Returns the actual media start time. As described in `new`, this can be less than the
@@ -433,7 +492,7 @@ mod tests {
     #[test]
     fn test_encode_example() {
         testutil::init();
-        let mut r = db::RecordingToInsert::default();
+        let mut r = db::RecentRecording::default();
         let mut e = SampleIndexEncoder::default();
         e.add_sample(10, 1000, true, &mut r);
         e.add_sample(9, 10, false, &mut r);
@@ -456,7 +515,7 @@ mod tests {
         #[derive(Debug, PartialEq, Eq)]
         struct Sample {
             duration_90k: i32,
-            bytes: i32,
+            bytes: u32,
             is_key: bool,
         }
         #[rustfmt::skip]
@@ -467,7 +526,7 @@ mod tests {
             Sample { duration_90k: 18, bytes: 31000, is_key: true,  },
             Sample { duration_90k:  0, bytes:  1000, is_key: false, },
         ];
-        let mut r = db::RecordingToInsert::default();
+        let mut r = db::RecentRecording::default();
         let mut e = SampleIndexEncoder::default();
         for sample in &samples {
             e.add_sample(sample.duration_90k, sample.bytes, sample.is_key, &mut r);
@@ -515,7 +574,16 @@ mod tests {
             },
             Test {
                 encoded: b"\x04\x00",
-                err: "non-positive bytes 0 after applying delta 0 to key=false frame at ts 0",
+                err: "non-positive bytes after applying delta 0 to key=false frame bytes=0 at ts 0",
+            },
+            Test {
+                encoded: b"\x05\x00",
+                err: "non-positive bytes after applying delta 0 to key=true frame bytes=0 at ts 0",
+            },
+            Test {
+                encoded: b"\x00\x01",
+                err:
+                    "non-positive bytes after applying delta -1 to key=false frame bytes=0 at ts 0",
             },
         ];
         for test in &tests {
@@ -545,18 +613,19 @@ mod tests {
     #[tokio::test]
     async fn test_segment_clipping_with_all_sync() {
         testutil::init();
-        let mut r = db::RecordingToInsert::default();
+        let mut r = db::RecentRecording::default();
         let mut encoder = SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
-            let bytes = 3 * i;
+            let bytes = 3 * i as u32;
             encoder.add_sample(duration_90k, bytes, true, &mut r);
         }
         let db = TestDb::new(RealClocks {}).await;
-        let row = db.insert_recording_from_encoder(r);
-        // Time range [2, 2 + 4 + 6 + 8) means the 2nd, 3rd, 4th samples should be
-        // included.
-        let segment = Segment::new(&db.db.lock(), &row, 2..2 + 4 + 6 + 8, true).unwrap();
+        let segment = db.insert_recording_from_encoder(r, |db, row| {
+            // Time range [2, 2 + 4 + 6 + 8) means the 2nd, 3rd, 4th samples should be
+            // included.
+            Segment::new(db, &row, 2..2 + 4 + 6 + 8, true).unwrap()
+        });
         assert_eq!(
             &get_frames(&db.db, &segment, |it| it.duration_90k),
             &[4, 6, 8]
@@ -567,32 +636,34 @@ mod tests {
     #[tokio::test]
     async fn test_segment_clipping_with_half_sync() {
         testutil::init();
-        let mut r = db::RecordingToInsert::default();
+        let mut r = db::RecentRecording::default();
         let mut encoder = SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
-            let bytes = 3 * i;
+            let bytes = 3 * i as u32;
             encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
         let db = TestDb::new(RealClocks {}).await;
-        let row = db.insert_recording_from_encoder(r);
-        // Time range [2 + 4 + 6, 2 + 4 + 6 + 8) means the 4th sample should be included.
-        // The 3rd also gets pulled in because it is a sync frame and the 4th is not.
-        let segment = Segment::new(&db.db.lock(), &row, 2 + 4 + 6..2 + 4 + 6 + 8, true).unwrap();
+        let segment = db.insert_recording_from_encoder(r, |db, row| {
+            // Time range [2 + 4 + 6, 2 + 4 + 6 + 8) means the 4th sample should be included.
+            // The 3rd also gets pulled in because it is a sync frame and the 4th is not.
+            Segment::new(db, &row, 2 + 4 + 6..2 + 4 + 6 + 8, true).unwrap()
+        });
         assert_eq!(&get_frames(&db.db, &segment, |it| it.duration_90k), &[6, 8]);
     }
 
     #[tokio::test]
     async fn test_segment_clipping_with_trailing_zero() {
         testutil::init();
-        let mut r = db::RecordingToInsert::default();
+        let mut r = db::RecentRecording::default();
         let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(1, 2, true, &mut r);
         encoder.add_sample(0, 3, true, &mut r);
         let db = TestDb::new(RealClocks {}).await;
-        let row = db.insert_recording_from_encoder(r);
-        let segment = Segment::new(&db.db.lock(), &row, 1..2, true).unwrap();
+        let segment = db.insert_recording_from_encoder(r, |db, row| {
+            Segment::new(db, &row, 1..2, true).unwrap()
+        });
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[2, 3]);
     }
 
@@ -600,12 +671,13 @@ mod tests {
     #[tokio::test]
     async fn test_segment_zero_desired_duration() {
         testutil::init();
-        let mut r = db::RecordingToInsert::default();
+        let mut r = db::RecentRecording::default();
         let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         let db = TestDb::new(RealClocks {}).await;
-        let row = db.insert_recording_from_encoder(r);
-        let segment = Segment::new(&db.db.lock(), &row, 0..0, true).unwrap();
+        let segment = db.insert_recording_from_encoder(r, |db, row| {
+            Segment::new(db, &row, 0..0, true).unwrap()
+        });
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1]);
     }
 
@@ -614,16 +686,17 @@ mod tests {
     #[tokio::test]
     async fn test_segment_fast_path() {
         testutil::init();
-        let mut r = db::RecordingToInsert::default();
+        let mut r = db::RecentRecording::default();
         let mut encoder = SampleIndexEncoder::default();
         for i in 1..6 {
             let duration_90k = 2 * i;
-            let bytes = 3 * i;
+            let bytes = 3 * i as u32;
             encoder.add_sample(duration_90k, bytes, (i % 2) == 1, &mut r);
         }
         let db = TestDb::new(RealClocks {}).await;
-        let row = db.insert_recording_from_encoder(r);
-        let segment = Segment::new(&db.db.lock(), &row, 0..2 + 4 + 6 + 8 + 10, true).unwrap();
+        let segment = db.insert_recording_from_encoder(r, |db, row| {
+            Segment::new(db, &row, 0..2 + 4 + 6 + 8 + 10, true).unwrap()
+        });
         assert_eq!(
             &get_frames(&db.db, &segment, |it| it.duration_90k),
             &[2, 4, 6, 8, 10]
@@ -633,15 +706,59 @@ mod tests {
     #[tokio::test]
     async fn test_segment_fast_path_with_trailing_zero() {
         testutil::init();
-        let mut r = db::RecordingToInsert::default();
+        let mut r = db::RecentRecording::default();
         let mut encoder = SampleIndexEncoder::default();
         encoder.add_sample(1, 1, true, &mut r);
         encoder.add_sample(1, 2, true, &mut r);
         encoder.add_sample(0, 3, true, &mut r);
         let db = TestDb::new(RealClocks {}).await;
-        let row = db.insert_recording_from_encoder(r);
-        let segment = Segment::new(&db.db.lock(), &row, 0..2, true).unwrap();
+        let segment = db.insert_recording_from_encoder(r, |db, row| {
+            Segment::new(db, &row, 0..2, true).unwrap()
+        });
         assert_eq!(&get_frames(&db.db, &segment, |it| it.bytes), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn test_partition_range_overlap() {
+        testutil::init();
+        use crate::stream::LockedStream;
+        let segment = Segment {
+            id: crate::db::CompositeId::new(1, 1),
+            open_id: 1,
+            begin: None,
+            file_end: 400,
+            frames: 4,
+            key_frames: 1,
+            video_sample_entry_id_and_trailing_zero: 1,
+        };
+        let mut stream = LockedStream::dummy();
+        use std::sync::Arc;
+        stream.recent_frames.push_back(crate::RecentFrame {
+            recording_id: 1,
+            is_key: true,
+            media_off_90k: 2000..3000,
+            sample: Arc::new(vec![0x11; 100]),
+            sample_start: 200,
+        });
+        stream.recent_frames.push_back(crate::RecentFrame {
+            recording_id: 1,
+            is_key: false,
+            media_off_90k: 3000..4000,
+            sample: Arc::new(vec![0x22; 100]),
+            sample_start: 300,
+        });
+
+        // Request a range that starts inside the first recent frame.
+        let (disk_r, mem_frames) = segment.partition_range(&stream, 250..350);
+        let actual_mem_bytes = mem_frames.iter().fold(vec![], |mut acc, frame| {
+            acc.extend_from_slice(frame);
+            acc
+        });
+        let mut expected_mem_bytes = vec![0x11; 50];
+        expected_mem_bytes.extend_from_slice(&[0x22; 50]);
+        assert_eq!(actual_mem_bytes, expected_mem_bytes);
+        assert_eq!(disk_r.start, 250);
+        assert_eq!(disk_r.end, 250);
     }
 
     // TODO: test segment error cases involving mismatch between row frames/key_frames and index.

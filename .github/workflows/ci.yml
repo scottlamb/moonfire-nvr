@@ -15,7 +15,7 @@ jobs:
     name: Rust ${{ matrix.rust }}
     strategy:
       matrix:
-        rust: ["stable", "1.88", "nightly"]
+        rust: ["stable", "1.91", "nightly"]
         include:
           - rust: nightly
             extra_args: "--features nightly --benches"
@@ -47,6 +47,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
           components: ${{ matrix.extra_components }}
+          rustflags: "" # don't override .cargo/config.toml flags.
       - name: Test
         run: |
           cd server

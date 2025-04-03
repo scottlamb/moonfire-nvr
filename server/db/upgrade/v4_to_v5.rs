@@ -17,6 +17,7 @@ use std::io::{Read, Write};
 use std::os::fd::AsFd as _;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
@@ -132,6 +133,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
         "#,
     )?;
     let mut rows = stmt.query(params![])?;
+    let flusher_notify = Arc::new(tokio::sync::Notify::new()); // dummy
     while let Some(row) = rows.next()? {
         let path = PathBuf::from(row.get_ref(0)?.as_str()?);
         info!("path: {}", path.display());
@@ -147,6 +149,7 @@ pub fn run(_args: &super::Args, tx: &rusqlite::Transaction) -> Result<(), Error>
                 uuid: open_uuid,
             }),
             current_open: None,
+            flusher_notify: flusher_notify.clone(),
         };
 
         let dir = crate::fs::Dir::open(&cfg.path, false)?;

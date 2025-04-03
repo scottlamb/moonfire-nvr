@@ -15,6 +15,7 @@ use base::{FastHashMap, FastHashSet};
 use futures::TryStreamExt as _;
 use rusqlite::params;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use tracing::{error, info, warn};
 
 pub struct Options {
@@ -80,6 +81,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
     let (db_uuid, _config) = raw::read_meta(conn)?;
 
     // Scan directories.
+    let flusher_notify = Arc::new(tokio::sync::Notify::new()); // dummy.
     let mut dirs_by_id: FastHashMap<i32, Dir> = FastHashMap::default();
     {
         let mut dir_stmt = conn.prepare(
@@ -107,6 +109,7 @@ pub fn run(conn: &mut rusqlite::Connection, opts: &Options) -> Result<i32, Error
                     uuid: open_uuid,
                 }),
                 current_open: None,
+                flusher_notify: flusher_notify.clone(),
             };
             dirs.push(read_dir(dir_id, config, opts.compare_lens));
         }
@@ -208,7 +211,7 @@ struct RecordingSummary {
     video_samples: i32,
     video_sync_samples: i32,
     media_duration: i32,
-    flags: i32,
+    flags: crate::db::RecordingFlags,
 }
 
 #[derive(Debug, Default)]
@@ -256,9 +259,9 @@ fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
         video_sync_samples,
         media_duration,
         flags: if it.duration_90k == 0 {
-            db::RecordingFlags::TrailingZero as i32
+            db::RecordingFlags::TRAILING_ZERO
         } else {
-            0
+            db::RecordingFlags::empty()
         },
     })
 }
@@ -266,8 +269,10 @@ fn summarize_index(video_index: &[u8]) -> Result<RecordingSummary, Error> {
 /// Reads through the given sample file directory.
 /// Logs unexpected files and creates a hash map of the files found there.
 /// If `opts.compare_lens` is set, the values are lengths; otherwise they're insignificant.
+///
+/// Note: the returned dir's `garbage_needs_unlink` will not be populated.
 async fn read_dir(id: i32, config: dir::Config, compare_lens: bool) -> Result<(i32, Dir), Error> {
-    let dir = dir::Pool::new(config);
+    let dir = dir::Pool::new(config, FastHashSet::default());
     dir.open(const { NonZeroUsize::new(1).unwrap() }).await?;
     let (tx, mut rx) = tokio::sync::oneshot::channel();
     dir.run("inventory", move |ctx| {
@@ -334,7 +339,7 @@ fn compare_stream(
         while let Some(row) = rows.next()? {
             let id = CompositeId(row.get(0)?);
             let s = RecordingSummary {
-                flags: row.get(1)?,
+                flags: db::RecordingFlags::from_bits_retain(row.get(1)?),
                 bytes: row.get::<_, i64>(2)? as u64,
                 media_duration: row.get(3)?,
                 video_samples: row.get(4)?,

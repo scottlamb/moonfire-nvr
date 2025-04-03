@@ -4,7 +4,6 @@
 
 use async_trait::async_trait;
 use base::{bail, err, Error};
-use bytes::Bytes;
 use futures::StreamExt;
 use retina::client::Demuxed;
 use retina::codec::CodecItem;
@@ -77,7 +76,7 @@ pub struct VideoFrame {
     pub duration: i32,
 
     pub is_key: bool,
-    pub data: Bytes,
+    pub data: Vec<u8>,
 
     pub new_video_sample_entry: bool,
 }
@@ -304,7 +303,7 @@ impl Stream for RetinaStream {
             #[cfg(test)]
             duration: 0,
             is_key: frame.is_random_access_point(),
-            data: frame.into_data().into(),
+            data: frame.into_data(),
             new_video_sample_entry,
         })
     }
@@ -412,7 +411,7 @@ pub mod testutil {
                 #[cfg(test)]
                 duration: sample.duration as i32,
                 is_key: sample.is_sync,
-                data: sample.bytes,
+                data: sample.bytes.into(),
                 new_video_sample_entry: false,
             })
         }

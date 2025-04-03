@@ -202,7 +202,7 @@ impl Service {
                 suffix
             ))?;
         }
-        let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
+        let mp4 = builder.build(self.db.clone())?;
         if debug {
             return Ok(plain_response(StatusCode::OK, format!("{mp4:#?}")));
         }

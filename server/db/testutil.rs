@@ -7,7 +7,7 @@
 
 use crate::db;
 use crate::dir;
-use crate::writer;
+use crate::lifecycle;
 use base::clock::Clocks;
 use base::FastHashMap;
 use std::sync::Arc;
@@ -48,8 +48,8 @@ pub struct TestDb<C: Clocks + Clone> {
     pub dirs_by_stream_id: Arc<FastHashMap<i32, dir::Pool>>,
     pub shutdown_tx: base::shutdown::Sender,
     pub shutdown_rx: base::shutdown::Receiver,
-    pub syncer_channel: writer::SyncerChannel<dir::writer::WriteStream>,
-    pub syncer_join: tokio::task::JoinHandle<()>,
+    pub flusher_channel: lifecycle::FlusherChannel,
+    pub flusher_join: tokio::task::JoinHandle<()>,
     pub tmpdir: TempDir,
     pub test_camera_uuid: Uuid,
 }
@@ -72,6 +72,7 @@ impl<C: Clocks + Clone> TestDb<C> {
         let test_camera_uuid;
         let path = tmpdir.path().to_owned();
         let dir;
+        let (flusher_channel, flusher_join) = lifecycle::start_flusher(db.clone());
         let sample_file_dir_id = db.add_sample_file_dir(path).await.unwrap();
         {
             let mut l = db.lock();
@@ -117,26 +118,31 @@ impl<C: Clocks + Clone> TestDb<C> {
         let mut dirs_by_stream_id = FastHashMap::default();
         dirs_by_stream_id.insert(TEST_STREAM_ID, dir);
         let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
-        let (syncer_channel, syncer_join) =
-            writer::start_syncer(db.clone(), shutdown_rx.clone(), sample_file_dir_id)
-                .await
-                .unwrap();
         TestDb {
             db,
             dirs_by_stream_id: Arc::new(dirs_by_stream_id),
             shutdown_tx,
             shutdown_rx,
-            syncer_channel,
-            syncer_join,
+            flusher_channel,
+            flusher_join,
             tmpdir,
             test_camera_uuid,
         }
     }
 
-    /// Creates a recording with a fresh `RecordingToInsert` row which has been touched only by
+    /// Creates a recording from a fresh `RecentRecording` row which has been touched only by
     /// a `SampleIndexEncoder`. Fills in a video sample entry id and such to make it valid.
     /// There will no backing sample file, so it won't be possible to generate a full `.mp4`.
-    pub fn insert_recording_from_encoder(&self, r: db::RecordingToInsert) -> db::ListRecordingsRow {
+    /// After insertion, calls `f` with the database lock and the inserted recording row,
+    /// returning whatever `f` returns.
+    pub fn insert_recording_from_encoder<
+        T,
+        F: FnOnce(&db::LockedDatabase, db::ListRecordingsRow) -> T,
+    >(
+        &self,
+        r: db::RecentRecording,
+        f: F,
+    ) -> T {
         use crate::recording::{self, TIME_UNITS_PER_SEC};
         let mut db = self.db.lock();
         let video_sample_entry_id = db
@@ -149,30 +155,52 @@ impl<C: Clocks + Clone> TestDb<C> {
                 rfc6381_codec: "avc1.000000".to_owned(),
             })
             .unwrap();
-        let (id, _) = db
-            .add_recording(
-                TEST_STREAM_ID,
-                db::RecordingToInsert {
-                    start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
-                    video_sample_entry_id,
-                    wall_duration_90k: r.media_duration_90k,
-                    ..r
-                },
-            )
-            .unwrap();
-        db.mark_synced(id).unwrap();
+        let id = {
+            let s = db.streams_by_id().get(&TEST_STREAM_ID).unwrap();
+            let mut s = s.inner.lock();
+            assert_eq!(s.writer_state.recording_id, s.complete.cum_recordings);
+            let id = s.add_recording(db::RecentRecording {
+                start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
+                video_sample_entry_id,
+                wall_duration_90k: r.media_duration_90k,
+                flags: db::RecordingFlags::UNCOMMITTED,
+                ..r
+            });
+            assert_eq!(s.writer_state.recording_id, id);
+            s.complete.cum_recordings += 1;
+            s.writer_state.recording_id = s.complete.cum_recordings;
+            crate::CompositeId::new(TEST_STREAM_ID, id)
+        };
+
         db.flush("create_recording_from_encoder").unwrap();
-        let mut row = None;
+
+        enum State<T, F: FnOnce(&db::LockedDatabase, db::ListRecordingsRow) -> T> {
+            Uncalled(F),
+            Calling,
+            Called(T),
+        }
+        let mut state = State::Uncalled(f);
         db.list_recordings_by_id(
             TEST_STREAM_ID,
             id.recording()..id.recording() + 1,
             &mut |r| {
-                row = Some(r);
+                match std::mem::replace(&mut state, State::Calling) {
+                    State::Uncalled(f) => state = State::Called(f(&db, r)),
+                    State::Calling => unreachable!(),
+                    State::Called(_) => panic!("row should be found only once"),
+                }
                 Ok(())
             },
         )
         .unwrap();
-        row.unwrap()
+        match state {
+            State::Called(r) => r,
+            State::Uncalled(_) => panic!(
+                "row {} should be found immediately after insertion",
+                id.recording()
+            ),
+            State::Calling => unreachable!(),
+        }
     }
 }
 
@@ -193,7 +221,8 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
             rfc6381_codec: "avc1.000000".to_owned(),
         })
         .unwrap();
-    let mut recording = db::RecordingToInsert {
+    let mut recording = db::RecentRecording {
+        flags: db::RecordingFlags::UNCOMMITTED,
         sample_file_bytes: 30104460,
         start: recording::Time(1430006400i64 * TIME_UNITS_PER_SEC),
         media_duration_90k: 5399985,
@@ -205,11 +234,20 @@ pub fn add_dummy_recordings_to_db(db: &db::Database, num: usize) {
         run_offset: 0,
         ..Default::default()
     };
-    for _ in 0..num {
-        let (id, _) = db.add_recording(TEST_STREAM_ID, recording.clone()).unwrap();
-        recording.start += recording::Duration(recording.wall_duration_90k as i64);
-        recording.run_offset += 1;
-        db.mark_synced(id).unwrap();
+    let stream = db.streams_by_id().get(&TEST_STREAM_ID).unwrap();
+    {
+        let mut stream = stream.inner.lock();
+        let mut id = 0;
+        for _ in 0..num {
+            id = stream.add_recording(recording.clone());
+            stream.complete.cum_recordings += 1;
+            stream.complete.cum_media_duration.0 += i64::from(recording.media_duration_90k);
+            stream.complete.cum_runs += i32::from(recording.run_offset == 0);
+            recording.start += recording::Duration(recording.wall_duration_90k as i64);
+            recording.run_offset += 1;
+        }
+        stream.writer_state.recording_id = id + 1;
+        stream.flush_ready = id + 1;
     }
     db.flush("add_dummy_recordings_to_db").unwrap();
 }

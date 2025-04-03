@@ -3,13 +3,11 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use base::strutil::{decode_size, encode_size};
-use base::Error;
-use base::Mutex;
+use base::{Error, Mutex};
 use cursive::traits::{Nameable, Resizable};
 use cursive::view::Scrollable;
 use cursive::Cursive;
 use cursive::{views, With};
-use db::writer;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -99,7 +97,7 @@ fn edit_record(model: &mut Model, id: i32, record: bool) {
     stream.record = record;
 }
 
-fn confirm_deletion(model: &Mutex<Model>, siv: &mut Cursive, to_delete: i64) {
+fn confirm_deletion(model: &Mutex<Model, 3>, siv: &mut Cursive, to_delete: i64) {
     let typed = siv
         .find_name::<views::EditView>("confirm")
         .unwrap()
@@ -120,12 +118,12 @@ fn confirm_deletion(model: &Mutex<Model>, siv: &mut Cursive, to_delete: i64) {
     }
 }
 
-fn actually_delete(model: &Mutex<Model>, siv: &mut Cursive) {
+fn actually_delete(model: &Mutex<Model, 3>, siv: &mut Cursive) {
     let model = model.lock();
     let new_limits: Vec<_> = model
         .streams
         .iter()
-        .map(|(&id, s)| writer::NewLimit {
+        .map(|(&id, s)| db::lifecycle::NewLimit {
             stream_id: id,
             limit: s.retain.unwrap(),
         })
@@ -133,11 +131,7 @@ fn actually_delete(model: &Mutex<Model>, siv: &mut Cursive) {
     siv.pop_layer(); // deletion confirmation
     siv.pop_layer(); // retention dialog
     block_on(model.db.open_sample_file_dirs(&[model.dir_id])).unwrap(); // TODO: don't unwrap.
-    if let Err(e) = block_on(writer::lower_retention(
-        model.db.clone(),
-        model.dir_id,
-        &new_limits[..],
-    )) {
+    if let Err(e) = block_on(db::lifecycle::lower_retention(&model.db, &new_limits[..])) {
         siv.add_layer(
             views::Dialog::text(format!("Unable to delete excess video: {}", e.chain()))
                 .title("Error")
@@ -148,7 +142,7 @@ fn actually_delete(model: &Mutex<Model>, siv: &mut Cursive) {
     }
 }
 
-fn press_change(model: &Arc<Mutex<Model>>, siv: &mut Cursive) {
+fn press_change(model: &Arc<Mutex<Model, 3>>, siv: &mut Cursive) {
     let to_delete = {
         let l = model.lock();
         if l.errors > 0 {
@@ -336,23 +330,24 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
         let pool = {
             let l = db.lock();
             for (&id, s) in l.streams_by_id() {
+                let s = s.inner.lock();
                 let c = l
                     .cameras_by_id()
                     .get(&s.camera_id)
                     .expect("stream without camera");
-                if s.sample_file_dir_id != Some(dir_id) {
+                if s.sample_file_dir.as_ref().map(|d| d.id) != Some(dir_id) {
                     continue;
                 }
                 streams.insert(
                     id,
                     Stream {
                         label: format!("{}: {}: {}", id, c.short_name, s.type_.as_str()),
-                        used: s.fs_bytes,
+                        used: s.committed.fs_bytes,
                         record: s.config.mode == db::json::STREAM_MODE_RECORD,
                         retain: Some(s.config.retain_bytes),
                     },
                 );
-                total_used += s.fs_bytes;
+                total_used += s.committed.fs_bytes;
                 total_retain += s.config.retain_bytes;
             }
             if streams.is_empty() {

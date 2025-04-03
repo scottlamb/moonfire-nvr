@@ -208,7 +208,7 @@ macro_rules! cvt {
         impl From<$t> for Error {
             #[inline(always)]
             fn from(t: $t) -> Self {
-                Self($crate::ErrorBuilder::from(t).0.into())
+                $crate::ErrorBuilder::from(t).into()
             }
         }
     };
@@ -226,14 +226,19 @@ impl From<Error> for ErrorBuilder {
 }
 
 impl From<ErrorBuilder> for Error {
+    #[track_caller]
     #[inline]
-    fn from(value: ErrorBuilder) -> Self {
+    fn from(mut value: ErrorBuilder) -> Self {
+        if value.0.backtrace.is_none() {
+            value.0.backtrace = maybe_backtrace(value.0.kind);
+        }
         Self(value.0.into())
     }
 }
 
 /// Captures a backtrace if enabled for the given error kind.
 // TODO: make this more configurable at runtime.
+#[track_caller]
 fn maybe_backtrace(kind: ErrorKind) -> Option<Backtrace> {
     if matches!(kind, ErrorKind::Internal) {
         Some(Backtrace::capture())
@@ -243,6 +248,7 @@ fn maybe_backtrace(kind: ErrorKind) -> Option<Backtrace> {
 }
 
 impl Error {
+    #[track_caller]
     #[inline]
     pub fn wrap<E: StdError + Sync + Send + 'static>(kind: ErrorKind, e: E) -> Self {
         Self(Arc::new(ErrorInner {

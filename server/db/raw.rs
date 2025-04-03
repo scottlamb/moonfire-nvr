@@ -6,7 +6,7 @@
 
 use crate::db::{self, CompositeId, SqlUuid};
 use crate::json::GlobalConfig;
-use crate::recording;
+use crate::{recording, RecordingFlags};
 use base::FastHashSet;
 use base::{bail, err, Error, ErrorKind, ResultExt as _};
 use rusqlite::{named_params, params};
@@ -34,7 +34,8 @@ const LIST_RECORDINGS_BY_TIME_SQL: &str = r#"
         stream_id = :stream_id and
         recording.start_time_90k > :start_time_90k - 27000000 and
         recording.start_time_90k < :end_time_90k and
-        recording.start_time_90k + recording.wall_duration_90k > :start_time_90k
+        recording.start_time_90k + recording.wall_duration_90k > :start_time_90k and
+        recording.composite_id < :end_composite_id
     order by
         recording.start_time_90k
 "#;
@@ -106,6 +107,7 @@ pub(crate) fn list_recordings_by_time(
     conn: &rusqlite::Connection,
     stream_id: i32,
     desired_time: Range<recording::Time>,
+    end_recording_id: i32,
     f: &mut dyn FnMut(db::ListRecordingsRow) -> Result<(), base::Error>,
 ) -> Result<(), base::Error> {
     let mut stmt = conn
@@ -116,6 +118,7 @@ pub(crate) fn list_recordings_by_time(
             ":stream_id": stream_id,
             ":start_time_90k": desired_time.start.0,
             ":end_time_90k": desired_time.end.0,
+            ":end_composite_id": CompositeId::new(stream_id, end_recording_id).0,
         })
         .err_kind(ErrorKind::Internal)?;
     list_recordings_inner(rows, false, f)
@@ -151,7 +154,7 @@ fn list_recordings_inner(
         f(db::ListRecordingsRow {
             id: CompositeId(row.get(0).err_kind(ErrorKind::Internal)?),
             run_offset: row.get(1).err_kind(ErrorKind::Internal)?,
-            flags: row.get(2).err_kind(ErrorKind::Internal)?,
+            flags: db::RecordingFlags::from_bits_retain(row.get(2).err_kind(ErrorKind::Internal)?),
             start: recording::Time(row.get(3).err_kind(ErrorKind::Internal)?),
             wall_duration_90k,
             media_duration_90k: wall_duration_90k + media_duration_delta_90k,
@@ -168,6 +171,7 @@ fn list_recordings_inner(
                     row.get(13).err_kind(ErrorKind::Internal)?,
                 )),
             },
+            recent_recording: None,
         })?;
     }
     Ok(())
@@ -185,13 +189,15 @@ pub(crate) fn read_meta(conn: &rusqlite::Connection) -> Result<(Uuid, GlobalConf
     )?)
 }
 
-/// Inserts the specified recording (for from `try_flush` only).
-pub(crate) fn insert_recording(
+/// Inserts the specified recordings (for from `flush` only).
+pub(crate) fn insert_recordings(
     tx: &rusqlite::Transaction,
     o: &db::Open,
-    id: CompositeId,
-    r: &db::RecordingToInsert,
+    new_recordings: &[(i32, db::RecentRecording)],
 ) -> Result<(), Error> {
+    if new_recordings.is_empty() {
+        return Ok(());
+    }
     let mut stmt = tx.prepare_cached(
         r#"
             insert into recording (composite_id, stream_id, open_id, run_offset, flags,
@@ -206,62 +212,77 @@ pub(crate) fn insert_recording(
                                :end_reason)
             "#,
     )?;
-    stmt.execute(named_params! {
-        ":composite_id": id.0,
-        ":stream_id": i64::from(id.stream()),
-        ":open_id": o.id,
-        ":run_offset": r.run_offset,
-        ":flags": r.flags,
-        ":sample_file_bytes": r.sample_file_bytes,
-        ":start_time_90k": r.start.0,
-        ":wall_duration_90k": r.wall_duration_90k,
-        ":media_duration_delta_90k": r.media_duration_90k - r.wall_duration_90k,
-        ":prev_media_duration_90k": r.prev_media_duration.0,
-        ":prev_runs": r.prev_runs,
-        ":video_samples": r.video_samples,
-        ":video_sync_samples": r.video_sync_samples,
-        ":video_sample_entry_id": r.video_sample_entry_id,
-        ":end_reason": r.end_reason.as_deref(),
-    })
-    .map_err(|e| {
-        err!(
-            e,
-            msg("unable to insert recording for recording {id} {r:#?}")
-        )
-    })?;
-
-    let mut stmt = tx.prepare_cached(
+    let mut stmt_integrity = tx.prepare_cached(
         r#"
             insert into recording_integrity (composite_id,  local_time_delta_90k,
-                                             sample_file_blake3)
-                                     values (:composite_id, :local_time_delta_90k,
-                                             :sample_file_blake3)
+                                            sample_file_blake3)
+                                    values (:composite_id, :local_time_delta_90k,
+                                            :sample_file_blake3)
             "#,
     )?;
-    let blake3 = r.sample_file_blake3.as_ref().map(|b| &b[..]);
-    let delta = match r.run_offset {
-        0 => None,
-        _ => Some(r.local_time_delta.0),
-    };
-    stmt.execute(named_params! {
-        ":composite_id": id.0,
-        ":local_time_delta_90k": delta,
-        ":sample_file_blake3": blake3,
-    })
-    .map_err(|e| err!(e, msg("unable to insert recording_integrity for {r:#?}")))?;
-
-    let mut stmt = tx.prepare_cached(
+    let mut stmt_playback = tx.prepare_cached(
         r#"
             insert into recording_playback (composite_id,  video_index)
                                     values (:composite_id, :video_index)
             "#,
     )?;
-    stmt.execute(named_params! {
-        ":composite_id": id.0,
-        ":video_index": &r.video_index,
-    })
-    .map_err(|e| err!(e, msg("unable to insert recording_playback for {r:#?}")))?;
+    for &(stream_id, ref r) in new_recordings {
+        let id = CompositeId::new(stream_id, r.id);
+        assert!(
+            r.flags
+                & (RecordingFlags::GROWING | RecordingFlags::DELETED | RecordingFlags::UNCOMMITTED)
+                == RecordingFlags::UNCOMMITTED,
+            "insert_recording with bad state: {r:#?}",
+        );
+        stmt.execute(named_params! {
+            ":composite_id": id.0,
+            ":stream_id": i64::from(stream_id),
+            ":open_id": o.id,
+            ":run_offset": r.run_offset,
+            ":flags": r.flags.difference(RecordingFlags::UNCOMMITTED).bits(),
+            ":sample_file_bytes": r.sample_file_bytes,
+            ":start_time_90k": r.start.0,
+            ":wall_duration_90k": r.wall_duration_90k,
+            ":media_duration_delta_90k": r.media_duration_90k - r.wall_duration_90k,
+            ":prev_media_duration_90k": r.prev_media_duration.0,
+            ":prev_runs": r.prev_runs,
+            ":video_samples": r.video_samples,
+            ":video_sync_samples": r.video_sync_samples,
+            ":video_sample_entry_id": r.video_sample_entry_id,
+            ":end_reason": r.end_reason.as_deref(),
+        })
+        .map_err(|e| {
+            err!(
+                e,
+                msg("unable to insert recording for stream {stream_id}: {r:#?}")
+            )
+        })?;
 
+        let blake3 = r.sample_file_blake3.as_ref().map(|b| &b[..]);
+        let delta = match r.run_offset {
+            0 => None,
+            _ => Some(r.local_time_delta.0),
+        };
+        stmt_integrity
+            .execute(named_params! {
+                ":composite_id": id.0,
+                ":local_time_delta_90k": delta,
+                ":sample_file_blake3": blake3,
+            })
+            .map_err(|e| {
+                err!(
+                    e,
+                    msg("unable to insert recording_integrity for stream {stream_id}: {r:#?}")
+                )
+            })?;
+
+        stmt_playback
+            .execute(named_params! {
+                ":composite_id": id.0,
+                ":video_index": &r.video_index,
+            })
+            .map_err(|e| err!(e, msg("unable to insert recording_playback for {r:#?}")))?;
+    }
     Ok(())
 }
 

@@ -10,7 +10,6 @@ use base::err;
 use base::FastHashMap;
 use base::{bail, Error};
 use bpaf::Bpaf;
-use db::{dir, writer};
 use hyper::service::service_fn;
 use itertools::Itertools;
 use retina::client::SessionGroup;
@@ -45,9 +44,8 @@ pub struct Args {
     read_only: bool,
 }
 
-struct Syncer {
-    dir: dir::Pool,
-    channel: writer::SyncerChannel<db::dir::WriteStream>,
+struct Flusher {
+    channel: db::lifecycle::FlusherChannel,
     join: tokio::task::JoinHandle<()>,
 }
 
@@ -139,6 +137,7 @@ async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
     tokio::pin! {
         let int = signal(SignalKind::interrupt())?;
         let term = signal(SignalKind::terminate())?;
+        let quit = signal(SignalKind::quit())?;
         let inner = inner(read_only, config, shutdown_rx);
     }
 
@@ -153,6 +152,23 @@ async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
                    Send another SIGINT or SIGTERM to shut down immediately.");
             shutdown_tx.take();
         },
+        _ = quit.recv() => {
+            #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "x86", target_arch = "aarch64")))]
+            match tokio::time::timeout(
+                tokio::time::Duration::from_secs(2),
+                tokio::runtime::Handle::current().dump()
+            ).await {
+                Ok(dump) => {
+                    info!("tokio task dump (on SIGQUIT) completed successfully");
+                    for (i, t) in dump.tasks().iter().enumerate() {
+                        info!("...task {i}: {trace}", trace=t.trace());
+                    }
+                },
+                Err(_) => {
+                    info!("tokio task dump (on SIGQUIT) timed out");
+                }
+            }
+        }
         result = &mut inner => return result,
     }
 
@@ -245,14 +261,24 @@ async fn inner(
     let db = Arc::new(db::Database::new(clocks, conn, !read_only)?);
     info!("Database is loaded.");
 
+    let flusher = if !read_only {
+        let (channel, join) = db::lifecycle::start_flusher(db.clone());
+        Some(Flusher { channel, join })
+    } else {
+        None
+    };
+
     let dirs_to_open: Vec<_> = db
         .lock()
         .streams_by_id()
         .values()
-        .filter_map(|s| s.sample_file_dir_id)
+        .filter_map(|s| s.inner.lock().sample_file_dir.as_ref().map(|d| d.id))
         .collect();
     db.open_sample_file_dirs(&dirs_to_open).await?;
     info!("Directories are opened.");
+    db::lifecycle::abandon(&db).await?;
+    db::lifecycle::initial_rotation(&db).await?;
+    info!("Initial rotation is complete.");
 
     let zone = base::time::global_zone();
     let Some(time_zone_name) = zone.iana_name() else {
@@ -264,69 +290,32 @@ async fn inner(
     info!("Resolved timezone: {}", &time_zone_name);
 
     // Start a streamer for each stream.
-    let mut streamers = Vec::new();
+    let mut streamers = tokio::task::JoinSet::new();
     let mut session_groups_by_camera: FastHashMap<i32, Arc<retina::client::SessionGroup>> =
         FastHashMap::default();
-    let syncers = if !read_only {
+    if !read_only {
+        // Start up streams.
         let l = db.lock();
-        let mut dirs = FastHashMap::with_capacity_and_hasher(
-            l.sample_file_dirs_by_id().len(),
-            Default::default(),
-        );
-        let streams = l.streams_by_id().len();
-        let env = streamer::Environment {
-            db: &db,
+        let env = Box::leak(Box::new(streamer::Environment {
             opener: &crate::stream::OPENER,
+            db: &db,
             shutdown_rx: &shutdown_rx,
-        };
-
-        // Get the directories that need syncers.
-        for stream in l.streams_by_id().values() {
-            if stream.config.mode != db::json::STREAM_MODE_RECORD {
+        }));
+        let streams = l.streams_by_id().len();
+        for (i, (_id, stream)) in l.streams_by_id().iter().enumerate() {
+            let locked = stream.inner.lock();
+            if locked.config.mode != db::json::STREAM_MODE_RECORD {
                 continue;
             }
-            if let Some(id) = stream.sample_file_dir_id {
-                dirs.entry(id).or_insert_with(|| {
-                    let d = l.sample_file_dirs_by_id().get(&id).unwrap();
-                    d.pool().clone()
-                });
-            } else {
+            if locked.sample_file_dir.is_none() {
                 warn!(
                     "Stream {} set to record but has no sample file dir id",
-                    stream.id
+                    locked.id
                 );
-            }
-        }
-
-        // Then, with the lock dropped, create syncers.
-        drop(l);
-        let mut syncers = FastHashMap::with_capacity_and_hasher(dirs.len(), Default::default());
-        for (id, dir) in dirs.drain() {
-            let (channel, join) = writer::start_syncer(db.clone(), shutdown_rx.clone(), id).await?;
-            syncers.insert(id, Syncer { dir, channel, join });
-        }
-
-        // Then start up streams.
-        let l = db.lock();
-        for (i, (id, stream)) in l.streams_by_id().iter().enumerate() {
-            if stream.config.mode != db::json::STREAM_MODE_RECORD {
                 continue;
             }
-            let camera = l.cameras_by_id().get(&stream.camera_id).unwrap();
-            let sample_file_dir_id = match stream.sample_file_dir_id {
-                Some(s) => s,
-                None => {
-                    warn!(
-                        "Can't record stream {} ({}/{}) because it has no sample file dir",
-                        id,
-                        camera.short_name,
-                        stream.type_.as_str()
-                    );
-                    continue;
-                }
-            };
+            let camera = l.cameras_by_id().get(&locked.camera_id).unwrap();
             let rotate_offset_sec = streamer::ROTATE_INTERVAL_SEC * i as i64 / streams as i64;
-            let syncer = syncers.get(&sample_file_dir_id).unwrap();
             let session_group = session_groups_by_camera
                 .entry(camera.id)
                 .or_insert_with(|| {
@@ -334,35 +323,28 @@ async fn inner(
                 })
                 .clone();
             let mut streamer = streamer::Streamer::new(
-                &env,
-                syncer.dir.clone(),
-                syncer.channel.clone(),
-                *id,
+                env,
                 camera,
-                stream,
+                &locked,
                 session_group,
                 rotate_offset_sec,
                 streamer::ROTATE_INTERVAL_SEC,
             )?;
             let span = tracing::info_span!("streamer", stream = streamer.short_name());
-            streamers.push(
-                tokio::task::Builder::new()
-                    .name(&format!("s-{}", streamer.short_name()))
-                    .spawn(
-                        async move {
-                            info!("starting");
-                            streamer.run().await;
-                            info!("ending");
-                        }
-                        .instrument(span),
-                    )
-                    .expect("can't create thread"),
-            );
+            streamers
+                .build_task()
+                .name(&format!("s-{}", streamer.short_name()))
+                .spawn(
+                    async move {
+                        info!("starting");
+                        streamer.run().await;
+                        info!("ending");
+                    }
+                    .instrument(span),
+                )
+                .expect("creating streamer task should succeed");
         }
         drop(l);
-        Some(syncers)
-    } else {
-        None
     };
 
     // Start the web interface(s).
@@ -437,18 +419,17 @@ async fn inner(
         }
     }
 
-    info!("Shutting down streamers and syncers.");
-    for streamer in streamers.drain(..) {
-        if streamer.await.is_err() {
+    info!("Shutting down streamers, directory pools, and flusher.");
+    while let Some(res) = streamers.join_next().await {
+        if res.is_err() {
             tracing::error!("streamer panicked; look for previous panic message");
         }
     }
-    if let Some(mut ss) = syncers {
-        // The syncers shut down when all channels to them have been dropped.
-        for (_, s) in ss.drain() {
-            drop(s.channel);
-            s.join.await.unwrap();
-        }
+    if let Some(flusher) = flusher {
+        let dirs: Vec<_> = db.lock().sample_file_dirs_by_id().keys().cloned().collect();
+        db.close_sample_file_dirs(&dirs).await?;
+        drop(flusher.channel);
+        flusher.join.await.unwrap();
     }
 
     info!("Waiting for TEARDOWN requests to complete.");

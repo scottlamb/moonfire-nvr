@@ -17,7 +17,7 @@ use cursive::{
 type TabCompleteFn = Arc<dyn Fn(&str) -> Vec<String> + Send + Sync>;
 
 pub struct TabCompleteEditView {
-    edit_view: Arc<Mutex<EditView>>,
+    edit_view: Arc<Mutex<EditView, 3>>,
     tab_completer: Option<TabCompleteFn>,
 }
 
@@ -77,7 +77,7 @@ impl View for TabCompleteEditView {
 }
 
 fn tab_complete(
-    edit_view: Arc<Mutex<EditView>>,
+    edit_view: Arc<Mutex<EditView, 3>>,
     tab_completer: TabCompleteFn,
     autofill_one: bool,
 ) -> EventResult {
@@ -105,7 +105,7 @@ fn tab_complete(
 }
 
 struct TabCompletePopup {
-    edit_view: Arc<Mutex<EditView>>,
+    edit_view: Arc<Mutex<EditView, 3>>,
     popup: MenuPopup,
     tab_completer: TabCompleteFn,
 }

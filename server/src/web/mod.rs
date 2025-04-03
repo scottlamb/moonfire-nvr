@@ -20,12 +20,10 @@ use crate::mp4;
 use crate::web::static_file::Ui;
 use base::err;
 use base::Error;
-use base::FastHashMap;
 use base::ResultExt;
 use base::{bail, clock::Clocks, ErrorKind};
 use core::borrow::Borrow;
 use core::str::FromStr;
-use db::dir::Pool;
 use db::{auth, recording};
 use http::header::{self, HeaderValue};
 use http::{status::StatusCode, Request, Response};
@@ -159,7 +157,6 @@ pub struct Config<'a> {
 pub struct Service {
     db: Arc<db::Database>,
     ui: Ui,
-    dirs_by_stream_id: Arc<FastHashMap<i32, Pool>>,
     time_zone_name: String,
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
@@ -183,30 +180,8 @@ enum CacheControl {
 impl Service {
     pub fn new(config: Config) -> Result<Self, Error> {
         let ui_dir = config.ui_dir.map(Ui::from).unwrap_or(Ui::None);
-        let dirs_by_stream_id = {
-            let l = config.db.lock();
-            let mut d =
-                FastHashMap::with_capacity_and_hasher(l.streams_by_id().len(), Default::default());
-            for (&id, s) in l.streams_by_id().iter() {
-                let dir_id = match s.sample_file_dir_id {
-                    Some(d) => d,
-                    None => continue,
-                };
-                d.insert(
-                    id,
-                    l.sample_file_dirs_by_id()
-                        .get(&dir_id)
-                        .unwrap()
-                        .pool()
-                        .clone(),
-                );
-            }
-            Arc::new(d)
-        };
-
         Ok(Service {
             db: config.db,
-            dirs_by_stream_id,
             ui: ui_dir,
             allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
             trust_forward_hdrs: config.trust_forward_hdrs,
@@ -528,7 +503,7 @@ impl Service {
         };
         builder.append_video_sample_entry(ent.clone());
         let mp4 = builder
-            .build(self.db.clone(), self.dirs_by_stream_id.clone())
+            .build(self.db.clone())
             .err_kind(ErrorKind::Internal)?;
         if debug {
             Ok(plain_response(StatusCode::OK, format!("{mp4:#?}")))

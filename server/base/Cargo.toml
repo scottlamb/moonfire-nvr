@@ -6,7 +6,7 @@ readme = "../README.md"
 edition = "2021"
 license-file = "../../LICENSE.txt"
 publish = false
-rust-version = "1.88"
+rust-version = "1.91"
 
 [features]
 mimalloc = ["dep:libmimalloc-sys"]

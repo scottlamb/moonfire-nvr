@@ -185,10 +185,10 @@ fn fill_recording(tx: &rusqlite::Transaction) -> Result<FastHashMap<i32, CameraS
             ":run_offset": &(composite_id - run_id),
             ":flags": &(
                 if trailing_zero {
-                    db::RecordingFlags::TrailingZero as i32
+                    db::RecordingFlags::TRAILING_ZERO
                 } else {
-                    0
-                }),
+                    db::RecordingFlags::empty()
+                }.bits()),
             ":sample_file_bytes": &sample_file_bytes,
             ":start_time_90k": &start_time_90k,
             ":duration_90k": &duration_90k,

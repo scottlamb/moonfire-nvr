@@ -5,7 +5,7 @@ authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
 edition = "2021"
 license-file = "../../LICENSE.txt"
-rust-version = "1.88"
+rust-version = "1.91"
 publish = false
 
 [features]
@@ -15,11 +15,14 @@ nightly = []
 path = "lib.rs"
 
 [dependencies]
+arrayvec = "0.7.6"
 base = { package = "moonfire-base", path = "../base" }
 base64 = { workspace = true }
+bitflags = "2.9.0"
 blake3 = "1.0.0"
 byteorder = "1.0"
 bytes = { workspace = true }
+derive_more.workspace = true
 diff = "0.1.12"
 futures = "0.3"
 h264-reader = { workspace = true }
@@ -32,7 +35,8 @@ num-rational = { version = "0.4.0", default-features = false, features = [
     "std",
 ] }
 pretty-hex = { workspace = true }
-protobuf = { workspace = true }
+protobuf.workspace = true
+reffers.workspace = true
 ring = { workspace = true }
 rusqlite = { workspace = true }
 scrypt = "0.11.0"

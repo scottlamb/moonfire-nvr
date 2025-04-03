@@ -11,8 +11,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 ## unreleased
 
 *   Major changes to sample file directory IO.
-    *   All IO happens on each directory's two-thread pool with threads named
-        `dir-<PATH>`. Formerly, IO could happen on the per-stream writer
+    *   All directory I/O happens on each directory's two-thread pool with threads
+        named `dir-<PATH>`. Formerly, I/O could happen on the per-stream writer
         threads, per-directory reader threads, and occasionally on even the
         tokio worker threads.
     *   Stream shutdowns are more responsive now. Before they could wait up to
@@ -20,9 +20,23 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
         these operations.
     *   Multiple sample file directories are scanned in parallel, speeding
         program startup.
-    *   The recording path uses more CPU than before due to extra thread
-        hand-offs. This is temporary; an upcoming change to the buffering
-        model will reclaim this performance and more.
+    *   Streamers write only into a recent frames buffer in RAM, which the directory
+        pool workers asynchronously write to disk approximately once per GOP, where
+        formerly there was a write call per frame.
+
+        In the new model, streamers never fall behind due to HDD I/O. Instead, frames
+        are buffered up to a limit. Recordings are aborted if the pool falls too
+        far behind.
+
+        This roughly halves CPU usage as thread hand-offs and syscalls are less common.
+        It also enables several desirable future changes:
+
+        *    audio recording (which radically increases the number of frames and thus
+             would otherwise significantly increase CPU usage).
+        *    "monitor mode" (allowing live view without recording to disk).
+        *    further CPU reductions for live view (by skipping all SQLite ops and disk I/O).
+
+*   bump minimum Rust version to 1.91.
 
 ## v0.7.25 (2026-02-14)
 

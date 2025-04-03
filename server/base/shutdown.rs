@@ -15,8 +15,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
-use crate::Condvar;
-use crate::Mutex;
+use crate::{Condvar, Mutex};
 use futures::Future;
 use slab::Slab;
 
@@ -33,7 +32,7 @@ impl std::error::Error for ShutdownError {}
 
 struct Inner {
     /// `None` iff shutdown has already happened.
-    wakers: Mutex<Option<Slab<Waker>>>,
+    wakers: Mutex<Option<Slab<Waker>>, 3>,
 
     condvar: Condvar,
 }

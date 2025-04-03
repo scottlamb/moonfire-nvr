@@ -1,5 +1,0 @@
-[build]
-rustflags = [
-    "--codegen", "force-frame-pointers=yes",
-    "--cfg", "tokio_unstable",
-]

@@ -5,10 +5,10 @@
 use crate::stream;
 use base::clock::{Clocks, TimerGuard};
 use base::{bail, err, Error};
-use db::{dir, recording, writer, Camera, Database, Stream};
+use db::{recording, writer, Camera, Database};
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
 use url::Url;
 
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
@@ -25,18 +25,13 @@ where
 
 /// Connects to a given RTSP stream and writes recordings to the database via [`writer::Writer`].
 /// Streamer is meant to be long-lived; it will sleep and retry after each failure.
-pub struct Streamer<'a, C>
-where
-    C: Clocks + Clone,
-{
+pub struct Streamer<'a, C: Clocks + Clone> {
     shutdown_rx: base::shutdown::Receiver,
 
     // State below is only used by the thread in Run.
     rotate_offset_sec: i64,
     rotate_interval_sec: i64,
     db: Arc<Database<C>>,
-    dir: dir::Pool,
-    syncer_channel: writer::SyncerChannel<db::dir::WriteStream>,
     opener: &'a dyn stream::Opener,
     transport: retina::client::Transport,
     stream_id: i32,
@@ -47,18 +42,11 @@ where
     password: String,
 }
 
-impl<'a, C> Streamer<'a, C>
-where
-    C: 'a + Clocks + Clone,
-{
-    #[allow(clippy::too_many_arguments)]
+impl<'a, C: Clocks + Clone> Streamer<'a, C> {
     pub fn new<'tmp>(
         env: &Environment<'a, 'tmp, C>,
-        dir: dir::Pool,
-        syncer_channel: writer::SyncerChannel<db::dir::WriteStream>,
-        stream_id: i32,
         c: &Camera,
-        s: &Stream,
+        s: &db::stream::LockedStream,
         session_group: Arc<retina::client::SessionGroup>,
         rotate_offset_sec: i64,
         rotate_interval_sec: i64,
@@ -80,11 +68,9 @@ where
             match retina::client::Transport::from_str(&s.config.rtsp_transport) {
                 Ok(t) => Some(t),
                 Err(_) => {
-                    tracing::warn!(
+                    warn!(
                         "Unable to parse configured transport {:?} for {}/{}; ignoring.",
-                        &s.config.rtsp_transport,
-                        &c.short_name,
-                        s.type_
+                        &s.config.rtsp_transport, &c.short_name, s.type_
                     );
                     None
                 }
@@ -95,11 +81,9 @@ where
             rotate_offset_sec,
             rotate_interval_sec,
             db: env.db.clone(),
-            dir,
-            syncer_channel,
             opener: env.opener,
             transport: stream_transport.unwrap_or_default(),
-            stream_id,
+            stream_id: s.id,
             session_group,
             short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
             url: url.clone(),
@@ -135,7 +119,7 @@ where
         loop {
             let status = self.session_group.stale_sessions();
             if let Some(max_expires) = status.max_expires {
-                tracing::info!(
+                info!(
                     "waiting up to {:?} for TEARDOWN or expiration of {} stale sessions",
                     max_expires.saturating_duration_since(tokio::time::Instant::now()),
                     status.num_sessions
@@ -147,14 +131,14 @@ where
                 waited = true;
             } else {
                 if waited {
-                    tracing::info!("done waiting; no more stale sessions");
+                    info!("done waiting; no more stale sessions");
                 }
                 break;
             }
         }
 
         let mut stream = {
-            let _t = TimerGuard::new(&clocks, || format!("opening {}", self.url));
+            let _t = TimerGuard::new(&clocks, |_| format!("opening {}", self.url));
             let options = stream::Options {
                 session: retina::client::SessionOptions::default()
                     .creds(if self.username.is_empty() {
@@ -174,9 +158,9 @@ where
                 r = self.opener.open(self.short_name.clone(), self.url.clone(), options) => r?,
             }
         };
-        let realtime_offset = self.db.clocks().realtime().0 - clocks.monotonic().0;
+        let realtime_offset = clocks.realtime().0 - clocks.monotonic().0;
         let mut video_sample_entry_id = {
-            let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
+            let _t = TimerGuard::new(&clocks, |_| "inserting video sample entry");
             self.db
                 .lock()
                 .insert_video_sample_entry(stream.video_sample_entry().clone())?
@@ -185,13 +169,20 @@ where
 
         // Seconds since epoch at which to next rotate. See comment at start
         // of while loop.
-        let mut rotate: Option<i64> = None;
-        let mut w = writer::Writer::new(&self.dir, &self.db, &self.syncer_channel, self.stream_id);
+        let mut rotate_at_sec: Option<i64> = None;
+        let db_stream = self
+            .db
+            .lock()
+            .streams_by_id()
+            .get(&self.stream_id)
+            .expect("stream should exist")
+            .clone();
+        let mut w = writer::Writer::new(db_stream).expect("should not have existing writer");
         loop {
-            // `rotate` should now be set iff `w` has an open recording.
+            // `rotate_if_sec` should now be set iff `w` has an open recording.
 
             let r = {
-                let _t = TimerGuard::new(&clocks, || "getting next packet");
+                let _t = TimerGuard::new(&clocks, |_| "getting next packet");
                 tokio::select! {
                     biased;
                     _ = self.shutdown_rx.as_future() => break,
@@ -201,7 +192,7 @@ where
             let frame = match r {
                 Ok(f) => f,
                 Err(e) => {
-                    let _ = w.close(None, Some(e.chain().to_string()));
+                    w.close(e.chain().to_string());
                     return Err(e);
                 }
             };
@@ -213,73 +204,60 @@ where
             }
             let frame_realtime = base::clock::SystemTime(realtime_offset + clocks.monotonic().0);
             let local_time = recording::Time::from(frame_realtime);
-            rotate = if let Some(r) = rotate {
+            let rotate_now = if let Some(r) = rotate_at_sec {
                 if frame_realtime.as_secs() > r && frame.is_key {
-                    trace!("close on normal rotation");
-                    let _t = TimerGuard::new(&clocks, || "closing writer");
-                    w.close(Some(frame.pts), None)?;
-                    None
+                    true
                 } else if frame.new_video_sample_entry {
+                    info!("forcing rotation due to new video sample entry");
                     if !frame.is_key {
                         bail!(Unavailable, msg("parameter change on non-key frame"));
                     }
-                    trace!("close on parameter change");
                     video_sample_entry_id = {
-                        let _t = TimerGuard::new(&clocks, || "inserting video sample entry");
+                        let _t = TimerGuard::new(&clocks, |_| "inserting video sample entry");
                         self.db
                             .lock()
                             .insert_video_sample_entry(stream.video_sample_entry().clone())?
                     };
-                    let _t = TimerGuard::new(&clocks, || "closing writer");
-                    w.close(Some(frame.pts), None)?;
-                    None
+                    true
                 } else {
-                    Some(r)
+                    false
                 }
             } else {
-                None
+                false
             };
-            let r = match rotate {
-                Some(r) => r,
-                None => {
-                    let sec = frame_realtime.as_secs();
-                    let r = sec - (sec % self.rotate_interval_sec) + self.rotate_offset_sec;
-                    let r = r + if r <= sec {
-                        self.rotate_interval_sec
-                    } else {
-                        0
-                    };
+            let r = if let Some(r2) = rotate_at_sec.filter(|_| !rotate_now) {
+                r2
+            } else {
+                let sec = frame_realtime.as_secs();
+                let r = sec - (sec % self.rotate_interval_sec) + self.rotate_offset_sec;
+                let r = r + if r <= sec {
+                    self.rotate_interval_sec
+                } else {
+                    0
+                };
 
-                    // On the first recording, set rotate time to not the next rotate offset, but
-                    // the one after, so that it's longer than usual rather than shorter than
-                    // usual.  This ensures there's plenty of frame times to use when calculating
-                    // the start time.
-                    let r = r + if w.previously_opened()? {
-                        0
-                    } else {
-                        self.rotate_interval_sec
-                    };
-                    let _t = TimerGuard::new(&clocks, || "creating writer");
-                    r
+                // On the first recording, set rotate time to not the next rotate offset, but
+                // the one after, so that it's longer than usual rather than shorter than
+                // usual.  This ensures there's plenty of frame times to use when calculating
+                // the start time.
+                r + if rotate_now {
+                    0
+                } else {
+                    self.rotate_interval_sec
                 }
             };
-            let len = frame.data.len();
-            let _t = TimerGuard::new(&clocks, || format!("writing {} bytes", len));
             w.write(
-                &mut self.shutdown_rx,
                 frame.data,
                 local_time,
                 frame.pts,
                 frame.is_key,
+                rotate_now,
                 video_sample_entry_id,
             )
-            .await?;
-            rotate = Some(r);
+            .map_err(|e| err!(Unknown, msg("{e}")))?;
+            rotate_at_sec = Some(r);
         }
-        if rotate.is_some() {
-            let _t = TimerGuard::new(&clocks, || "closing writer");
-            w.close(None, Some("NVR shutdown".to_owned()))?;
-        }
+        w.close("NVR shutdown".to_owned());
         Ok(())
     }
 }
@@ -378,8 +356,8 @@ mod tests {
 
     struct MockOpener {
         expected_url: url::Url,
-        streams: Mutex<Vec<Box<dyn stream::Stream>>>,
-        shutdown_tx: Mutex<Option<base::shutdown::Sender>>,
+        streams: Mutex<Vec<Box<dyn stream::Stream>>, 1>,
+        shutdown_tx: Mutex<Option<base::shutdown::Sender>, 1>,
     }
 
     #[async_trait]
@@ -459,31 +437,30 @@ mod tests {
             shutdown_rx: &shutdown_rx,
         };
         let mut stream;
+        let pool;
         {
             let l = db.db.lock();
             let camera = l.cameras_by_id().get(&testutil::TEST_CAMERA_ID).unwrap();
             let s = l.streams_by_id().get(&testutil::TEST_STREAM_ID).unwrap();
-            let dir = db
-                .dirs_by_stream_id
-                .get(&testutil::TEST_STREAM_ID)
-                .unwrap()
-                .clone();
             stream = super::Streamer::new(
                 &env,
-                dir,
-                db.syncer_channel.clone(),
-                testutil::TEST_STREAM_ID,
                 camera,
-                s,
+                &s.inner.lock(),
                 Arc::new(retina::client::SessionGroup::default()),
                 0,
                 3,
             )
             .unwrap();
+            pool = db
+                .dirs_by_stream_id
+                .get(&testutil::TEST_STREAM_ID)
+                .unwrap()
+                .clone();
         }
         stream.run().await;
         assert!(opener.streams.lock().is_empty());
-        db.syncer_channel.flush().await;
+        pool.await_no_write_streams().await;
+        db.flusher_channel.await_idle().await;
         let db = db.db.lock();
 
         // Compare frame-by-frame. Note below that while the rotation is scheduled to happen near
@@ -507,18 +484,27 @@ mod tests {
             Frame { start_90k:  90011, duration_90k:     0, is_key: false },
         ]);
         let mut recordings = Vec::new();
+        struct Recording {
+            id: CompositeId,
+            start: recording::Time,
+            flags: db::RecordingFlags,
+        }
         db.list_recordings_by_id(testutil::TEST_STREAM_ID, 0..2, &mut |r| {
-            recordings.push(r);
+            recordings.push(Recording {
+                id: r.id,
+                start: r.start,
+                flags: r.flags,
+            });
             Ok(())
         })
         .unwrap();
         assert_eq!(2, recordings.len());
         assert_eq!(0, recordings[0].id.recording());
-        assert_eq!(recording::Time(128700575999999), recordings[0].start);
-        assert_eq!(0, recordings[0].flags);
+        assert_eq!(recording::Time(128700576089748), recordings[0].start);
+        assert_eq!(db::RecordingFlags::empty(), recordings[0].flags);
         assert_eq!(1, recordings[1].id.recording());
-        assert_eq!(recording::Time(128700576719993), recordings[1].start);
-        assert_eq!(db::RecordingFlags::TrailingZero as i32, recordings[1].flags);
+        assert_eq!(recording::Time(128700576719784), recordings[1].start);
+        assert_eq!(db::RecordingFlags::TRAILING_ZERO, recordings[1].flags);
 
         drop(opener);
     }

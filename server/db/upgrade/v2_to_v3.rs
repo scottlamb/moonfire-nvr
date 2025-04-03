@@ -7,12 +7,15 @@
 /// completed, and possibly an upgrade from 2 to 3 is half-finished.
 use crate::db::{self, SqlUuid};
 use crate::dir;
-use base::{Error, ErrorKind};
+use base::{Error, ErrorKind, FastHashSet};
 use rusqlite::params;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Opens the sample file dir.
+///
+/// Does not populate `garbage_needs_unlink`.
 ///
 /// Makes a couple simplifying assumptions valid for version 2:
 /// *   there's only one dir.
@@ -39,16 +42,20 @@ fn open_sample_file_dir(tx: &rusqlite::Transaction) -> Result<dir::Pool, Error> 
                 ))
             },
         )?;
-    let pool = crate::dir::Pool::new(crate::dir::Config {
-        path: PathBuf::from(p),
-        db_uuid,
-        dir_uuid,
-        last_complete_open: Some(crate::db::Open {
-            id: o_id as u32,
-            uuid: o_uuid,
-        }),
-        current_open: None,
-    });
+    let pool = crate::dir::Pool::new(
+        crate::dir::Config {
+            path: PathBuf::from(p),
+            db_uuid,
+            dir_uuid,
+            last_complete_open: Some(crate::db::Open {
+                id: o_id as u32,
+                uuid: o_uuid,
+            }),
+            current_open: None,
+            flusher_notify: Arc::new(tokio::sync::Notify::new()), // dummy
+        },
+        FastHashSet::default(),
+    );
     futures::executor::block_on(pool.open(const { NonZeroUsize::new(1).unwrap() }))?;
     Ok(pool)
 }

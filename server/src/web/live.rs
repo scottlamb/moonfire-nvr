@@ -10,7 +10,6 @@ use base::{bail, err, Error};
 use bytes::Bytes;
 use futures::SinkExt;
 use http::header;
-use tokio::sync::broadcast::error::RecvError;
 use tokio_tungstenite::tungstenite;
 use uuid::Uuid;
 
@@ -38,10 +37,9 @@ impl Service {
             bail!(PermissionDenied, msg("view_video required"));
         }
 
-        let stream_id;
-        let open_id;
-        let mut sub_rx = {
-            let mut db = self.db.lock();
+        let (open_id, stream_id, stream);
+        {
+            let db = self.db.lock();
             open_id = match db.open {
                 None => {
                     bail!(
@@ -56,38 +54,35 @@ impl Service {
                 .ok_or_else(|| err!(NotFound, msg("no such camera {uuid}")))?;
             stream_id = camera.streams[stream_type.index()]
                 .ok_or_else(|| err!(NotFound, msg("no such stream {uuid}/{stream_type}")))?;
-            db.watch_live(stream_id).expect("stream_id refed by camera")
+            stream = db
+                .streams_by_id()
+                .get(&stream_id)
+                .expect("stream referenced by camera should exist")
+                .clone();
         };
+        let mut sub_rx = stream.frames();
 
         let mut keepalive = tokio::time::interval(KEEPALIVE_AFTER_IDLE);
         keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-        // On the first LiveFrame, send all the data from the previous key frame
-        // onward. Afterward, send a single (often non-key) frame at a time.
-        let mut start_at_key = true;
         loop {
             tokio::select! {
                 biased;
 
-                next = sub_rx.recv() => {
+                next = sub_rx.next() => {
                     match next {
-                        Ok(l) => {
+                        Ok(frame) => {
                             keepalive.reset_after(KEEPALIVE_AFTER_IDLE);
                             if !self.stream_live_m4s_chunk(
                                 open_id,
                                 stream_id,
                                 ws,
-                                l,
-                                start_at_key,
+                                frame,
                             ).await? {
                                 return Ok(());
                             }
-                            start_at_key = false;
                         }
-                        Err(RecvError::Closed) => {
-                            bail!(Internal, msg("live stream closed unexpectedly"));
-                        }
-                        Err(RecvError::Lagged(frames)) => {
+                        Err(db::stream::DroppedFramesError(frames)) => {
                             bail!(
                                 ResourceExhausted,
                                 msg("subscriber {frames} frames further behind than allowed; \
@@ -113,24 +108,43 @@ impl Service {
         open_id: u32,
         stream_id: i32,
         ws: &mut WebSocketStream,
-        live: db::LiveFrame,
-        start_at_key: bool,
+        live: db::RecentFrame,
     ) -> Result<bool, Error> {
         let mut builder = mp4::FileBuilder::new(mp4::Type::MediaSegment);
+
+        /// Selected fields from the `ListRecordingsRow` that are used after dropping the lock.
+        struct AbridgedRow {
+            prev_media_duration_and_runs: Option<(base::time::Duration, i32)>,
+            run_offset: i32,
+            start: base::time::Time,
+            video_sample_entry_id: i32,
+        }
         let mut row = None;
+        tracing::debug!("looking for row to match frame");
         {
             let db = self.db.lock();
             let mut rows = 0;
-            db.list_recordings_by_id(stream_id, live.recording..live.recording + 1, &mut |r| {
-                rows += 1;
-                builder.append(&db, &r, live.media_off_90k.clone(), start_at_key)?;
-                row = Some(r);
-                Ok(())
-            })?;
+            db.list_recordings_by_id(
+                stream_id,
+                live.recording_id..live.recording_id + 1,
+                &mut |r| {
+                    rows += 1;
+                    builder.append(&db, &r, live.media_off_90k.clone(), false)?;
+                    row = Some(AbridgedRow {
+                        prev_media_duration_and_runs: r.prev_media_duration_and_runs,
+                        run_offset: r.run_offset,
+                        start: r.start,
+                        video_sample_entry_id: r.video_sample_entry_id,
+                    });
+                    Ok(())
+                },
+            )?;
         }
-        let row = row.ok_or_else(|| err!(Internal, msg("unable to find {live:?}")))?;
+        let row =
+            row.ok_or_else(|| err!(Internal, msg("unable to find recording for {live:?}")))?;
+        tracing::debug!("have row to match frame");
         use http_serve::Entity;
-        let mp4 = builder.build(self.db.clone(), self.dirs_by_stream_id.clone())?;
+        let mp4 = builder.build(self.db.clone())?;
         let mut hdrs = header::HeaderMap::new();
         mp4.add_headers(&mut hdrs);
         let mime_type = hdrs.get(header::CONTENT_TYPE).unwrap();
@@ -146,7 +160,7 @@ impl Service {
             mime_type.to_str().unwrap(),
             row.start.0,
             open_id,
-            live.recording,
+            live.recording_id,
             live.media_off_90k.start,
             live.media_off_90k.end,
             prev_media_duration.0,
@@ -155,6 +169,7 @@ impl Service {
         );
         let mut v = hdr.into_bytes();
         mp4.append_into_vec(&mut v).await?;
+        tracing::debug!("sending frame msg");
         Ok(ws
             .send(tungstenite::Message::Binary(v.into()))
             .await

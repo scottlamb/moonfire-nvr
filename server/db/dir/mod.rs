@@ -13,9 +13,9 @@ pub mod writer;
 
 use crate::db::CompositeId;
 use crate::schema;
+use crate::stream::Stream;
 use crate::{coding, fs};
-use base::{bail, err, Error};
-use bytes::Bytes;
+use base::{bail, err, Condvar, Error, FastHashSet, Mutex, MutexGuard};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryFutureExt as _};
 use nix::{
@@ -31,11 +31,9 @@ use std::future::Future;
 use std::io::{Read, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 use tracing::{error, info_span};
 use uuid::Uuid;
-
-pub use writer::WriteStream;
 
 /// The fixed length of a directory's `meta` file.
 ///
@@ -54,6 +52,8 @@ pub(crate) struct Config {
 
     /// The current open, iff the database is open for writing.
     pub current_open: Option<crate::db::Open>,
+
+    pub flusher_notify: Arc<tokio::sync::Notify>,
 }
 
 impl Config {
@@ -100,21 +100,47 @@ impl Config {
 /// Handle to a sample file directory pool. Typically one pool per physical disk drive.
 ///
 /// If the directory is used for writing, [`crate::writer::start_syncer`] should be
-/// called to start a background thread. This thread manages deleting files and
+/// called to start a background task. This task manages deleting files and
 /// writing new files. It synces the directory and commits these operations to
 /// the database in the correct order to maintain the invariants described in
 /// `design/schema.md`.
 #[derive(Clone)]
 pub struct Pool(Arc<Shared>);
 
+pub(crate) struct Guard<'a>(MutexGuard<'a, Inner>);
+
+impl<'a> Guard<'a> {
+    pub(crate) fn insert_garbage_needs_unlink(&mut self, id: CompositeId) {
+        self.0.garbage_needs_unlink.insert(id);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn garbage_needs_unlink(&self) -> &base::FastHashSet<CompositeId> {
+        &self.0.garbage_needs_unlink
+    }
+
+    pub(crate) fn garbage_unlinked(&self) -> &[CompositeId] {
+        &self.0.garbage_unlinked
+    }
+
+    pub(crate) fn remove_garbage_unlinked_prefix(&mut self, ids: &[CompositeId]) {
+        debug_assert_eq!(ids, &self.0.garbage_unlinked[0..ids.len()]);
+        self.0.garbage_unlinked.drain(0..ids.len());
+    }
+}
+
+// TODO: Drop for Guard impl that ensures a worker is running to handle `garbage_needs_unlink`.
+
 /// State shared between handles and workers.
 struct Shared {
     config: Config,
 
     /// Notifies workers that work is available.
-    worker_notify: std::sync::Condvar,
+    worker_notify: Condvar,
 
-    inner: Mutex<Inner>,
+    no_write_streams_notify: tokio::sync::Notify,
+
+    inner: Mutex<Inner, 3>,
 }
 
 /// Mutable state shared between handles and workers.
@@ -128,13 +154,35 @@ struct Inner {
     /// The number of workers actually doing work.
     active_workers: usize,
 
-    /// The number of active write streams. Write streams are always closed by
-    /// workers to prevent blocking other threads. To allow this, worker threads
-    /// are never shut down while there are active write streams.
+    /// The number of active write streams.
+    ///
+    /// A [`LockedStream`] is considered to have an active write stream if its
+    /// associated [`dir::writer::State`] indicates the stream is on-worker
+    /// and/or there is an open file.
+    ///
+    /// Workers are never shut down while there are an active write streams.
+    /// When `write_streams` is decremented to 0 and the pool is closing,
+    /// workers must be notified to exit.
     write_streams: usize,
 
     /// The work to be performed.
     work: VecDeque<IoCommand>,
+
+    /// ids which are in the `garbage` database table (rather than `recording`) as of last commit
+    /// but may still exist on disk. These can't be safely removed from the database yet.
+    ///
+    /// These values are _inserted_ by `LockedDatabase` (by way of `Pool::garbage_needs_unlink_inserter`)
+    /// and _removed_ by directory pool threads within syncer code.
+    garbage_needs_unlink: FastHashSet<CompositeId>,
+
+    /// ids which are in the `garbage` database table and are guaranteed to no longer exist on
+    /// disk (have been unlinked and the dir has been synced).
+    ///
+    /// These values are _appended_ by directory pool threads within syncer code
+    /// (they are moved from `garbage_needs_unlink`). Prefixes are _removed_ by
+    /// `LockedDatabase` on flush. The latter will get quite confused if the state
+    /// is mutated in any other way.
+    garbage_unlinked: Vec<CompositeId>,
 }
 
 struct Worker {
@@ -151,32 +199,13 @@ struct Worker {
 enum IoCommand {
     CollectGarbage {
         span: tracing::Span,
-        garbage: Vec<CompositeId>,
-        tx: tokio::sync::oneshot::Sender<Result<Vec<CompositeId>, Error>>,
+        tx: tokio::sync::oneshot::Sender<Result<bool, Error>>,
     },
 
     Run(Box<dyn FnOnce(WorkerCtx<'_>) + Send + 'static>),
 
     // writer.rs
-    CreateFile {
-        span: tracing::Span,
-        composite_id: CompositeId,
-        tx: tokio::sync::oneshot::Sender<Result<writer::WriteStream, Error>>,
-    },
-    Write {
-        span: tracing::Span,
-        file: std::fs::File,
-        data: Bytes,
-        tx: tokio::sync::oneshot::Sender<(std::fs::File, Bytes, Result<usize, std::io::Error>)>,
-    },
-    Abandon {
-        file: std::fs::File,
-    },
-    SyncAll {
-        span: tracing::Span,
-        file: std::fs::File,
-        tx: tokio::sync::oneshot::Sender<(std::fs::File, Result<(), std::io::Error>)>,
-    },
+    WakeWriter(Arc<Stream>),
 
     // reader.rs
     /// Opens a file and reads the first chunk.
@@ -252,6 +281,14 @@ impl NixPath for CompositeIdPath {
     {
         let p = CStr::from_bytes_with_nul(&self.0[..]).expect("no interior nuls");
         Ok(f(p))
+    }
+}
+
+impl AsRef<Path> for CompositeIdPath {
+    fn as_ref(&self) -> &Path {
+        use std::str;
+        let s = str::from_utf8(&self.0[..self.len()]).unwrap();
+        Path::new(s)
     }
 }
 
@@ -350,18 +387,25 @@ pub(crate) fn is_open(state: &State) -> bool {
 
 impl Pool {
     /// Returns a closed `Pool` for the given configuration.
-    pub(crate) fn new(config: Config) -> Self {
+    pub(crate) fn new(config: Config, garbage_needs_unlink: FastHashSet<CompositeId>) -> Self {
         Self(Arc::new(Shared {
             config,
             worker_notify: Condvar::new(),
+            no_write_streams_notify: tokio::sync::Notify::new(),
             inner: Mutex::new(Inner {
                 state: State::Closed,
                 live_workers: 0,
                 active_workers: 0,
                 work: VecDeque::new(),
                 write_streams: 0,
+                garbage_needs_unlink,
+                garbage_unlinked: Vec::new(),
             }),
         }))
+    }
+
+    pub(crate) fn lock(&self) -> Guard<'_> {
+        Guard(self.0.inner.lock())
     }
 
     pub(crate) fn config(&self) -> &Config {
@@ -391,7 +435,7 @@ impl Pool {
             )
             .boxed();
         }
-        let mut l = self.0.inner.lock().expect("dir is not poisoned");
+        let mut l = self.0.inner.lock();
         match &l.state {
             State::Closed => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -434,14 +478,17 @@ impl Pool {
     }
 
     /// Transitions from state `OpenStage1` to `Open`.
+    ///
+    /// If the `flusher_channel` is `None`, it will not be possible to add
+    /// recordings. It is still possible to delete files.
     pub(crate) fn complete_open_for_write(&self) -> BoxFuture<'static, Result<(), Error>> {
         let Some(open) = &self.0.config.current_open else {
             return futures::future::err(err!(FailedPrecondition, msg("read-only")).build())
                 .boxed();
         };
-        let mut l = self.0.inner.lock().expect("dir is not poisoned");
+        let mut l = self.0.inner.lock();
         match &mut l.state {
-            State::OpenStage1 => {}
+            State::OpenStage1 => {} // ok
             State::Open => return futures::future::ok(()).boxed(),
             o => {
                 return futures::future::err(
@@ -469,7 +516,7 @@ impl Pool {
             |s| matches!(s, State::OpeningStage2),
             move |ctx| {
                 write_meta(&ctx.0.dir, &meta)?;
-                let mut l = ctx.0.shared.inner.lock().expect("dir is not poisoned");
+                let mut l = ctx.0.shared.inner.lock();
                 assert!(matches!(l.state, State::OpeningStage2));
                 l.state = State::Open;
                 Ok(())
@@ -480,16 +527,18 @@ impl Pool {
 
     /// Transitions to state `Closed`.
     ///
-    /// Must be in one of: `OpenStage1`, `Open`, `Deleting`, `Closing`, `Closed.`
+    /// Must be in one of: `OpenStage1`, `Open`, `Deleting`, `Closing`, `Closed`.
     pub(crate) async fn close(&self) -> Result<(), Error> {
         let done;
         let done_notify = {
-            let mut l = self.0.inner.lock().expect("dir is not poisoned");
+            let mut l = self.0.inner.lock();
             done = match &mut l.state {
                 State::OpenStage1 | State::Open => {
                     let done = Arc::new(tokio::sync::Notify::new());
                     l.state = State::Closing { done: done.clone() };
                     if l.write_streams == 0 {
+                        // There are no active write streams; tell the workers they can exit now.
+                        // The last one must notify 'done'.
                         self.0.worker_notify.notify_all();
                     }
                     done
@@ -558,7 +607,7 @@ impl Pool {
             let _enter = span.enter();
             let result = inner(ctx);
             {
-                let mut l = ctx.0.shared.inner.lock().expect("not poisoned");
+                let mut l = ctx.0.shared.inner.lock();
                 assert!(matches!(l.state, State::Deleting));
                 l.state = match result {
                     Ok(_) => State::OpenStage1,
@@ -568,7 +617,7 @@ impl Pool {
             let _ = tx.send(result);
         };
         {
-            let mut l = self.0.inner.lock().expect("not poisoned");
+            let mut l = self.0.inner.lock();
             let State::Open = l.state else {
                 bail!(
                     FailedPrecondition,
@@ -598,19 +647,26 @@ impl Pool {
         )
     }
 
-    /// Unlinks the given recordings, which have been marked as deleted in the database.
+    /// Unlinks files in `garbage_needs_unlink`.
     ///
-    /// Returns the ones that were successfully unlinked.
-    pub fn collect_garbage(
-        &self,
-        garbage: Vec<CompositeId>,
-    ) -> impl Future<Output = Result<Vec<CompositeId>, Error>> {
+    /// This work will be performed even if the returned future is dropped immediately. The caller
+    /// may await the future to obtain the result. On success, returns true iff there are files
+    /// any files afterward which have been unlinked and need a flush to be
+    /// marked as such (regardless of whether that unlink happened due to this
+    /// call).
+    pub fn collect_garbage(&self) -> impl Future<Output = Result<bool, Error>> {
+        {
+            let l = self.0.inner.lock();
+            if l.garbage_needs_unlink.is_empty() {
+                // fast path to avoid thread handoff.
+                return futures::future::ok(!l.garbage_unlinked.is_empty()).boxed();
+            }
+        }
         let (tx, rx) = tokio::sync::oneshot::channel();
         let r = self.send(
             is_open,
             IoCommand::CollectGarbage {
                 span: tracing::info_span!("collect_garbage"),
-                garbage,
                 tx,
             },
         );
@@ -619,9 +675,12 @@ impl Pool {
             rx.await
                 .unwrap_or_else(|_| panic!("worker should not panic"))
         }
+        .boxed()
     }
 
     /// Runs a function, which can batch several operations and return an arbitrary result.
+    ///
+    /// The returned future represents work spawned onto the pool: it will make progress even without polling.
     ///
     /// Fails if the pool is not in state `Open`.
     pub fn run<T: Send + 'static>(
@@ -659,7 +718,7 @@ impl Pool {
 
     /// Sends a command to a worker.
     fn send(&self, state_okay: impl FnOnce(&State) -> bool, cmd: IoCommand) -> Result<(), Error> {
-        let mut l = self.0.inner.lock().expect("not poisoned");
+        let mut l = self.0.inner.lock();
         if !state_okay(&l.state) {
             bail!(
                 FailedPrecondition,
@@ -673,15 +732,50 @@ impl Pool {
     }
 
     pub(crate) fn is_open(&self) -> bool {
-        matches!(
-            self.0.inner.lock().expect("dir is not poisoned").state,
-            State::Open
-        )
+        matches!(self.0.inner.lock().state, State::Open)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn new_for_test(
+        path: &Path,
+        flusher_notify: Arc<tokio::sync::Notify>,
+    ) -> Self {
+        use crate::db::Open;
+        use std::num::NonZeroUsize;
+        use uuid::Uuid;
+
+        let pool = Self::new(
+            Config {
+                path: path.to_owned(),
+                db_uuid: Uuid::from_u128(0),
+                dir_uuid: Uuid::from_u128(1),
+                last_complete_open: None,
+                current_open: Some(Open {
+                    uuid: Uuid::from_u128(2),
+                    id: 0,
+                }),
+                flusher_notify,
+            },
+            FastHashSet::default(),
+        );
+        pool.open(NonZeroUsize::new(1).unwrap()).await.unwrap();
+        pool.complete_open_for_write().await.unwrap();
+        pool
+    }
+
+    pub async fn await_no_write_streams(&self) {
+        loop {
+            let notified = self.0.no_write_streams_notify.notified();
+            if self.0.inner.lock().write_streams == 0 {
+                return;
+            }
+            notified.await;
+        }
     }
 }
 
 impl Worker {
-    /// Opens the directory or fails, reporting to the supplied channel.
+    /// Opens the directory or fails, reporting to the supplied channel after state settles.
     fn create(
         shared: Arc<Shared>,
         tx: tokio::sync::oneshot::Sender<Result<(), Error>>,
@@ -690,15 +784,14 @@ impl Worker {
             Ok(d) => d,
             Err(e) => {
                 let _ = tx.send(Err(e));
-                let mut l = shared.inner.lock().expect("dir is not poisoned");
+                let mut l = shared.inner.lock();
                 assert!(matches!(l.state, State::OpeningStage1 { .. }));
                 l.state = State::Closed;
                 return Err(());
             }
         };
-        let _ = tx.send(Ok(()));
 
-        let mut l = shared.inner.lock().expect("dir is not poisoned");
+        let mut l = shared.inner.lock();
         let State::OpeningStage1 { .. } = l.state else {
             panic!("unexpected state: {:?}", l.state);
         };
@@ -708,6 +801,7 @@ impl Worker {
             State::Open
         };
         drop(l);
+        let _ = tx.send(Ok(()));
         Ok(Self {
             dir,
             shared,
@@ -723,7 +817,7 @@ impl Worker {
         let shared = self_.shared.clone();
         let mut active_now = false;
         loop {
-            let mut l = shared.inner.lock().expect("not poisoned");
+            let mut l = shared.inner.lock();
             if active_now {
                 l.active_workers = l
                     .active_workers
@@ -749,7 +843,7 @@ impl Worker {
                         };
                         return;
                     }
-                    l = self_.shared.worker_notify.wait(l).expect("not poisoned");
+                    l = self_.shared.worker_notify.wait(l);
                     continue;
                 };
                 inner.active_workers += 1;
@@ -803,9 +897,7 @@ impl Worker {
     fn cmd(&self, cmd: IoCommand) {
         match cmd {
             IoCommand::Run(f) => f(WorkerCtx(self)),
-            IoCommand::CollectGarbage { span, garbage, tx } => {
-                self.collect_garbage(span, garbage, tx)
-            }
+            IoCommand::CollectGarbage { span, tx } => self.collect_garbage(span, tx),
             IoCommand::OpenForReading {
                 span,
                 composite_id,
@@ -813,19 +905,7 @@ impl Worker {
                 reply_tx,
             } => self.open_for_reading(span, composite_id, range, reply_tx),
             IoCommand::ReadNextChunk { file } => self.read_chunk(file),
-            IoCommand::CreateFile {
-                span,
-                composite_id,
-                tx,
-            } => self.create_file(span, composite_id, tx),
-            IoCommand::Write {
-                span,
-                file,
-                data,
-                tx,
-            } => self.write(span, file, data, tx),
-            IoCommand::Abandon { file } => drop(file),
-            IoCommand::SyncAll { span, file, tx } => self.sync_all(span, file, tx),
+            IoCommand::WakeWriter(stream) => self.write(stream),
         }
     }
 
@@ -846,13 +926,20 @@ impl Worker {
     fn collect_garbage(
         &self,
         span: tracing::Span,
-        mut garbage: Vec<CompositeId>,
-        tx: tokio::sync::oneshot::Sender<Result<Vec<CompositeId>, Error>>,
+        tx: tokio::sync::oneshot::Sender<Result<bool, Error>>,
     ) {
         if tx.is_closed() {
             return;
         }
         let _enter = span.enter();
+        let mut garbage: Vec<_> = self
+            .shared
+            .inner
+            .lock()
+            .garbage_needs_unlink
+            .iter()
+            .copied()
+            .collect();
         garbage.retain(|&id| {
             match self.unlink(id) {
                 Ok(()) | Err(nix::Error::ENOENT) => true,
@@ -868,7 +955,14 @@ impl Worker {
                 return;
             }
         }
-        let _ = tx.send(Ok(garbage));
+        let mut l = self.shared.inner.lock();
+        l.garbage_unlinked.reserve(garbage.len());
+        for &id in &garbage {
+            if l.garbage_needs_unlink.remove(&id) {
+                l.garbage_unlinked.push(id);
+            }
+        }
+        let _ = tx.send(Ok(!l.garbage_unlinked.is_empty()));
     }
 
     fn unlink(&self, id: CompositeId) -> Result<(), nix::Error> {
@@ -898,10 +992,6 @@ impl WorkerCtx<'_> {
         to: &P2,
     ) -> Result<(), Error> {
         nix::fcntl::renameat(Some(self.0.dir.0), from, Some(self.0.dir.0), to).map_err(Into::into)
-    }
-
-    pub(crate) fn sync(&self) -> Result<(), Error> {
-        nix::unistd::fsync(self.0.dir.0).map_err(|e| err!(e, msg("unable to sync dir")).build())
     }
 
     pub(crate) fn is_empty(&self) -> Result<bool, Error> {

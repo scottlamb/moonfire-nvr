@@ -8,9 +8,8 @@ use base::{bail, err, Error};
 use cursive::traits::{Finder, Nameable, Resizable, Scrollable};
 use cursive::views::{self, Dialog, ViewRef};
 use cursive::Cursive;
-use db::writer;
+use db::StreamType;
 use itertools::Itertools;
-use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use url::Url;
@@ -175,7 +174,7 @@ fn press_edit(siv: &mut Cursive, db: &Arc<db::Database>, id: Option<i32>) {
         change.config.username = camera.username;
         change.config.password = camera.password;
         for (i, stream) in camera.streams.iter().enumerate() {
-            let type_ = db::StreamType::from_index(i).unwrap();
+            let type_ = StreamType::from_index(i).unwrap();
             if stream.record && (stream.url.is_empty() || stream.sample_file_dir_id.is_none()) {
                 bail!(
                     InvalidArgument,
@@ -381,25 +380,27 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
     if decode_size(typed.as_str()).ok() == Some(to_delete) {
         siv.pop_layer(); // deletion confirmation dialog
 
-        let mut zero_limits = BTreeMap::new();
+        let mut zero_limits = Vec::with_capacity(2);
+        let mut needed_dirs = Vec::with_capacity(2);
         {
             let l = db.lock();
             for (&stream_id, stream) in l.streams_by_id() {
+                let stream = stream.inner.lock();
                 if stream.camera_id == id {
-                    let Some(dir_id) = stream.sample_file_dir_id else {
+                    let Some(ref dir) = stream.sample_file_dir else {
                         continue;
                     };
-                    let l = zero_limits
-                        .entry(dir_id)
-                        .or_insert_with(|| Vec::with_capacity(2));
-                    l.push(writer::NewLimit {
+                    if !needed_dirs.contains(&dir.id) {
+                        needed_dirs.push(dir.id);
+                    }
+                    zero_limits.push(db::lifecycle::NewLimit {
                         stream_id,
                         limit: 0,
                     });
                 }
             }
         }
-        if let Err(e) = lower_retention(db.clone(), zero_limits) {
+        if let Err(e) = lower_retention(db.clone(), &needed_dirs, &zero_limits) {
             siv.add_layer(
                 views::Dialog::text(format!("Unable to delete recordings: {}", e.chain()))
                     .title("Error")
@@ -419,13 +420,11 @@ fn confirm_deletion(siv: &mut Cursive, db: &Arc<db::Database>, id: i32, to_delet
 
 fn lower_retention(
     db: Arc<db::Database>,
-    zero_limits: BTreeMap<i32, Vec<writer::NewLimit>>,
+    needed_dirs: &[i32],
+    limits: &[db::lifecycle::NewLimit],
 ) -> Result<(), Error> {
-    let dirs_to_open: Vec<_> = zero_limits.keys().copied().collect();
-    block_on(db.open_sample_file_dirs(&dirs_to_open[..]))?;
-    for (&dir_id, l) in &zero_limits {
-        block_on(writer::lower_retention(db.clone(), dir_id, l))?;
-    }
+    block_on(db.open_sample_file_dirs(needed_dirs))?;
+    block_on(db::lifecycle::lower_retention(&db, limits))?;
     Ok(())
 }
 
@@ -484,23 +483,24 @@ fn load_camera_values(
         // Find the index into dirs of the stored sample file dir.
         let mut selected_dir = 0;
         if let Some(s) = sid.map(|sid| l.streams_by_id().get(&sid).unwrap()) {
-            if let Some(id) = s.sample_file_dir_id {
+            let s = s.inner.lock();
+            if let Some(ref dir) = s.sample_file_dir {
                 for (i, &(_, d_id)) in dirs.iter().skip(1).enumerate() {
-                    if Some(id) == d_id {
+                    if Some(dir.id) == d_id {
                         selected_dir = i + 1;
                         break;
                     }
                 }
             }
-            bytes += s.sample_file_bytes;
+            bytes += s.committed.sample_file_bytes;
             let u = if s.config.retain_bytes == 0 {
                 "0 / 0 (0.0%)".to_owned()
             } else {
                 format!(
                     "{} / {} ({:.1}%)",
-                    s.fs_bytes,
+                    s.committed.fs_bytes,
                     s.config.retain_bytes,
-                    100. * s.fs_bytes as f32 / s.config.retain_bytes as f32
+                    100. * s.committed.fs_bytes as f32 / s.config.retain_bytes as f32
                 )
             };
             dialog.call_on_name(&format!("{}_url", t.as_str()), |v: &mut views::EditView| {

@@ -22,6 +22,8 @@ pub mod db;
 pub mod dir;
 pub mod fs;
 pub mod json;
+pub mod lifecycle;
+pub mod stream;
 mod proto {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 }
@@ -39,3 +41,5 @@ pub mod testutil;
 pub use crate::db::*;
 pub use crate::schema::Permissions;
 pub use crate::signal::Signal;
+pub use crate::stream::recent_frames::RecentFrame;
+pub use crate::stream::{Stream, StreamType, ALL_STREAM_TYPES, NUM_STREAM_TYPES};
