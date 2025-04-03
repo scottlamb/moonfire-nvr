@@ -18,6 +18,7 @@ nightly = ["db/nightly"]
 bundled = ["rusqlite/bundled", "bundled-ui"]
 
 bundled-ui = []
+mimalloc = ["base/mimalloc"]
 
 [workspace]
 members = ["base", "db"]
@@ -42,10 +43,16 @@ uuid = { version = "1.1.2", features = ["serde", "std", "v7", "fast-rng"] }
 base = { package = "moonfire-base", path = "base" }
 base64 = { workspace = true }
 blake3 = "1.0.0"
-bpaf = { version = "0.9.15", features = ["autocomplete", "bright-color", "derive"]}
+bpaf = { version = "0.9.15", features = [
+    "autocomplete",
+    "bright-color",
+    "derive",
+] }
 bytes = "1"
 byteorder = "1.0"
-cursive = { version = "0.21.1", default-features = false, features = ["termion-backend"] }
+cursive = { version = "0.21.1", default-features = false, features = [
+    "termion-backend",
+] }
 data-encoding = "2.7.0"
 db = { package = "moonfire-db", path = "db" }
 futures = "0.3"
@@ -70,7 +77,13 @@ rusqlite = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = { version = "1.7", features = ["union"] }
-tokio = { version = "1.24", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.24", features = [
+    "macros",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
 tokio-tungstenite = "0.26.1"
 toml = "0.8"
 tracing = { workspace = true, features = ["log"] }
@@ -96,7 +109,9 @@ walkdir = "2.3.3"
 
 [dev-dependencies]
 mp4 = { git = "https://github.com/scottlamb/mp4-rust", branch = "moonfire" }
-num-rational = { version = "0.4.0", default-features = false, features = ["std"] }
+num-rational = { version = "0.4.0", default-features = false, features = [
+    "std",
+] }
 reqwest = { version = "0.12.0", default-features = false, features = ["json"] }
 tempfile = "3.2.0"
 tracing-test = "0.2.4"

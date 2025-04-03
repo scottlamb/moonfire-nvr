@@ -77,6 +77,7 @@ fn main() {
     }
     base::tracing_setup::install();
     base::time::init_zone(jiff::tz::TimeZone::system);
+    base::ensure_malloc_used();
 
     // Get the program name from the OS (e.g. if invoked as `target/debug/nvr`: `nvr`),
     // falling back to the crate name if conversion to a path/UTF-8 string fails.

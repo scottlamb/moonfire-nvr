@@ -52,16 +52,16 @@ jobs:
     strategy:
       matrix:
         include:
-        # Note: keep these arches in sync with `Upload Docker Manifest` list.
-        - arch: x86_64 # as in `uname -m` on Linux.
-          rust_target: x86_64-unknown-linux-musl # as in <https://doc.rust-lang.org/rustc/platform-support.html>
-          docker_platform: linux/amd64 # as in <https://docs.docker.com/build/building/multi-platform/>
-        - arch: aarch64
-          rust_target: aarch64-unknown-linux-musl
-          docker_platform: linux/arm64
-        - arch: armv7l
-          rust_target: armv7-unknown-linux-musleabihf
-          docker_platform: linux/arm/v7
+          # Note: keep these arches in sync with `Upload Docker Manifest` list.
+          - arch: x86_64 # as in `uname -m` on Linux.
+            rust_target: x86_64-unknown-linux-musl # as in <https://doc.rust-lang.org/rustc/platform-support.html>
+            docker_platform: linux/amd64 # as in <https://docs.docker.com/build/building/multi-platform/>
+          - arch: aarch64
+            rust_target: aarch64-unknown-linux-musl
+            docker_platform: linux/arm64
+          - arch: armv7l
+            rust_target: armv7-unknown-linux-musleabihf
+            docker_platform: linux/arm/v7
       fail-fast: false
     runs-on: ubuntu-latest
     steps:
@@ -90,7 +90,7 @@ jobs:
           working-directory: server
           target: ${{ matrix.rust_target }}
           command: build
-          args: --release --features bundled
+          args: --release --features bundled,mimalloc
       - name: Upload Docker Artifact
         run: |
           tag="${DOCKER_TAG}-${{ matrix.arch }}"
@@ -115,7 +115,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [ base, cross ]
+    needs: [base, cross]
     runs-on: ubuntu-latest
     permissions:
       contents: write

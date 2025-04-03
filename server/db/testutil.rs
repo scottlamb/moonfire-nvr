@@ -37,6 +37,7 @@ pub const TEST_VIDEO_SAMPLE_ENTRY_DATA: &[u8] =
 ///    * use a fast but insecure password hashing format.
 pub fn init() {
     INIT.call_once(|| {
+        base::ensure_malloc_used();
         base::tracing_setup::install_for_tests();
         base::time::testutil::init_zone();
         crate::auth::set_test_config();

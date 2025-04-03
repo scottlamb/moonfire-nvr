@@ -75,3 +75,16 @@ impl std::ops::Deref for Condvar {
         &self.0
     }
 }
+
+pub fn ensure_malloc_used() {
+    #[cfg(feature = "mimalloc")]
+    {
+        // This is a load-bearing debug line.
+        // Building `libmimalloc-sys` with the `override` feature will override `malloc` and
+        // `free` as used through the Rust global allocator, SQLite, and `libc`. But...`cargo`
+        // doesn't seem to build `libmimalloc-sys` at all if it's not referenced from Rust code.
+        tracing::debug!("mimalloc version {}", unsafe {
+            libmimalloc_sys::mi_version()
+        })
+    }
+}

@@ -656,6 +656,7 @@ mod bench {
     /// Benchmarks the decoder, which is performance-critical for .mp4 serving.
     #[bench]
     fn bench_decoder(b: &mut test::Bencher) {
+        crate::testutil::init();
         let data = include_bytes!("testdata/video_sample_index.bin");
         b.bytes = data.len() as u64;
         b.iter(|| {

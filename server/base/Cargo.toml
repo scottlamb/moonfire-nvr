@@ -9,6 +9,7 @@ publish = false
 rust-version = "1.82"
 
 [features]
+mimalloc = ["dep:libmimalloc-sys"]
 nightly = []
 
 [lib]
@@ -16,10 +17,14 @@ path = "lib.rs"
 
 [dependencies]
 ahash = "0.8"
-coded = { git = "https://github.com/scottlamb/coded", rev = "2c97994974a73243d5dd12134831814f42cdb0e8"}
+coded = { git = "https://github.com/scottlamb/coded", rev = "2c97994974a73243d5dd12134831814f42cdb0e8" }
 futures = "0.3"
 jiff = { workspace = true }
 libc = "0.2"
+libmimalloc-sys = { version = "0.1.41", features = [
+    "override",
+    "extended",
+], optional = true }
 nix = { workspace = true, features = ["time"] }
 nom = "7.0.0"
 rusqlite = { workspace = true }
