@@ -7,8 +7,8 @@
 //! Note these types are in a more standard nanosecond-based format, where
 //! [`crate::time`] uses Moonfire's 90 kHz time base.
 
+use crate::Mutex;
 use nix::sys::time::{TimeSpec, TimeValLike as _};
-use std::sync::Mutex;
 use std::sync::{mpsc, Arc};
 use std::thread;
 pub use std::time::Duration;
@@ -220,15 +220,15 @@ impl SimulatedClocks {
 
 impl Clocks for SimulatedClocks {
     fn realtime(&self) -> SystemTime {
-        self.0.boot + *self.0.uptime.lock().unwrap()
+        self.0.boot + *self.0.uptime.lock()
     }
     fn monotonic(&self) -> Instant {
-        Instant(TimeSpec::from(*self.0.uptime.lock().unwrap()))
+        Instant(TimeSpec::from(*self.0.uptime.lock()))
     }
 
     /// Advances the clock by the specified amount without actually sleeping.
     fn sleep(&self, how_long: Duration) {
-        let mut l = self.0.uptime.lock().unwrap();
+        let mut l = self.0.uptime.lock();
         *l += how_long;
     }
 

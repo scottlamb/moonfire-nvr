@@ -288,12 +288,12 @@ where
 mod tests {
     use crate::stream::{self, Stream};
     use base::clock::{self, Clocks};
+    use base::Mutex;
     use base::{bail, Error};
     use db::{recording, testutil, CompositeId};
     use std::cmp;
     use std::convert::TryFrom;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use tracing::trace;
 
     struct ProxyingStream {
@@ -388,7 +388,7 @@ mod tests {
             _options: stream::Options,
         ) -> Result<Box<dyn stream::Stream>, Error> {
             assert_eq!(&url, &self.expected_url);
-            let mut l = self.streams.lock().unwrap();
+            let mut l = self.streams.lock();
             match l.pop() {
                 Some(stream) => {
                     trace!("MockOpener returning next stream");
@@ -396,7 +396,7 @@ mod tests {
                 }
                 None => {
                     trace!("MockOpener shutting down");
-                    self.shutdown_tx.lock().unwrap().take();
+                    self.shutdown_tx.lock().take();
                     bail!(Cancelled, msg("done"))
                 }
             }
@@ -478,7 +478,7 @@ mod tests {
             .unwrap();
         }
         stream.run();
-        assert!(opener.streams.lock().unwrap().is_empty());
+        assert!(opener.streams.lock().is_empty());
         db.syncer_channel.flush();
         let db = db.db.lock();
 

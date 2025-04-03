@@ -2,7 +2,8 @@
 // Copyright (C) 2020 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
-use std::sync::{Arc, Mutex};
+use base::Mutex;
+use std::sync::Arc;
 
 use cursive::{
     direction::Direction,
@@ -37,25 +38,25 @@ impl TabCompleteEditView {
     }
 
     pub fn get_content(&self) -> Arc<String> {
-        self.edit_view.lock().unwrap().get_content()
+        self.edit_view.lock().get_content()
     }
 }
 
 impl View for TabCompleteEditView {
     fn draw(&self, printer: &Printer) {
-        self.edit_view.lock().unwrap().draw(printer)
+        self.edit_view.lock().draw(printer)
     }
 
     fn layout(&mut self, size: Vec2) {
-        self.edit_view.lock().unwrap().layout(size)
+        self.edit_view.lock().layout(size)
     }
 
     fn take_focus(&mut self, source: Direction) -> Result<EventResult, CannotFocus> {
-        self.edit_view.lock().unwrap().take_focus(source)
+        self.edit_view.lock().take_focus(source)
     }
 
     fn on_event(&mut self, event: Event) -> EventResult {
-        if !self.edit_view.lock().unwrap().is_enabled() {
+        if !self.edit_view.lock().is_enabled() {
             return EventResult::Ignored;
         }
 
@@ -66,12 +67,12 @@ impl View for TabCompleteEditView {
                 EventResult::consumed()
             }
         } else {
-            self.edit_view.lock().unwrap().on_event(event)
+            self.edit_view.lock().on_event(event)
         }
     }
 
     fn important_area(&self, view_size: Vec2) -> Rect {
-        self.edit_view.lock().unwrap().important_area(view_size)
+        self.edit_view.lock().important_area(view_size)
     }
 }
 
@@ -80,10 +81,10 @@ fn tab_complete(
     tab_completer: TabCompleteFn,
     autofill_one: bool,
 ) -> EventResult {
-    let completions = tab_completer(edit_view.lock().unwrap().get_content().as_str());
+    let completions = tab_completer(edit_view.lock().get_content().as_str());
     EventResult::with_cb_once(move |siv| match *completions {
         [] => {}
-        [ref completion] if autofill_one => edit_view.lock().unwrap().set_content(completion)(siv),
+        [ref completion] if autofill_one => edit_view.lock().set_content(completion)(siv),
         [..] => {
             siv.add_layer(TabCompletePopup {
                 popup: views::MenuPopup::new(Arc::new({
@@ -91,7 +92,7 @@ fn tab_complete(
                         for completion in completions {
                             let edit_view = edit_view.clone();
                             tree.add_leaf(completion.clone(), move |siv| {
-                                edit_view.lock().unwrap().set_content(&completion)(siv)
+                                edit_view.lock().set_content(&completion)(siv)
                             })
                         }
                     })
@@ -114,7 +115,7 @@ impl TabCompletePopup {
         let tab_completer = self.tab_completer.clone();
         EventResult::with_cb_once(move |s| {
             s.pop_layer();
-            edit_view.lock().unwrap().on_event(event).process(s);
+            edit_view.lock().on_event(event).process(s);
             tab_complete(edit_view, tab_completer, false).process(s);
         })
     }

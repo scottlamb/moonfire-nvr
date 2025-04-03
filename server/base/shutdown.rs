@@ -15,9 +15,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
+use crate::Condvar;
+use crate::Mutex;
 use futures::Future;
 use slab::Slab;
-use std::sync::{Condvar, Mutex};
 
 #[derive(Debug)]
 pub struct ShutdownError;
@@ -47,7 +48,6 @@ impl Drop for Sender {
             .0
             .wakers
             .lock()
-            .unwrap()
             .take()
             .expect("only the single Sender takes the slab");
         for w in wakers.drain() {
@@ -78,7 +78,7 @@ const NO_WAKER: usize = usize::MAX;
 
 impl Receiver {
     pub fn check(&self) -> Result<(), ShutdownError> {
-        if self.0.wakers.lock().unwrap().is_none() {
+        if self.0.wakers.lock().is_none() {
             Err(ShutdownError)
         } else {
             Ok(())
@@ -107,12 +107,11 @@ impl Receiver {
     }
 
     pub fn wait_for(&self, timeout: std::time::Duration) -> Result<(), ShutdownError> {
-        let l = self.0.wakers.lock().unwrap();
+        let l = self.0.wakers.lock();
         let result = self
             .0
             .condvar
-            .wait_timeout_while(l, timeout, |wakers| wakers.is_some())
-            .unwrap();
+            .wait_timeout_while(l, timeout, |wakers| wakers.is_some());
         if result.1.timed_out() {
             Ok(())
         } else {
@@ -122,7 +121,7 @@ impl Receiver {
 }
 
 fn poll_impl(inner: &Inner, waker_i: &mut usize, cx: &mut Context<'_>) -> Poll<()> {
-    let mut l = inner.wakers.lock().unwrap();
+    let mut l = inner.wakers.lock();
     let wakers = match &mut *l {
         None => return Poll::Ready(()),
         Some(w) => w,
@@ -152,7 +151,7 @@ impl Drop for ReceiverRefFuture<'_> {
         if self.waker_i == NO_WAKER {
             return;
         }
-        let mut l = self.receiver.0.wakers.lock().unwrap();
+        let mut l = self.receiver.0.wakers.lock();
         if let Some(wakers) = &mut *l {
             wakers.remove(self.waker_i);
         }
@@ -173,7 +172,7 @@ impl Drop for ReceiverFuture {
         if self.waker_i == NO_WAKER {
             return;
         }
-        let mut l = self.receiver.wakers.lock().unwrap();
+        let mut l = self.receiver.wakers.lock();
         if let Some(wakers) = &mut *l {
             wakers.remove(self.waker_i);
         }

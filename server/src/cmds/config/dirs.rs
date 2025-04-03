@@ -4,6 +4,7 @@
 
 use base::strutil::{decode_size, encode_size};
 use base::Error;
+use base::Mutex;
 use cursive::traits::{Nameable, Resizable};
 use cursive::view::Scrollable;
 use cursive::Cursive;
@@ -11,7 +12,7 @@ use cursive::{views, With};
 use db::writer;
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tracing::{debug, trace};
 
 use super::tab_complete::TabCompleteEditView;
@@ -119,7 +120,7 @@ fn confirm_deletion(model: &Mutex<Model>, siv: &mut Cursive, to_delete: i64) {
 }
 
 fn actually_delete(model: &Mutex<Model>, siv: &mut Cursive) {
-    let model = model.lock().unwrap();
+    let model = model.lock();
     let new_limits: Vec<_> = model
         .streams
         .iter()
@@ -147,7 +148,7 @@ fn actually_delete(model: &Mutex<Model>, siv: &mut Cursive) {
 
 fn press_change(model: &Arc<Mutex<Model>>, siv: &mut Cursive) {
     let to_delete = {
-        let l = model.lock().unwrap();
+        let l = model.lock();
         if l.errors > 0 {
             return;
         }
@@ -185,7 +186,7 @@ fn press_change(model: &Arc<Mutex<Model>>, siv: &mut Cursive) {
         siv.add_layer(dialog);
     } else {
         siv.pop_layer();
-        update_limits(&model.lock().unwrap(), siv);
+        update_limits(&model.lock(), siv);
     }
 }
 
@@ -384,13 +385,13 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
             .child(views::TextView::new("usage").fixed_width(BYTES_WIDTH))
             .child(views::TextView::new("limit").fixed_width(BYTES_WIDTH)),
     );
-    let l = model.lock().unwrap();
+    let l = model.lock();
     for (&id, stream) in &l.streams {
         let mut record_cb = views::Checkbox::new();
         record_cb.set_checked(stream.record);
         record_cb.set_on_change({
             let model = model.clone();
-            move |_siv, record| edit_record(&mut model.lock().unwrap(), id, record)
+            move |_siv, record| edit_record(&mut model.lock(), id, record)
         });
         list.add_child(
             &stream.label,
@@ -403,7 +404,7 @@ fn edit_dir_dialog(db: &Arc<db::Database>, siv: &mut Cursive, dir_id: i32) {
                         .on_edit({
                             let model = model.clone();
                             move |siv, content, _pos| {
-                                edit_limit(&mut model.lock().unwrap(), siv, id, content)
+                                edit_limit(&mut model.lock(), siv, id, content)
                             }
                         })
                         .on_submit({
