@@ -8,10 +8,11 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## unreleased
+## v0.7.21 (2025-04-04)
 
 *   Release with `mimalloc` allocator, which is significantly faster than the memory
     allocator built into `musl`.
+*   Eliminate some memory allocations.
 
 ## v0.7.20 (2025-01-31)
 
