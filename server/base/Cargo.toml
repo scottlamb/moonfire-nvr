@@ -21,7 +21,7 @@ coded = { git = "https://github.com/scottlamb/coded", rev = "2c97994974a73243d5d
 futures = "0.3"
 jiff = { workspace = true }
 libc = "0.2"
-libmimalloc-sys = { version = "0.1.41", features = [
+libmimalloc-sys = { git = "https://github.com/scottlamb/mimalloc_rust", branch = "musl-fix", features = [
     "override",
     "extended",
 ], optional = true }
