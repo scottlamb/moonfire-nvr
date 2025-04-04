@@ -26,12 +26,12 @@ members = ["base", "db"]
 [workspace.dependencies]
 base64 = "0.22.0"
 h264-reader = "0.8.0"
-itertools = "0.12.0"
-jiff = "0.1.8"
+itertools = "0.14.0"
+jiff = "0.1.6"
 nix = "0.27.0"
 pretty-hex = "0.4.0"
 ring = "0.17.0"
-rusqlite = "0.33.0"
+rusqlite = "0.34.0"
 tracing = { version = "0.1" }
 tracing-core = "0.1.30"
 tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }
@@ -98,6 +98,7 @@ hyper-util = { version = "0.1.7", features = ["server-graceful", "tokio"] }
 http-body = "1.0.1"
 http-body-util = "0.1.2"
 pin-project = "1.1.10"
+subtle = "2.6.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libsystemd = "0.7.0"

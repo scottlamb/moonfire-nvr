@@ -84,7 +84,8 @@ fn serve_json<R: http_serve::AsRequest, T: serde::ser::Serialize>(
 fn csrf_matches(csrf: &str, session: auth::SessionHash) -> bool {
     let mut b64 = [0u8; 32];
     session.encode_base64(&mut b64);
-    ::ring::constant_time::verify_slices_are_equal(&b64[..], csrf.as_bytes()).is_ok()
+    use subtle::ConstantTimeEq as _;
+    b64.ct_eq(csrf.as_bytes()).into()
 }
 
 /// Extracts `s` cookie from the HTTP request headers. Does not authenticate.
