@@ -8,6 +8,11 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   switch from per-layer to global `tracing` filter to avoid missing log lines
+    (tokio-rs/tracing#2519)[https://github.com/tokio-rs/tracing/issues/2519]).
+
 ## v0.7.21 (2025-04-04)
 
 *   Release with `mimalloc` allocator, which is significantly faster than the memory

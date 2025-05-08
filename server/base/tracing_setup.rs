@@ -122,33 +122,36 @@ pub fn install() {
 
     match std::env::var("MOONFIRE_FORMAT") {
         Ok(s) if s == "systemd" => {
-            let sub = tracing_subscriber::registry().with(
-                tracing_subscriber::fmt::Layer::new()
-                    .with_writer(std::io::stderr)
-                    .with_ansi(false)
-                    .event_format(FormatSystemd)
-                    .with_filter(filter),
-            );
+            let sub = tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::Layer::new()
+                        .with_writer(std::io::stderr)
+                        .with_ansi(false)
+                        .event_format(FormatSystemd),
+                )
+                .with(filter);
             tracing::subscriber::set_global_default(sub).unwrap();
         }
         Ok(s) if s == "json" => {
-            let sub = tracing_subscriber::registry().with(
-                tracing_subscriber::fmt::Layer::new()
-                    .with_writer(std::io::stderr)
-                    .with_thread_names(true)
-                    .json()
-                    .with_filter(filter),
-            );
+            let sub = tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::Layer::new()
+                        .with_writer(std::io::stderr)
+                        .with_thread_names(true)
+                        .json(),
+                )
+                .with(filter);
             tracing::subscriber::set_global_default(sub).unwrap();
         }
         _ => {
-            let sub = tracing_subscriber::registry().with(
-                tracing_subscriber::fmt::Layer::new()
-                    .with_writer(std::io::stderr)
-                    .with_timer(JiffTimer)
-                    .with_thread_names(true)
-                    .with_filter(filter),
-            );
+            let sub = tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::Layer::new()
+                        .with_writer(std::io::stderr)
+                        .with_timer(JiffTimer)
+                        .with_thread_names(true),
+                )
+                .with(filter);
             tracing::subscriber::set_global_default(sub).unwrap();
         }
     }
