@@ -15,7 +15,7 @@ jobs:
     name: Rust ${{ matrix.rust }}
     strategy:
       matrix:
-        rust: [ "stable", "1.82", "nightly" ]
+        rust: ["stable", "1.82", "nightly"]
         include:
           - rust: nightly
             extra_args: "--features nightly --benches"
@@ -29,7 +29,7 @@ jobs:
           # `git describe` output gets baked into the binary for `moonfire-nvr --version`.
           # Fetch all revs so it can see tag history.
           fetch-depth: 0
-          filter: 'tree:0'
+          filter: "tree:0"
       - name: Cache
         uses: actions/cache@v4
         with:
@@ -63,7 +63,7 @@ jobs:
     name: Node ${{ matrix.node }}
     strategy:
       matrix:
-        node: [ "18", "20", "21" ]
+        node: ["18", "20", "21"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +79,7 @@ jobs:
       - run: cd ui && pnpm run check-format
   license:
     name: Check copyright/license headers
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
