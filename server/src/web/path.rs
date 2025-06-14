@@ -14,6 +14,8 @@ pub(super) enum Path {
     Request,                                          // "/api/request"
     InitSegment(i32, bool),                           // "/api/init/<id>.mp4{.txt}"
     Camera(Uuid),                                     // "/api/cameras/<uuid>/"
+    Cameras,                                          // "/api/cameras"
+    CameraTest(Uuid),                                 // "/api/cameras/<uuid>/test"
     Signals,                                          // "/api/signals"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
@@ -40,6 +42,7 @@ impl Path {
             "logout" => return Path::Logout,
             "request" => return Path::Request,
             "signals" => return Path::Signals,
+            "cameras" => return Path::Cameras,
             _ => {}
         };
         if let Some(path) = path.strip_prefix("init/") {
@@ -69,6 +72,10 @@ impl Path {
 
             if path.is_empty() {
                 return Path::Camera(uuid);
+            }
+
+            if path == "test" {
+                return Path::CameraTest(uuid);
             }
 
             let (type_, path) = match path.split_once('/') {
@@ -170,5 +177,10 @@ mod tests {
         assert_eq!(Path::decode("/api/users/42"), Path::User(42));
         assert_eq!(Path::decode("/api/users/asdf"), Path::NotFound);
         assert_eq!(Path::decode("/api/users/"), Path::Users);
+        assert_eq!(Path::decode("/api/cameras"), Path::Cameras);
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/test"),
+            Path::CameraTest(cam_uuid)
+        );
     }
 }

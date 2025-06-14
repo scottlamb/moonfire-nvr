@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 pub mod accept;
+mod cameras;
 mod live;
 mod path;
 mod session;
@@ -254,7 +255,18 @@ impl Service {
                 CacheControl::PrivateDynamic,
                 self.request(&req, &authreq, caller)?,
             ),
-            Path::Camera(uuid) => (CacheControl::PrivateDynamic, self.camera(&req, uuid)?),
+            Path::Camera(uuid) => (
+                CacheControl::PrivateDynamic,
+                self.camera(req, caller, uuid).await?,
+            ),
+            Path::Cameras => (
+                CacheControl::PrivateDynamic,
+                self.cameras(req, caller).await?,
+            ),
+            Path::CameraTest(uuid) => (
+                CacheControl::PrivateDynamic,
+                self.camera_test(req, caller, uuid).await?,
+            ),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
                 self.stream_recordings(&req, uuid, type_)?,
@@ -415,17 +427,6 @@ impl Service {
                 signal_types: &db,
                 permissions: caller.permissions.into(),
             },
-        )
-    }
-
-    fn camera(&self, req: &Request<::hyper::body::Incoming>, uuid: Uuid) -> ResponseResult {
-        let db = self.db.lock();
-        let camera = db
-            .get_camera(uuid)
-            .ok_or_else(|| err!(NotFound, msg("no such camera {uuid}")))?;
-        serve_json(
-            req,
-            &json::Camera::wrap(camera, &db, true, false).err_kind(ErrorKind::Internal)?,
         )
     }
 
