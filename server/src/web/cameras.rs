@@ -12,7 +12,6 @@ use uuid::Uuid;
 use crate::json::{
     self, CameraWithId, GetCamerasResponse, PostCamerasResponse, TestCameraResponse,
 };
-use crate::stream::{self, Opener};
 
 use super::{
     into_json_body, parse_json_body, plain_response, require_csrf_if_session, serve_json, Caller,
@@ -298,12 +297,17 @@ impl Service {
 
         if let Some(streams) = subset.streams.take() {
             for (i, stream_subset) in streams.into_iter().enumerate() {
-                let stream_type = db::StreamType::from_index(i).unwrap();
-                self.apply_stream_subset_to_change(
-                    &mut change.streams[i],
-                    stream_subset,
-                    stream_type,
-                )?;
+                // Only process up to NUM_STREAM_TYPES streams
+                if i >= db::db::NUM_STREAM_TYPES {
+                    break;
+                }
+                if let Some(stream_type) = db::StreamType::from_index(i) {
+                    self.apply_stream_subset_to_change(
+                        &mut change.streams[i],
+                        stream_subset,
+                        stream_type,
+                    )?;
+                }
             }
         }
 
@@ -367,6 +371,19 @@ impl Service {
 
         if let Some(sample_file_dir_id) = subset.sample_file_dir_id.take() {
             change.sample_file_dir_id = sample_file_dir_id;
+        }
+
+        if let Some(retain_bytes) = subset.retain_bytes.take() {
+            if retain_bytes < 0 {
+                bail!(
+                    InvalidArgument,
+                    msg(
+                        "retain_bytes for {} must be non-negative",
+                        stream_type.as_str()
+                    )
+                );
+            }
+            change.config.retain_bytes = retain_bytes;
         }
 
         // Safety valve in case something is added to StreamSubset and forgotten here.
@@ -498,25 +515,87 @@ impl Service {
             })
         };
 
-        let options = stream::Options {
-            session: retina::client::SessionOptions::default().creds(credentials),
-            setup: retina::client::SetupOptions::default(),
-        };
+        // Use spawn_blocking to avoid the runtime nesting issue
+        tokio::task::spawn_blocking(move || {
+            // Create a minimal test that just tries to connect to the RTSP stream
+            // This is a simplified version that doesn't use the full stream infrastructure
+            let rt = tokio::runtime::Runtime::new().map_err(|e| {
+                err!(
+                    Internal,
+                    msg("Failed to create runtime for stream test"),
+                    source(e)
+                )
+            })?;
 
-        let stream = stream::OPENER.open("test stream".to_owned(), url, options)?;
-        let video_sample_entry = stream.video_sample_entry();
+            rt.block_on(async {
+                let timeout = std::time::Duration::from_secs(30);
 
-        Ok(format!(
-            "codec: {}\n\
-             dimensions: {}x{}\n\
-             pixel aspect ratio: {}x{}\n\
-             tool: {:?}",
-            &video_sample_entry.rfc6381_codec,
-            video_sample_entry.width,
-            video_sample_entry.height,
-            video_sample_entry.pasp_h_spacing,
-            video_sample_entry.pasp_v_spacing,
-            stream.tool(),
-        ))
+                // Use retina directly for a simple connection test
+                let mut session_options = retina::client::SessionOptions::default()
+                    .user_agent(format!("Moonfire NVR {}", env!("CARGO_PKG_VERSION")));
+
+                // Add credentials if provided
+                session_options = session_options.creds(credentials);
+
+                let setup_options = retina::client::SetupOptions::default();
+
+                match tokio::time::timeout(
+                    timeout,
+                    retina::client::Session::describe(url.clone(), session_options),
+                )
+                .await
+                {
+                    Ok(Ok(mut session)) => {
+                        // Try to set up one stream to get video information
+                        match session.setup(0, setup_options).await {
+                            Ok(()) => {
+                                match session.play(retina::client::PlayOptions::default()).await {
+                                    Ok(session) => {
+                                        // Get stream information
+                                        let stream_info = session.streams().iter().next();
+                                        if let Some(stream) = stream_info {
+                                            if let Some(params) = &stream.parameters() {
+                                                return Ok(format!(
+                                                    "Connection successful!\n\
+                                                     Stream type: {}\n\
+                                                     Media: {:?}\n\
+                                                     URL: {}",
+                                                    stream.media(),
+                                                    params,
+                                                    &url
+                                                ));
+                                            }
+                                        }
+                                        Ok(format!(
+                                            "Connection successful!\n\
+                                             URL: {}\n\
+                                             No detailed stream information available",
+                                            &url
+                                        ))
+                                    }
+                                    Err(e) => Err(err!(
+                                        InvalidArgument,
+                                        msg("Failed to start playback: {}", e)
+                                    )),
+                                }
+                            }
+                            Err(e) => {
+                                Err(err!(InvalidArgument, msg("Failed to setup stream: {}", e)))
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => Err(err!(
+                        InvalidArgument,
+                        msg("Failed to connect to camera: {}", e)
+                    )),
+                    Err(_) => Err(err!(
+                        DeadlineExceeded,
+                        msg("Connection timed out after 30 seconds")
+                    )),
+                }
+            })
+        })
+        .await
+        .map_err(|e| err!(Internal, msg("Stream test task failed"), source(e)))?
     }
 }

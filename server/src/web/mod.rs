@@ -9,6 +9,7 @@ mod path;
 mod session;
 mod signals;
 mod static_file;
+mod storage;
 mod users;
 mod view;
 mod websocket;
@@ -300,6 +301,18 @@ impl Service {
             Path::User(id) => (
                 CacheControl::PrivateDynamic,
                 self.user(req, caller, id).await?,
+            ),
+            Path::Storage => (
+                CacheControl::PrivateDynamic,
+                self.storage(req, caller).await?,
+            ),
+            Path::StorageDir(id) => (
+                CacheControl::PrivateDynamic,
+                self.storage_dir(req, caller, id).await?,
+            ),
+            Path::StorageDirs => (
+                CacheControl::PrivateDynamic,
+                self.storage_dirs_simple(req, caller)?,
             ),
         };
         match cache {
