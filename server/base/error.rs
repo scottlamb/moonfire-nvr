@@ -101,7 +101,7 @@ impl ToErrKind for rusqlite::types::FromSqlError {
 impl ToErrKind for nix::Error {
     fn err_kind(&self) -> ErrorKind {
         use nix::Error;
-        match self {
+        match *self {
             Error::EACCES | Error::EPERM => ErrorKind::PermissionDenied,
             Error::EDQUOT => ErrorKind::ResourceExhausted,
             Error::EBUSY
