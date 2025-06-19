@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 pub mod accept;
+mod cameras;
 mod live;
 mod path;
 mod session;
 mod signals;
 mod static_file;
+mod storage;
 mod users;
 mod view;
 mod websocket;
@@ -254,7 +256,18 @@ impl Service {
                 CacheControl::PrivateDynamic,
                 self.request(&req, &authreq, caller)?,
             ),
-            Path::Camera(uuid) => (CacheControl::PrivateDynamic, self.camera(&req, uuid)?),
+            Path::Camera(uuid) => (
+                CacheControl::PrivateDynamic,
+                self.camera(req, caller, uuid).await?,
+            ),
+            Path::Cameras => (
+                CacheControl::PrivateDynamic,
+                self.cameras(req, caller).await?,
+            ),
+            Path::CameraTest(uuid) => (
+                CacheControl::PrivateDynamic,
+                self.camera_test(req, caller, uuid).await?,
+            ),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
                 self.stream_recordings(&req, uuid, type_)?,
@@ -288,6 +301,18 @@ impl Service {
             Path::User(id) => (
                 CacheControl::PrivateDynamic,
                 self.user(req, caller, id).await?,
+            ),
+            Path::Storage => (
+                CacheControl::PrivateDynamic,
+                self.storage(req, caller).await?,
+            ),
+            Path::StorageDir(id) => (
+                CacheControl::PrivateDynamic,
+                self.storage_dir(req, caller, id).await?,
+            ),
+            Path::StorageDirs => (
+                CacheControl::PrivateDynamic,
+                self.storage_dirs_simple(req, caller)?,
             ),
         };
         match cache {
@@ -415,17 +440,6 @@ impl Service {
                 signal_types: &db,
                 permissions: caller.permissions.into(),
             },
-        )
-    }
-
-    fn camera(&self, req: &Request<::hyper::body::Incoming>, uuid: Uuid) -> ResponseResult {
-        let db = self.db.lock();
-        let camera = db
-            .get_camera(uuid)
-            .ok_or_else(|| err!(NotFound, msg("no such camera {uuid}")))?;
-        serve_json(
-            req,
-            &json::Camera::wrap(camera, &db, true, false).err_kind(ErrorKind::Internal)?,
         )
     }
 

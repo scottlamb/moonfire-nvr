@@ -45,6 +45,8 @@ fn get_change(
             "perm_update_signals",
             &mut change.permissions.update_signals,
         ),
+        ("perm_admin_users", &mut change.permissions.admin_users),
+        ("perm_admin_cameras", &mut change.permissions.admin_cameras),
     ] {
         **b = siv.find_name::<views::Checkbox>(id).unwrap().is_checked();
     }
@@ -186,6 +188,8 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
         ("view_video", permissions.view_video),
         ("read_camera_configs", permissions.read_camera_configs),
         ("update_signals", permissions.update_signals),
+        ("admin_users", permissions.admin_users),
+        ("admin_cameras", permissions.admin_cameras),
     ] {
         let mut checkbox = views::Checkbox::new();
         checkbox.set_checked(*b);
