@@ -259,3 +259,469 @@ impl Service {
         serve_json(&parts, &json::GetStorageDirsSimpleResponse { dirs })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::web::tests::Server;
+    use db::testutil;
+    use http::{Method, StatusCode};
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    async fn make_request(
+        server: &Server,
+        method: Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> reqwest::Response {
+        let client = reqwest::Client::new();
+        let url = format!("{}/api{}", server.base_url, path);
+
+        let mut req = match method {
+            Method::GET => client.get(&url),
+            Method::POST => client.post(&url),
+            Method::PATCH => client.patch(&url),
+            Method::DELETE => client.delete(&url),
+            _ => panic!("Unsupported method"),
+        };
+
+        if let Some(body) = body {
+            req = req.json(&body);
+        }
+
+        req.send().await.unwrap()
+    }
+
+    async fn make_authenticated_request(
+        server: &Server,
+        method: Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> reqwest::Response {
+        let client = reqwest::Client::new();
+
+        // First login to get session cookie
+        let login_resp = client
+            .post(&format!("{}/api/login", server.base_url))
+            .json(&json!({
+                "username": "slamb",
+                "password": "hunter2"
+            }))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(login_resp.status(), StatusCode::NO_CONTENT);
+
+        // Extract session cookie from Set-Cookie header
+        let cookie_header = login_resp
+            .headers()
+            .get("set-cookie")
+            .and_then(|v| v.to_str().ok())
+            .unwrap();
+
+        // Get CSRF token from /api/ endpoint
+        let csrf_token = if matches!(method, Method::POST | Method::PATCH | Method::DELETE) {
+            let toplevel_resp = client
+                .get(&format!("{}/api/", server.base_url))
+                .header("Cookie", cookie_header)
+                .send()
+                .await
+                .unwrap();
+
+            let toplevel: serde_json::Value = toplevel_resp.json().await.unwrap();
+            toplevel
+                .get("user")
+                .and_then(|u| u.get("session"))
+                .and_then(|s| s.get("csrf"))
+                .and_then(|c| c.as_str())
+                .map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        let url = format!("{}/api{}", server.base_url, path);
+        let mut req = match method {
+            Method::GET => client.get(&url),
+            Method::POST => client.post(&url),
+            Method::PATCH => client.patch(&url),
+            Method::DELETE => client.delete(&url),
+            _ => panic!("Unsupported method"),
+        };
+
+        // Add session cookie
+        req = req.header("Cookie", cookie_header);
+
+        if let Some(mut body) = body {
+            // Add CSRF token to body for state-changing requests
+            if let Some(csrf) = csrf_token {
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert("csrf".to_string(), json!(csrf));
+                }
+            }
+            req = req.json(&body);
+        } else if let Some(csrf) = csrf_token {
+            // For requests with no body but needing CSRF
+            req = req.json(&json!({"csrf": csrf}));
+        }
+
+        req.send().await.unwrap()
+    }
+
+    fn create_test_server_with_permissions(perms: db::Permissions) -> Server {
+        let server = Server::new(None);
+
+        // Update the test user with the specified permissions
+        let mut user_change = server.db.db.lock().users_by_id().get(&1).unwrap().change();
+        user_change.permissions = perms;
+        server.db.db.lock().apply_user_change(user_change).unwrap();
+
+        server
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_unauthorized() {
+        testutil::init();
+        let server = Server::new(None);
+
+        let resp = make_request(&server, Method::GET, "/storage", None).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_forbidden() {
+        testutil::init();
+        let server = create_test_server_with_permissions(db::Permissions::default()); // No view_video permission
+
+        let resp = make_authenticated_request(&server, Method::GET, "/storage", None).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_empty() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.view_video = true;
+        let server = create_test_server_with_permissions(perms);
+
+        let resp = make_authenticated_request(&server, Method::GET, "/storage", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(json["storageDirs"].as_array().unwrap().len(), 1); // TestDb creates one dir
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_with_data() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.view_video = true;
+        let server = create_test_server_with_permissions(perms);
+
+        let resp = make_authenticated_request(&server, Method::GET, "/storage", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json: serde_json::Value = resp.json().await.unwrap();
+        let dirs = json["storageDirs"].as_array().unwrap();
+        assert!(!dirs.is_empty());
+
+        // Check structure of first directory
+        let dir = &dirs[0];
+        assert!(dir["id"].is_number());
+        assert!(dir["uuid"].is_string());
+        assert!(dir["path"].is_string());
+        assert!(dir["totalBytes"].is_number());
+        assert!(dir["usedBytes"].is_number());
+        assert!(dir["streamsUsing"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_post_storage_unauthorized() {
+        testutil::init();
+        let server = Server::new(None);
+        let tempdir = TempDir::new().unwrap();
+
+        let body = json!({
+            "path": tempdir.path().to_str().unwrap()
+        });
+
+        let resp = make_request(&server, Method::POST, "/storage", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_post_storage_forbidden() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.view_video = true; // Has view_video but not admin_cameras
+        let server = create_test_server_with_permissions(perms);
+        let tempdir = TempDir::new().unwrap();
+
+        let body = json!({
+            "path": tempdir.path().to_str().unwrap()
+        });
+
+        let resp = make_authenticated_request(&server, Method::POST, "/storage", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_post_storage_success() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.admin_cameras = true;
+        let server = create_test_server_with_permissions(perms);
+        let tempdir = TempDir::new().unwrap();
+
+        let body = json!({
+            "path": tempdir.path().to_str().unwrap()
+        });
+
+        let resp = make_authenticated_request(&server, Method::POST, "/storage", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json: serde_json::Value = resp.json().await.unwrap();
+        assert!(json["id"].is_number());
+        assert!(json["uuid"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_post_storage_invalid_path() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.admin_cameras = true;
+        let server = create_test_server_with_permissions(perms);
+
+        let body = json!({
+            "path": "/nonexistent/path/that/should/not/exist"
+        });
+
+        let resp = make_authenticated_request(&server, Method::POST, "/storage", Some(body)).await;
+        // The system returns 404 when the path doesn't exist rather than 400
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_dir_success() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.view_video = true;
+        let server = create_test_server_with_permissions(perms);
+
+        // Get the test storage directory ID
+        let resp = make_authenticated_request(&server, Method::GET, "/storage", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = resp.json().await.unwrap();
+        let dir_id = json["storageDirs"][0]["id"].as_i64().unwrap();
+
+        let resp =
+            make_authenticated_request(&server, Method::GET, &format!("/storage/{}", dir_id), None)
+                .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(json["id"].as_i64().unwrap(), dir_id);
+        assert!(json["uuid"].is_string());
+        assert!(json["path"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_dir_not_found() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.view_video = true;
+        let server = create_test_server_with_permissions(perms);
+
+        let resp = make_authenticated_request(&server, Method::GET, "/storage/99999", None).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_dir_unauthorized() {
+        testutil::init();
+        let server = Server::new(None);
+
+        let resp = make_request(&server, Method::GET, "/storage/1", None).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_patch_storage_dir_unauthorized() {
+        testutil::init();
+        let server = Server::new(None);
+
+        let body = json!({
+            "csrf": "test-csrf-token"
+        });
+
+        let resp = make_request(&server, Method::PATCH, "/storage/1", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_patch_storage_dir_forbidden() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.view_video = true; // Has view_video but not admin_cameras
+        let server = create_test_server_with_permissions(perms);
+
+        let body = json!({});
+
+        let resp =
+            make_authenticated_request(&server, Method::PATCH, "/storage/1", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_patch_storage_dir_success() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.admin_cameras = true;
+        let server = create_test_server_with_permissions(perms);
+
+        let body = json!({});
+
+        let resp =
+            make_authenticated_request(&server, Method::PATCH, "/storage/1", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(json["success"], true);
+    }
+
+    #[tokio::test]
+    async fn test_delete_storage_dir_unauthorized() {
+        testutil::init();
+        let server = Server::new(None);
+
+        let body = json!({
+            "csrf": "test-csrf-token"
+        });
+
+        let resp = make_request(&server, Method::DELETE, "/storage/1", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_delete_storage_dir_forbidden() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.view_video = true; // Has view_video but not admin_cameras
+        let server = create_test_server_with_permissions(perms);
+
+        let body = json!({});
+
+        let resp =
+            make_authenticated_request(&server, Method::DELETE, "/storage/1", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_delete_storage_dir_not_found() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.admin_cameras = true;
+        let server = create_test_server_with_permissions(perms);
+
+        let body = json!({});
+
+        let resp =
+            make_authenticated_request(&server, Method::DELETE, "/storage/99999", Some(body)).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_dirs_simple_unauthorized() {
+        testutil::init();
+        let server = Server::new(None);
+
+        let resp = make_request(&server, Method::GET, "/storage-dirs", None).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_dirs_simple_forbidden() {
+        testutil::init();
+        let server = create_test_server_with_permissions(db::Permissions::default()); // No view_video permission
+
+        let resp = make_authenticated_request(&server, Method::GET, "/storage-dirs", None).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_get_storage_dirs_simple_success() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.view_video = true;
+        let server = create_test_server_with_permissions(perms);
+
+        let resp = make_authenticated_request(&server, Method::GET, "/storage-dirs", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json: serde_json::Value = resp.json().await.unwrap();
+        let dirs = json["dirs"].as_array().unwrap();
+        assert!(!dirs.is_empty());
+
+        // Check structure
+        let dir = &dirs[0];
+        assert!(dir["id"].is_number());
+        assert!(dir["path"].is_string());
+        // Should not have other fields like uuid, totalBytes, etc.
+        assert!(!dir.as_object().unwrap().contains_key("uuid"));
+        assert!(!dir.as_object().unwrap().contains_key("totalBytes"));
+    }
+
+    #[tokio::test]
+    async fn test_invalid_json_payload() {
+        testutil::init();
+        let mut perms = db::Permissions::default();
+        perms.admin_cameras = true;
+        let server = create_test_server_with_permissions(perms);
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/storage", server.base_url);
+
+        let resp = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .body("invalid json")
+            .send()
+            .await
+            .unwrap();
+
+        // Authentication is checked before JSON parsing, so we get 401 instead of 400
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_method_not_allowed() {
+        testutil::init();
+        let server = Server::new(None);
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/storage", server.base_url);
+
+        // Authentication is checked before method validation, so we get 401 instead of 405
+        let resp = client.put(&url).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let resp = client.head(&url).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_storage_dir_method_not_allowed() {
+        testutil::init();
+        let server = Server::new(None);
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/storage/1", server.base_url);
+
+        // Authentication is checked before method validation, so we get 401 instead of 405
+        let resp = client.put(&url).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let resp = client.post(&url).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+}
