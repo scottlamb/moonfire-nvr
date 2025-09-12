@@ -14,7 +14,12 @@ pub(super) enum Path {
     Request,                                          // "/api/request"
     InitSegment(i32, bool),                           // "/api/init/<id>.mp4{.txt}"
     Camera(Uuid),                                     // "/api/cameras/<uuid>/"
+    Cameras,                                          // "/api/cameras"
+    CameraTest(Uuid),                                 // "/api/cameras/<uuid>/test"
     Signals,                                          // "/api/signals"
+    Storage,                                          // "/api/storage"
+    StorageDir(i32),                                  // "/api/storage/<id>"
+    StorageDirs,                                      // "/api/storage-dirs"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
     StreamViewMp4Segment(Uuid, db::StreamType, bool), // "/api/cameras/<uuid>/<type>/view.m4s{.txt}"
@@ -40,6 +45,9 @@ impl Path {
             "logout" => return Path::Logout,
             "request" => return Path::Request,
             "signals" => return Path::Signals,
+            "storage" => return Path::Storage,
+            "storage-dirs" => return Path::StorageDirs,
+            "cameras" => return Path::Cameras,
             _ => {}
         };
         if let Some(path) = path.strip_prefix("init/") {
@@ -56,19 +64,23 @@ impl Path {
             }
             Path::NotFound
         } else if let Some(path) = path.strip_prefix("cameras/") {
-            let (uuid, path) = match path.split_once('/') {
+            let (uuid_str, path) = match path.split_once('/') {
                 Some(pair) => pair,
-                None => return Path::NotFound,
+                None => (path, ""), // Handle URLs without trailing slash
             };
 
             // TODO(slamb): require uuid to be in canonical format.
-            let uuid = match Uuid::parse_str(uuid) {
+            let uuid = match Uuid::parse_str(uuid_str) {
                 Ok(u) => u,
                 Err(_) => return Path::NotFound,
             };
 
             if path.is_empty() {
                 return Path::Camera(uuid);
+            }
+
+            if path == "test" {
+                return Path::CameraTest(uuid);
             }
 
             let (type_, path) = match path.split_once('/') {
@@ -90,6 +102,14 @@ impl Path {
                 "live.m4s" => Path::StreamLiveMp4Segments(uuid, type_),
                 _ => Path::NotFound,
             }
+        } else if let Some(path) = path.strip_prefix("storage/") {
+            if let Ok(id) = i32::from_str(path) {
+                return Path::StorageDir(id);
+            }
+            if path.is_empty() {
+                return Path::Storage;
+            }
+            Path::NotFound
         } else if let Some(path) = path.strip_prefix("users/") {
             if let Ok(id) = i32::from_str(path) {
                 return Path::User(id);
@@ -166,9 +186,18 @@ mod tests {
         assert_eq!(Path::decode("/api/login"), Path::Login);
         assert_eq!(Path::decode("/api/logout"), Path::Logout);
         assert_eq!(Path::decode("/api/signals"), Path::Signals);
+        assert_eq!(Path::decode("/api/storage"), Path::Storage);
+        assert_eq!(Path::decode("/api/storage/42"), Path::StorageDir(42));
+        assert_eq!(Path::decode("/api/storage/asdf"), Path::NotFound);
+        assert_eq!(Path::decode("/api/storage-dirs"), Path::StorageDirs);
         assert_eq!(Path::decode("/api/junk"), Path::NotFound);
         assert_eq!(Path::decode("/api/users/42"), Path::User(42));
         assert_eq!(Path::decode("/api/users/asdf"), Path::NotFound);
         assert_eq!(Path::decode("/api/users/"), Path::Users);
+        assert_eq!(Path::decode("/api/cameras"), Path::Cameras);
+        assert_eq!(
+            Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/test"),
+            Path::CameraTest(cam_uuid)
+        );
     }
 }

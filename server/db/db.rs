@@ -391,7 +391,8 @@ pub struct Camera {
     pub streams: [Option<i32>; NUM_STREAM_TYPES],
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum StreamType {
     Main,
     Sub,

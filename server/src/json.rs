@@ -83,6 +83,9 @@ pub struct Stream<'a> {
     pub record: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_file_dir_id: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "Stream::serialize_days")]
     pub days: Option<db::days::Map<db::days::StreamValue>>,
 
@@ -240,6 +243,7 @@ impl<'a> Stream<'a> {
             total_sample_file_bytes: s.sample_file_bytes,
             fs_bytes: s.fs_bytes,
             record: s.config.mode == db::json::STREAM_MODE_RECORD,
+            sample_file_dir_id: s.sample_file_dir_id,
             days: if include_days { Some(s.days()) } else { None },
             config: match include_config {
                 false => None,
@@ -608,6 +612,9 @@ pub struct Permissions {
 
     #[serde(default)]
     pub admin_users: bool,
+
+    #[serde(default)]
+    pub admin_cameras: bool,
 }
 
 impl From<Permissions> for db::schema::Permissions {
@@ -617,6 +624,7 @@ impl From<Permissions> for db::schema::Permissions {
             read_camera_configs: p.read_camera_configs,
             update_signals: p.update_signals,
             admin_users: p.admin_users,
+            admin_cameras: p.admin_cameras,
             special_fields: Default::default(),
         }
     }
@@ -629,6 +637,7 @@ impl From<db::schema::Permissions> for Permissions {
             read_camera_configs: p.read_camera_configs,
             update_signals: p.update_signals,
             admin_users: p.admin_users,
+            admin_cameras: p.admin_cameras,
         }
     }
 }
@@ -649,4 +658,188 @@ pub struct UserWithId<'a> {
 #[derive(Serialize)]
 pub struct PutUsersResponse {
     pub id: i32,
+}
+
+/// Request body for `POST /api/cameras`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PostCameras<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub camera: CameraSubset<'a>,
+}
+
+/// Response body for `POST /api/cameras`.
+#[derive(Debug, Serialize)]
+pub struct PostCamerasResponse {
+    pub id: i32,
+    pub uuid: Uuid,
+}
+
+/// Request body for `PATCH /api/cameras/<uuid>`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchCamera<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub update: Option<CameraSubset<'a>>,
+    pub precondition: Option<CameraSubset<'a>>,
+}
+
+/// Request body for `DELETE /api/cameras/<uuid>`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteCamera<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+}
+
+/// Request body for `POST /api/cameras/<uuid>/test`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct TestCamera<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub stream_type: db::StreamType,
+}
+
+/// Response body for `POST /api/cameras/<uuid>/test`.
+#[derive(Debug, Serialize)]
+pub struct TestCameraResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+/// Camera configuration subset for API requests.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraSubset<'a> {
+    #[serde(borrow)]
+    pub short_name: Option<&'a str>,
+
+    #[serde(borrow)]
+    pub description: Option<&'a str>,
+
+    #[serde(borrow)]
+    pub onvif_base_url: Option<&'a str>,
+
+    #[serde(borrow)]
+    pub username: Option<&'a str>,
+
+    #[serde(borrow)]
+    pub password: Option<&'a str>,
+
+    pub streams: Option<[StreamSubset<'a>; db::db::NUM_STREAM_TYPES]>,
+}
+
+/// Stream configuration subset for API requests.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamSubset<'a> {
+    #[serde(borrow)]
+    pub url: Option<&'a str>,
+
+    pub record: Option<bool>,
+
+    pub flush_if_sec: Option<i32>,
+
+    #[serde(borrow)]
+    pub rtsp_transport: Option<&'a str>,
+
+    #[serde(default)]
+    pub sample_file_dir_id: Option<Option<i32>>,
+
+    pub retain_bytes: Option<i64>,
+}
+
+/// Response body for `GET /api/cameras`.
+#[derive(Debug, Serialize)]
+pub struct GetCamerasResponse<'a> {
+    pub cameras: Vec<CameraWithId<'a>>,
+}
+
+/// Camera with ID for API responses.
+#[derive(Debug, Serialize)]
+pub struct CameraWithId<'a> {
+    pub id: i32,
+    pub uuid: Uuid,
+    pub camera: Camera<'a>,
+}
+
+// Storage API types
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetStorageResponse {
+    pub storage_dirs: Vec<StorageDir>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageDir {
+    pub id: i32,
+    pub uuid: Uuid,
+    pub path: String,
+    pub total_bytes: i64,
+    pub used_bytes: i64,
+    pub streams_using: Vec<StorageStreamUsage>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageStreamUsage {
+    pub stream_id: i32,
+    pub camera_name: String,
+    pub stream_type: String,
+    pub used_bytes: i64,
+    pub duration_90k: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PostStorageRequest<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    #[serde(borrow)]
+    pub path: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PostStorageResponse {
+    pub id: i32,
+    pub uuid: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PatchStorageRequest<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PatchStorageResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteStorageRequest<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteStorageResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetStorageDirsSimpleResponse {
+    pub dirs: Vec<StorageDirSimple>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StorageDirSimple {
+    pub id: i32,
+    pub path: String,
 }
