@@ -8,13 +8,18 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## v0.7.22 (2025-10-03)
+## v0.7.23 (2025-10-03)
 
-*   switch from per-layer to global `tracing` filter to avoid missing log lines
-    (tokio-rs/tracing#2519)[https://github.com/tokio-rs/tracing/issues/2519]).
 *   update Retina to [v0.4.14](https://github.com/scottlamb/retina/blob/main/CHANGELOG.md#v0414-2025-10-03),
     improving camera compatibility. Fixes [#344](https://github.com/scottlamb/moonfire-nvr/issues/344).
 *   bump minimum Rust version to 1.88.
+
+## v0.7.22 (2025-10-03)
+
+(This version was tagged but never released due to an error.)
+
+*   switch from per-layer to global `tracing` filter to avoid missing log lines
+    (tokio-rs/tracing#2519)[https://github.com/tokio-rs/tracing/issues/2519]).
 
 ## v0.7.21 (2025-04-04)
 
