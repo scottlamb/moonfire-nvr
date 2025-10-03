@@ -2417,7 +2417,7 @@ impl<C: Clocks + Clone> Database<C> {
 
     /// Locks the database; the returned reference is the only way to perform (read or write)
     /// operations.
-    pub fn lock(&self) -> DatabaseGuard<C> {
+    pub fn lock(&self) -> DatabaseGuard<'_, C> {
         let timer = clock::TimerGuard::new(&self.clocks, acquisition);
         let db = self.db.as_ref().unwrap().lock();
         drop(timer);

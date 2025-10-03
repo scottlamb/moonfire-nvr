@@ -55,7 +55,7 @@ fn fixed_len_num<'a, T: FromStr>(len: usize) -> impl FnMut(&'a str) -> IResult<'
 }
 
 /// Parses `YYYY-mm-dd` into pieces.
-fn parse_datepart(input: &str) -> IResult<&str, (i16, i8, i8)> {
+fn parse_datepart(input: &str) -> IResult<'_, &str, (i16, i8, i8)> {
     tuple((
         fixed_len_num(4),
         preceded(tag("-"), fixed_len_num(2)),
@@ -64,7 +64,7 @@ fn parse_datepart(input: &str) -> IResult<&str, (i16, i8, i8)> {
 }
 
 /// Parses `HH:MM[:SS[:FFFFF]]` into pieces.
-fn parse_timepart(input: &str) -> IResult<&str, (i8, i8, i8, i32)> {
+fn parse_timepart(input: &str) -> IResult<'_, &str, (i8, i8, i8, i32)> {
     let (input, (hr, _, min)) = tuple((fixed_len_num(2), tag(":"), fixed_len_num(2)))(input)?;
     let (input, stuff) = opt(tuple((
         preceded(tag(":"), fixed_len_num(2)),
@@ -75,7 +75,7 @@ fn parse_timepart(input: &str) -> IResult<&str, (i8, i8, i8, i32)> {
 }
 
 /// Parses `Z` (UTC) or `{+,-,}HH:MM` into a time zone offset in seconds.
-fn parse_zone(input: &str) -> IResult<&str, i32> {
+fn parse_zone(input: &str) -> IResult<'_, &str, i32> {
     alt((
         nom::combinator::value(0, tag("Z")),
         map(

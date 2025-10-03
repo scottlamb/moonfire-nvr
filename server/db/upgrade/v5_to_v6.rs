@@ -27,7 +27,7 @@ fn default_pixel_aspect_ratio(width: u16, height: u16) -> (u16, u16) {
     (1, 1)
 }
 
-fn parse(data: &[u8]) -> Result<AvcDecoderConfigurationRecord, Error> {
+fn parse(data: &[u8]) -> Result<AvcDecoderConfigurationRecord<'_>, Error> {
     if data.len() < 94 || &data[4..8] != b"avc1" || &data[90..94] != b"avcC" {
         bail!(
             DataLoss,

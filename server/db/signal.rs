@@ -81,12 +81,12 @@ impl Point {
     }
 
     /// Returns an iterator over state as of immediately before this point.
-    fn prev(&self) -> PointDataIterator {
+    fn prev(&self) -> PointDataIterator<'_> {
         PointDataIterator::new(&self.data[0..self.changes_off])
     }
 
     /// Returns an iterator over changes in this point.
-    fn changes(&self) -> PointDataIterator {
+    fn changes(&self) -> PointDataIterator<'_> {
         PointDataIterator::new(&self.data[self.changes_off..])
     }
 

@@ -85,7 +85,7 @@ impl Receiver {
         }
     }
 
-    pub fn as_future(&self) -> ReceiverRefFuture {
+    pub fn as_future(&self) -> ReceiverRefFuture<'_> {
         ReceiverRefFuture {
             receiver: self,
             waker_i: NO_WAKER,

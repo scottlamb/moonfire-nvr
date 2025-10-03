@@ -30,7 +30,7 @@ impl<T> Mutex<T> {
 
     #[track_caller]
     #[inline]
-    pub fn lock(&self) -> std::sync::MutexGuard<T> {
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, T> {
         self.0.lock().expect(NOT_POISONED)
     }
 
