@@ -1212,7 +1212,7 @@ mod tests {
     }
 
     fn eio() -> io::Error {
-        io::Error::new(io::ErrorKind::Other, "got EIO")
+        io::Error::other("got EIO")
     }
 
     #[test]

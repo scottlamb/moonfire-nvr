@@ -6,7 +6,7 @@ readme = "../README.md"
 edition = "2021"
 license-file = "../../LICENSE.txt"
 publish = false
-rust-version = "1.82"
+rust-version = "1.88"
 
 [features]
 mimalloc = ["dep:libmimalloc-sys"]
@@ -21,7 +21,7 @@ coded = { git = "https://github.com/scottlamb/coded", rev = "2c97994974a73243d5d
 futures = "0.3"
 jiff = { workspace = true }
 libc = "0.2"
-libmimalloc-sys = { git = "https://github.com/scottlamb/mimalloc_rust", branch = "musl-fix", features = [
+libmimalloc-sys = { version = "0.1.44", features = [
     "override",
     "extended",
 ], optional = true }

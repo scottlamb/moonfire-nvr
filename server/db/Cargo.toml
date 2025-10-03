@@ -5,7 +5,7 @@ authors = ["Scott Lamb <slamb@slamb.org>"]
 readme = "../README.md"
 edition = "2021"
 license-file = "../../LICENSE.txt"
-rust-version = "1.82"
+rust-version = "1.88"
 publish = false
 
 [features]
@@ -31,7 +31,7 @@ num-rational = { version = "0.4.0", default-features = false, features = [
     "std",
 ] }
 pretty-hex = { workspace = true }
-protobuf = "3.0"
+protobuf = { workspace = true }
 ring = { workspace = true }
 rusqlite = { workspace = true }
 scrypt = "0.11.0"
@@ -45,4 +45,4 @@ url = { version = "2.1.1", features = ["serde"] }
 uuid = { workspace = true }
 
 [build-dependencies]
-protobuf-codegen = "3.0"
+protobuf-codegen = { workspace = true }
