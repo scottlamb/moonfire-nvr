@@ -12,7 +12,6 @@ use tracing_subscriber::{
     fmt::{format::Writer, time::FormatTime, FmtContext, FormatFields, FormattedFields},
     layer::SubscriberExt,
     registry::LookupSpan,
-    Layer,
 };
 
 struct FormatSystemd;
@@ -170,12 +169,13 @@ pub fn install_for_tests() {
         .with_env_var("MOONFIRE_LOG")
         .from_env_lossy();
     tracing_log::LogTracer::init().unwrap();
-    let sub = tracing_subscriber::registry().with(
-        tracing_subscriber::fmt::Layer::new()
-            .with_test_writer()
-            .with_timer(JiffTimer)
-            .with_thread_names(true)
-            .with_filter(filter),
-    );
+    let sub = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::Layer::new()
+                .with_test_writer()
+                .with_timer(JiffTimer)
+                .with_thread_names(true),
+        )
+        .with(filter);
     tracing::subscriber::set_global_default(sub).unwrap();
 }
