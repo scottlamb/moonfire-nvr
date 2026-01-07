@@ -235,7 +235,7 @@ impl From<ErrorBuilder> for Error {
 /// Captures a backtrace if enabled for the given error kind.
 // TODO: make this more configurable at runtime.
 fn maybe_backtrace(kind: ErrorKind) -> Option<Backtrace> {
-    if matches!(kind, ErrorKind::Internal | ErrorKind::Unknown) {
+    if matches!(kind, ErrorKind::Internal) {
         Some(Backtrace::capture())
     } else {
         None
