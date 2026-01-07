@@ -97,7 +97,7 @@ tracing-futures = { version = "0.2.5", features = ["futures-03", "std-future"] }
 tracing-log = { workspace = true }
 url = "2.1.1"
 uuid = { workspace = true }
-flate2 = "1.0.26"
+flate2 = { version = "1.1.5", features = ["zlib-rs"] }
 hyper-util = { version = "0.1.7", features = ["server-graceful", "tokio"] }
 http-body = "1.0.1"
 http-body-util = "0.1.2"
@@ -121,10 +121,28 @@ reqwest = { version = "0.12.0", default-features = false, features = ["json"] }
 tempfile = "3.2.0"
 tracing-test = "0.2.4"
 
+[profile.dev.package.blake3]
+opt-level = 2
+
+[profile.dev.package.memchr]
+opt-level = 2
+
+[profile.dev.package.retina]
+# Without this, debug builds spend a long time in Retina's `add_fu_a` -> `memchr::memchr`.
+# It doesn't appear to be enough to optimize only the `memchr` crate; apparently
+# the hot path is inlined into `retina`.
+opt-level = 2
+
 [profile.dev.package.scrypt]
 # On an Intel i3-6100U @ 2.30 GHz, a single scrypt password hash takes 7.6
 # seconds at opt-level=0, or 0.096 seconds at opt-level=2. Always optimize this
 # crate to avoid seeming hung / being annoyingly slow when debugging.
+opt-level = 2
+
+[profile.dev.package.serde_json]
+opt-level = 2
+
+[profile.dev.package.zlib-rs]
 opt-level = 2
 
 [profile.release]
