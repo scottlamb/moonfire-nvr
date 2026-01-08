@@ -31,6 +31,7 @@ use crate::dir;
 use crate::json::SampleFileDirConfig;
 use crate::raw;
 use crate::recording;
+use crate::sample_entries;
 use crate::schema;
 use crate::signal;
 use crate::stream;
@@ -83,13 +84,6 @@ const GET_RECORDING_PLAYBACK_SQL: &str = r#"
       composite_id = :composite_id
 "#;
 
-const INSERT_VIDEO_SAMPLE_ENTRY_SQL: &str = r#"
-    insert into video_sample_entry (width,  height,  pasp_h_spacing,  pasp_v_spacing,
-                                    rfc6381_codec, data)
-                            values (:width, :height, :pasp_h_spacing, :pasp_v_spacing,
-                                    :rfc6381_codec, :data)
-"#;
-
 const UPDATE_STREAM_COUNTERS_SQL: &str = r#"
     update stream
     set cum_recordings = :cum_recordings,
@@ -136,55 +130,6 @@ struct VideoIndex(Box<[u8]>);
 impl rusqlite::types::FromSql for VideoIndex {
     fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
         Ok(VideoIndex(value.as_blob()?.to_vec().into_boxed_slice()))
-    }
-}
-
-/// A concrete box derived from a ISO/IEC 14496-12 section 8.5.2 VisualSampleEntry box. Describes
-/// the codec, width, height, etc.
-#[derive(Debug)]
-pub struct VideoSampleEntry {
-    pub id: i32,
-
-    // Fields matching VideoSampleEntryToInsert below.
-    pub data: Vec<u8>,
-    pub rfc6381_codec: String,
-    pub width: u16,
-    pub height: u16,
-    pub pasp_h_spacing: u16,
-    pub pasp_v_spacing: u16,
-}
-
-impl VideoSampleEntry {
-    /// Returns the aspect ratio as a minimized ratio.
-    pub fn aspect(&self) -> num_rational::Ratio<u32> {
-        num_rational::Ratio::new(
-            u32::from(self.width) * u32::from(self.pasp_h_spacing),
-            u32::from(self.height) * u32::from(self.pasp_v_spacing),
-        )
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct VideoSampleEntryToInsert {
-    pub data: Vec<u8>,
-    pub rfc6381_codec: String,
-    pub width: u16,
-    pub height: u16,
-    pub pasp_h_spacing: u16,
-    pub pasp_v_spacing: u16,
-}
-
-impl std::fmt::Debug for VideoSampleEntryToInsert {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use pretty_hex::PrettyHex;
-        f.debug_struct("VideoSampleEntryToInsert")
-            .field("data", &self.data.hex_dump())
-            .field("rfc6381_codec", &self.rfc6381_codec)
-            .field("width", &self.width)
-            .field("height", &self.height)
-            .field("pasp_h_spacing", &self.pasp_h_spacing)
-            .field("pasp_v_spacing", &self.pasp_v_spacing)
-            .finish()
     }
 }
 
@@ -492,7 +437,7 @@ pub struct LockedDatabase {
     cameras_by_id: BTreeMap<i32, Camera>,
     streams_by_id: BTreeMap<i32, Arc<Stream>>,
     cameras_by_uuid: BTreeMap<Uuid, i32>, // values are ids.
-    video_sample_entries_by_id: BTreeMap<i32, Arc<VideoSampleEntry>>,
+    sample_entries: sample_entries::Handle,
     video_index_cache: RefCell<LinkedHashMap<i64, Box<[u8]>, base::RandomState>>,
     on_flush: tokio::sync::watch::Sender<u64>,
 }
@@ -756,6 +701,10 @@ impl LockedDatabase {
         self.flush_count
     }
 
+    pub fn sample_entries(&self) -> &sample_entries::Handle {
+        &self.sample_entries
+    }
+
     /// Helper for `DatabaseGuard::flush()` and `Database::drop()`.
     ///
     /// The public API is in `DatabaseGuard::flush()`; it supplies the `Clocks` to this function.
@@ -855,6 +804,8 @@ impl LockedDatabase {
         let mut conn = self.conn.borrow_mut();
         let tx = conn.transaction()?;
 
+        let sample_entries_to_flush = self.sample_entries.lock().get_entries_to_flush();
+        sample_entries_to_flush.perform_inserts(&tx)?;
         raw::insert_recordings(&tx, o, &new_recordings)?;
         let mut update_stream_counters_stmt = tx.prepare_cached(UPDATE_STREAM_COUNTERS_SQL)?;
         for (&stream_id, ent) in &changing_streams {
@@ -997,6 +948,7 @@ impl LockedDatabase {
         }
         self.auth.post_flush();
         self.signal.post_flush();
+        sample_entries_to_flush.post_flush(&mut self.sample_entries.lock());
         self.flush_count += 1;
         let mut log_msg = String::with_capacity(256);
         for (&dir_id, log) in &dir_changes {
@@ -1037,11 +989,6 @@ impl LockedDatabase {
 
     pub fn streams_by_id(&self) -> &BTreeMap<i32, Arc<Stream>> {
         &self.streams_by_id
-    }
-
-    /// Returns an immutable view of the video sample entries.
-    pub fn video_sample_entries_by_id(&self) -> &BTreeMap<i32, Arc<VideoSampleEntry>> {
-        &self.video_sample_entries_by_id
     }
 
     /// Gets a given camera by uuid.
@@ -1399,52 +1346,6 @@ impl LockedDatabase {
         Ok(())
     }
 
-    /// Initializes the video_sample_entries. To be called during construction.
-    fn init_video_sample_entries(&mut self) -> Result<(), Error> {
-        info!("Loading video sample entries");
-        let conn = self.conn.borrow();
-        let mut stmt = conn.prepare(
-            r#"
-            select
-                id,
-                width,
-                height,
-                pasp_h_spacing,
-                pasp_v_spacing,
-                rfc6381_codec,
-                data
-            from
-                video_sample_entry
-            "#,
-        )?;
-        let mut rows = stmt.query(params![])?;
-        while let Some(row) = rows.next()? {
-            let id = row.get(0)?;
-            let data: Vec<u8> = row.get(6)?;
-            let get_and_cvt = |i: usize| {
-                let raw = row.get::<_, i32>(i)?;
-                u16::try_from(raw).map_err(|e| err!(OutOfRange, source(e)))
-            };
-            self.video_sample_entries_by_id.insert(
-                id,
-                Arc::new(VideoSampleEntry {
-                    id,
-                    width: get_and_cvt(1)?,
-                    height: get_and_cvt(2)?,
-                    pasp_h_spacing: get_and_cvt(3)?,
-                    pasp_v_spacing: get_and_cvt(4)?,
-                    data,
-                    rfc6381_codec: row.get(5)?,
-                }),
-            );
-        }
-        info!(
-            "Loaded {} video sample entries",
-            self.video_sample_entries_by_id.len()
-        );
-        Ok(())
-    }
-
     /// Initializes the sample file dirs.
     /// To be called during construction.
     fn init_sample_file_dirs(&mut self) -> Result<(), Error> {
@@ -1616,61 +1517,6 @@ impl LockedDatabase {
         }
         info!("Loaded {} streams", self.streams_by_id.len());
         Ok(())
-    }
-
-    /// Inserts the specified video sample entry if absent.
-    /// On success, returns the id of a new or existing row.
-    pub fn insert_video_sample_entry(
-        &mut self,
-        entry: VideoSampleEntryToInsert,
-    ) -> Result<i32, Error> {
-        let conn = self.conn.borrow();
-
-        // Check if it already exists.
-        // There shouldn't be too many entries, so it's fine to enumerate everything.
-        for (&id, v) in &self.video_sample_entries_by_id {
-            if v.data == entry.data {
-                // The other fields are derived from data, so differences indicate a bug.
-                if v.width != entry.width
-                    || v.height != entry.height
-                    || v.pasp_h_spacing != entry.pasp_h_spacing
-                    || v.pasp_v_spacing != entry.pasp_v_spacing
-                {
-                    bail!(
-                        Internal,
-                        msg("video_sample_entry id {id}: existing entry {v:?}, new {entry:?}"),
-                    );
-                }
-                return Ok(id);
-            }
-        }
-
-        let mut stmt = conn.prepare_cached(INSERT_VIDEO_SAMPLE_ENTRY_SQL)?;
-        stmt.execute(named_params! {
-            ":width": i32::from(entry.width),
-            ":height": i32::from(entry.height),
-            ":pasp_h_spacing": i32::from(entry.pasp_h_spacing),
-            ":pasp_v_spacing": i32::from(entry.pasp_v_spacing),
-            ":rfc6381_codec": &entry.rfc6381_codec,
-            ":data": &entry.data,
-        })
-        .map_err(|e| err!(e, msg("Unable to insert {entry:#?}")))?;
-
-        let id = conn.last_insert_rowid() as i32;
-        self.video_sample_entries_by_id.insert(
-            id,
-            Arc::new(VideoSampleEntry {
-                id,
-                width: entry.width,
-                height: entry.height,
-                pasp_h_spacing: entry.pasp_h_spacing,
-                pasp_v_spacing: entry.pasp_v_spacing,
-                data: entry.data,
-                rfc6381_codec: entry.rfc6381_codec,
-            }),
-        );
-
-        Ok(id)
     }
 
     /// Adds a camera.
@@ -2164,6 +2010,7 @@ impl<C: Clocks + Clone> Database<C> {
         };
         let auth = auth::State::init(&conn)?;
         let signal = signal::State::init(&conn, &config)?;
+        let sample_entries = Arc::new(Mutex::new(sample_entries::State::load(&conn)?));
         let db = Database {
             db: Some(Mutex::new(LockedDatabase {
                 conn: base::Antilock::new(conn),
@@ -2177,7 +2024,7 @@ impl<C: Clocks + Clone> Database<C> {
                 cameras_by_id: BTreeMap::new(),
                 cameras_by_uuid: BTreeMap::new(),
                 streams_by_id: BTreeMap::new(),
-                video_sample_entries_by_id: BTreeMap::new(),
+                sample_entries,
                 video_index_cache: RefCell::new(LinkedHashMap::with_capacity_and_hasher(
                     VIDEO_INDEX_CACHE_LEN + 1,
                     Default::default(),
@@ -2189,7 +2036,6 @@ impl<C: Clocks + Clone> Database<C> {
         };
         {
             let l = &mut *db.lock();
-            l.init_video_sample_entries()?;
             l.init_sample_file_dirs()?;
             l.init_cameras()?;
             l.init_streams()?;
@@ -2485,6 +2331,7 @@ impl<C: Clocks + Clone> ::std::ops::DerefMut for DatabaseGuard<'_, C> {
 mod tests {
     use super::*;
     use crate::recording::{self, TIME_UNITS_PER_SEC};
+    use crate::sample_entries::Video;
     use crate::testutil;
     use base::clock;
     use rusqlite::Connection;
@@ -2568,10 +2415,11 @@ mod tests {
                 assert_eq!(r.video_sync_samples, row.video_sync_samples);
                 assert_eq!(r.sample_file_bytes, row.sample_file_bytes);
                 let vse = db
-                    .video_sample_entries_by_id()
-                    .get(&row.video_sample_entry_id)
+                    .sample_entries()
+                    .lock()
+                    .get_video(row.video_sample_entry_id)
                     .unwrap();
-                assert_eq!(vse.rfc6381_codec, "avc1.4d0029");
+                assert_eq!(vse.1.rfc6381_codec, "avc1.4d0029");
                 Ok(())
             })
             .unwrap();
@@ -2797,7 +2645,9 @@ mod tests {
 
         let vse_id = db
             .lock()
-            .insert_video_sample_entry(VideoSampleEntryToInsert {
+            .sample_entries()
+            .lock()
+            .insert_video(Video {
                 width: 1920,
                 height: 1080,
                 pasp_h_spacing: 1,

@@ -156,6 +156,7 @@ pub struct Config<'a> {
 
 pub struct Service {
     db: Arc<db::Database>,
+    sample_entries: db::sample_entries::Handle,
     ui: Ui,
     time_zone_name: String,
     allow_unauthenticated_permissions: Option<db::Permissions>,
@@ -180,8 +181,10 @@ enum CacheControl {
 impl Service {
     pub fn new(config: Config) -> Result<Self, Error> {
         let ui_dir = config.ui_dir.map(Ui::from).unwrap_or(Ui::None);
+        let sample_entries = config.db.lock().sample_entries().clone();
         Ok(Service {
             db: config.db,
+            sample_entries,
             ui: ui_dir,
             allow_unauthenticated_permissions: config.allow_unauthenticated_permissions,
             trust_forward_hdrs: config.trust_forward_hdrs,
@@ -446,10 +449,8 @@ impl Service {
             (time, split)
         };
         let db = self.db.lock();
-        let mut out = json::ListRecordings {
-            recordings: Vec::new(),
-            video_sample_entries: (&db, Vec::new()),
-        };
+        let mut recordings = Vec::new();
+        let mut vse_ids = Vec::new();
         let Some(camera) = db.get_camera(uuid) else {
             bail!(NotFound, msg("no such camera {uuid}"));
         };
@@ -458,7 +459,7 @@ impl Service {
         };
         db.list_aggregated_recordings(stream_id, r, split, &mut |row| {
             let end = row.ids.end - 1; // in api, ids are inclusive.
-            out.recordings.push(json::Recording {
+            recordings.push(json::Recording {
                 start_id: row.ids.start,
                 end_id: if end == row.ids.start {
                     None
@@ -477,17 +478,31 @@ impl Service {
                 has_trailing_zero: row.has_trailing_zero,
                 end_reason: row.end_reason.clone(),
             });
-            if !out
-                .video_sample_entries
-                .1
-                .contains(&row.video_sample_entry_id)
-            {
-                out.video_sample_entries.1.push(row.video_sample_entry_id);
+            if !vse_ids.contains(&row.video_sample_entry_id) {
+                vse_ids.push(row.video_sample_entry_id);
             }
             Ok(())
         })
         .err_kind(ErrorKind::Internal)?;
-        serve_json(req, &out)
+        let video_sample_entries: Vec<_> = {
+            let sample_entries = db.sample_entries().lock();
+            vse_ids
+                .iter()
+                .map(|id| {
+                    sample_entries
+                        .get_video(*id)
+                        .expect("row.video_sample_entry_id should exist")
+                })
+                .collect()
+        };
+        drop(db);
+        serve_json(
+            req,
+            &json::ListRecordings {
+                recordings,
+                video_sample_entries,
+            },
+        )
     }
 
     fn init_segment(
@@ -497,11 +512,10 @@ impl Service {
         req: &Request<::hyper::body::Incoming>,
     ) -> ResponseResult {
         let mut builder = mp4::FileBuilder::new(mp4::Type::InitSegment);
-        let db = self.db.lock();
-        let Some(ent) = db.video_sample_entries_by_id().get(&id) else {
+        let Some(ent) = self.sample_entries.lock().get_video(id) else {
             bail!(NotFound, msg("no such init segment"));
         };
-        builder.append_video_sample_entry(ent.clone());
+        builder.append_video_sample_entry(ent);
         let mp4 = builder
             .build(self.db.clone())
             .err_kind(ErrorKind::Internal)?;

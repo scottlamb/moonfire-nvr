@@ -10,6 +10,7 @@ use db::auth::SessionHash;
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::ops::Not;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -435,31 +436,27 @@ impl TopLevel<'_> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ListRecordings<'a> {
+pub struct ListRecordings {
     pub recordings: Vec<Recording>,
 
     // There are likely very few video sample entries for a given stream in a given day, so
     // representing with an unordered Vec (and having O(n) insert-if-absent) is probably better
     // than dealing with a HashSet's code bloat.
     #[serde(serialize_with = "ListRecordings::serialize_video_sample_entries")]
-    pub video_sample_entries: (&'a db::LockedDatabase, Vec<i32>),
+    pub video_sample_entries: Vec<Arc<(i32, db::sample_entries::Video)>>,
 }
 
-impl ListRecordings<'_> {
+impl ListRecordings {
     fn serialize_video_sample_entries<S>(
-        video_sample_entries: &(&db::LockedDatabase, Vec<i32>),
+        video_sample_entries: &Vec<Arc<(i32, db::sample_entries::Video)>>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let (db, ref v) = *video_sample_entries;
-        let mut map = serializer.serialize_map(Some(v.len()))?;
-        for id in v {
-            map.serialize_entry(
-                id,
-                &VideoSampleEntry::from(db.video_sample_entries_by_id().get(id).unwrap()),
-            )?;
+        let mut map = serializer.serialize_map(Some(video_sample_entries.len()))?;
+        for e in video_sample_entries {
+            map.serialize_entry(&e.0, &VideoSampleEntry::from(&e.1))?;
         }
         map.end()
     }
@@ -505,7 +502,7 @@ pub struct VideoSampleEntry {
 }
 
 impl VideoSampleEntry {
-    fn from(e: &db::VideoSampleEntry) -> Self {
+    fn from(e: &db::sample_entries::Video) -> Self {
         let aspect = e.aspect();
         Self {
             width: e.width,

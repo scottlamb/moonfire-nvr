@@ -630,7 +630,7 @@ pub struct FileBuilder {
     /// Segments of video: one per "recording" table entry as they should
     /// appear in the video.
     segments: Vec<Segment>,
-    video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
+    video_sample_entries: SmallVec<[Arc<(i32, db::sample_entries::Video)>; 1]>,
     streams_by_id: FastHashMap<i32, Arc<db::Stream>>,
     next_frame_num: u32,
 
@@ -749,7 +749,7 @@ impl Slice {
         let mp4 = ARefss::new(f.0.clone());
         Ok(mp4
             .try_map(|mp4| {
-                let data = &mp4.video_sample_entries[self.p()].data;
+                let data = &mp4.video_sample_entries[self.p()].1.data;
                 if u64::try_from(data.len()).unwrap() != len {
                     bail!(Internal, msg("expected len {} got len {}", len, data.len()));
                 }
@@ -939,7 +939,7 @@ impl FileBuilder {
         self.segments.reserve(additional);
     }
 
-    pub fn append_video_sample_entry(&mut self, ent: Arc<db::VideoSampleEntry>) {
+    pub fn append_video_sample_entry(&mut self, ent: Arc<(i32, db::sample_entries::Video)>) {
         self.video_sample_entries.push(ent);
     }
 
@@ -985,12 +985,13 @@ impl FileBuilder {
         if !self
             .video_sample_entries
             .iter()
-            .any(|e| e.id == row.video_sample_entry_id)
+            .any(|e| e.0 == row.video_sample_entry_id)
         {
             let vse = db
-                .video_sample_entries_by_id()
-                .get(&row.video_sample_entry_id)
-                .unwrap();
+                .sample_entries()
+                .lock()
+                .get_video(row.video_sample_entry_id)
+                .expect("row.video_sample_entry_id should always be valid");
             self.video_sample_entries.push(vse.clone());
         }
         if let std::collections::hash_map::Entry::Vacant(e) = self.streams_by_id.entry(stream_id) {
@@ -1381,8 +1382,8 @@ impl FileBuilder {
                 .video_sample_entries
                 .iter()
                 .fold(None, |m, e| match m {
-                    None => Some((e.width, e.height)),
-                    Some((w, h)) => Some((cmp::max(w, e.width), cmp::max(h, e.height))),
+                    None => Some((e.1.width, e.1.height)),
+                    Some((w, h)) => Some((cmp::max(w, e.1.width), cmp::max(h, e.1.height))),
                 })
                 .ok_or_else(|| err!(InvalidArgument, msg("no video_sample_entries")))?;
             self.body.append_u32((width as u32) << 16);
@@ -1555,7 +1556,7 @@ impl FileBuilder {
             self.body.flush_buf()?;
             for (i, e) in self.video_sample_entries.iter().enumerate() {
                 self.body
-                    .append_slice(e.data.len() as u64, SliceType::VideoSampleEntry, i)?;
+                    .append_slice(e.1.data.len() as u64, SliceType::VideoSampleEntry, i)?;
             }
         })
     }
@@ -1658,7 +1659,7 @@ impl FileBuilder {
                 let i = self
                     .video_sample_entries
                     .iter()
-                    .position(|e| e.id == s.s.video_sample_entry_id())
+                    .position(|e| e.0 == s.s.video_sample_entry_id())
                     .unwrap();
                 self.body.append_u32((i + 1) as u32);
             }
@@ -1807,7 +1808,7 @@ struct FileInner {
     segments: Vec<Segment>,
     slices: Slices<Slice>,
     buf: Vec<u8>,
-    video_sample_entries: SmallVec<[Arc<db::VideoSampleEntry>; 1]>,
+    video_sample_entries: SmallVec<[Arc<(i32, db::sample_entries::Video)>; 1]>,
     initial_sample_byte_pos: u64,
     last_modified: SystemTime,
     etag: HeaderValue,
@@ -1955,7 +1956,7 @@ impl http_serve::Entity for File {
             } else {
                 mime.extend_from_slice(b", ");
             }
-            mime.extend_from_slice(e.rfc6381_codec.as_bytes());
+            mime.extend_from_slice(e.1.rfc6381_codec.as_bytes());
         }
         mime.extend_from_slice(b"\"");
         hdrs.insert(
@@ -1993,7 +1994,7 @@ impl http_serve::Entity for File {
                 .video_sample_entries
                 .first()
                 .expect("no video_sample_entries");
-            let aspect = ent.aspect();
+            let aspect = ent.1.aspect();
             hdrs.insert(
                 "X-Aspect",
                 HeaderValue::try_from(format!("{}:{}", aspect.numer(), aspect.denom()))
@@ -2341,9 +2342,11 @@ mod tests {
         const START_TIME: recording::Time = recording::Time(1430006400i64 * TIME_UNITS_PER_SEC);
         let (video_sample_entry_id, stream);
         {
-            let mut l = db.db.lock();
+            let l = db.db.lock();
             video_sample_entry_id = l
-                .insert_video_sample_entry(input.video_sample_entry().clone())
+                .sample_entries()
+                .lock()
+                .insert_video(input.video_sample_entry().clone())
                 .unwrap();
             stream = l.streams_by_id().get(&TEST_STREAM_ID).unwrap().clone();
         }
@@ -2755,9 +2758,10 @@ mod tests {
         testutil::init();
         let db = TestDb::new(RealClocks {}).await;
         let ent = {
-            let mut l = db.db.lock();
+            let l = db.db.lock();
+            let mut l = l.sample_entries().lock();
             let id = l
-                .insert_video_sample_entry(db::VideoSampleEntryToInsert {
+                .insert_video(db::sample_entries::Video {
                     width: 1920,
                     height: 1080,
                     pasp_h_spacing: 1,
@@ -2766,7 +2770,7 @@ mod tests {
                     rfc6381_codec: "avc1.000000".to_owned(),
                 })
                 .unwrap();
-            l.video_sample_entries_by_id().get(&id).unwrap().clone()
+            l.get_video(id).unwrap().clone()
         };
         let mut builder = FileBuilder::new(Type::InitSegment);
         builder.append_video_sample_entry(ent);

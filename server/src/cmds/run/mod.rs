@@ -297,9 +297,10 @@ async fn inner(
         // Start up streams.
         let l = db.lock();
         let env = Box::leak(Box::new(streamer::Environment {
+            clocks: db.clocks(),
+            sample_entries: l.sample_entries().clone(),
             opener: &crate::stream::OPENER,
-            db: &db,
-            shutdown_rx: &shutdown_rx,
+            shutdown_rx: shutdown_rx.clone(),
         }));
         let streams = l.streams_by_id().len();
         for (i, (_id, stream)) in l.streams_by_id().iter().enumerate() {
@@ -325,6 +326,7 @@ async fn inner(
             let mut streamer = streamer::Streamer::new(
                 env,
                 camera,
+                stream.clone(),
                 &locked,
                 session_group,
                 rotate_offset_sec,

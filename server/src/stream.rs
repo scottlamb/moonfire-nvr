@@ -84,7 +84,7 @@ pub struct VideoFrame {
 #[async_trait]
 pub trait Stream: Send {
     fn tool(&self) -> Option<&retina::client::Tool>;
-    fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert;
+    fn video_sample_entry(&self) -> &db::sample_entries::Video;
     async fn next(&mut self) -> Result<VideoFrame, Error>;
 }
 
@@ -128,7 +128,7 @@ impl Opener for RealOpener {
 struct RetinaStream {
     label: String,
     session: Demuxed,
-    video_sample_entry: db::VideoSampleEntryToInsert,
+    video_sample_entry: db::sample_entries::Video,
 
     /// The first frame, if not yet returned from `next`.
     ///
@@ -139,12 +139,12 @@ struct RetinaStream {
 
 fn params_to_sample_entry(
     params: &retina::codec::VideoParameters,
-) -> Result<db::VideoSampleEntryToInsert, Error> {
+) -> Result<db::sample_entries::Video, Error> {
     let (width, height) = params.pixel_dimensions();
     let width = u16::try_from(width).map_err(|e| err!(Unknown, source(e)))?;
     let height = u16::try_from(height).map_err(|e| err!(Unknown, source(e)))?;
     let aspect = default_pixel_aspect_ratio(width, height);
-    Ok(db::VideoSampleEntryToInsert {
+    Ok(db::sample_entries::Video {
         data: params
             .mp4_sample_entry()
             .with_aspect_ratio(aspect)
@@ -263,7 +263,7 @@ impl Stream for RetinaStream {
         self.session.tool()
     }
 
-    fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert {
+    fn video_sample_entry(&self) -> &db::sample_entries::Video {
         &self.video_sample_entry
     }
 
@@ -321,7 +321,7 @@ pub mod testutil {
         reader: mp4::Mp4Reader<Cursor<Vec<u8>>>,
         h264_track_id: u32,
         next_sample_id: u32,
-        video_sample_entry: db::VideoSampleEntryToInsert,
+        video_sample_entry: db::sample_entries::Video,
     }
 
     impl Mp4Stream {
@@ -360,7 +360,7 @@ pub mod testutil {
                 .unwrap()
                 .write_box(&mut data)
                 .unwrap();
-            let video_sample_entry = db::VideoSampleEntryToInsert {
+            let video_sample_entry = db::sample_entries::Video {
                 data,
                 rfc6381_codec: "avc1.4d401e".to_string(),
                 width: h264_track.width(),
@@ -416,7 +416,7 @@ pub mod testutil {
             })
         }
 
-        fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert {
+        fn video_sample_entry(&self) -> &db::sample_entries::Video {
             &self.video_sample_entry
         }
     }

@@ -36,6 +36,12 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
         *    "monitor mode" (allowing live view without recording to disk).
         *    further CPU reductions for live view (by skipping all SQLite ops and disk I/O).
 
+    *   Streamers never acquire the full SQLite database lock, only a per-stream lock.
+        They thus never wait on SQLite operations, except indirectly if the tokio thread
+        is performing SQLite work on another task. A future change will move all
+        SQLite operations to a dedicated thread to avoid such stalls. This was previously
+        not viable because it would cause too many thread hand-offs.
+
 *   bump minimum Rust version to 1.91.
 
 ## v0.7.25 (2026-02-14)

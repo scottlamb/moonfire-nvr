@@ -5,7 +5,7 @@
 use crate::stream;
 use base::clock::{Clocks, TimerGuard};
 use base::{bail, err, Error};
-use db::{recording, writer, Camera, Database};
+use db::{recording, writer, Camera};
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -14,27 +14,26 @@ use url::Url;
 pub static ROTATE_INTERVAL_SEC: i64 = 60;
 
 /// Common state that can be used by multiple `Streamer` instances.
-pub struct Environment<'a, 'tmp, C>
+pub struct Environment<'a, C>
 where
     C: Clocks + Clone,
 {
+    pub clocks: C,
     pub opener: &'a dyn stream::Opener,
-    pub db: &'tmp Arc<Database<C>>,
-    pub shutdown_rx: &'tmp base::shutdown::Receiver,
+    pub sample_entries: db::sample_entries::Handle,
+    pub shutdown_rx: base::shutdown::Receiver,
 }
 
 /// Connects to a given RTSP stream and writes recordings to the database via [`writer::Writer`].
 /// Streamer is meant to be long-lived; it will sleep and retry after each failure.
 pub struct Streamer<'a, C: Clocks + Clone> {
-    shutdown_rx: base::shutdown::Receiver,
+    env: &'a Environment<'a, C>,
 
     // State below is only used by the thread in Run.
     rotate_offset_sec: i64,
     rotate_interval_sec: i64,
-    db: Arc<Database<C>>,
-    opener: &'a dyn stream::Opener,
     transport: retina::client::Transport,
-    stream_id: i32,
+    stream: Arc<db::Stream>,
     session_group: Arc<retina::client::SessionGroup>,
     short_name: String,
     url: Url,
@@ -43,15 +42,16 @@ pub struct Streamer<'a, C: Clocks + Clone> {
 }
 
 impl<'a, C: Clocks + Clone> Streamer<'a, C> {
-    pub fn new<'tmp>(
-        env: &Environment<'a, 'tmp, C>,
+    pub fn new(
+        env: &'a Environment<'a, C>,
         c: &Camera,
-        s: &db::stream::LockedStream,
+        stream: Arc<db::Stream>,
+        locked: &db::stream::LockedStream,
         session_group: Arc<retina::client::SessionGroup>,
         rotate_offset_sec: i64,
         rotate_interval_sec: i64,
     ) -> Result<Self, Error> {
-        let url = s
+        let url = locked
             .config
             .url
             .as_ref()
@@ -62,30 +62,28 @@ impl<'a, C: Clocks + Clone> Streamer<'a, C> {
                 msg("RTSP URL shouldn't include credentials")
             );
         }
-        let stream_transport = if s.config.rtsp_transport.is_empty() {
+        let stream_transport = if locked.config.rtsp_transport.is_empty() {
             None
         } else {
-            match retina::client::Transport::from_str(&s.config.rtsp_transport) {
+            match retina::client::Transport::from_str(&locked.config.rtsp_transport) {
                 Ok(t) => Some(t),
                 Err(_) => {
                     warn!(
                         "Unable to parse configured transport {:?} for {}/{}; ignoring.",
-                        &s.config.rtsp_transport, &c.short_name, s.type_
+                        &locked.config.rtsp_transport, &c.short_name, locked.type_
                     );
                     None
                 }
             }
         };
         Ok(Streamer {
-            shutdown_rx: env.shutdown_rx.clone(),
+            env,
+            stream,
             rotate_offset_sec,
             rotate_interval_sec,
-            db: env.db.clone(),
-            opener: env.opener,
             transport: stream_transport.unwrap_or_default(),
-            stream_id: s.id,
             session_group,
-            short_name: format!("{}-{}", c.short_name, s.type_.as_str()),
+            short_name: format!("{}-{}", c.short_name, locked.type_.as_str()),
             url: url.clone(),
             username: c.config.username.clone(),
             password: c.config.password.clone(),
@@ -98,14 +96,14 @@ impl<'a, C: Clocks + Clone> Streamer<'a, C> {
 
     /// Runs the streamer, retrying after errors, until shutdown.
     pub async fn run(&mut self) {
-        while self.shutdown_rx.check().is_ok() {
+        while self.env.shutdown_rx.check().is_ok() {
             if let Err(err) = self.run_once().await {
                 let sleep_time = base::clock::Duration::from_secs(1);
                 warn!(
                     err = %err.chain(),
                     "sleeping for 1 s after error"
                 );
-                self.db.clocks().sleep(sleep_time).await;
+                self.env.clocks.sleep(sleep_time).await;
             }
         }
         info!("shutting down");
@@ -113,7 +111,7 @@ impl<'a, C: Clocks + Clone> Streamer<'a, C> {
 
     async fn run_once(&mut self) -> Result<(), Error> {
         info!(url = %self.url, "opening input");
-        let clocks = self.db.clocks();
+        let clocks = &self.env.clocks;
 
         let mut waited = false;
         loop {
@@ -126,7 +124,7 @@ impl<'a, C: Clocks + Clone> Streamer<'a, C> {
                 );
                 tokio::select! {
                     _ = self.session_group.await_stale_sessions(&status) => {},
-                    _ = self.shutdown_rx.as_future() => bail!(Cancelled, msg("shutdown")),
+                    _ = self.env.shutdown_rx.as_future() => bail!(Cancelled, msg("shutdown")),
                 }
                 waited = true;
             } else {
@@ -138,7 +136,7 @@ impl<'a, C: Clocks + Clone> Streamer<'a, C> {
         }
 
         let mut stream = {
-            let _t = TimerGuard::new(&clocks, |_| format!("opening {}", self.url));
+            let _t = TimerGuard::new(clocks, |_| format!("opening {}", self.url));
             let options = stream::Options {
                 session: retina::client::SessionOptions::default()
                     .creds(if self.username.is_empty() {
@@ -154,38 +152,31 @@ impl<'a, C: Clocks + Clone> Streamer<'a, C> {
             };
             tokio::select! {
                 biased;
-                _ = self.shutdown_rx.as_future() => bail!(Cancelled, msg("shutdown")),
-                r = self.opener.open(self.short_name.clone(), self.url.clone(), options) => r?,
+                _ = self.env.shutdown_rx.as_future() => bail!(Cancelled, msg("shutdown")),
+                r = self.env.opener.open(self.short_name.clone(), self.url.clone(), options) => r?,
             }
         };
         let realtime_offset = clocks.realtime().0 - clocks.monotonic().0;
-        let mut video_sample_entry_id = {
-            let _t = TimerGuard::new(&clocks, |_| "inserting video sample entry");
-            self.db
-                .lock()
-                .insert_video_sample_entry(stream.video_sample_entry().clone())?
-        };
+        let mut video_sample_entry_id = self
+            .env
+            .sample_entries
+            .lock()
+            .insert_video(stream.video_sample_entry().clone())?;
         let mut seen_key_frame = false;
 
         // Seconds since epoch at which to next rotate. See comment at start
         // of while loop.
         let mut rotate_at_sec: Option<i64> = None;
-        let db_stream = self
-            .db
-            .lock()
-            .streams_by_id()
-            .get(&self.stream_id)
-            .expect("stream should exist")
-            .clone();
-        let mut w = writer::Writer::new(db_stream).expect("should not have existing writer");
+        let mut w =
+            writer::Writer::new(self.stream.clone()).expect("should not have existing writer");
         loop {
             // `rotate_if_sec` should now be set iff `w` has an open recording.
 
             let r = {
-                let _t = TimerGuard::new(&clocks, |_| "getting next packet");
+                let _t = TimerGuard::new(clocks, |_| "getting next packet");
                 tokio::select! {
                     biased;
-                    _ = self.shutdown_rx.as_future() => break,
+                    _ = self.env.shutdown_rx.as_future() => break,
                     r = stream.next() => r,
                 }
             };
@@ -213,10 +204,11 @@ impl<'a, C: Clocks + Clone> Streamer<'a, C> {
                         bail!(Unavailable, msg("parameter change on non-key frame"));
                     }
                     video_sample_entry_id = {
-                        let _t = TimerGuard::new(&clocks, |_| "inserting video sample entry");
-                        self.db
+                        let _t = TimerGuard::new(clocks, |_| "inserting video sample entry");
+                        self.env
+                            .sample_entries
                             .lock()
-                            .insert_video_sample_entry(stream.video_sample_entry().clone())?
+                            .insert_video(stream.video_sample_entry().clone())?
                     };
                     true
                 } else {
@@ -310,7 +302,7 @@ mod tests {
             self.inner.tool()
         }
 
-        fn video_sample_entry(&self) -> &db::VideoSampleEntryToInsert {
+        fn video_sample_entry(&self) -> &db::sample_entries::Video {
             self.inner.video_sample_entry()
         }
 
@@ -430,11 +422,12 @@ mod tests {
             streams: Mutex::new(vec![Box::new(stream)]),
             shutdown_tx: Mutex::new(Some(shutdown_tx)),
         };
-        let db = testutil::TestDb::new(clocks).await;
+        let db = testutil::TestDb::new(clocks.clone()).await;
         let env = super::Environment {
+            sample_entries: db.db.lock().sample_entries().clone(),
+            clocks,
             opener: &opener,
-            db: &db.db,
-            shutdown_rx: &shutdown_rx,
+            shutdown_rx,
         };
         let mut stream;
         let pool;
@@ -445,6 +438,7 @@ mod tests {
             stream = super::Streamer::new(
                 &env,
                 camera,
+                s.clone(),
                 &s.inner.lock(),
                 Arc::new(retina::client::SessionGroup::default()),
                 0,

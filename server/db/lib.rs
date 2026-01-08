@@ -23,6 +23,7 @@ pub mod dir;
 pub mod fs;
 pub mod json;
 pub mod lifecycle;
+pub mod sample_entries;
 pub mod stream;
 mod proto {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
