@@ -199,6 +199,10 @@ impl Map<StreamValue> {
     /// length of a recording entry is less than a day (even a 23-hour "spring forward" day).
     /// See [`crate::recording::MAX_RECORDING_WALL_DURATION`].
     pub(crate) fn adjust(&mut self, r: Range<Time>, sign: i64) {
+        if r.is_empty() {
+            return;
+        }
+
         // Find first day key.
         let sec = r.start.unix_seconds();
         let start = jiff::Zoned::new(
@@ -253,6 +257,10 @@ impl Map<SignalValue> {
     ///
     /// Note that the specified range may span several days (unlike `StreamValue`).
     pub(crate) fn adjust(&mut self, mut r: Range<Time>, old_state: u16, new_state: u16) {
+        if r.is_empty() {
+            return;
+        }
+
         // Find first day key.
         let sec = r.start.unix_seconds();
         let mut tm = jiff::Zoned::new(
@@ -494,5 +502,18 @@ mod tests {
             Key(*b"2017-11-05").bounds(), // fall back (25 hrs)
             Time(135887868000000)..Time(135895968000000)
         );
+    }
+
+    /// Currently the writer path adds an empty `RecordingToInsert` with start time `Time::MAX`, then
+    /// adjusts the start downward after receiving the first frame. This should be fixed, but in the
+    /// meantime, handle this gracefully. In particular, we must not call
+    /// `jiff::Timestamp::from_second(Time::MAX.unix_seconds()).expect("...")`.
+    /// <https://github.com/scottlamb/moonfire-nvr/issues/346>
+    #[test]
+    fn adjust_with_max_to_max() {
+        testutil::init();
+        let mut m = Map::<StreamValue>::default();
+        m.adjust(Time::MAX..Time::MAX, 0);
+        assert!(m.is_empty());
     }
 }

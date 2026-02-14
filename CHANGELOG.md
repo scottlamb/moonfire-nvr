@@ -12,6 +12,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 *   in UI, replace unhelpful `TypeError: Failed to fetch` messages with more descriptive errors such as `POST /api/login failed; see browser console`.
 *   update the tested and supported [Node.js](https://nodejs.org/en) versions to 20, 22, 24, or 25. Fix some test failures on 24+.
+*   quick fix for `valid timestamp: parameter 'second' with value 102481911520608 is not in the required range of -377705023201..=253402207200 ` panics.
+    See [#346](https://github.com/scottlamb/moonfire-nvr/issues/346).
 
 ## v0.7.23 (2025-10-03)
 
