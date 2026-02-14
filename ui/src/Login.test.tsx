@@ -128,9 +128,6 @@ test("network error", async () => {
   );
   await user.type(screen.getByLabelText(/Username/), "network-error");
   await user.type(screen.getByLabelText(/Password/), "asdf{enter}");
-
-  // This is the text chosen by msw:
-  // https://github.com/mswjs/interceptors/blob/122a6533ce57d551dc3b59b3bb43a39026989b70/src/interceptors/fetch/index.ts#L187
-  await screen.findByText(/Failed to fetch/);
+  await screen.findByText(/POST \/api\/login failed; see browser console/);
   expect(onSuccess).toHaveBeenCalledTimes(0);
 });

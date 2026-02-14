@@ -63,7 +63,7 @@ jobs:
     name: Node ${{ matrix.node }}
     strategy:
       matrix:
-        node: ["18", "20", "21"]
+        node: ["20", "22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

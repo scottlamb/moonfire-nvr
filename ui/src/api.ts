@@ -47,30 +47,23 @@ async function myfetch(
     // Resolve it ourselves here. Harmless in production, makes the tests work.
     response = await fetch(new URL(url, window.location.origin), init);
   } catch (e) {
-    if (e instanceof TypeError) {
-      // One might expect this to indicate a logic flaw, but it can happen on a variety of
-      // conditions including network errors (as seen in Chrome, Firefox, and msw):
-      // <https://developer.mozilla.org/en-US/docs/Web/API/fetch#exceptions>
-      //
-      // It turns out the `DOMException` name of `NetworkEror` is just a decoy, I guess?
-      // Or possibly only used by the older `XMLHTTPRequest`.
-      // <https://webidl.spec.whatwg.org/#idl-DOMException-error-names>
-      // <https://developer.mozilla.org/en-US/docs/Web/API/DOMException#error_names>
-      // <https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/send>
-      return {
-        status: "error",
-        message: `${e.name}: ${e.message}`,
-      };
-    } else if (e instanceof DOMException) {
-      if (e.name === "AbortError") {
-        return { status: "aborted" };
-      }
-      return {
-        status: "error",
-        message: `${e.name}: ${e.message}`,
-      };
-    } else {
+    // fetch throws AbortError (on signal abort) or TypeError (on network
+    // errors): <https://developer.mozilla.org/en-US/docs/Web/API/fetch#exceptions>
+    // We avoid `instanceof` because it fails across JavaScript realms
+    // (e.g. jsdom under vitest).
+    if (!(e instanceof Error)) {
       throw e;
+    }
+    switch (e.name) {
+      case "AbortError":
+        return { status: "aborted" };
+      case "TypeError":
+        return {
+          status: "error",
+          message: `${init.method ?? "GET"} ${url} failed; see browser console`,
+        };
+      default:
+        throw e;
     }
   }
   if (!response.ok) {
@@ -78,17 +71,10 @@ async function myfetch(
     try {
       text = await response.text();
     } catch (e) {
-      if (!(e instanceof DOMException)) {
-        throw e;
+      if (e instanceof Error && e.name === "AbortError") {
+        return { status: "aborted" };
       }
-      console.warn(
-        `${url}: ${response.status}: unable to read body: ${e.message}`
-      );
-      return {
-        status: "error",
-        httpStatus: response.status,
-        message: `unable to read body: ${e.message}`,
-      };
+      throw e;
     }
     return {
       status: "error",
@@ -130,14 +116,10 @@ export async function init(
   try {
     body = await fetchRes.response.arrayBuffer();
   } catch (e) {
-    if (!(e instanceof DOMException)) {
-      throw e;
+    if (e instanceof Error && e.name === "AbortError") {
+      return { status: "aborted" };
     }
-    console.warn(`${url}: unable to read body: ${e.message}`);
-    return {
-      status: "error",
-      message: `unable to read body: ${e.message}`,
-    };
+    throw e;
   }
 
   return {
@@ -158,14 +140,10 @@ async function json<T>(
   try {
     body = await fetchRes.response.json();
   } catch (e) {
-    if (!(e instanceof DOMException)) {
-      throw e;
+    if (e instanceof Error && e.name === "AbortError") {
+      return { status: "aborted" };
     }
-    console.warn(`${url}: unable to read body: ${e.message}`);
-    return {
-      status: "error",
-      message: `unable to read body: ${e.message}`,
-    };
+    throw e;
   }
   return {
     status: "success",

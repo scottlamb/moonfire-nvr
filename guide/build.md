@@ -40,7 +40,7 @@ mind the `moonfire-nvr sql` command not working.
 To build the UI, you'll need a [nodejs](https://nodejs.org/en/download/) release
 in "Maintenance", "LTS", or "Current" status on the
 [Release Schedule](https://github.com/nodejs/release#release-schedule):
-currently v18, v20, or v21.
+currently v20, v22, v24, or v25.
 
 On recent Ubuntu or Raspbian Linux, the following command will install
 most non-Rust dependencies:
