@@ -8,7 +8,7 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## unreleased
+## v0.7.24 (2026-02-14)
 
 *   in UI, replace unhelpful `TypeError: Failed to fetch` messages with more descriptive errors such as `POST /api/login failed; see browser console`.
 *   update the tested and supported [Node.js](https://nodejs.org/en) versions to 20, 22, 24, or 25. Fix some test failures on 24+.
