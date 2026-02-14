@@ -128,14 +128,15 @@ tracing-test = "0.2.4"
 opt-level = 2
 
 [profile.release]
-debug = 1
+debug = "line-tables-only"
+panic = "abort"
 
 [profile.release-lto]
 inherits = "release"
 lto = true
 
 [profile.bench]
-debug = 1
+debug = "line-tables-only"
 
 [patch.crates-io]
 

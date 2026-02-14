@@ -14,6 +14,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 *   update the tested and supported [Node.js](https://nodejs.org/en) versions to 20, 22, 24, or 25. Fix some test failures on 24+.
 *   quick fix for `valid timestamp: parameter 'second' with value 102481911520608 is not in the required range of -377705023201..=253402207200 ` panics.
     See [#346](https://github.com/scottlamb/moonfire-nvr/issues/346).
+*   abort on panics. This avoids situations in which the binary continues to run in a broken state after mutexes have been "poisoned". It should be less confusing, and when coupled with typical systemd/Docker policies, will cause the system to recover on its own.
+*   reduce the amount of debug info in the binary.
 
 ## v0.7.23 (2025-10-03)
 
