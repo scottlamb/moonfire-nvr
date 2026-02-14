@@ -97,7 +97,7 @@ jobs:
           mkdir output
           ln ./server/target/${{ matrix.rust_target }}/release/moonfire-nvr output/
           echo ${{secrets.GITHUB_TOKEN}} | docker login --username ${{github.actor}} --password-stdin ghcr.io
-          docker build --platform ${{ matrix.docker_platform }} --push --tag "${tag}" --file - output <<EOF
+          docker build --platform ${{ matrix.docker_platform }} --provenance=false --push --tag "${tag}" --file - output <<EOF
           FROM scratch
           LABEL org.opencontainers.image.title="Moonfire NVR"
           LABEL org.opencontainers.image.description="security camera network video recorder"
