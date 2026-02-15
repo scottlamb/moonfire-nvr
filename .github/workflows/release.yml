@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - uses: taiki-e/install-action@v2
         with:
           tool: parse-changelog
@@ -25,20 +25,20 @@ jobs:
         run: |
           VERSION_MINUS_V=${GITHUB_REF_NAME/#v/}
           parse-changelog CHANGELOG.md $VERSION_MINUS_V > CHANGELOG-$GITHUB_REF_NAME.md
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v6
         with:
-          node-version: 18
+          node-version: 24
       - run: npm i -g pnpm
       - run: cd ui && pnpm i --frozen-lockfile
       - run: cd ui && pnpm run build
       - run: cd ui && pnpm run test
       # Upload the UI and changelog as *job* artifacts (not *release* artifacts), used below.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: moonfire-nvr-ui-${{ github.ref_name }}
           path: ui/dist
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: CHANGELOG-${{ github.ref_name }}
           path: CHANGELOG-${{ github.ref_name }}.md
@@ -66,9 +66,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Download UI
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: moonfire-nvr-ui-${{ github.ref_name }}
           path: ui/dist
@@ -79,7 +79,7 @@ jobs:
         run: sudo apt-get --option=APT::Acquire::Retries=3 update && sudo apt-get --option=APT::Acquire::Retries=3 install musl-tools
         if: matrix.rust_target == 'x86_64-unknown-linux-musl'
       - name: Build
-        uses: houseabsolute/actions-rust-cross@v0
+        uses: houseabsolute/actions-rust-cross@v1
         env:
           UI_BUILD_DIR: ../ui/dist
 
@@ -108,7 +108,7 @@ jobs:
           EOF
       # Upload as a *job* artifact (not *release* artifact), used below.
       - name: Upload Job Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: moonfire-nvr-${{ github.ref_name }}-${{ matrix.arch }}
           path: output/moonfire-nvr
@@ -121,7 +121,7 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
       - name: ls before rearranging
@@ -140,7 +140,7 @@ jobs:
           docker manifest create "$DOCKER_TAG" "${DOCKER_TAG}"-{x86_64,aarch64,armv7l}
           docker manifest push "$DOCKER_TAG"
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           body_path: artifacts/CHANGELOG-${{ github.ref_name }}/CHANGELOG-${{ github.ref_name }}.md
           files: |

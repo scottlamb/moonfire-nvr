@@ -24,14 +24,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # `git describe` output gets baked into the binary for `moonfire-nvr --version`.
           # Fetch all revs so it can see tag history.
           fetch-depth: 0
           filter: "tree:0"
       - name: Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -41,11 +41,8 @@ jobs:
           restore-keys: |
             cargo-${{ matrix.rust }}-
             cargo-
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 18
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
@@ -66,8 +63,8 @@ jobs:
         node: ["20", "22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
       # Install pnpm then use pnpm instead npm
@@ -82,5 +79,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - run: find . -type f -print0 | xargs -0 .github/workflows/check-license.py
