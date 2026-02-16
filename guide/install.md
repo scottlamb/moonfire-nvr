@@ -60,7 +60,6 @@ instructions to the workflow you use with Docker.  You may find the following
 Docker compose snippet useful:
 
 ```yaml
-version: 3
 services:
   moonfire-nvr:
     # The `vX.Y.Z` images will work on any architecture (x86-64, arm, or
@@ -79,7 +78,7 @@ services:
 
       # Pass through `/var/tmp` from the host.
       # SQLite expects to be able to create temporary files in this dir, which
-      # is not created in Moonfire's minimal Docker image.
+      # was not created in Moonfire's minimal Docker image prior to 0.7.26.
       # See: <https://www.sqlite.org/tempfiles.html>
       - "/var/tmp:/var/tmp"
 

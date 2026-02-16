@@ -95,6 +95,15 @@ jobs:
         run: |
           tag="${DOCKER_TAG}-${{ matrix.arch }}"
           mkdir output
+
+          # We want a `/var/tmp` that any user can write to.
+          # Dockerfile's `COPY` doesn't preserve permissions on directories.
+          # But `ADD` does when expanding tarfiles. Prep a "filesystem skeleton" tar.
+          mkdir -p fs-skel/var/tmp
+          chmod 1777 fs-skel/var/tmp
+          tar cf output/fs-skel.tar --owner=0 --group=0 --directory=fs-skel .
+          tar tvf output/fs-skel.tar
+
           ln ./server/target/${{ matrix.rust_target }}/release/moonfire-nvr output/
           echo ${{secrets.GITHUB_TOKEN}} | docker login --username ${{github.actor}} --password-stdin ghcr.io
           docker build --platform ${{ matrix.docker_platform }} --provenance=false --push --tag "${tag}" --file - output <<EOF
@@ -103,7 +112,8 @@ jobs:
           LABEL org.opencontainers.image.description="security camera network video recorder"
           LABEL org.opencontainers.image.source="https://github.com/${{ github.repository }}"
           LABEL org.opencontainers.image.version="${{ github.ref_name }}"
-          COPY --chown=root:root --chmod=755 ./moonfire-nvr /usr/local/bin/moonfire-nvr
+          ADD fs-skel.tar /
+          COPY --chmod=755 ./moonfire-nvr /usr/local/bin/moonfire-nvr
           ENTRYPOINT ["/usr/local/bin/moonfire-nvr"]
           EOF
       # Upload as a *job* artifact (not *release* artifact), used below.

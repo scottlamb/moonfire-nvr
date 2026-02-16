@@ -16,7 +16,7 @@ need more help.
         * [`clock_gettime(CLOCK_MONOTONIC) failed: EPERM: Operation not permitted`](#clock_gettimeclock_monotonic-failed-eperm-operation-not-permitted)
         * [`VFS is unable to determine a suitable directory for temporary files`](#vfs-is-unable-to-determine-a-suitable-directory-for-temporary-files)
     * [Server errors](#server-errors)
-        * [`unable to get IANA time zone name; check your $TZ and /etc/localtime`](#unable-to-get-iana-time-zone-name-check-your-tz-and-etclocaltime)
+        * [`unable to get IANA time zone name; check your $TZ, /etc/localtime, and /usr/share/zoneinfo`](#unable-to-get-iana-time-zone-name-check-your-tz-etclocaltime-and-usrsharezoneinfo)
         * [`Error: pts not monotonically increasing; got 26615520 then 26539470`](#error-pts-not-monotonically-increasing-got-26615520-then-26539470)
         * [Out of disk space](#out-of-disk-space)
         * [Database or filesystem corruption errors](#database-or-filesystem-corruption-errors)
@@ -251,11 +251,19 @@ container in your Docker compose file.
 
 ### Server errors
 
-#### `unable to get IANA time zone name; check your $TZ and /etc/localtime`
+#### `unable to get IANA time zone name; check your $TZ, /etc/localtime, and /usr/share/zoneinfo/`
 
 Moonfire NVR loads the system time zone via the logic described at
 [`jiff::tz::TimeZone::system`](https://docs.rs/jiff/0.1.8/jiff/tz/struct.TimeZone.html#method.system)
 and expects to be able to get the IANA zone name.
+
+* On most systems, this just works because `/etc/localtime` is a symlink to a file in `/usr/share/zoneinfo/`,
+  and Moonfire learns the IANA zone name from the filename.
+* If `/etc/localtime` is an actual zone file rather than a symlink to one, Moonfire will fail
+  with this error, because zone files don't contain their own name.
+* You can override the zone by setting `TZ` to the name of your time zone, e.g. `TZ=America/Los_Angeles`.
+* Moonfire's Docker images don't contain a time zone database. If you are using Docker,
+  mount `/usr/share/zoneinfo` from the host.
 
 #### `Error: pts not monotonically increasing; got 26615520 then 26539470`
 

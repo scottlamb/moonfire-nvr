@@ -258,7 +258,7 @@ async fn inner(
     let Some(time_zone_name) = zone.iana_name() else {
         bail!(
             Unknown,
-            msg("unable to get IANA time zone name; check your $TZ and /etc/localtime")
+            msg("unable to get IANA time zone name; check your $TZ, /etc/localtime, and /usr/share/zoneinfo/")
         );
     };
     info!("Resolved timezone: {}", &time_zone_name);
