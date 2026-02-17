@@ -26,10 +26,10 @@ left, and pick the [latest tagged version](https://github.com/scottlamb/moonfire
 
 Download the binary for your platform from the matching GitHub release.
 Install it as `/usr/local/bin/moonfire-nvr` and ensure it is executable, e.g.
-for version `v0.7.25`:
+for version `v0.7.26`:
 
 ```console
-$ VERSION=v0.7.25
+$ VERSION=v0.7.26
 $ ARCH=$(uname -m)
 $ curl -OL "https://github.com/scottlamb/moonfire-nvr/releases/download/$VERSION/moonfire-nvr-$VERSION-$ARCH"
 $ sudo install -m 755 "moonfire-nvr-$VERSION-$ARCH" /usr/local/bin/moonfire-nvr
@@ -64,7 +64,7 @@ services:
   moonfire-nvr:
     # The `vX.Y.Z` images will work on any architecture (x86-64, arm, or
     # aarch64); just pick the correct version.
-    image: ghcr.io/scottlamb/moonfire-nvr:v0.7.25
+    image: ghcr.io/scottlamb/moonfire-nvr:v0.7.26
     command: run
 
     volumes:
