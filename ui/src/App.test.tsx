@@ -21,4 +21,7 @@ afterAll(() => server.close());
 test("instantiate", async () => {
   renderWithCtx(<App />);
   expect(screen.getByText(/Moonfire NVR/)).toBeInTheDocument();
+  // Wait for the /api/ fetch to complete and error state to render,
+  // so cleanup's abort() doesn't race with msw's response.
+  await screen.findByText(/Error querying server/);
 });
