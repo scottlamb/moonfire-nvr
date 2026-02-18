@@ -109,7 +109,10 @@ function App() {
     };
   }, [fetchSeq]);
 
-  const Frame = ({ activityMenuPart, children }: FrameProps): React.JSX.Element => {
+  const Frame = ({
+    activityMenuPart,
+    children,
+  }: FrameProps): React.JSX.Element => {
     return (
       <>
         <Header

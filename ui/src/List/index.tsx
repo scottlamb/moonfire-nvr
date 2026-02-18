@@ -8,8 +8,8 @@ import Paper from "@mui/material/Paper";
 import { useTheme } from "@mui/material/styles";
 import Table from "@mui/material/Table";
 import TableContainer from "@mui/material/TableContainer";
-import utcToZonedTime from "date-fns-tz/utcToZonedTime";
-import format from "date-fns/format";
+import { toZonedTime } from "date-fns-tz";
+import { format } from "date-fns";
 import React, { useMemo, useReducer, useState } from "react";
 import * as api from "../api";
 import { Stream } from "../types";
@@ -233,7 +233,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
   const formatTime = useMemo(() => {
     return (time90k: number) => {
       return format(
-        utcToZonedTime(new Date(time90k / 90), timeZoneName),
+        toZonedTime(new Date(time90k / 90), timeZoneName),
         "d MMM yyyy HH:mm:ss",
       );
     };
@@ -265,8 +265,8 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
         width: "max-content",
         height: "max-content",
         "& .streamHeader": {
-          background: theme.palette.primary.light,
-          color: theme.palette.primary.contrastText,
+          background: theme.vars!.palette.header,
+          color: theme.vars!.palette.headerContrastText,
         },
         "& .MuiTableBody-root:not(:last-child):after": {
           content: "''",

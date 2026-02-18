@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
 import { screen } from "@testing-library/react";
-import { utcToZonedTime } from "date-fns-tz";
-import format from "date-fns/format";
+import { toZonedTime } from "date-fns-tz";
+import { format } from "date-fns";
 import { DefaultBodyType, delay, http, HttpResponse, PathParams } from "msw";
 import { setupServer } from "msw/node";
 import { Recording, VideoSampleEntry } from "../api";
@@ -101,7 +101,7 @@ const TEST_VIDEO_SAMPLE_ENTRIES: { [id: number]: VideoSampleEntry } = {
 
 function TestFormat(time90k: number) {
   return format(
-    utcToZonedTime(new Date(time90k / 90), "America/Los_Angeles"),
+    toZonedTime(new Date(time90k / 90), "America/Los_Angeles"),
     "d MMM yyyy HH:mm:ss",
   );
 }

@@ -51,14 +51,15 @@
  */
 
 import { Stream } from "../types";
-import {
-  StaticDatePicker,
-  StaticDatePickerProps,
-} from "@mui/x-date-pickers/StaticDatePicker";
+import { StaticDatePicker } from "@mui/x-date-pickers/StaticDatePicker";
 import React, { useEffect } from "react";
-import { zonedTimeToUtc } from "date-fns-tz";
-import { addDays, addMilliseconds, differenceInMilliseconds } from "date-fns";
-import startOfDay from "date-fns/startOfDay";
+import { fromZonedTime } from "date-fns-tz";
+import {
+  addDays,
+  addMilliseconds,
+  differenceInMilliseconds,
+  startOfDay,
+} from "date-fns";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import FormLabel from "@mui/material/FormLabel";
 import Radio from "@mui/material/Radio";
@@ -76,7 +77,7 @@ interface Props {
 }
 
 const MyTimePicker = (
-  props: Pick<TimePickerProps<Date>, "value" | "onChange" | "disabled">,
+  props: Pick<TimePickerProps, "value" | "onChange" | "disabled">,
 ) => (
   <TimePicker
     label="Time"
@@ -93,7 +94,9 @@ const MyTimePicker = (
   />
 );
 
-const SmallStaticDatePicker = (props: StaticDatePickerProps<Date>) => {
+const SmallStaticDatePicker = (
+  props: React.ComponentProps<typeof StaticDatePicker>,
+) => {
   // The spacing defined at https://material.io/components/date-pickers#specs
   // seems plenty big enough (on desktop). Not sure why material-ui wants
   // to make it bigger but that doesn't work well with our layout.
@@ -140,7 +143,11 @@ const SmallStaticDatePicker = (props: StaticDatePickerProps<Date>) => {
         },
       }}
     >
-      <StaticDatePicker {...props} sx={{ background: "transparent" }} />
+      <StaticDatePicker
+        {...props}
+        slots={{ actionBar: () => null }}
+        sx={{ background: "transparent" }}
+      />
     </Box>
   );
 };
@@ -357,8 +364,8 @@ const TimerangeSelector = ({
     const start = combine(days.rangeMillis[0], startTime);
     const end = combine(days.rangeMillis[1], endTime);
     setRange90k([
-      zonedTimeToUtc(start, timeZoneName).getTime() * 90,
-      zonedTimeToUtc(end, timeZoneName).getTime() * 90,
+      fromZonedTime(start, timeZoneName).getTime() * 90,
+      fromZonedTime(end, timeZoneName).getTime() * 90,
     ]);
   }, [days, startTime, endTime, timeZoneName, setRange90k]);
 

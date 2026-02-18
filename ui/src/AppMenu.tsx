@@ -6,7 +6,7 @@ import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
-import { useTheme } from "@mui/material/styles";
+import { useColorScheme, useTheme } from "@mui/material/styles";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import AccountCircle from "@mui/icons-material/AccountCircle";
@@ -14,7 +14,6 @@ import MenuIcon from "@mui/icons-material/Menu";
 import React from "react";
 import { LoginState } from "./App";
 import Box from "@mui/material/Box";
-import { CurrentMode, useThemeMode } from "./components/ThemeMode";
 import Brightness2 from "@mui/icons-material/Brightness2";
 import Brightness7 from "@mui/icons-material/Brightness7";
 import BrightnessAuto from "@mui/icons-material/BrightnessAuto";
@@ -31,7 +30,10 @@ interface Props {
 
 // https://material-ui.com/components/app-bar/
 function MoonfireMenu(props: Props) {
-  const { choosenTheme, changeTheme } = useThemeMode();
+  const { mode, setMode } = useColorScheme();
+  const changeMode = React.useCallback(() => {
+    setMode(mode === "dark" ? "light" : mode === "light" ? "system" : "dark");
+  }, [mode, setMode]);
   const theme = useTheme();
   const [accountMenuAnchor, setAccountMenuAnchor] =
     React.useState<null | HTMLElement>(null);
@@ -76,10 +78,10 @@ function MoonfireMenu(props: Props) {
           </Box>
         )}
         <Tooltip title="Toggle theme">
-          <IconButton onClick={changeTheme} color="inherit" size="small">
-            {choosenTheme === CurrentMode.Light ? (
+          <IconButton onClick={changeMode} color="inherit" size="small">
+            {mode === "light" ? (
               <Brightness7 />
-            ) : choosenTheme === CurrentMode.Dark ? (
+            ) : mode === "dark" ? (
               <Brightness2 />
             ) : (
               <BrightnessAuto />

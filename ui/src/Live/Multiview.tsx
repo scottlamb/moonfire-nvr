@@ -31,7 +31,10 @@ const MAX_CAMERAS = 9;
 export interface MultiviewProps {
   cameras: Camera[];
   layoutIndex: number;
-  renderCamera: (camera: Camera | null, chooser: React.JSX.Element) => React.JSX.Element;
+  renderCamera: (
+    camera: Camera | null,
+    chooser: React.JSX.Element,
+  ) => React.JSX.Element;
 }
 
 export interface MultiviewChooserProps {
@@ -272,7 +275,10 @@ interface MonoviewProps {
   cameras: Camera[];
   cameraIndex: number | null;
   onSelect: (cameraIndex: number | null) => void;
-  renderCamera: (camera: Camera | null, chooser: React.JSX.Element) => React.JSX.Element;
+  renderCamera: (
+    camera: Camera | null,
+    chooser: React.JSX.Element,
+  ) => React.JSX.Element;
 }
 
 /** A single pane of a Multiview, including its camera chooser. */

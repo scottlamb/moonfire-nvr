@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
  */
 
-:root {
-  --mui-palette-AppBar-darkBg: #000 !important;
-  --mui-palette-primary-main: #000 !important;
-  --mui-palette-secondary-main: #e65100 !important;
-}
-
 html,
 body,
 #root {
@@ -19,8 +13,4 @@ body,
 
 a {
   color: inherit;
-}
-
-[data-mui-color-scheme="dark"] {
-  color-scheme: dark;
 }

@@ -28,7 +28,7 @@ export default function NewPassword(props: { required?: boolean }) {
         variant="filled"
         required={required}
         autoComplete="new-password"
-        validation={{
+        rules={{
           validate: (v: string) => {
             if (!required) {
               return true;
@@ -53,7 +53,7 @@ export default function NewPassword(props: { required?: boolean }) {
         autoComplete="new-password"
         fullWidth
         helperText=" "
-        validation={{
+        rules={{
           validate: (v: string) => {
             if (!required) {
               return true;

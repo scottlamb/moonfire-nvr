@@ -11,10 +11,10 @@ import LoadingButton from "@mui/lab/LoadingButton";
 import React, { useEffect } from "react";
 import * as api from "./api";
 import { useSnackbars } from "./snackbars";
-import Box from "@mui/material/Box/Box";
-import DialogContent from "@mui/material/DialogContent/DialogContent";
-import InputAdornment from "@mui/material/InputAdornment/InputAdornment";
-import Typography from "@mui/material/Typography/Typography";
+import Box from "@mui/material/Box";
+import DialogContent from "@mui/material/DialogContent";
+import InputAdornment from "@mui/material/InputAdornment";
+import Typography from "@mui/material/Typography";
 import AccountCircle from "@mui/icons-material/AccountCircle";
 import Lock from "@mui/icons-material/Lock";
 
