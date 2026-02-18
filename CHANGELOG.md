@@ -8,7 +8,7 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## unreleased
+## v0.7.27 (2026-02-18)
 
 *   Fix React warnings (and potential malfunction) when opening a recording
     in list view. `FullScreenVideo` was not wrapped in `React.forwardRef`,
