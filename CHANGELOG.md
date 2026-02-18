@@ -8,6 +8,11 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   Use real hyperlinks to issues in live view error alert.
+    Fixes [#326](https://github.com/scottlamb/moonfire-nvr/issues/326).
+
 ## v0.7.26 (2026-02-17)
 
 *   Major changes to sample file directory IO.

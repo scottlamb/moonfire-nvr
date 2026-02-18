@@ -2,7 +2,7 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import React from "react";
+import React, { ReactNode } from "react";
 import { Camera } from "../types";
 import { Part, parsePart } from "./parser";
 import * as api from "../api";
@@ -58,7 +58,7 @@ interface PlaybackStateWaiting {
 
 interface PlaybackStateError {
   state: "error";
-  message: string;
+  message: ReactNode;
 }
 
 type PlaybackState =
@@ -123,9 +123,25 @@ class LiveCameraDriver {
     const subStream = this.camera.streams.sub;
     if (subStream === undefined || !subStream.record) {
       this.error(
-        "Must have sub stream set to record; see " +
-          "https://github.com/scottlamb/moonfire-nvr/issues/119 and " +
-          "https://github.com/scottlamb/moonfire-nvr/issues/120"
+        "Must have sub stream set to record",
+        <span>
+          see{" "}
+          <a
+            href="https://github.com/scottlamb/moonfire-nvr/issues/119"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            #119
+          </a>{" "}
+          and{" "}
+          <a
+            href="https://github.com/scottlamb/moonfire-nvr/issues/120"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            #120
+          </a>
+        </span>
       );
       return;
     }
@@ -142,11 +158,20 @@ class LiveCameraDriver {
     this.ws.addEventListener("message", this.onWsMessage);
   };
 
-  error = (reason: string) => {
+  error = (reason: string, extra?: ReactNode) => {
     console.error(`${this.camera.shortName}: aborting due to ${reason}`);
     this.stopStream(reason);
     this.buf = { state: "error" };
-    this.setPlaybackState({ state: "error", message: reason });
+    this.setPlaybackState({
+      state: "error",
+      message: extra ? (
+        <div>
+          {reason} {extra}
+        </div>
+      ) : (
+        reason
+      ),
+    });
   };
 
   onWsClose = (e: CloseEvent) => {
@@ -461,6 +486,7 @@ const LiveCamera = ({ mediaSourceApi, camera, chooser }: LiveCameraProps) => {
           height: "100%",
           alignItems: "flex-end",
           p: 1,
+          zIndex: 2,
         },
       }}
     >
@@ -471,8 +497,10 @@ const LiveCamera = ({ mediaSourceApi, camera, chooser }: LiveCameraProps) => {
         </div>
       )}
       {playbackState.state === "error" && (
-        <div className="alert-overlay">
-          <Alert severity="error">{playbackState.message}</Alert>
+        <div className="alert-overlay" style={{ pointerEvents: "none" }}>
+          <Alert severity="error" style={{ pointerEvents: "auto" }}>
+            {playbackState.message}
+          </Alert>
         </div>
       )}
       <video ref={videoRef} muted autoPlay playsInline />
