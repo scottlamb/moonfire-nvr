@@ -62,7 +62,7 @@ function App() {
       {
         csrf: toplevel!.user!.session!.csrf,
       },
-      {}
+      {},
     );
     switch (resp.status) {
       case "aborted":
@@ -97,7 +97,7 @@ function App() {
           setLoginState(
             resp.response.user?.session === undefined
               ? "not-logged-in"
-              : "logged-in"
+              : "logged-in",
           );
           setToplevel(resp.response);
           setTimeZoneName(resp.response.timeZoneName);
@@ -128,7 +128,7 @@ function App() {
           }
           handleClose={() => {
             setLoginState((s) =>
-              s === "user-requested-login" ? "not-logged-in" : s
+              s === "user-requested-login" ? "not-logged-in" : s,
             );
           }}
         />

@@ -14,7 +14,7 @@
 export function fillAspect(
   rect: DOMRectReadOnly,
   innerRef: React.RefObject<HTMLElement>,
-  aspect: [number, number]
+  aspect: [number, number],
 ) {
   const w = rect.width;
   const h = rect.height;

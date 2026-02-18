@@ -29,7 +29,7 @@ test("notifications that time out", async () => {
   render(
     <SnackbarProvider autoHideDuration={5000}>
       <AddSnackbar />
-    </SnackbarProvider>
+    </SnackbarProvider>,
   );
 
   // message A should be present immediately.
@@ -44,7 +44,7 @@ test("notifications that time out", async () => {
   // ...then it should close and message B should open...
   act(() => vi.runOnlyPendingTimers());
   await waitFor(() =>
-    expect(screen.queryByText(/message A/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/message A/)).not.toBeInTheDocument(),
   );
   expect(screen.getByText(/message B/)).toBeInTheDocument();
 
@@ -57,7 +57,7 @@ test("notifications that time out", async () => {
   act(() => vi.runOnlyPendingTimers());
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
   await waitFor(() =>
-    expect(screen.queryByText(/message B/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/message B/)).not.toBeInTheDocument(),
   );
 });
 

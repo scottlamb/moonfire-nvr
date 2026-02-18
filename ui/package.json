@@ -104,7 +104,7 @@
     "http-proxy-middleware": "^2.0.6",
     "jsdom": "^24.0.0",
     "msw": "^2.12.10",
-    "prettier": "^2.8.8",
+    "prettier": "^3.8.1",
     "terser": "^5.30.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.4",

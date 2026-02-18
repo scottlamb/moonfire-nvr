@@ -9,7 +9,7 @@ import { SnackbarProvider } from "./snackbars";
 import React from "react";
 
 export function renderWithCtx(
-  children: React.ReactElement
+  children: React.ReactElement,
 ): Pick<ReturnType<typeof render>, "rerender"> {
   function wrapped(children: React.ReactElement): React.ReactElement {
     return (

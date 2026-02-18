@@ -77,7 +77,7 @@ class LiveCameraDriver {
     camera: Camera,
     setPlaybackState: (state: PlaybackState) => void,
     setAspect: (aspect: [number, number]) => void,
-    video: HTMLVideoElement
+    video: HTMLVideoElement,
   ) {
     this.mediaSourceApi = mediaSourceApi;
     this.src = new mediaSourceApi();
@@ -141,7 +141,7 @@ class LiveCameraDriver {
           >
             #120
           </a>
-        </span>
+        </span>,
       );
       return;
     }
@@ -199,7 +199,7 @@ class LiveCameraDriver {
     // concurrent Blob.arrayBuffer() calls from resolving out of order and
     // delivering segments to the SourceBuffer out of order.
     this.messageChain = this.messageChain.then(() =>
-      this.processWsBlob(e.data as Blob)
+      this.processWsBlob(e.data as Blob),
     );
   };
 
@@ -267,7 +267,7 @@ class LiveCameraDriver {
   bufUpdateEnd = () => {
     if (this.buf.state !== "open") {
       console.error(
-        `${this.camera.shortName}: bufUpdateEnd in state ${this.buf.state}`
+        `${this.camera.shortName}: bufUpdateEnd in state ${this.buf.state}`,
       );
       return;
     }
@@ -434,7 +434,7 @@ const LiveCamera = ({ mediaSourceApi, camera, chooser }: LiveCameraProps) => {
       camera,
       setPlaybackState,
       setAspect,
-      video
+      video,
     );
     return () => {
       d.unmount();

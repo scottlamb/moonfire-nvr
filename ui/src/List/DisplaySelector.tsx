@@ -52,7 +52,7 @@ const DisplaySelector = (props: Props) => {
               props.setSplit90k(
                 typeof e.target.value === "string"
                   ? parseInt(e.target.value)
-                  : e.target.value
+                  : e.target.value,
               )
             }
             displayEmpty

@@ -35,7 +35,7 @@ export default function DeleteDialog({
         {
           csrf: csrf,
         },
-        { signal }
+        { signal },
       );
       setReq(undefined);
       switch (resp.status) {

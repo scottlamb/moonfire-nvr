@@ -36,7 +36,7 @@ export type FetchResult<T> = FetchSuccess<T> | FetchAborted | FetchError;
 
 async function myfetch(
   url: string,
-  init: RequestInit
+  init: RequestInit,
 ): Promise<FetchResult<Response>> {
   let response;
   try {
@@ -97,7 +97,7 @@ export interface InitSegmentResponse {
 /** Fetches an initialization segment. */
 export async function init(
   videoSampleEntryId: number,
-  init: RequestInit
+  init: RequestInit,
 ): Promise<FetchResult<InitSegmentResponse>> {
   const url = `/api/init/${videoSampleEntryId}.mp4`;
   const fetchRes = await myfetch(url, init);
@@ -130,7 +130,7 @@ export async function init(
 
 async function json<T>(
   url: string,
-  init: RequestInit
+  init: RequestInit,
 ): Promise<FetchResult<T>> {
   const fetchRes = await myfetch(url, init);
   if (fetchRes.status !== "success") {
@@ -271,7 +271,7 @@ export async function postUser(req: PostUserRequest, init: RequestInit) {
 export async function updateUser(
   id: number,
   req: UpdateUserRequest,
-  init: RequestInit
+  init: RequestInit,
 ) {
   return await myfetch(`/api/users/${id}`, {
     method: "PATCH",
@@ -291,7 +291,7 @@ export interface DeleteUserRequest {
 export async function deleteUser(
   id: number,
   req: DeleteUserRequest,
-  init: RequestInit
+  init: RequestInit,
 ) {
   return await myfetch(`/api/users/${id}`, {
     method: "DELETE",
@@ -441,7 +441,7 @@ export async function recordings(req: RecordingsRequest, init: RequestInit) {
       startTime90k: req.startTime90k,
       endTime90k: req.endTime90k,
       split90k: req.split90k,
-    }
+    },
   );
   return await json<RecordingsResponse>(url, init);
 }
@@ -457,7 +457,7 @@ export function recordingUrl(
   stream: StreamType,
   r: RecordingSpecifier,
   timestampTrack: boolean,
-  trimToRange90k?: [number, number]
+  trimToRange90k?: [number, number],
 ): string {
   let s = `${r.startId}`;
   if (r.endId !== undefined) {

@@ -33,16 +33,15 @@ interface SnackbarProviderProps {
   children: React.ReactNode;
 }
 
-export interface MySnackbarProps
-  extends Omit<
-    SnackbarProps,
-    | "key"
-    | "anchorOrigin"
-    | "open"
-    | "handleClosed"
-    | "TransitionProps"
-    | "actions"
-  > {
+export interface MySnackbarProps extends Omit<
+  SnackbarProps,
+  | "key"
+  | "anchorOrigin"
+  | "open"
+  | "handleClosed"
+  | "TransitionProps"
+  | "actions"
+> {
   key?: React.Key;
 }
 
@@ -115,7 +114,7 @@ export class SnackbarProvider
   handleCloseSnackbar = (
     key: React.Key,
     event: Event | React.SyntheticEvent<any>,
-    reason: SnackbarCloseReason
+    reason: SnackbarCloseReason,
   ) => {
     if (reason === "clickaway") return;
     this.setState((state) => {

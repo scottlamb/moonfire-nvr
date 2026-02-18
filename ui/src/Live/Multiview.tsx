@@ -53,7 +53,7 @@ export const MultiviewChooser = (props: MultiviewChooserProps) => {
         props.onChoice(
           typeof e.target.value === "string"
             ? parseInt(e.target.value)
-            : e.target.value
+            : e.target.value,
         );
       }}
       size="small"
@@ -116,8 +116,8 @@ const Multiview = (props: MultiviewProps) => {
     searchParams.has("cams")
       ? JSON.parse(searchParams.get("cams") || "")
       : localStorage.getItem("camsSelected") !== null
-      ? JSON.parse(localStorage.getItem("camsSelected") || "")
-      : Array(MAX_CAMERAS).fill(null)
+        ? JSON.parse(localStorage.getItem("camsSelected") || "")
+        : Array(MAX_CAMERAS).fill(null),
   );
 
   /**
@@ -169,8 +169,8 @@ const Multiview = (props: MultiviewProps) => {
           searchParams.set(
             "cams",
             JSON.stringify(
-              selectedReducer(selected, { selectedIndex: i, cameraIndex })
-            )
+              selectedReducer(selected, { selectedIndex: i, cameraIndex }),
+            ),
           );
           setSearchParams(searchParams);
         }}
@@ -312,7 +312,7 @@ const Monoview = (props: MonoviewProps) => {
   );
   return props.renderCamera(
     props.cameraIndex === null ? null : props.cameras[props.cameraIndex],
-    chooser
+    chooser,
   );
 };
 

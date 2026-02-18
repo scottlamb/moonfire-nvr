@@ -142,14 +142,14 @@ export default function AddEditDialog({
               csrf: csrf,
               update: user,
             },
-            { signal }
+            { signal },
           )
         : await api.postUser(
             {
               csrf: csrf,
               user: user,
             },
-            { signal }
+            { signal },
           );
       setReq(undefined);
       switch (resp.status) {

@@ -75,7 +75,7 @@ const ChangePassword = ({ user, open, handleClose }: Props) => {
             password: loading.newPassword,
           },
         },
-        { signal }
+        { signal },
       );
       switch (response.status) {
         case "aborted":

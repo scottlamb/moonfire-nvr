@@ -12,7 +12,7 @@ import { beforeAll, afterAll, afterEach, expect, test } from "vitest";
 const server = setupServer(
   http.get("/api/", () => {
     return HttpResponse.text("server error", { status: 503 });
-  })
+  }),
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());

@@ -70,7 +70,7 @@ const FullScreenVideo = React.forwardRef<HTMLElement, FullScreenVideoProps>(
         <video ref={videoRef} controls preload="auto" autoPlay src={src} />
       </Box>
     );
-  }
+  },
 );
 FullScreenVideo.displayName = "FullScreenVideo";
 
@@ -187,7 +187,7 @@ const useParsedSearchParams = (): ParsedSearchParamsAndSetters => {
 
 const calcSelectedStreams = (
   toplevel: api.ToplevelResponse,
-  ids: Set<number>
+  ids: Set<number>,
 ): Set<Stream> => {
   let streams = new Set<Stream>();
   for (const id of ids) {
@@ -216,7 +216,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
 
   const [showSelectors, toggleShowSelectors] = useReducer(
     (m: boolean) => !m,
-    true
+    true,
   );
 
   // The time range to examine, or null if one hasn't yet been selected. This
@@ -231,7 +231,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
   // each time.
   const selectedStreams = useMemo(
     () => calcSelectedStreams(toplevel, selectedStreamIds),
-    [toplevel, selectedStreamIds]
+    [toplevel, selectedStreamIds],
   );
 
   const [activeRecording, setActiveRecording] = useState<
@@ -241,7 +241,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
     return (time90k: number) => {
       return format(
         utcToZonedTime(new Date(time90k / 90), timeZoneName),
-        "d MMM yyyy HH:mm:ss"
+        "d MMM yyyy HH:mm:ss",
       );
     };
   }, [timeZoneName]);
@@ -257,7 +257,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
         trimStartAndEnd={trimStartAndEnd}
         setActiveRecording={setActiveRecording}
         formatTime={formatTime}
-      />
+      />,
     );
   }
   const closeModal = (event: {}, reason: string) => {
@@ -361,7 +361,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
                 activeRecording[0].streamType,
                 activeRecording[1],
                 timestampTrack,
-                trimStartAndEnd ? range90k! : undefined
+                trimStartAndEnd ? range90k! : undefined,
               )}
               aspect={[
                 activeRecording[1].aspectWidth,

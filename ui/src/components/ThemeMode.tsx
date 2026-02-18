@@ -31,7 +31,7 @@ const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
 
   const useMediaQuery = (query: string) => {
     const [matches, setMatches] = React.useState(
-      () => window.matchMedia(query).matches
+      () => window.matchMedia(query).matches,
     );
     React.useEffect(() => {
       const m = window.matchMedia(query);
@@ -43,7 +43,7 @@ const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
   };
 
   const detectedSystemColorScheme = useMediaQuery(
-    "(prefers-color-scheme: dark)"
+    "(prefers-color-scheme: dark)",
   )
     ? "dark"
     : "light";
@@ -55,13 +55,13 @@ const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
   const currentTheme =
     mode === "system"
       ? detectedSystemColorScheme
-      : mode ?? detectedSystemColorScheme;
+      : (mode ?? detectedSystemColorScheme);
   const choosenTheme =
     mode === "dark"
       ? CurrentMode.Dark
       : mode === "light"
-      ? CurrentMode.Light
-      : CurrentMode.Auto;
+        ? CurrentMode.Light
+        : CurrentMode.Auto;
 
   return (
     <ThemeContext.Provider value={{ changeTheme, currentTheme, choosenTheme }}>

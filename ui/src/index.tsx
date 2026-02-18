@@ -56,5 +56,5 @@ root.render(
       </Experimental_CssVarsProvider>
       {/* </ThemeProvider> */}
     </StyledEngineProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

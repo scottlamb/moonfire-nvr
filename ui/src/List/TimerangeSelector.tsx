@@ -76,7 +76,7 @@ interface Props {
 }
 
 const MyTimePicker = (
-  props: Pick<TimePickerProps<Date>, "value" | "onChange" | "disabled">
+  props: Pick<TimePickerProps<Date>, "value" | "onChange" | "disabled">,
 ) => (
   <TimePicker
     label="Time"
@@ -157,7 +157,7 @@ const combine = (dayMillis: number, time: Date | null) => {
   }
   return addMilliseconds(
     start,
-    differenceInMilliseconds(time, startOfDay(time))
+    differenceInMilliseconds(time, startOfDay(time)),
   );
 };
 
@@ -226,7 +226,7 @@ type DaysOp =
  * Returns null if there are no allowed days.
  */
 function computeAllowedDayInfo(
-  selectedStreams: Set<Stream>
+  selectedStreams: Set<Stream>,
 ): AllowedDays | null {
   let minMillis = null;
   let maxMillis = null;
@@ -333,13 +333,13 @@ const TimerangeSelector = ({
     endType: "same-day",
   });
   const [startTime, setStartTime] = React.useState<any>(
-    new Date("1970-01-01T00:00:00")
+    new Date("1970-01-01T00:00:00"),
   );
   const [endTime, setEndTime] = React.useState<any>(null);
 
   useEffect(
     () => updateDays({ op: "update-selected-streams", selectedStreams }),
-    [selectedStreams]
+    [selectedStreams],
   );
   const shouldDisableDate = (date: Date | null) => {
     return (

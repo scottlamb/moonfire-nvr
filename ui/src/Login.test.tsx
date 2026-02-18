@@ -28,7 +28,7 @@ const server = setupServer(
     const body = await request.json();
     const { username, password } = body!;
     console.log(
-      "/api/login post username=" + username + " password=" + password
+      "/api/login post username=" + username + " password=" + password,
     );
     if (username === "slamb" && password === "hunter2") {
       return new HttpResponse(null, { status: 204 });
@@ -42,7 +42,7 @@ const server = setupServer(
     } else {
       return HttpResponse.text("bad credentials", { status: 401 });
     }
-  })
+  }),
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 beforeEach(() => {
@@ -64,7 +64,7 @@ test("success", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
-    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
+    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />,
   );
   await user.type(screen.getByLabelText(/Username/), "slamb");
   await user.type(screen.getByLabelText(/Password/), "hunter2{enter}");
@@ -76,18 +76,18 @@ test("close while pending", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   const { rerender } = renderWithCtx(
-    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
+    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />,
   );
   await user.type(screen.getByLabelText(/Username/), "delay");
   await user.type(screen.getByLabelText(/Password/), "hunter2{enter}");
   expect(screen.getByRole("button", { name: /Log in/ })).toBeInTheDocument();
   rerender(
-    <Login open={false} onSuccess={onSuccess} handleClose={handleClose} />
+    <Login open={false} onSuccess={onSuccess} handleClose={handleClose} />,
   );
   await waitFor(() =>
     expect(
-      screen.queryByRole("button", { name: /Log in/ })
-    ).not.toBeInTheDocument()
+      screen.queryByRole("button", { name: /Log in/ }),
+    ).not.toBeInTheDocument(),
   );
 });
 
@@ -96,7 +96,7 @@ test("bad credentials", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
-    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
+    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />,
   );
   await user.type(screen.getByLabelText(/Username/), "slamb");
   await user.type(screen.getByLabelText(/Password/), "wrong{enter}");
@@ -109,7 +109,7 @@ test("server error", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
-    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
+    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />,
   );
   await user.type(screen.getByLabelText(/Username/), "server-error");
   await user.type(screen.getByLabelText(/Password/), "asdf{enter}");
@@ -124,7 +124,7 @@ test("network error", async () => {
   const handleClose = vi.fn().mockName("handleClose");
   const onSuccess = vi.fn().mockName("handleOpen");
   renderWithCtx(
-    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />
+    <Login open={true} onSuccess={onSuccess} handleClose={handleClose} />,
   );
   await user.type(screen.getByLabelText(/Username/), "network-error");
   await user.type(screen.getByLabelText(/Password/), "asdf{enter}");

@@ -24,15 +24,15 @@ const Live = ({ cameras, Frame }: LiveProps) => {
       searchParams.get("layout") ||
         localStorage.getItem("multiviewLayoutIndex") ||
         "0",
-      10
-    )
+      10,
+    ),
   );
 
   useEffect(() => {
     if (searchParams.has("layout"))
       localStorage.setItem(
         "multiviewLayoutIndex",
-        searchParams.get("layout") || "0"
+        searchParams.get("layout") || "0",
       );
   }, [searchParams]);
 

@@ -54,7 +54,7 @@ export interface CombinedRecording {
  */
 export function combine(
   split90k: number | undefined,
-  response: api.RecordingsResponse
+  response: api.RecordingsResponse,
 ): CombinedRecording[] {
   let out = [];
   let cur = null;
@@ -207,7 +207,7 @@ const VideoList = ({
     const doFetch = async (
       signal: AbortSignal,
       timerId: ReturnType<typeof setTimeout>,
-      range90k: [number, number]
+      range90k: [number, number],
     ) => {
       const req: api.RecordingsRequest = {
         cameraUuid: stream.camera.uuid,
@@ -236,7 +236,7 @@ const VideoList = ({
     if (range90k !== null) {
       const timerId = setTimeout(
         () => setState({ range90k, response: { status: "skeleton" } }),
-        1000
+        1000,
       );
       doFetch(abort.signal, timerId, range90k);
       return () => {

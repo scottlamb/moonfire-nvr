@@ -102,7 +102,7 @@ const TEST_VIDEO_SAMPLE_ENTRIES: { [id: number]: VideoSampleEntry } = {
 function TestFormat(time90k: number) {
   return format(
     utcToZonedTime(new Date(time90k / 90), "America/Los_Angeles"),
-    "d MMM yyyy HH:mm:ss"
+    "d MMM yyyy HH:mm:ss",
   );
 }
 
@@ -131,8 +131,8 @@ const server = setupServer(
           videoSampleEntries: TEST_VIDEO_SAMPLE_ENTRIES,
         });
       }
-    }
-  )
+    },
+  ),
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
@@ -201,7 +201,7 @@ test("load", async () => {
         formatTime={TestFormat}
         trimStartAndEnd={false}
       />
-    </table>
+    </table>,
   );
   expect(await screen.findByText(/26 Apr 2021 08:21:13/)).toBeInTheDocument();
 });
@@ -219,7 +219,7 @@ test("slow replace", async () => {
         formatTime={TestFormat}
         trimStartAndEnd={false}
       />
-    </table>
+    </table>,
   );
   expect(await screen.findByText(/26 Apr 2021 08:21:13/)).toBeInTheDocument();
   rerender(
@@ -231,7 +231,7 @@ test("slow replace", async () => {
         formatTime={TestFormat}
         trimStartAndEnd={false}
       />
-    </table>
+    </table>,
   );
 
   // The first results don't go away immediately.
@@ -240,12 +240,12 @@ test("slow replace", async () => {
   // A loading indicator should show up after a second.
   // The default timeout is 1 second; extend it to pass reliably.
   expect(
-    await screen.findByRole("progressbar", {}, { timeout: 2000 })
+    await screen.findByRole("progressbar", {}, { timeout: 2000 }),
   ).toBeInTheDocument();
 
   // Then the second query result should show up.
   expect(
-    await screen.findByText(/27 Apr 2021 06:17:43/, {}, { timeout: 2000 })
+    await screen.findByText(/27 Apr 2021 06:17:43/, {}, { timeout: 2000 }),
   ).toBeInTheDocument();
 });
 
@@ -259,7 +259,7 @@ test("error", async () => {
         formatTime={TestFormat}
         trimStartAndEnd={false}
       />
-    </table>
+    </table>,
   );
   expect(await screen.findByRole("alert")).toHaveTextContent(/server error/);
 });

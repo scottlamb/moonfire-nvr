@@ -14,7 +14,7 @@ test("renders string error", () => {
   render(
     <ErrorBoundary>
       <ThrowsLiteralComponent />
-    </ErrorBoundary>
+    </ErrorBoundary>,
   );
   const msgElement = screen.getByText(/simple string error/);
   expect(msgElement).toBeInTheDocument();
