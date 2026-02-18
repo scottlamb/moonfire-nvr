@@ -24,6 +24,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 *   Test and fix dir pool shutdown with multiple streams.
     `v0.7.26` introduced a busy loop error in this case.
 *   Fix debug-mode panics within `moonfire-nvr config` command.
+*   Update to [retina 0.4.17](https://github.com/scottlamb/retina/blob/main/CHANGELOG.md#v0417-2026-02-17),
+    which improves compatibility with several camera models.
 
 ## v0.7.26 (2026-02-17)
 
