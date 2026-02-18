@@ -5,7 +5,7 @@
 export interface Part {
   mimeType: string;
   videoSampleEntryId: number;
-  body: Uint8Array;
+  body: Uint8Array<ArrayBuffer>;
 }
 
 interface ParseSuccess {
@@ -25,7 +25,7 @@ const NL = "\n".charCodeAt(0);
 type ParseResult = ParseSuccess | ParseError;
 
 /// Parses a live stream message.
-export function parsePart(raw: Uint8Array): ParseResult {
+export function parsePart(raw: Uint8Array<ArrayBuffer>): ParseResult {
   // Parse into headers and body.
   const headers = new Headers();
   let pos = 0;
