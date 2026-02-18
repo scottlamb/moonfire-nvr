@@ -349,21 +349,21 @@ impl Service {
             tracing::error!(
                 parent: &span,
                 latency = latency.as_secs_f32(),
-                error = error.map(tracing::field::display),
+                error = error.map(tracing::field::debug),
                 "sending response headers",
             );
         } else if response.status().is_client_error() {
             tracing::warn!(
                 parent: &span,
                 latency = latency.as_secs_f32(),
-                error = error.map(tracing::field::display),
+                error = error.map(tracing::field::debug),
                 "sending response headers",
             );
         } else {
             tracing::info!(
                 parent: &span,
                 latency = latency.as_secs_f32(),
-                error = error.map(tracing::field::display),
+                error = error.map(tracing::field::debug),
                 "sending response headers",
             );
         }
