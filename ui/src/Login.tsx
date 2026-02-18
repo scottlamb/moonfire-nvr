@@ -7,7 +7,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormHelperText from "@mui/material/FormHelperText";
 import TextField from "@mui/material/TextField";
-import LoadingButton from "@mui/lab/LoadingButton";
+import Button from "@mui/material/Button";
 import React, { useEffect } from "react";
 import * as api from "./api";
 import { useSnackbars } from "./snackbars";
@@ -160,14 +160,14 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <LoadingButton
+          <Button
             type="submit"
             variant="contained"
             color="secondary"
             loading={loading !== null}
           >
             Log in
-          </LoadingButton>
+          </Button>
         </DialogActions>
       </form>
     </Dialog>

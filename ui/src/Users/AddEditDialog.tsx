@@ -9,7 +9,6 @@ import {
   RadioButtonGroup,
   TextFieldElement,
 } from "react-hook-form-mui";
-import LoadingButton from "@mui/lab/LoadingButton";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
@@ -249,14 +248,14 @@ export default function AddEditDialog({
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose}>Cancel</Button>
-          <LoadingButton
+          <Button
             loading={req !== undefined}
             color="secondary"
             variant="contained"
             type="submit"
           >
             {prior === null ? "Add" : "Edit"}
-          </LoadingButton>
+          </Button>
         </DialogActions>
       </FormContainer>
     </Dialog>

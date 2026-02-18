@@ -5,7 +5,6 @@
 import { useForm } from "react-hook-form";
 import { FormContainer, PasswordElement } from "react-hook-form-mui";
 import Button from "@mui/material/Button";
-import LoadingButton from "@mui/lab/LoadingButton";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -162,14 +161,14 @@ const ChangePassword = ({ user, open, handleClose }: Props) => {
           <Button onClick={handleClose} disabled={loading !== null}>
             Cancel
           </Button>
-          <LoadingButton
+          <Button
             type="submit"
             variant="contained"
             color="secondary"
             loading={loading !== null}
           >
             Change
-          </LoadingButton>
+          </Button>
         </DialogActions>
       </FormContainer>
     </Dialog>
