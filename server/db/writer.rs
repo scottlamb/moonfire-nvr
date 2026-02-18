@@ -353,7 +353,7 @@ impl InnerWriter {
 impl Drop for Writer {
     fn drop(&mut self) {
         let mut locked = None;
-        if let Some(mut inner) = self.inner.take() {
+        if let Some(inner) = self.inner.as_mut() {
             if let Some(sample) = inner.unfinished_sample.take() {
                 let blake3 = inner.hasher.borrow_mut().finalize();
                 let locked = locked.insert(self.stream.inner.lock());

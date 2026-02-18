@@ -275,8 +275,13 @@ pub struct BytePos {
 impl LockedStream {
     #[cfg(test)]
     pub(crate) fn dummy() -> Self {
+        Self::dummy_with_id(1)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dummy_with_id(id: i32) -> Self {
         Self {
-            id: 1,
+            id,
             camera_id: 1,
             open_writer: false,
             sample_file_dir: None,

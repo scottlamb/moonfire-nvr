@@ -758,7 +758,7 @@ impl Pool {
             },
             FastHashSet::default(),
         );
-        pool.open(NonZeroUsize::new(1).unwrap()).await.unwrap();
+        pool.open(NonZeroUsize::new(2).unwrap()).await.unwrap();
         pool.complete_open_for_write().await.unwrap();
         pool
     }
@@ -830,6 +830,7 @@ impl Worker {
                     if let State::Closing { done } = &mut inner.state {
                         if inner.write_streams > 0 {
                             // Can't shut down the pool until the write streams are closed.
+                            l = self_.shared.worker_notify.wait(l);
                             continue;
                         }
                         drop(lazy);

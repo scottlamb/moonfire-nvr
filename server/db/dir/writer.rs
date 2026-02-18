@@ -469,7 +469,9 @@ impl Worker {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{pin::pin, sync::Arc};
+
+    use futures::FutureExt as _;
 
     use crate::{
         recording,
@@ -722,6 +724,73 @@ mod tests {
             // on_worker should not have been set.
             assert!(!l.writer_state.on_worker);
         }
+    }
+
+    /// Tests pool shutdown with two concurrent write streams.
+    ///
+    /// This exercises the fix for a busy-loop bug in `Worker::run`. With two
+    /// streams, when the first finishes `write_streams` goes 2→1 (not yet 0),
+    /// so `dec_write_streams` doesn't call `worker_notify.notify_all()`. The
+    /// worker re-enters its idle loop, sees `Closing + write_streams > 0`, and
+    /// without the fix busy-loops holding the mutex — preventing the second
+    /// stream from ever decrementing `write_streams` and completing shutdown.
+    #[tokio::test]
+    async fn two_streams_shutdown() {
+        crate::testutil::init();
+        let tmpdir = tempfile::Builder::new()
+            .prefix("moonfire-db-test-dir-writer-two")
+            .tempdir()
+            .unwrap();
+
+        let stream_a = crate::stream::Stream::new(LockedStream::dummy_with_id(1));
+        let stream_b = crate::stream::Stream::new(LockedStream::dummy_with_id(2));
+        let flusher_notify = Arc::new(tokio::sync::Notify::new());
+        let dir_pool = crate::dir::Pool::new_for_test(tmpdir.path(), flusher_notify.clone()).await;
+
+        for stream in [&stream_a, &stream_b] {
+            let mut l = stream.inner.lock();
+            l.sample_file_dir = Some(crate::db::SampleFileDir {
+                id: 0,
+                pool: dir_pool.clone(),
+            });
+        }
+
+        // Give each stream 3 key frames:
+        // frame 0: is deferred because there's no duration
+        // frame 1: causes frame 0 to be written to `recent_frames`, but no wake
+        // frame 2: wakes the worker to write frame 0.
+        let mut writer_a = Writer::new(stream_a.clone()).unwrap();
+        writer_a
+            .write(b"aa1"[..].into(), recording::Time(1), 0, true, false, 0)
+            .unwrap();
+        writer_a
+            .write(b"aa2"[..].into(), recording::Time(2), 1, true, false, 0)
+            .unwrap();
+        writer_a
+            .write(b"aa3"[..].into(), recording::Time(3), 2, true, false, 0)
+            .unwrap();
+        assert_eq!(dir_pool.0.inner.lock().write_streams, 1);
+
+        let mut writer_b = Writer::new(stream_b.clone()).unwrap();
+        writer_b
+            .write(b"bb1"[..].into(), recording::Time(1), 0, true, false, 0)
+            .unwrap();
+        writer_b
+            .write(b"bb2"[..].into(), recording::Time(2), 1, true, false, 0)
+            .unwrap();
+        writer_b
+            .write(b"bb3"[..].into(), recording::Time(3), 2, true, false, 0)
+            .unwrap();
+        assert_eq!(dir_pool.0.inner.lock().write_streams, 2);
+
+        // Start closing the directory pool. It should not complete because the open write streams prevent this.
+        let mut close = pin!(dir_pool.close());
+        assert!(close.as_mut().now_or_never().is_none());
+
+        drop(writer_a);
+        drop(writer_b);
+
+        close.await.unwrap();
     }
 
     /// Tests that `wake` short-circuits when `on_worker` is already true.

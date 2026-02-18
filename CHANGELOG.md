@@ -21,6 +21,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 *   Fix 9x16 videos being stretched to the full screen dimensions in
     list view full screen mode. Clean up some references to ancient
     Firefox versions along the way.
+*   Test and fix dir pool shutdown with multiple streams.
+    `v0.7.26` introduced a busy loop error in this case.
 
 ## v0.7.26 (2026-02-17)
 
