@@ -24,7 +24,7 @@ import * as api from "./api";
 import Login from "./Login";
 import { useSnackbars } from "./snackbars";
 import ListActivity from "./List";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router";
 import LiveActivity from "./Live";
 import UsersActivity from "./Users";
 import ChangePassword from "./ChangePassword";
@@ -38,7 +38,7 @@ export type LoginState =
   | "user-requested-login";
 
 export interface FrameProps {
-  activityMenuPart?: JSX.Element;
+  activityMenuPart?: React.JSX.Element;
   children?: React.ReactNode;
 }
 
@@ -109,7 +109,7 @@ function App() {
     };
   }, [fetchSeq]);
 
-  const Frame = ({ activityMenuPart, children }: FrameProps): JSX.Element => {
+  const Frame = ({ activityMenuPart, children }: FrameProps): React.JSX.Element => {
     return (
       <>
         <Header

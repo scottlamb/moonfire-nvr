@@ -26,7 +26,7 @@ interface Props {
   logout: () => void;
   changePassword: () => void;
   menuClick?: () => void;
-  activityMenuPart?: JSX.Element;
+  activityMenuPart?: React.JSX.Element;
 }
 
 // https://material-ui.com/components/app-bar/

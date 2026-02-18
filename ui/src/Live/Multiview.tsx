@@ -7,7 +7,7 @@ import Select, { SelectChangeEvent } from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import React, { useCallback, useEffect, useReducer } from "react";
 import { Camera } from "../types";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import Fullscreen from "@mui/icons-material/Fullscreen";
@@ -31,7 +31,7 @@ const MAX_CAMERAS = 9;
 export interface MultiviewProps {
   cameras: Camera[];
   layoutIndex: number;
-  renderCamera: (camera: Camera | null, chooser: JSX.Element) => JSX.Element;
+  renderCamera: (camera: Camera | null, chooser: React.JSX.Element) => React.JSX.Element;
 }
 
 export interface MultiviewChooserProps {
@@ -272,7 +272,7 @@ interface MonoviewProps {
   cameras: Camera[];
   cameraIndex: number | null;
   onSelect: (cameraIndex: number | null) => void;
-  renderCamera: (camera: Camera | null, chooser: JSX.Element) => JSX.Element;
+  renderCamera: (camera: Camera | null, chooser: React.JSX.Element) => React.JSX.Element;
 }
 
 /** A single pane of a Multiview, including its camera chooser. */

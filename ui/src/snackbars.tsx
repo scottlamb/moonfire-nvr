@@ -145,7 +145,7 @@ export class SnackbarProvider
     });
   }
 
-  render(): JSX.Element {
+  render(): React.JSX.Element {
     const first = this.state.queue[0];
     const snackbars: Snackbars = this;
     return (

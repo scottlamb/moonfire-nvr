@@ -117,7 +117,7 @@ export default function AddEditDialog({
   csrf,
   onClose,
   refetch,
-}: Props): JSX.Element {
+}: Props): React.JSX.Element {
   const hasPassword =
     prior !== undefined && prior !== null && prior.user.password !== null;
   const passwordOpts = hasPassword

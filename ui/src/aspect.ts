@@ -13,7 +13,7 @@
  */
 export function fillAspect(
   rect: DOMRectReadOnly,
-  innerRef: React.RefObject<HTMLElement>,
+  innerRef: React.RefObject<HTMLElement | null>,
   aspect: [number, number],
 ) {
   const w = rect.width;

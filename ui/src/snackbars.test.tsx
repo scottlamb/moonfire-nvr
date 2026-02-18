@@ -2,7 +2,7 @@
 // Copyright (C) 2021 The Moonfire NVR Authors; see AUTHORS and LICENSE.txt.
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { useEffect } from "react";
 import { SnackbarProvider, useSnackbars } from "./snackbars";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
@@ -37,28 +37,25 @@ test("notifications that time out", async () => {
   expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 
   // ...then start to close...
-  act(() => vi.advanceTimersByTime(5000));
+  await act(() => vi.advanceTimersByTime(5000));
   expect(screen.getByText(/message A/)).toBeInTheDocument();
   expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 
   // ...then it should close and message B should open...
-  act(() => vi.runOnlyPendingTimers());
-  await waitFor(() =>
-    expect(screen.queryByText(/message A/)).not.toBeInTheDocument(),
-  );
+  // Advance through the exit transition.
+  await act(() => vi.advanceTimersByTime(1000));
+  expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
   expect(screen.getByText(/message B/)).toBeInTheDocument();
 
   // ...then message B should start to close...
-  act(() => vi.advanceTimersByTime(5000));
+  await act(() => vi.advanceTimersByTime(5000));
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
   expect(screen.getByText(/message B/)).toBeInTheDocument();
 
   // ...then message B should fully close.
-  act(() => vi.runOnlyPendingTimers());
+  await act(() => vi.advanceTimersByTime(1000));
   expect(screen.queryByText(/message A/)).not.toBeInTheDocument();
-  await waitFor(() =>
-    expect(screen.queryByText(/message B/)).not.toBeInTheDocument(),
-  );
+  expect(screen.queryByText(/message B/)).not.toBeInTheDocument();
 });
 
 // TODO: test dismiss.

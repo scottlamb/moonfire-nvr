@@ -4,14 +4,14 @@
 
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { render } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { SnackbarProvider } from "./snackbars";
 import React from "react";
 
 export function renderWithCtx(
-  children: React.ReactElement,
+  children: React.ReactNode,
 ): Pick<ReturnType<typeof render>, "rerender"> {
-  function wrapped(children: React.ReactElement): React.ReactElement {
+  function wrapped(children: React.ReactNode) {
     return (
       <ThemeProvider theme={createTheme()}>
         <SnackbarProvider autoHideDuration={5000}>
@@ -22,6 +22,6 @@ export function renderWithCtx(
   }
   const { rerender } = render(wrapped(children));
   return {
-    rerender: (children: React.ReactElement) => rerender(wrapped(children)),
+    rerender: (children: React.ReactNode) => rerender(wrapped(children)),
   };
 }

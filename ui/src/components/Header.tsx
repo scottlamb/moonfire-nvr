@@ -16,7 +16,7 @@ import * as api from "../api";
 import MoonfireMenu from "../AppMenu";
 import { useReducer } from "react";
 import { LoginState } from "../App";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 export default function Header({
   loginState,
@@ -29,7 +29,7 @@ export default function Header({
   loginState: LoginState;
   logout: () => void;
   setChangePasswordOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  activityMenuPart?: JSX.Element;
+  activityMenuPart?: React.JSX.Element;
   setLoginState: React.Dispatch<React.SetStateAction<LoginState>>;
   toplevel: api.ToplevelResponse | null;
 }) {

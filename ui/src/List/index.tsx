@@ -20,7 +20,7 @@ import VideoList, { CombinedRecording } from "./VideoList";
 import { useLayoutEffect } from "react";
 import { fillAspect } from "../aspect";
 import useResizeObserver from "@react-hook/resize-observer";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { FrameProps } from "../App";
 import IconButton from "@mui/material/IconButton";
 import FilterList from "@mui/icons-material/FilterList";
@@ -36,48 +36,41 @@ interface FullScreenVideoProps {
  * pixel aspect ratio specified in .mp4 files. Thus we need to specify it
  * out-of-band.
  */
-const FullScreenVideo = React.forwardRef<HTMLElement, FullScreenVideoProps>(
-  ({ src, aspect }, ref) => {
-    const boxRef = React.useRef<HTMLElement | null>(null);
-    const videoRef = React.useRef<HTMLVideoElement>(null);
-    useLayoutEffect(() => {
-      fillAspect(boxRef.current!.getBoundingClientRect(), videoRef, aspect);
-    }, [aspect]);
-    useResizeObserver(boxRef, (entry: ResizeObserverEntry) => {
+const FullScreenVideo = ({ src, aspect }: FullScreenVideoProps) => {
+  const boxRef = React.useRef<HTMLElement | null>(null);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  useLayoutEffect(() => {
+    fillAspect(boxRef.current!.getBoundingClientRect(), videoRef, aspect);
+  }, [aspect]);
+  useResizeObserver(
+    boxRef as React.RefObject<HTMLElement>,
+    (entry: ResizeObserverEntry) => {
       fillAspect(entry.contentRect, videoRef, aspect);
-    });
-    return (
-      <Box
-        ref={(el: HTMLElement | null) => {
-          boxRef.current = el;
-          if (typeof ref === "function") {
-            ref(el);
-          } else if (ref) {
-            ref.current = el;
-          }
-        }}
-        tabIndex={-1}
-        sx={{
-          width: "100vw",
-          height: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          pointerEvents: "none",
-          "& video": { pointerEvents: "auto" },
-        }}
-      >
-        <video ref={videoRef} controls preload="auto" autoPlay src={src} />
-      </Box>
-    );
-  },
-);
-FullScreenVideo.displayName = "FullScreenVideo";
+    },
+  );
+  return (
+    <Box
+      ref={boxRef}
+      tabIndex={-1}
+      sx={{
+        width: "100vw",
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        "& video": { pointerEvents: "auto" },
+      }}
+    >
+      <video ref={videoRef} controls preload="auto" autoPlay src={src} />
+    </Box>
+  );
+};
 
 interface Props {
   timeZoneName: string;
   toplevel: api.ToplevelResponse;
-  Frame: (props: FrameProps) => JSX.Element;
+  Frame: (props: FrameProps) => React.JSX.Element;
 }
 
 /// Parsed URL search parameters.

@@ -25,7 +25,7 @@ export const ThemeContext = createContext<ThemeProps>({
   choosenTheme: CurrentMode.Auto,
 });
 
-const ThemeMode = ({ children }: { children: JSX.Element }): JSX.Element => {
+const ThemeMode = ({ children }: { children: React.JSX.Element }): React.JSX.Element => {
   const { mode, setMode } = useColorScheme();
 
   const useMediaQuery = (query: string) => {

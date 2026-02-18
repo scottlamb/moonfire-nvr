@@ -8,12 +8,12 @@ import { Camera } from "../types";
 import LiveCamera, { MediaSourceApi } from "./LiveCamera";
 import Multiview, { MultiviewChooser } from "./Multiview";
 import { FrameProps } from "../App";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { useEffect, useState } from "react";
 
 export interface LiveProps {
   cameras: Camera[];
-  Frame: (props: FrameProps) => JSX.Element;
+  Frame: (props: FrameProps) => React.JSX.Element;
 }
 
 const Live = ({ cameras, Frame }: LiveProps) => {
@@ -72,7 +72,7 @@ const Live = ({ cameras, Frame }: LiveProps) => {
       <Multiview
         layoutIndex={multiviewLayoutIndex}
         cameras={cameras}
-        renderCamera={(camera: Camera | null, chooser: JSX.Element) => (
+        renderCamera={(camera: Camera | null, chooser: React.JSX.Element) => (
           <LiveCamera
             mediaSourceApi={mediaSourceApi}
             camera={camera}

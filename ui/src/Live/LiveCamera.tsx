@@ -27,7 +27,7 @@ interface LiveCameraProps {
   /// and pass it back here otherwise.
   mediaSourceApi: typeof MediaSource;
   camera: Camera | null;
-  chooser: JSX.Element;
+  chooser: React.JSX.Element;
 }
 
 interface BufferStateClosed {
@@ -409,8 +409,8 @@ class LiveCameraDriver {
  */
 const LiveCamera = ({ mediaSourceApi, camera, chooser }: LiveCameraProps) => {
   const [aspect, setAspect] = React.useState<[number, number]>([16, 9]);
-  const videoRef = React.useRef<HTMLVideoElement>(null);
-  const boxRef = React.useRef<HTMLElement>(null);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const boxRef = React.useRef<HTMLElement | null>(null);
   const [playbackState, setPlaybackState] = React.useState<PlaybackState>({
     state: "normal",
   });
@@ -418,9 +418,12 @@ const LiveCamera = ({ mediaSourceApi, camera, chooser }: LiveCameraProps) => {
   React.useLayoutEffect(() => {
     fillAspect(boxRef.current!.getBoundingClientRect(), videoRef, aspect);
   }, [boxRef, videoRef, aspect]);
-  useResizeObserver(boxRef, (entry: ResizeObserverEntry) => {
-    fillAspect(entry.contentRect, videoRef, aspect);
-  });
+  useResizeObserver(
+    boxRef as React.RefObject<HTMLElement>,
+    (entry: ResizeObserverEntry) => {
+      fillAspect(entry.contentRect, videoRef, aspect);
+    },
+  );
 
   // Load the camera driver.
   React.useEffect(() => {

@@ -24,7 +24,7 @@ export default function DeleteDialog({
   csrf,
   onClose,
   refetch,
-}: Props): JSX.Element {
+}: Props): React.JSX.Element {
   const [req, setReq] = useState<undefined | number>();
   const snackbars = useSnackbars();
   useEffect(() => {

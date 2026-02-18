@@ -17,7 +17,7 @@ import ErrorBoundary from "./ErrorBoundary";
 import { SnackbarProvider } from "./snackbars";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import "./index.css";
-import { HashRouter } from "react-router-dom";
+import { HashRouter } from "react-router";
 import ThemeMode from "./components/ThemeMode";
 
 const themeExtended = experimental_extendTheme({

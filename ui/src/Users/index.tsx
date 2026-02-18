@@ -25,7 +25,7 @@ import AddEditDialog from "./AddEditDialog";
 import React from "react";
 
 interface Props {
-  Frame: (props: FrameProps) => JSX.Element;
+  Frame: (props: FrameProps) => React.JSX.Element;
   csrf?: string;
 }
 
