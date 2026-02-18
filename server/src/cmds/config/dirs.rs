@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 use base::strutil::{decode_size, encode_size};
-use base::{Error, Mutex};
+use base::Mutex;
 use cursive::traits::{Nameable, Resizable};
 use cursive::view::Scrollable;
 use cursive::Cursive;
@@ -33,21 +33,28 @@ struct Model {
     streams: BTreeMap<i32, Stream>,
 }
 
-/// Updates the limits in the database. Doesn't delete excess data (if any).
-fn update_limits_inner(model: &Model) -> Result<(), Error> {
-    let mut changes = Vec::with_capacity(model.streams.len());
-    for (&stream_id, stream) in &model.streams {
-        changes.push(db::RetentionChange {
+/// Collects retention changes from the model.
+///
+/// Call this while holding the model lock, then drop the lock before passing
+/// the result to [`apply_retention_changes`] (which acquires the order-1 db lock).
+fn collect_retention_changes(model: &Model) -> (Arc<db::Database>, Vec<db::RetentionChange>) {
+    let changes = model
+        .streams
+        .iter()
+        .map(|(&stream_id, stream)| db::RetentionChange {
             stream_id,
             new_record: stream.record,
             new_limit: stream.retain.unwrap(),
-        });
-    }
-    model.db.lock().update_retention(&changes)
+        })
+        .collect();
+    (model.db.clone(), changes)
 }
 
-fn update_limits(model: &Model, siv: &mut Cursive) {
-    if let Err(e) = update_limits_inner(model) {
+/// Applies retention changes to the database and reports errors to the UI.
+///
+/// Must be called *without* holding the order-3 model lock.
+fn apply_retention_changes(db: &db::Database, changes: &[db::RetentionChange], siv: &mut Cursive) {
+    if let Err(e) = db.lock().update_retention(changes) {
         siv.add_layer(
             views::Dialog::text(format!("Unable to update limits: {}", e.chain()))
                 .dismiss_button("Back")
@@ -119,26 +126,30 @@ fn confirm_deletion(model: &Mutex<Model, 3>, siv: &mut Cursive, to_delete: i64) 
 }
 
 fn actually_delete(model: &Mutex<Model, 3>, siv: &mut Cursive) {
-    let model = model.lock();
-    let new_limits: Vec<_> = model
-        .streams
-        .iter()
-        .map(|(&id, s)| db::lifecycle::NewLimit {
-            stream_id: id,
-            limit: s.retain.unwrap(),
-        })
-        .collect();
+    let (db, dir_id, new_limits, changes) = {
+        let model = model.lock();
+        let new_limits: Vec<_> = model
+            .streams
+            .iter()
+            .map(|(&id, s)| db::lifecycle::NewLimit {
+                stream_id: id,
+                limit: s.retain.unwrap(),
+            })
+            .collect();
+        let (db, changes) = collect_retention_changes(&model);
+        (db, model.dir_id, new_limits, changes)
+    };
     siv.pop_layer(); // deletion confirmation
     siv.pop_layer(); // retention dialog
-    block_on(model.db.open_sample_file_dirs(&[model.dir_id])).unwrap(); // TODO: don't unwrap.
-    if let Err(e) = block_on(db::lifecycle::lower_retention(&model.db, &new_limits[..])) {
+    block_on(db.open_sample_file_dirs(&[dir_id])).unwrap(); // TODO: don't unwrap.
+    if let Err(e) = block_on(db::lifecycle::lower_retention(&db, &new_limits[..])) {
         siv.add_layer(
             views::Dialog::text(format!("Unable to delete excess video: {}", e.chain()))
                 .title("Error")
                 .dismiss_button("Abort"),
         );
     } else {
-        update_limits(&model, siv);
+        apply_retention_changes(&db, &changes, siv);
     }
 }
 
@@ -181,8 +192,9 @@ fn press_change(model: &Arc<Mutex<Model, 3>>, siv: &mut Cursive) {
         .title("Confirm deletion");
         siv.add_layer(dialog);
     } else {
+        let (db, changes) = collect_retention_changes(&model.lock());
         siv.pop_layer();
-        update_limits(&model.lock(), siv);
+        apply_retention_changes(&db, &changes, siv);
     }
 }
 

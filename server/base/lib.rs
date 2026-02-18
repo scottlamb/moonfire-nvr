@@ -68,7 +68,7 @@ impl Holder {
             prev: {
                 let prev = CUR_HOLD.replace(Some(Hold { location, order }));
                 if let Some(prev) = prev {
-                    if prev.order > order {
+                    if prev.order > order && !std::thread::panicking() {
                         panic!(
                             "order-{order} holder at {location}: acquired while holding\n\
                             order-{prev_order} holder at {prev_location}",
@@ -89,11 +89,14 @@ impl Holder {
 impl Drop for Holder {
     fn drop(&mut self) {
         let latest = CUR_HOLD.replace(self.prev);
+        if std::thread::panicking() {
+            return;
+        }
         if let Some(latest) = latest {
             if latest != self.this {
                 panic!(
                     "released holder with order {this_order}, acquire location {this_location}\n\
-                     but last acquired holder had order {latest_order}, acquire location {latest_location}",
+                    but last acquired holder had order {latest_order}, acquire location {latest_location}",
                     this_order=self.this.order,
                     this_location=self.this.location,
                     latest_order=latest.order,
@@ -103,7 +106,7 @@ impl Drop for Holder {
         } else {
             panic!(
                 "released holder with order {this_order}, acquire_location {this_location}\n\
-                 but no last acquired holder",
+                but no last acquired holder",
                 this_order = self.this.order,
                 this_location = self.this.location,
             );

@@ -23,6 +23,7 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
     Firefox versions along the way.
 *   Test and fix dir pool shutdown with multiple streams.
     `v0.7.26` introduced a busy loop error in this case.
+*   Fix debug-mode panics within `moonfire-nvr config` command.
 
 ## v0.7.26 (2026-02-17)
 
