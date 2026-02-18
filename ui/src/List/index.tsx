@@ -97,7 +97,7 @@ interface ParsedSearchParamsAndSetters extends ParsedSearchParams {
 }
 
 const parseSearchParams = (raw: URLSearchParams): ParsedSearchParams => {
-  let selectedStreamIds = new Set<number>();
+  const selectedStreamIds = new Set<number>();
   let split90k = DEFAULT_DURATION;
   let trimStartAndEnd = true;
   let timestampTrack = false;
@@ -189,7 +189,7 @@ const calcSelectedStreams = (
   toplevel: api.ToplevelResponse,
   ids: Set<number>,
 ): Set<Stream> => {
-  let streams = new Set<Stream>();
+  const streams = new Set<Stream>();
   for (const id of ids) {
     const s = toplevel.streams.get(id);
     if (s === undefined) {
@@ -246,7 +246,7 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
     };
   }, [timeZoneName]);
 
-  let videoLists = [];
+  const videoLists = [];
   for (const s of selectedStreams) {
     videoLists.push(
       <VideoList

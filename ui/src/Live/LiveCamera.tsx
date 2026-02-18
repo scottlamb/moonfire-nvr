@@ -219,7 +219,7 @@ class LiveCameraDriver {
     if (this.buf.state === "error") {
       return;
     }
-    let result = parsePart(raw);
+    const result = parsePart(raw);
     if (result.status === "error") {
       this.error(`unparseable part: ${result.errorMessage}`);
       return;
@@ -245,7 +245,7 @@ class LiveCameraDriver {
         mimeType: part.mimeType,
         videoSampleEntryId: part.videoSampleEntryId,
       };
-      let initSegmentResult = await api.init(part.videoSampleEntryId, {});
+      const initSegmentResult = await api.init(part.videoSampleEntryId, {});
       switch (initSegmentResult.status) {
         case "error":
           this.error(`init segment fetch error: ${initSegmentResult.message}`);

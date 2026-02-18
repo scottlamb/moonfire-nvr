@@ -63,9 +63,9 @@ const Login = ({ open, onSuccess, handleClose }: Props) => {
     if (loading === null) {
       return;
     }
-    let abort = new AbortController();
+    const abort = new AbortController();
     const send = async (signal: AbortSignal) => {
-      let response = await api.login(loading, { signal });
+      const response = await api.login(loading, { signal });
       switch (response.status) {
         case "aborted":
           break;

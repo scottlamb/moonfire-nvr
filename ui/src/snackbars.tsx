@@ -102,7 +102,7 @@ export class SnackbarProvider
   autoKeySeq = 0;
 
   enqueue(snackbar: MySnackbarProps): React.Key {
-    let key =
+    const key =
       snackbar.key === undefined ? `auto-${this.autoKeySeq++}` : snackbar.key;
     // TODO: filter existing.
     this.setState((state) => ({

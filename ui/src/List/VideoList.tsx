@@ -56,7 +56,7 @@ export function combine(
   split90k: number | undefined,
   response: api.RecordingsResponse,
 ): CombinedRecording[] {
-  let out = [];
+  const out = [];
   let cur = null;
 
   for (const r of response.recordings) {
@@ -216,7 +216,7 @@ const VideoList = ({
         endTime90k: range90k[1],
         split90k,
       };
-      let response = await api.recordings(req, { signal });
+      const response = await api.recordings(req, { signal });
       clearTimeout(timerId);
       if (response.status === "success") {
         // Sort recordings in descending order.

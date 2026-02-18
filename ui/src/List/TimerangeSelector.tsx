@@ -230,7 +230,7 @@ function computeAllowedDayInfo(
 ): AllowedDays | null {
   let minMillis = null;
   let maxMillis = null;
-  let allMillis = new Set<number>();
+  const allMillis = new Set<number>();
   for (const s of selectedStreams) {
     for (const d in s.days) {
       const t = new Date(d + "T00:00:00").getTime();
@@ -256,7 +256,7 @@ function computeAllowedDayInfo(
 const toMillis = (d: Date) => startOfDay(d).getTime();
 
 function daysStateReducer(old: DaysState, op: DaysOp): DaysState {
-  let state = { ...old };
+  const state = { ...old };
 
   function updateStart(newStart: number) {
     if (

@@ -89,7 +89,7 @@ interface SelectOp {
 }
 
 function selectedReducer(old: SelectedCameras, op: SelectOp): SelectedCameras {
-  let selected = [...old]; // shallow clone.
+  const selected = [...old]; // shallow clone.
   if (op.cameraIndex !== null) {
     // de-dupe.
     for (let i = 0; i < selected.length; i++) {

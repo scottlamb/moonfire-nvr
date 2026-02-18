@@ -28,7 +28,7 @@ const StreamMultiSelector = ({ toplevel, selected, setSelected }: Props) => {
     setSelected(updated);
   };
   const toggleType = (st: StreamType) => {
-    let updated = new Set(selected);
+    const updated = new Set(selected);
     let foundAny = false;
     for (const sid of selected) {
       const s = toplevel.streams.get(sid);
