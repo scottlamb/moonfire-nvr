@@ -36,32 +36,43 @@ interface FullScreenVideoProps {
  * pixel aspect ratio specified in .mp4 files. Thus we need to specify it
  * out-of-band.
  */
-const FullScreenVideo = ({ src, aspect }: FullScreenVideoProps) => {
-  const boxRef = React.useRef<HTMLElement>(null);
-  const videoRef = React.useRef<HTMLVideoElement>(null);
-  useLayoutEffect(() => {
-    fillAspect(boxRef.current!.getBoundingClientRect(), videoRef, aspect);
-  }, [aspect]);
-  useResizeObserver(boxRef, (entry: ResizeObserverEntry) => {
-    fillAspect(entry.contentRect, videoRef, aspect);
-  });
-  return (
-    <Box
-      ref={boxRef}
-      sx={{
-        width: "100vw",
-        height: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        pointerEvents: "none",
-        "& video": { pointerEvents: "auto" },
-      }}
-    >
-      <video ref={videoRef} controls preload="auto" autoPlay src={src} />
-    </Box>
-  );
-};
+const FullScreenVideo = React.forwardRef<HTMLElement, FullScreenVideoProps>(
+  ({ src, aspect }, ref) => {
+    const boxRef = React.useRef<HTMLElement | null>(null);
+    const videoRef = React.useRef<HTMLVideoElement>(null);
+    useLayoutEffect(() => {
+      fillAspect(boxRef.current!.getBoundingClientRect(), videoRef, aspect);
+    }, [aspect]);
+    useResizeObserver(boxRef, (entry: ResizeObserverEntry) => {
+      fillAspect(entry.contentRect, videoRef, aspect);
+    });
+    return (
+      <Box
+        ref={(el: HTMLElement | null) => {
+          boxRef.current = el;
+          if (typeof ref === "function") {
+            ref(el);
+          } else if (ref) {
+            ref.current = el;
+          }
+        }}
+        tabIndex={-1}
+        sx={{
+          width: "100vw",
+          height: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          pointerEvents: "none",
+          "& video": { pointerEvents: "auto" },
+        }}
+      >
+        <video ref={videoRef} controls preload="auto" autoPlay src={src} />
+      </Box>
+    );
+  }
+);
+FullScreenVideo.displayName = "FullScreenVideo";
 
 interface Props {
   timeZoneName: string;

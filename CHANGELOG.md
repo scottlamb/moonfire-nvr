@@ -10,6 +10,11 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 ## unreleased
 
+*   Fix React warnings (and potential malfunction) when opening a recording
+    in list view. `FullScreenVideo` was not wrapped in `React.forwardRef`,
+    so MUI's `Modal`/`FocusTrap` could not attach a ref to it. Also fix
+    an MUI warning about the modal content node not accepting focus, by
+    adding `tabIndex={-1}` to `FullScreenVideo`'s root element.
 *   Fix frequent intermittent live view failures in Firefox.
     Concurrent `Blob.arrayBuffer()` calls in the WebSocket message handler
     could resolve out of order, delivering fMP4 segments to the SourceBuffer
