@@ -10,6 +10,12 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
 ## unreleased
 
+*   Fix frequent intermittent live view failures in Firefox.
+    Concurrent `Blob.arrayBuffer()` calls in the WebSocket message handler
+    could resolve out of order, delivering fMP4 segments to the SourceBuffer
+    with non-monotonic decode timestamps. Fix by processing messages
+    sequentially via promise chaining.
+    Fixes [#343](https://github.com/scottlamb/moonfire-nvr/issues/343).
 *   Use real hyperlinks to issues in live view error alert.
     Fixes [#326](https://github.com/scottlamb/moonfire-nvr/issues/326).
 *   Fix 9x16 videos being stretched to the full screen dimensions in

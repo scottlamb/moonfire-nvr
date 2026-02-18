@@ -189,24 +189,34 @@ class LiveCameraDriver {
     console.error(`${this.camera.shortName}: ws error`, e);
   };
 
-  onWsMessage = async (e: MessageEvent<any>) => {
+  onWsMessage = (e: MessageEvent<any>) => {
     if (typeof e.data === "string") {
       // error message.
       this.error(`server: ${e.data}`);
       return;
     }
+    // Process blobs sequentially by chaining onto a promise. This prevents
+    // concurrent Blob.arrayBuffer() calls from resolving out of order and
+    // delivering segments to the SourceBuffer out of order.
+    this.messageChain = this.messageChain.then(() =>
+      this.processWsBlob(e.data as Blob)
+    );
+  };
+
+  messageChain: Promise<void> = Promise.resolve();
+
+  processWsBlob = async (blob: Blob) => {
     let raw;
     try {
-      raw = new Uint8Array(await (e.data as Blob).arrayBuffer());
+      raw = new Uint8Array(await blob.arrayBuffer());
     } catch (e) {
       if (!(e instanceof DOMException)) {
         throw e;
       }
-      this.error(`error reading part: ${e.message}`);
+      this.error(`error reading part: ${(e as DOMException).message}`);
       return;
     }
     if (this.buf.state === "error") {
-      console.log(`${this.camera.shortName}: onWsMessage while in state error`);
       return;
     }
     let result = parsePart(raw);
@@ -325,10 +335,10 @@ class LiveCameraDriver {
 
     // TODO: call out key frames in the part headers. The "- 5" here is a guess
     // to avoid removing anything from the current GOP.
-    const firstTs = this.buf.srcBuf.buffered.start(0);
+    const sb = this.buf.srcBuf;
+    const firstTs = sb.buffered.start(0);
     if (firstTs < curTs - 5) {
-      console.log(`${this.camera.shortName}: trimming ${firstTs}-${curTs}`);
-      this.buf.srcBuf.remove(firstTs, curTs - 5);
+      sb.remove(firstTs, curTs - 5);
       this.buf.busy = true;
     }
   };
