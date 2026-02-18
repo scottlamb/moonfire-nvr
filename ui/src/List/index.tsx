@@ -31,20 +31,36 @@ interface FullScreenVideoProps {
 }
 
 /**
- * A video sized for the entire document window constrained to aspect ratio.
+ * A video sized to fill its container while maintaining aspect ratio.
  * This is particularly helpful for Firefox (89), which doesn't honor the
  * pixel aspect ratio specified in .mp4 files. Thus we need to specify it
  * out-of-band.
  */
 const FullScreenVideo = ({ src, aspect }: FullScreenVideoProps) => {
-  const ref = React.useRef<HTMLVideoElement>(null);
+  const boxRef = React.useRef<HTMLElement>(null);
+  const videoRef = React.useRef<HTMLVideoElement>(null);
   useLayoutEffect(() => {
-    fillAspect(document.body.getBoundingClientRect(), ref, aspect);
+    fillAspect(boxRef.current!.getBoundingClientRect(), videoRef, aspect);
+  }, [aspect]);
+  useResizeObserver(boxRef, (entry: ResizeObserverEntry) => {
+    fillAspect(entry.contentRect, videoRef, aspect);
   });
-  useResizeObserver(document.body, (entry: ResizeObserverEntry) => {
-    fillAspect(entry.contentRect, ref, aspect);
-  });
-  return <video ref={ref} controls preload="auto" autoPlay src={src} />;
+  return (
+    <Box
+      ref={boxRef}
+      sx={{
+        width: "100vw",
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        "& video": { pointerEvents: "auto" },
+      }}
+    >
+      <video ref={videoRef} controls preload="auto" autoPlay src={src} />
+    </Box>
+  );
 };
 
 interface Props {
@@ -322,16 +338,10 @@ const Main = ({ toplevel, timeZoneName, Frame }: Props) => {
             open
             onClose={closeModal}
             sx={{
-              // Make the content as large as possible without distorting it.
-              // Center it in the screen and ensure that the video element only
-              // takes up the space actually used by the content, so that clicking
-              // outside it will dismiss the modal.
+              // Clicking outside the video element dismisses the modal.
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              "& video": {
-                objectFit: "fill",
-              },
             }}
           >
             <FullScreenVideo

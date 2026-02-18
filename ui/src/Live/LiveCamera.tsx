@@ -456,14 +456,7 @@ const LiveCamera = ({ mediaSourceApi, camera, chooser }: LiveCameraProps) => {
           width: "100%",
           height: "100%",
 
-          // It'd be nice to use "contain" here so non-16x9 videos display
-          // with letterboxing rather than by being stretched. Unfortunately
-          // Firefox 87.0 doesn't honor the PixelAspectRatioBox of anamorphic
-          // sub streams. For now, make anamorphic 16x9 sub streams display
-          // correctly (at the expense of non-16x9 streams).
-          // TODO: adjust width/height dynamically to handle the letterboxing
-          // on non-16x9 streams.
-          objectFit: "fill",
+          objectFit: "contain",
         },
         "& .controls": {
           position: "absolute",

@@ -6,14 +6,10 @@
  * Sets CSS properties on <tt>innerRef</tt> to fill as much of <tt>rect</tt>
  * as possible while maintaining aspect ratio.
  *
- * While Chrome 89 supports the "aspect-ratio" CSS property and behaves in a
- * predictable way, Firefox 87 doesn't. Emulating it with an <img> child
- * doesn't work well either for using a (flex item) ancestor's (calculated)
- * height to compute the <img>'s width and then the parent's width. There are
- * open bugs that look related, eg:
- * https://bugzilla.mozilla.org/show_bug.cgi?id=1349738
- * https://bugzilla.mozilla.org/show_bug.cgi?id=1690423
- * so just do it all by hand. The caller should use a ResizeObserver.
+ * Uses imperative sizing rather than the CSS <tt>aspect-ratio</tt> property
+ * because the video's display aspect ratio comes from the server (based on the
+ * init segment), not from the element's natural dimensions. The caller should
+ * use a ResizeObserver to keep the sizing up to date.
  */
 export function fillAspect(
   rect: DOMRectReadOnly,
