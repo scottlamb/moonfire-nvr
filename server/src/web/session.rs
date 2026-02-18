@@ -111,7 +111,7 @@ impl Service {
             // Clear useless cookie.
             res.headers_mut().append(
                 header::SET_COOKIE,
-                HeaderValue::from_str("s=; Max-Age=0; Path=/").unwrap(),
+                HeaderValue::from_str("s=; Max-Age=0; SameSite=Lax; Path=/").unwrap(),
             );
         }
         *res.status_mut() = StatusCode::NO_CONTENT;
