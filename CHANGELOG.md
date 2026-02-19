@@ -8,6 +8,14 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## v0.7.30 (2026-02-19)
+
+*   fix another v0.7.26 regression,
+    [#350](https://github.com/scottlamb/moonfire-nvr/issues/350): severe timestamp
+    drift. This was a pair of errors in the new writer path: the "local start time"
+    was not being reset at recording rotation, and the wall clock was not accounting
+    for the final frame of each recording.
+
 ## v0.7.29 (2026-02-19)
 
 *   fix a v0.7.26 regression: the database would not be updated during

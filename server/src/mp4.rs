@@ -2889,7 +2889,7 @@ mod tests {
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"729561b694db8af402c53670e4647973a9dedbfffc431b07e627f86ba864e518\"";
+            "\"15d3324cedac763a4d98580bae7435b4ec2c7b1a875dd617a696ca9d4dc3a98a\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2913,11 +2913,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "48f8d1fde8b02d8c0be87fd6cb81948746417c62d5b80d1168d748d4c7655a61",
+            "9c25e76a13ac8b13cf221cedec278670bfcba0c324622448c5b845f1215ce854",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"05577657860db742f64279a0e1e70d1c76c584a4dba269d35df18b99940556c9\"";
+            "\"a18299fc5b50f6780bd7d07907e5d9a0d95ea79e5d17e88ab1874e0eda2ef055\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2945,7 +2945,7 @@ mod tests {
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"13b7a8d0b98ea6f32425e92e2ec00e06f757353656eb873f41891c651cc2c8a6\"";
+            "\"62fc891e814e43453dbe3145203109383abcd41b923482cfc7c096a7cd814d60\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -2970,11 +2970,11 @@ mod tests {
         // combine ranges from the new format with ranges from the old format.
         let hash = digest(&mp4).await;
         assert_eq!(
-            "be157bac1d6cfe1e6908d5e7167452eba146cc6df690a5bb7663228ad596a315",
+            "b56bf69a9dfee87480dcf0166b7db4f45285d536e11fac58b05afd8097514acc",
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"b38d2b19dd539631f12e6c1613d81fa2b67265ff7eed2768bf80a2655af02e60\"";
+            "\"da70f5692e1f7ed816a771b005988d4bff72d4287f20614f5abcd9fdfc69d4a1\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()
@@ -3003,7 +3003,7 @@ mod tests {
             hash.to_hex().as_str()
         );
         const EXPECTED_ETAG: &str =
-            "\"729561b694db8af402c53670e4647973a9dedbfffc431b07e627f86ba864e518\"";
+            "\"15d3324cedac763a4d98580bae7435b4ec2c7b1a875dd617a696ca9d4dc3a98a\"";
         assert_eq!(
             Some(HeaderValue::from_str(EXPECTED_ETAG).unwrap()),
             mp4.etag()

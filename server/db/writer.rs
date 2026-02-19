@@ -227,8 +227,8 @@ impl InnerWriter {
                 MAX_RECORDING_WALL_DURATION = recording::Duration(MAX_RECORDING_WALL_DURATION),
             ));
         }
-        self.adj_wall_and_start(sample);
         self.media_duration_90k = media_duration_90k as i32;
+        self.adj_wall_and_start(sample);
         Ok(duration_90k as i32)
     }
 
@@ -342,6 +342,7 @@ impl InnerWriter {
         r.end_reason = end_reason;
         dir::writer::wake(stream_arc, locked);
         self.start.0 += i64::from(self.wall_duration_90k);
+        self.local_start = base::time::Time::MAX;
         self.wall_duration_90k = 0;
         self.media_duration_90k = 0;
         self.run_offset += 1;
@@ -387,7 +388,7 @@ mod tests {
         writer
             .write(
                 Vec::from(b"foo"),
-                recording::Time(1),
+                recording::Time(2),
                 0,
                 true,
                 false,
@@ -398,7 +399,7 @@ mod tests {
         writer
             .write(
                 Vec::from(b"bar"),
-                recording::Time(2),
+                recording::Time(3),
                 1,
                 false,
                 false,
@@ -477,6 +478,196 @@ mod tests {
         assert_eq!(
             r.flags,
             RecordingFlags::TRAILING_ZERO | RecordingFlags::UNCOMMITTED
+        );
+    }
+
+    /// Tests properties of consecutive recordings within a single run.
+    ///
+    /// Verifies that each recording's `start`, `run_offset`, `wall_duration_90k`, and
+    /// `local_time_delta` are computed correctly with respect to each recording's own frames,
+    /// independently of earlier recordings in the same run.
+    #[test]
+    fn multi_recording_run() {
+        testutil::init();
+        const VIDEO_SAMPLE_ENTRY_ID: i32 = 0;
+        let stream = Stream::new(LockedStream::dummy());
+
+        // 90 kHz units. Each frame has media duration F = 90_000 ticks (1 second).
+        // T is an arbitrary nonzero base time for the wall clock.
+        //
+        // local_time for frame i = T + (i+1)*F, modeling a clock that starts at T and advances
+        // one frame duration per frame. The estimated wall start is
+        //   local_time_i - media_duration_including_i = T + (i+1)*F - (i+1)*F = T.
+        //
+        // Each write(fN) flushes the previous unfinished frame with duration pts_fN - pts_f(N-1),
+        // optionally closing the active recording after that flush (rotate_now). So rotate_now on
+        // write(fN) closes recording 1 after flushing f(N-1); fN becomes the first frame of rec 2.
+        //
+        // Recording 1: 3 frames (f0, f1, f2) with local clock matching media (no skew).
+        //   pts:        0,    F,   2F  (f3's pts determines f2's duration)
+        //   local_time: T+F, T+2F, T+3F
+        //   run_offset = 0, so start floats with local_start.
+        //   local_start = min(T+F-F, T+2F-2F, T+3F-3F) = T
+        //   start       = local_start = T
+        //   wall_duration  = 3F + clamp(T - T, ±(3F/2000)) = 3F
+        //   local_time_delta = 0
+        //
+        // Recording 2: 2 frames (f3, f4) with local clock matching media (no skew).
+        //   After close of rec 1:  self.start = T + 3F,  self.local_start = T + 3F
+        //   pts:        3F, 4F  (trailing zero at 5F from writer.close())
+        //   local_time: T+4F, T+5F
+        //   run_offset = 1, so start is anchored (= T+3F).
+        //   f4 flushes f3: local_start = min(T+3F, T+4F-F) = T+3F; wall = F
+        //   trailing zero: local_start = min(T+3F, T+5F-F) = T+3F; wall = F
+        //   local_time_delta = 0
+
+        const F: i64 = 90_000;
+        const T: i64 = 90_000 * 90_000; // arbitrary nonzero base time
+
+        let mut writer = Writer::new(stream.clone()).unwrap();
+
+        // Recording 1, frames 0–2 (local clock matches media).
+        writer
+            .write(
+                Vec::from(b"f0"),
+                recording::Time(T + F),
+                0,
+                true,
+                false,
+                VIDEO_SAMPLE_ENTRY_ID,
+            )
+            .unwrap();
+        writer
+            .write(
+                Vec::from(b"f1"),
+                recording::Time(T + 2 * F),
+                F,
+                false,
+                false,
+                VIDEO_SAMPLE_ENTRY_ID,
+            )
+            .unwrap();
+        writer
+            .write(
+                Vec::from(b"f2"),
+                recording::Time(T + 3 * F),
+                2 * F,
+                false,
+                false,
+                VIDEO_SAMPLE_ENTRY_ID,
+            )
+            .unwrap();
+        // rotate_now: write(f3) flushes f2 into recording 1, then closes it.
+        // f3 becomes the first frame of recording 2.
+        writer
+            .write(
+                Vec::from(b"f3"),
+                recording::Time(T + 4 * F),
+                3 * F,
+                true,
+                true,
+                VIDEO_SAMPLE_ENTRY_ID,
+            )
+            .unwrap();
+        // Recording 2, frame 4.
+        writer
+            .write(
+                Vec::from(b"f4"),
+                recording::Time(T + 5 * F),
+                4 * F,
+                false,
+                false,
+                VIDEO_SAMPLE_ENTRY_ID,
+            )
+            .unwrap();
+
+        writer.close("done".to_owned());
+
+        let l = stream.inner.lock();
+        let recordings: Vec<_> = l.recent_recordings.iter().collect();
+        assert_eq!(recordings.len(), 2);
+        let r0 = recordings[0];
+        let r1 = recordings[1];
+
+        // run_offset increments per recording within a run.
+        assert_eq!(r0.run_offset, 0);
+        assert_eq!(r1.run_offset, 1);
+
+        // Recording 1: 3 frames, no clock skew; wall == media.
+        assert_eq!(r0.media_duration_90k, 3 * F as i32);
+        assert_eq!(r0.wall_duration_90k, 3 * F as i32);
+        assert_eq!(r0.local_time_delta, recording::Duration(0));
+
+        // Recording 2's wall-clock start is contiguous with recording 1's wall-clock end.
+        assert_eq!(r1.start, recording::Time(T + 3 * F));
+        assert_eq!(
+            r1.start,
+            r0.start + recording::Duration(r0.wall_duration_90k as i64)
+        );
+
+        // Recording 2: 1 frame, no clock skew, gets trailing zero from writer.close().
+        assert_eq!(r1.media_duration_90k, F as i32);
+        assert_eq!(r1.wall_duration_90k, F as i32);
+        assert_eq!(r1.local_time_delta, recording::Duration(0));
+    }
+
+    /// Tests total wall-clock duration over 4 hours of recordings at 30 fps, rotating every 60 s.
+    ///
+    /// With a perfect local clock, the sum of all recordings' `wall_duration_90k` should equal
+    /// the total elapsed media time (4 hours).
+    #[test]
+    fn total_wall_duration() {
+        testutil::init();
+        const VIDEO_SAMPLE_ENTRY_ID: i32 = 0;
+        let stream = Stream::new(LockedStream::dummy());
+
+        const FPS: i64 = 30;
+        const FRAME_DURATION: i64 = 90_000 / FPS; // 3_000 ticks
+        const FRAMES_PER_RECORDING: i64 = 60 * FPS; // 1_800 frames = 60 seconds
+        const NUM_RECORDINGS: i64 = 4 * 60; // 240 recordings = 4 hours
+
+        let total_frames = NUM_RECORDINGS * FRAMES_PER_RECORDING;
+        // local_time models a wall clock starting at T that advances in lockstep with media.
+        // Frame i has pts = i * FRAME_DURATION and arrives at T + (i+1) * FRAME_DURATION.
+        // The estimated wall start is local_time - media_duration_including_frame = T (constant).
+        const T: i64 = 90_000 * 90_000; // arbitrary nonzero base time
+        let local_time = |i: i64| recording::Time(T + (i + 1) * FRAME_DURATION);
+
+        let mut writer = Writer::new(stream.clone()).unwrap();
+        let mut pts = 0i64;
+
+        for i in 0..total_frames {
+            let is_key = i % FRAMES_PER_RECORDING == 0;
+            // rotate_now is true for the first frame of each new recording (except the first),
+            // which causes the previous recording to be closed after flushing its last frame.
+            let rotate_now = is_key && i > 0;
+            writer
+                .write(
+                    vec![],
+                    local_time(i),
+                    pts,
+                    is_key,
+                    rotate_now,
+                    VIDEO_SAMPLE_ENTRY_ID,
+                )
+                .unwrap();
+            pts += FRAME_DURATION;
+        }
+        writer.close("done".to_owned());
+
+        let l = stream.inner.lock();
+        let total_wall: i64 = l
+            .recent_recordings
+            .iter()
+            .map(|r| i64::from(r.wall_duration_90k))
+            .sum();
+        // The last frame in the loop is always closed with duration 0 (trailing zero),
+        // so the actual total media duration is one frame short of total_frames * FRAME_DURATION.
+        let total_media = (total_frames - 1) * FRAME_DURATION;
+
+        assert_eq!(
+            total_wall, total_media,
+            "total_wall={total_wall} total_media={total_media}"
         );
     }
 

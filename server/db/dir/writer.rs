@@ -647,13 +647,13 @@ mod tests {
 
         // First frame of recording 1.
         writer
-            .write(b"rec1a"[..].into(), recording::Time(1), 0, true, false, 0)
+            .write(b"rec1a"[..].into(), recording::Time(2), 0, true, false, 0)
             .unwrap();
         // Second frame, with rotate_now=true to close recording 1 and start recording 2.
         writer
             .write(
                 b"rec2a"[..].into(),
-                recording::Time(2),
+                recording::Time(3),
                 1,
                 true,
                 /* rotate_now */ true,
@@ -761,25 +761,25 @@ mod tests {
         // frame 2: wakes the worker to write frame 0.
         let mut writer_a = Writer::new(stream_a.clone()).unwrap();
         writer_a
-            .write(b"aa1"[..].into(), recording::Time(1), 0, true, false, 0)
+            .write(b"aa1"[..].into(), recording::Time(2), 0, true, false, 0)
             .unwrap();
         writer_a
-            .write(b"aa2"[..].into(), recording::Time(2), 1, true, false, 0)
+            .write(b"aa2"[..].into(), recording::Time(3), 1, true, false, 0)
             .unwrap();
         writer_a
-            .write(b"aa3"[..].into(), recording::Time(3), 2, true, false, 0)
+            .write(b"aa3"[..].into(), recording::Time(4), 2, true, false, 0)
             .unwrap();
         assert_eq!(dir_pool.0.inner.lock().write_streams, 1);
 
         let mut writer_b = Writer::new(stream_b.clone()).unwrap();
         writer_b
-            .write(b"bb1"[..].into(), recording::Time(1), 0, true, false, 0)
+            .write(b"bb1"[..].into(), recording::Time(2), 0, true, false, 0)
             .unwrap();
         writer_b
-            .write(b"bb2"[..].into(), recording::Time(2), 1, true, false, 0)
+            .write(b"bb2"[..].into(), recording::Time(3), 1, true, false, 0)
             .unwrap();
         writer_b
-            .write(b"bb3"[..].into(), recording::Time(3), 2, true, false, 0)
+            .write(b"bb3"[..].into(), recording::Time(4), 2, true, false, 0)
             .unwrap();
         assert_eq!(dir_pool.0.inner.lock().write_streams, 2);
 

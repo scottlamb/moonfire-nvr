@@ -494,10 +494,10 @@ mod tests {
         .unwrap();
         assert_eq!(2, recordings.len());
         assert_eq!(0, recordings[0].id.recording());
-        assert_eq!(recording::Time(128700576089748), recordings[0].start);
+        assert_eq!(recording::Time(128700575999999), recordings[0].start);
         assert_eq!(db::RecordingFlags::empty(), recordings[0].flags);
         assert_eq!(1, recordings[1].id.recording());
-        assert_eq!(recording::Time(128700576719784), recordings[1].start);
+        assert_eq!(recording::Time(128700576719993), recordings[1].start);
         assert_eq!(db::RecordingFlags::TRAILING_ZERO, recordings[1].flags);
 
         drop(opener);
