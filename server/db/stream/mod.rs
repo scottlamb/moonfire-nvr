@@ -211,7 +211,7 @@ pub(crate) struct StreamComplete {
     pub cum_media_duration: recording::Duration,
 }
 
-/// A subscription to frames, starting with a key frame.
+/// A subscription to frames, starting with the most recent key frame.
 pub struct FramesSubscription<'s> {
     stream: &'s Stream,
 
@@ -219,27 +219,44 @@ pub struct FramesSubscription<'s> {
     next: Option<NonZeroU64>,
 }
 
-pub struct DroppedFramesError(pub u64);
+pub struct DroppedFramesError {
+    pub last: NonZeroU64,
+    pub next: NonZeroU64,
+}
 
 impl FramesSubscription<'_> {
-    pub async fn next(&mut self) -> Result<RecentFrame, DroppedFramesError> {
+    /// Resets the position to the latest key frame, returning the frame number.
+    pub fn reset(&mut self) -> Option<NonZeroU64> {
+        let next = self
+            .stream
+            .inner
+            .lock()
+            .recent_frames
+            .iter_last_gop()
+            .next()
+            .map(|(num, _)| num);
+        self.next = next;
+        next
+    }
+
+    pub async fn next(&mut self) -> Result<(NonZeroU64, RecentFrame), DroppedFramesError> {
         let mut first_this_call = true;
         loop {
-            let stream_id;
             let notified = {
                 let l = self.stream.inner.lock();
-                stream_id = l.id;
                 if let Some(next) = self.next {
                     match l.recent_frames.iter_from_frame_num(next).next() {
                         Some((num, f)) if num == next => {
                             self.next =
                                 Some(next.checked_add(1).expect("recent frame num never wraps"));
-                            tracing::debug!(stream_id, "returning frame {num}, non-first");
-                            return Ok(f.clone());
+                            return Ok((num, f.clone()));
                         }
                         Some((num, _)) => {
                             self.next = Some(num);
-                            return Err(DroppedFramesError(num.get() - next.get()));
+                            return Err(DroppedFramesError {
+                                last: next,
+                                next: num,
+                            });
                         }
                         None => {
                             assert!(
@@ -250,15 +267,12 @@ impl FramesSubscription<'_> {
                     }
                 } else if let Some((num, f)) = l.recent_frames.iter_last_gop().next() {
                     if f.is_key {
-                        tracing::debug!(stream_id, "returning frame {num}, first");
                         self.next = Some(num.checked_add(1).expect("recent frame num never wraps"));
-                        return Ok(f.clone());
+                        return Ok((num, f.clone()));
                     }
-                    tracing::debug!(stream_id, "ignoring non-key frame {num}");
                 };
                 self.stream.recent_frames_notify.notified()
             };
-            tracing::debug!(stream_id, "waiting for a frame");
             notified.await;
             first_this_call = false;
         }

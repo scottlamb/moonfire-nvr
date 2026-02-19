@@ -66,6 +66,16 @@ type PlaybackState =
   | PlaybackStateWaiting
   | PlaybackStateError;
 
+interface DroppedMessage {
+  type: "dropped";
+  frames: number;
+}
+interface ErrorMessage {
+  type: "error";
+  message: string;
+}
+type Message = DroppedMessage | ErrorMessage;
+
 /**
  * Drives a live camera.
  * Implementation detail of LiveCamera which listens to various DOM events and
@@ -191,9 +201,19 @@ class LiveCameraDriver {
 
   onWsMessage = (e: MessageEvent<any>) => {
     if (typeof e.data === "string") {
-      // error message.
-      this.error(`server: ${e.data}`);
-      return;
+      const message = JSON.parse(e.data) as Message;
+      switch (message.type) {
+        case "dropped":
+          console.log(
+            `${this.camera.shortName}: dropped ${message.frames} frames`,
+          );
+          return;
+        case "error":
+          this.error(`server error: ${message.message}`);
+          return;
+        default:
+          return;
+      }
     }
     // Process blobs sequentially by chaining onto a promise. This prevents
     // concurrent Blob.arrayBuffer() calls from resolving out of order and

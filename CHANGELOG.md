@@ -11,6 +11,8 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 ## unreleased
 
 *   log full error chains when serving errors to HTTP clients
+*   upgrade frontend dependencies, including React 18->19 and MUI 5->7
+*   gracefully degrade live stream on low bandwidth
 
 ## v0.7.27 (2026-02-18)
 

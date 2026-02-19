@@ -652,3 +652,11 @@ pub struct UserWithId<'a> {
 pub struct PutUsersResponse {
     pub id: i32,
 }
+
+/// A text message sent over the `.../live.m4s` websocket.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum LiveM4sMessage {
+    Error { message: String },
+    Dropped { frames: u64 },
+}

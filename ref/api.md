@@ -574,7 +574,13 @@ is required) the `s` cookie.
 
 The server will send messages as follows:
 
-*   text: a plaintext error message, followed by the end of stream.
+*   text: a JSON message of the following types:
+    *    `{"type": "drop", "frames": 5}` indicating that (in this case 5) frames
+         were dropped. This typically means the client's bandwidth is
+         insufficient to keep up with the stream. In this case the server will
+         jump to the most recent key frame to degrade gracefully.
+    *    `{"type": "error", "message": "..."}` an error which will be followed by
+         end of stream.
 *   binary: video data, repeatedly, as described below.
 *   ping: every 30 seconds.
 

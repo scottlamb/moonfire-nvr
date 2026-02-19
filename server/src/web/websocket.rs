@@ -9,7 +9,7 @@ use std::pin::Pin;
 
 use crate::body::Body;
 use base::{bail, err};
-use futures::{Future, SinkExt};
+use futures::Future;
 use http::{header, Request, Response};
 use tokio_tungstenite::tungstenite;
 use tracing::Instrument;
@@ -26,9 +26,7 @@ pub(super) fn upgrade<H>(
     handler: H,
 ) -> Result<Response<Body>, base::Error>
 where
-    for<'a> H: FnOnce(
-            &'a mut WebSocketStream,
-        ) -> Pin<Box<dyn Future<Output = Result<(), base::Error>> + Send + 'a>>
+    for<'a> H: FnOnce(&'a mut WebSocketStream) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
         + Send
         + 'static,
 {
@@ -59,15 +57,7 @@ where
                     None,
                 )
                 .await;
-                if let Err(err) = handler(&mut ws).await {
-                    // TODO: use a nice JSON message format for errors.
-                    tracing::error!(err = %err.chain(), "closing with error");
-                    let _ = ws
-                        .send(tungstenite::Message::Text(err.to_string().into()))
-                        .await;
-                } else {
-                    tracing::info!("closing");
-                };
+                handler(&mut ws).await;
                 let _ = ws.close(None).await;
             }
             .instrument(span),

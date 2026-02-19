@@ -11,6 +11,7 @@ use bytes::Bytes;
 use futures::SinkExt;
 use http::header;
 use tokio_tungstenite::tungstenite;
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::mp4;
@@ -27,6 +28,32 @@ const KEEPALIVE_AFTER_IDLE: tokio::time::Duration = tokio::time::Duration::from_
 impl Service {
     pub(super) async fn stream_live_m4s(
         self: Arc<Self>,
+        ws: &mut WebSocketStream,
+        caller: Result<Caller, Error>,
+        uuid: Uuid,
+        stream_type: db::StreamType,
+    ) {
+        if let Err(err) = self
+            .stream_live_m4s_inner(ws, caller, uuid, stream_type)
+            .await
+        {
+            tracing::error!(err = %err.chain(), "closing with error");
+            let _ = ws
+                .send(tungstenite::Message::Text(
+                    serde_json::to_string(&crate::json::LiveM4sMessage::Error {
+                        message: err.to_string(),
+                    })
+                    .expect("should serialize")
+                    .into(),
+                ))
+                .await;
+        } else {
+            tracing::info!("closing");
+        };
+    }
+
+    async fn stream_live_m4s_inner(
+        &self,
         ws: &mut WebSocketStream,
         caller: Result<Caller, Error>,
         uuid: Uuid,
@@ -71,7 +98,7 @@ impl Service {
 
                 next = sub_rx.next() => {
                     match next {
-                        Ok(frame) => {
+                        Ok((_n, frame)) => {
                             keepalive.reset_after(KEEPALIVE_AFTER_IDLE);
                             if !self.stream_live_m4s_chunk(
                                 open_id,
@@ -82,12 +109,21 @@ impl Service {
                                 return Ok(());
                             }
                         }
-                        Err(db::stream::DroppedFramesError(frames)) => {
-                            bail!(
-                                ResourceExhausted,
-                                msg("subscriber {frames} frames further behind than allowed; \
-                                     this typically indicates insufficient bandwidth"),
-                            )
+                        Err(db::stream::DroppedFramesError { last, next }) => {
+                            let next_key_frame = sub_rx.reset().expect("should have key frame after drop");
+                            let behind = next.get() - last.get();
+                            let key_frame_gap = next_key_frame.get() - next.get();
+                            debug!("subscriber fell {behind} frames behind `recent_frames`; will jump {key_frame_gap} frames further to next key frame");
+                            if ws.send(tungstenite::Message::Text(
+                                serde_json::to_string(&crate::json::LiveM4sMessage::Dropped {
+                                    frames: next_key_frame.get() - last.get(),
+                                }).expect("should serialize")
+                                .into(),
+                            ))
+                            .await.is_err()
+                            {
+                                return Ok(());
+                            }
                         }
                     }
                 }
