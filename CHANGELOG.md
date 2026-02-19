@@ -8,7 +8,7 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## unreleased
+## v0.7.28 (2026-02-19)
 
 *   log full error chains when serving errors to HTTP clients
 *   upgrade frontend dependencies, including React 18->19 and MUI 5->7
