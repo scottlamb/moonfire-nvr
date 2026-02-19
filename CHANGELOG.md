@@ -8,6 +8,14 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## v0.7.29 (2026-02-19)
+
+*   fix a v0.7.26 regression: the database would not be updated during
+    normal operation to reflect that recordings had been fully deleted.
+    This made restarts take a long time because they started with a database
+    transaction proportional to the number of recordings in the previous run.
+    It would also cause the SQLite database to (slowly) grow without bound.
+
 ## v0.7.28 (2026-02-19)
 
 *   log full error chains when serving errors to HTTP clients

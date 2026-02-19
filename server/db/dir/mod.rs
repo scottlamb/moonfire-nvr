@@ -929,9 +929,6 @@ impl Worker {
         span: tracing::Span,
         tx: tokio::sync::oneshot::Sender<Result<bool, Error>>,
     ) {
-        if tx.is_closed() {
-            return;
-        }
         let _enter = span.enter();
         let mut garbage: Vec<_> = self
             .shared
