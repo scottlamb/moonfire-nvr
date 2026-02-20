@@ -199,6 +199,23 @@ class LiveCameraDriver {
     console.error(`${this.camera.shortName}: ws error`, e);
   };
 
+  tryAddInitSegment = async (id: number, buf: BufferStateOpen) => {
+    const initSegmentResult = await api.init(id, {});
+    switch (initSegmentResult.status) {
+      case "error":
+        this.error(`init segment fetch error: ${initSegmentResult.message}`);
+        return;
+      case "aborted":
+        this.error(`init segment fetch aborted`);
+        return;
+      case "success":
+        break;
+    }
+    this.setAspect(initSegmentResult.response.aspect);
+    buf.srcBuf.appendBuffer(initSegmentResult.response.body);
+    return;
+  };
+
   onWsMessage = (e: MessageEvent<any>) => {
     if (typeof e.data === "string") {
       const message = JSON.parse(e.data) as Message;
@@ -265,22 +282,9 @@ class LiveCameraDriver {
         mimeType: part.mimeType,
         videoSampleEntryId: part.videoSampleEntryId,
       };
-      const initSegmentResult = await api.init(part.videoSampleEntryId, {});
-      switch (initSegmentResult.status) {
-        case "error":
-          this.error(`init segment fetch error: ${initSegmentResult.message}`);
-          return;
-        case "aborted":
-          this.error(`init segment fetch aborted`);
-          return;
-        case "success":
-          break;
-      }
-      this.setAspect(initSegmentResult.response.aspect);
-      srcBuf.appendBuffer(initSegmentResult.response.body);
-      return;
+      await this.tryAddInitSegment(part.videoSampleEntryId, this.buf);
     } else if (this.buf.state === "open") {
-      this.tryAppendPart(this.buf);
+      await this.tryAppendPart(this.buf);
     }
   };
 
@@ -300,7 +304,7 @@ class LiveCameraDriver {
     this.tryAppendPart(this.buf);
   };
 
-  tryAppendPart = (buf: BufferStateOpen) => {
+  tryAppendPart = async (buf: BufferStateOpen) => {
     if (buf.busy) {
       return;
     }
@@ -309,13 +313,26 @@ class LiveCameraDriver {
     if (part === undefined) {
       return;
     }
-    this.queuedBytes -= part.body.byteLength;
 
-    if (
-      part.mimeType !== buf.mimeType ||
-      part.videoSampleEntryId !== buf.videoSampleEntryId
-    ) {
-      this.error("Switching MIME type or videoSampleEntryId unimplemented");
+    if (part.mimeType !== buf.mimeType) {
+      try {
+        buf.srcBuf.changeType(part.mimeType);
+      } catch (e) {
+        this.error(
+          `Failed to change MIME type (${buf.mimeType}->${part.mimeType}): ${e}`,
+        );
+        return;
+      }
+      buf.mimeType = part.mimeType;
+    }
+    if (part.videoSampleEntryId !== buf.videoSampleEntryId) {
+      console.info(
+        `${this.camera.shortName}: switching video sample entry ${buf.videoSampleEntryId}->${part.videoSampleEntryId}`,
+      );
+      buf.busy = true;
+      buf.videoSampleEntryId = part.videoSampleEntryId;
+      this.queue.unshift(part);
+      await this.tryAddInitSegment(part.videoSampleEntryId, buf);
       return;
     }
 

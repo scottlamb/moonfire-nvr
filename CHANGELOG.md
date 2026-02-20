@@ -8,6 +8,10 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   support changing video sample parameters in live view.
+
 ## v0.7.30 (2026-02-19)
 
 *   fix another v0.7.26 regression,
