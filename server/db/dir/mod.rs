@@ -416,6 +416,10 @@ impl Pool {
         &self.0.config.path
     }
 
+    pub fn uuid(&self) -> Uuid {
+        self.0.config.dir_uuid
+    }
+
     /// Opens the directory, partially or completely.
     ///
     /// If the database is open for reading only

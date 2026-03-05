@@ -28,6 +28,17 @@ Status: **current**.
         * [`GET /api/users/<id>`](#get-apiusersid)
         * [`PATCH /api/users/<id>`](#patch-apiusersid)
         * [`DELETE /api/users/<id>`](#delete-apiusersid)
+    * [Camera management](#camera-management)
+        * [`POST /api/cameras`](#post-apicameras)
+        * [`PATCH /api/cameras/<uuid>/`](#patch-apicamerasuuid)
+        * [`DELETE /api/cameras/<uuid>/`](#delete-apicamerasuuid)
+        * [`POST /api/cameras/<uuid>/test`](#post-apicamerasuuidtest)
+    * [Storage management](#storage-management)
+        * [`GET /api/storage`](#get-apistorage)
+        * [`POST /api/storage`](#post-apistorage)
+        * [`GET /api/storage/<id>`](#get-apistorageid)
+        * [`PATCH /api/storage/<id>`](#patch-apistorageid)
+        * [`DELETE /api/storage/<id>`](#delete-apistorageid)
 * [Types](#types)
     * [UserSubset](#usersubset)
     * [Permissions](#permissions)
@@ -910,6 +921,152 @@ Expects a JSON object body with the following parameters:
 *   `csrf`: a CSRF token, required when using session authentication.
 
 Returns HTTP status 204 (No Content) on success.
+
+### Camera management
+
+#### `POST /api/cameras`
+
+Adds a new camera. Requires the `adminCameras` permission.
+
+Expects a JSON object body with the following parameters:
+
+*   `csrf`: a CSRF token, required when using session authentication.
+*   `camera`: a `CameraSubset` object (see below). The `shortName` field is
+    required.
+
+Returns a JSON object:
+
+*   `id`: the integer ID of the new camera.
+*   `uuid`: the UUID assigned to the new camera.
+
+##### CameraSubset
+
+A JSON object with any of the following parameters:
+
+*   `shortName`: a short string name for the camera.
+*   `description`: a longer description string.
+*   `onvifBaseUrl`: the base URL for ONVIF access (http or https scheme).
+*   `username`: the username for camera authentication.
+*   `password`: the password for camera authentication.
+*   `streams`: a dict keyed by stream type (`"main"`, `"sub"`, `"ext"`),
+    where each value is a `StreamSubset` object.
+
+##### StreamSubset
+
+A JSON object with any of the following parameters:
+
+*   `url`: the RTSP URL for the stream.
+*   `record`: boolean indicating whether to record this stream.
+*   `flushIfSec`: seconds before flushing buffered data.
+*   `rtspTransport`: the RTSP transport to use (e.g., `"tcp"`, `"udp"`).
+*   `sampleFileDirId`: the storage directory ID, or null to unset.
+*   `retainBytes`: the number of bytes of recordings to retain.
+
+#### `PATCH /api/cameras/<uuid>/`
+
+Updates an existing camera. Requires the `adminCameras` permission.
+
+Expects a JSON object body with the following parameters:
+
+*   `csrf`: a CSRF token, required when using session authentication.
+*   `update`: an optional `CameraSubset` with fields to change.
+*   `precondition`: an optional `CameraSubset` with fields that must match
+    current values for the update to proceed. Useful for optimistic
+    concurrency control. (Password preconditions are not checked.)
+
+Returns HTTP status 204 (No Content) on success.
+
+#### `DELETE /api/cameras/<uuid>/`
+
+Deletes a camera. Requires the `adminCameras` permission. The camera must
+have no recordings; delete all recordings first.
+
+Expects a JSON object body with the following parameters:
+
+*   `csrf`: a CSRF token, required when using session authentication.
+
+Returns HTTP status 204 (No Content) on success.
+
+#### `POST /api/cameras/<uuid>/test`
+
+Tests connectivity to a camera stream. Requires the `adminCameras` permission.
+
+Expects a JSON object body with the following parameters:
+
+*   `csrf`: a CSRF token, required when using session authentication.
+*   `streamType`: the stream type to test (`"main"`, `"sub"`, or `"ext"`).
+
+Returns a JSON object:
+
+*   `success`: boolean indicating if the connection test succeeded.
+*   `message`: a human-readable message with connection details or error info.
+
+### Storage management
+
+#### `GET /api/storage`
+
+Lists all storage directories and their usage. Requires the `viewVideo`
+permission.
+
+Returns a JSON object:
+
+*   `storageDirs`: an array of storage directory objects, each with:
+    *   `id`: integer ID.
+    *   `uuid`: the directory's UUID.
+    *   `path`: filesystem path.
+    *   `totalBytes`: total available bytes on the filesystem, or null if
+        the filesystem stats could not be determined.
+    *   `usedBytes`: total bytes used by recordings (rounded to fs block size).
+    *   `streamsUsing`: an array of objects describing streams stored here:
+        *   `streamId`: the stream's integer ID.
+        *   `cameraName`: short name of the camera.
+        *   `streamType`: the stream type (`"main"`, `"sub"`, `"ext"`).
+        *   `usedBytes`: bytes used by this stream.
+        *   `duration90k`: total duration in 90 kHz units.
+
+#### `POST /api/storage`
+
+Adds a new storage directory. Requires the `adminCameras` permission.
+
+Expects a JSON object body with the following parameters:
+
+*   `csrf`: a CSRF token, required when using session authentication.
+*   `path`: the filesystem path for the new storage directory.
+
+Returns a JSON object:
+
+*   `id`: the integer ID of the new directory.
+*   `uuid`: the UUID assigned to the new directory.
+
+#### `GET /api/storage/<id>`
+
+Gets details for a single storage directory. Requires the `viewVideo`
+permission.
+
+Returns the same structure as a single element of the `storageDirs` array
+from `GET /api/storage`.
+
+#### `PATCH /api/storage/<id>`
+
+Reserved for future use. Currently a no-op. Requires the `adminCameras`
+permission.
+
+Expects a JSON object body with the following parameters:
+
+*   `csrf`: a CSRF token, required when using session authentication.
+
+Returns an empty JSON object on success.
+
+#### `DELETE /api/storage/<id>`
+
+Deletes a storage directory. Requires the `adminCameras` permission. The
+directory must not be in use by any streams.
+
+Expects a JSON object body with the following parameters:
+
+*   `csrf`: a CSRF token, required when using session authentication.
+
+Returns an empty JSON object on success.
 
 ## Types
 
