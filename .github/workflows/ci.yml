@@ -60,15 +60,20 @@ jobs:
     name: Node ${{ matrix.node }}
     strategy:
       matrix:
-        node: ["20", "22", "24", "25"]
+        # Node 20 is dropped: it reached end-of-life 2026-04-30, and pnpm 11
+        # requires Node >= 22.13 (it crashes on 20 with
+        # ERR_UNKNOWN_BUILTIN_MODULE).
+        node: ["22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
-      # Install pnpm then use pnpm instead npm
-      - run: npm i -g pnpm
+      # Install pnpm then use pnpm instead npm. Pin the version: an unpinned
+      # install silently picked up new majors, which is how pnpm 11 broke this
+      # job. Bump deliberately, checking the changelog.
+      - run: npm i -g pnpm@11.21.0
       - run: cd ui && pnpm i --frozen-lockfile
       - run: cd ui && pnpm run build
       - run: cd ui && pnpm run test

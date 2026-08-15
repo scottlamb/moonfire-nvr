@@ -28,7 +28,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - run: npm i -g pnpm
+      # Keep this pin in sync with ci.yml.
+      - run: npm i -g pnpm@11.21.0
       - run: cd ui && pnpm i --frozen-lockfile
       - run: cd ui && pnpm run build
       - run: cd ui && pnpm run test
