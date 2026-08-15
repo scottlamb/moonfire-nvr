@@ -8,6 +8,10 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## v0.7.32 (2026-08-14)
+
+*   update Retina to 0.4.20. This version features a more efficient I/O model and improves compatibility with some Anjvision cameras.
+
 ## v0.7.31 (2026-03-13)
 
 *   support changing video sample parameters in live view.
