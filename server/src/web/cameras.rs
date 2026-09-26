@@ -180,7 +180,7 @@ fn ensure_safe_update(
             .get(&stream_id)
             .ok_or_else(|| err!(Internal, msg("camera references missing stream {stream_id}")))?;
         let stream = stream.inner.lock();
-        if !stream.open_writer {
+        if !stream.has_open_writer() {
             continue;
         }
         let old_dir = stream.sample_file_dir.as_ref().map(|d| d.id);
@@ -203,7 +203,7 @@ fn ensure_safe_delete(db: &db::LockedDatabase, camera: &db::Camera) -> Result<()
             .streams_by_id()
             .get(&stream_id)
             .ok_or_else(|| err!(Internal, msg("camera references missing stream {stream_id}")))?;
-        if stream.inner.lock().open_writer {
+        if stream.inner.lock().has_open_writer() {
             bail!(
                 FailedPrecondition,
                 msg("can't delete camera while stream {stream_id} is actively writing")
