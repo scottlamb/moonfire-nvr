@@ -75,7 +75,7 @@ impl Service {
                     if db
                         .sample_file_dirs_by_id()
                         .values()
-                        .any(|dir| dir.pool().path() == request.path)
+                        .any(|dir| dir.pool().path() == request.path.as_path())
                     {
                         bail!(
                             FailedPrecondition,
