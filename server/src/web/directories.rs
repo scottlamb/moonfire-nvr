@@ -116,7 +116,6 @@ impl Service {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use db::testutil;
     use serde_json::json;
 
