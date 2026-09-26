@@ -52,10 +52,7 @@ impl Service {
                         path: dir.pool().path().to_owned(),
                     })
                     .collect();
-                serve_json(
-                    &req,
-                    &json::SampleFileDirListResponse { sample_file_dirs },
-                )
+                serve_json(&req, &json::SampleFileDirListResponse { sample_file_dirs })
             }
             Method::POST => {
                 require_admin(&caller)?;
@@ -90,15 +87,12 @@ impl Service {
                 let id = self.db.add_sample_file_dir(request.path).await?;
                 let path = {
                     let db = self.db.lock();
-                    let dir = db
-                        .sample_file_dirs_by_id()
-                        .get(&id)
-                        .ok_or_else(|| {
-                            err!(
-                                Internal,
-                                msg("sample file directory {id} missing after insert")
-                            )
-                        })?;
+                    let dir = db.sample_file_dirs_by_id().get(&id).ok_or_else(|| {
+                        err!(
+                            Internal,
+                            msg("sample file directory {id} missing after insert")
+                        )
+                    })?;
                     dir.pool().path().to_owned()
                 };
 
