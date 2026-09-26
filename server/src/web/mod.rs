@@ -4,6 +4,7 @@
 
 pub mod accept;
 mod cameras;
+mod directories;
 mod live;
 mod path;
 mod session;
@@ -248,6 +249,10 @@ impl Service {
             Path::ConfigCamera(uuid) => (
                 CacheControl::PrivateDynamic,
                 self.config_camera(req, caller, uuid).await?,
+            ),
+            Path::ConfigSampleFileDirs => (
+                CacheControl::PrivateDynamic,
+                self.config_sample_file_dirs(req, caller).await?,
             ),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
