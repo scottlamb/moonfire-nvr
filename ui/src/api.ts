@@ -164,6 +164,7 @@ export interface ToplevelResponse {
 
 export interface Permissions {
   adminUsers?: boolean;
+  adminCameraConfigs?: boolean;
   readCameraConfigs?: boolean;
   updateSignals?: boolean;
   viewVideo?: boolean;
