@@ -15,6 +15,8 @@ Status: **current**.
         * [`POST /api/config/cameras`](#post-apiconfigcameras)
         * [`PUT /api/config/cameras/<uuid>`](#put-apiconfigcamerasuuid)
         * [`DELETE /api/config/cameras/<uuid>`](#delete-apiconfigcamerasuuid)
+        * [`GET /api/config/sample-file-dirs`](#get-apiconfigsample-file-dirs)
+        * [`POST /api/config/sample-file-dirs`](#post-apiconfigsample-file-dirs)
     * [`GET /api/cameras/<uuid>/<stream>/recordings`](#get-apicamerasuuidstreamrecordings)
     * [`GET /api/cameras/<uuid>/<stream>/view.mp4`](#get-apicamerasuuidstreamviewmp4)
     * [`GET /api/cameras/<uuid>/<stream>/view.mp4.txt`](#get-apicamerasuuidstreamviewmp4txt)
@@ -780,6 +782,39 @@ The request body contains only the optional session CSRF token:
 ```
 
 Returns `{"restartRequired": true}` on success.
+
+#### `GET /api/config/sample-file-dirs`
+
+Returns the configured sample-file directories:
+
+```json
+{
+  "sampleFileDirs": [
+    {"id": 1, "path": "/var/lib/moonfire-nvr/video"}
+  ]
+}
+```
+
+Reading requires `readCameraConfigs` or `adminCameraConfigs`.
+
+#### `POST /api/config/sample-file-dirs`
+
+Adds a sample-file directory using Moonfire NVR's normal directory
+initialization path. The path must be absolute and must not already be
+configured.
+
+```json
+{
+  "csrf": "...",
+  "path": "/var/lib/moonfire-nvr/video"
+}
+```
+
+The directory must already exist and be writable by Moonfire NVR. Creating it
+does not require a restart, so the response contains
+`"restartRequired": false`. Removing sample-file directories is deliberately
+not exposed by this initial API because the current online deletion path is not
+designed for concurrent reconfiguration.
 
 ### `GET /api/signals`
 
