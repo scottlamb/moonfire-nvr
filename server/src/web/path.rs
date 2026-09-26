@@ -14,9 +14,9 @@ pub(super) enum Path {
     Request,                                          // "/api/request"
     InitSegment(i32, bool),                           // "/api/init/<id>.mp4{.txt}"
     Camera(Uuid),                                     // "/api/cameras/<uuid>/"
-    ConfigCameras,                                      // "/api/config/cameras"
-    ConfigCamera(Uuid),                                 // "/api/config/cameras/<uuid>"
-    ConfigSampleFileDirs,                               // "/api/config/sample-file-dirs"
+    ConfigCameras,                                    // "/api/config/cameras"
+    ConfigCamera(Uuid),                               // "/api/config/cameras/<uuid>"
+    ConfigSampleFileDirs,                             // "/api/config/sample-file-dirs"
     Signals,                                          // "/api/signals"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
@@ -48,10 +48,7 @@ impl Path {
         if matches!(path, "config/cameras" | "config/cameras/") {
             return Path::ConfigCameras;
         }
-        if matches!(
-            path,
-            "config/sample-file-dirs" | "config/sample-file-dirs/"
-        ) {
+        if matches!(path, "config/sample-file-dirs" | "config/sample-file-dirs/") {
             return Path::ConfigSampleFileDirs;
         }
         if let Some(path) = path.strip_prefix("config/cameras/") {
