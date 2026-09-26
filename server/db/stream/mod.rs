@@ -166,6 +166,17 @@ pub struct LockedStream {
     pub(crate) writer_state: crate::dir::writer::State,
 }
 
+impl LockedStream {
+    /// Returns true while a recorder writer is open for this stream.
+    ///
+    /// Configuration clients can use this to avoid structural changes which
+    /// would invalidate state held by a running streamer. It intentionally
+    /// exposes only the state, not mutation of the writer flag itself.
+    pub fn has_open_writer(&self) -> bool {
+        self.open_writer
+    }
+}
+
 /// Per-stream information matching what is committed to the database; updated on startup and during `LockedRecording::flush`.
 ///
 /// This is separated out both to make it extremely clear which fields track committed vs in-memory state and to group for borrows.
