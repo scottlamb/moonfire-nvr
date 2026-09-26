@@ -46,10 +46,12 @@ fn camera_view(
         let Some(stream_id) = camera.streams[type_.index()] else {
             continue;
         };
-        let stream = db
-            .streams_by_id()
-            .get(&stream_id)
-            .ok_or_else(|| err!(Internal, msg("camera references missing stream {stream_id}")))?;
+        let stream = db.streams_by_id().get(&stream_id).ok_or_else(|| {
+            err!(
+                Internal,
+                msg("camera references missing stream {stream_id}")
+            )
+        })?;
         let stream = stream.inner.lock();
         streams.insert(
             type_.as_str().to_owned(),
@@ -69,11 +71,7 @@ fn camera_view(
     })
 }
 
-fn validate_url(
-    field: &str,
-    url: &url::Url,
-    allowed_schemes: &[&str],
-) -> Result<(), Error> {
+fn validate_url(field: &str, url: &url::Url, allowed_schemes: &[&str]) -> Result<(), Error> {
     if !allowed_schemes.iter().any(|scheme| *scheme == url.scheme()) {
         bail!(
             InvalidArgument,
@@ -151,9 +149,7 @@ fn camera_change(
         {
             bail!(
                 InvalidArgument,
-                msg(
-                    "can't record {name} stream without RTSP URL and sample file directory"
-                )
+                msg("can't record {name} stream without RTSP URL and sample file directory")
             );
         }
 
@@ -175,10 +171,12 @@ fn ensure_safe_update(
         let Some(stream_id) = camera.streams[i] else {
             continue;
         };
-        let stream = db
-            .streams_by_id()
-            .get(&stream_id)
-            .ok_or_else(|| err!(Internal, msg("camera references missing stream {stream_id}")))?;
+        let stream = db.streams_by_id().get(&stream_id).ok_or_else(|| {
+            err!(
+                Internal,
+                msg("camera references missing stream {stream_id}")
+            )
+        })?;
         let stream = stream.inner.lock();
         if !stream.has_open_writer() {
             continue;
@@ -199,10 +197,12 @@ fn ensure_safe_update(
 
 fn ensure_safe_delete(db: &db::LockedDatabase, camera: &db::Camera) -> Result<(), Error> {
     for stream_id in camera.streams.iter().flatten().copied() {
-        let stream = db
-            .streams_by_id()
-            .get(&stream_id)
-            .ok_or_else(|| err!(Internal, msg("camera references missing stream {stream_id}")))?;
+        let stream = db.streams_by_id().get(&stream_id).ok_or_else(|| {
+            err!(
+                Internal,
+                msg("camera references missing stream {stream_id}")
+            )
+        })?;
         if stream.inner.lock().has_open_writer() {
             bail!(
                 FailedPrecondition,
@@ -443,12 +443,7 @@ mod tests {
         assert_eq!(updated["camera"]["shortName"], "api camera updated");
         assert_eq!(updated["camera"]["streams"]["main"]["config"]["mode"], "");
 
-        let response = client
-            .delete(&item)
-            .json(&json!({}))
-            .send()
-            .await
-            .unwrap();
+        let response = client.delete(&item).json(&json!({})).send().await.unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         let deleted: serde_json::Value = response.json().await.unwrap();
         assert_eq!(deleted["restartRequired"], true);
