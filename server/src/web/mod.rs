@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 pub mod accept;
+mod cameras;
 mod live;
 mod path;
 mod session;
@@ -240,6 +241,14 @@ impl Service {
                 self.request(&req, &authreq, caller)?,
             ),
             Path::Camera(uuid) => (CacheControl::PrivateDynamic, self.camera(&req, uuid)?),
+            Path::ConfigCameras => (
+                CacheControl::PrivateDynamic,
+                self.config_cameras(req, caller).await?,
+            ),
+            Path::ConfigCamera(uuid) => (
+                CacheControl::PrivateDynamic,
+                self.config_camera(req, caller, uuid).await?,
+            ),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
                 self.stream_recordings(&req, uuid, type_)?,
@@ -632,6 +641,7 @@ impl Service {
                     read_camera_configs: true,
                     update_signals: true,
                     admin_users: true,
+                    admin_camera_configs: true,
                     ..Default::default()
                 },
                 user: None,
