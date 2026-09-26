@@ -351,7 +351,6 @@ impl Service {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use db::testutil;
     use serde_json::json;
 
@@ -441,7 +440,7 @@ mod tests {
         let updated: serde_json::Value = response.json().await.unwrap();
         assert_eq!(updated["restartRequired"], true);
         assert_eq!(updated["camera"]["shortName"], "api camera updated");
-        assert_eq!(updated["camera"]["streams"]["main"]["config"]["mode"], "");
+        assert!(updated["camera"]["streams"]["main"]["config"]["mode"].is_null());
 
         let response = client.delete(&item).json(&json!({})).send().await.unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::OK);
