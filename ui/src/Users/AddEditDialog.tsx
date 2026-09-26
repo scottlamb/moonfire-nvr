@@ -43,6 +43,12 @@ interface PermissionCheckboxDefinition {
 const PERMISSION_CHECKBOXES: PermissionCheckboxDefinition[] = [
   { propName: "adminUsers", label: "Administer users" },
   {
+    propName: "adminCameraConfigs",
+    label: "Administer camera configs",
+    helpText:
+      "Allow adding and changing camera, stream, and recording-storage configuration.",
+  },
+  {
     propName: "readCameraConfigs",
     label: "Read camera configs",
     helpText:
