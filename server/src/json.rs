@@ -11,6 +11,7 @@ use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::ops::Not;
+use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -223,6 +224,35 @@ pub struct CameraConfigMutationResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteCameraConfigResponse {
+    pub restart_required: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct SampleFileDirMutation<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleFileDirView {
+    pub id: i32,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleFileDirListResponse {
+    pub sample_file_dirs: Vec<SampleFileDirView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleFileDirMutationResponse {
+    pub sample_file_dir: SampleFileDirView,
     pub restart_required: bool,
 }
 
