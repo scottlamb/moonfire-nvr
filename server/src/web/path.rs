@@ -16,6 +16,7 @@ pub(super) enum Path {
     Camera(Uuid),                                     // "/api/cameras/<uuid>/"
     ConfigCameras,                                      // "/api/config/cameras"
     ConfigCamera(Uuid),                                 // "/api/config/cameras/<uuid>"
+    ConfigSampleFileDirs,                               // "/api/config/sample-file-dirs"
     Signals,                                          // "/api/signals"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
@@ -46,6 +47,12 @@ impl Path {
         };
         if matches!(path, "config/cameras" | "config/cameras/") {
             return Path::ConfigCameras;
+        }
+        if matches!(
+            path,
+            "config/sample-file-dirs" | "config/sample-file-dirs/"
+        ) {
+            return Path::ConfigSampleFileDirs;
         }
         if let Some(path) = path.strip_prefix("config/cameras/") {
             let path = path.strip_suffix('/').unwrap_or(path);
@@ -143,6 +150,14 @@ mod tests {
         assert_eq!(Path::decode("/api/cameras/asdf/"), Path::NotFound);
         assert_eq!(Path::decode("/api/config/cameras"), Path::ConfigCameras);
         assert_eq!(Path::decode("/api/config/cameras/"), Path::ConfigCameras);
+        assert_eq!(
+            Path::decode("/api/config/sample-file-dirs"),
+            Path::ConfigSampleFileDirs
+        );
+        assert_eq!(
+            Path::decode("/api/config/sample-file-dirs/"),
+            Path::ConfigSampleFileDirs
+        );
         assert_eq!(
             Path::decode("/api/config/cameras/35144640-ff1e-4619-b0d5-4c74c185741c"),
             Path::ConfigCamera(cam_uuid)
