@@ -190,10 +190,7 @@ fn edit_user_dialog(db: &Arc<db::Database>, siv: &mut Cursive, item: Option<i32>
         ("view_video", permissions.view_video),
         ("read_camera_configs", permissions.read_camera_configs),
         ("update_signals", permissions.update_signals),
-        (
-            "admin_camera_configs",
-            permissions.admin_camera_configs,
-        ),
+        ("admin_camera_configs", permissions.admin_camera_configs),
     ] {
         let mut checkbox = views::Checkbox::new();
         checkbox.set_checked(*b);
