@@ -131,17 +131,26 @@ pub fn run(args: Args) -> Result<i32, Error> {
 }
 
 async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
+    const RESTART_EXIT_CODE: i32 = 75;
+
     let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
     let mut shutdown_tx = Some(shutdown_tx);
+    let (restart_tx, mut restart_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let mut restart_requested = false;
 
     tokio::pin! {
         let int = signal(SignalKind::interrupt())?;
         let term = signal(SignalKind::terminate())?;
         let quit = signal(SignalKind::quit())?;
-        let inner = inner(read_only, config, shutdown_rx);
+        let inner = inner(read_only, config, shutdown_rx, restart_tx);
     }
 
     tokio::select! {
+        _ = restart_rx.recv() => {
+            info!("Runtime restart requested through internal API; shutting down gracefully.");
+            restart_requested = true;
+            shutdown_tx.take();
+        },
         _ = int.recv() => {
             info!("Received SIGINT; shutting down gracefully. \
                    Send another SIGINT or SIGTERM to shut down immediately.");
@@ -172,10 +181,17 @@ async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
         result = &mut inner => return result,
     }
 
-    tokio::select! {
+    let result = tokio::select! {
         _ = int.recv() => bail!(Cancelled, msg("immediate shutdown due to second signal (SIGINT)")),
         _ = term.recv() => bail!(Cancelled, msg("immediate shutdown due to second singal (SIGTERM)")),
         result = &mut inner => result,
+    }?;
+
+    if restart_requested {
+        info!(exit_code = RESTART_EXIT_CODE, "Graceful restart shutdown complete");
+        Ok(RESTART_EXIT_CODE)
+    } else {
+        Ok(result)
     }
 }
 
@@ -248,6 +264,7 @@ async fn inner(
     read_only: bool,
     config: &ConfigFile,
     shutdown_rx: base::shutdown::Receiver,
+    restart_tx: tokio::sync::mpsc::UnboundedSender<()>,
 ) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
@@ -363,6 +380,7 @@ async fn inner(
             trust_forward_hdrs: bind.trust_forward_headers,
             time_zone_name: time_zone_name.to_owned(),
             privileged_unix_uid: bind.own_uid_is_privileged.then_some(own_euid),
+            restart_tx: Some(restart_tx.clone()),
         })?);
         let mut listener = make_listener(&bind.address, &mut preopened)?;
         let addr = bind.address.clone();
