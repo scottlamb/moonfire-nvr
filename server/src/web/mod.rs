@@ -147,6 +147,12 @@ fn require_csrf_if_session(caller: &Caller, csrf: Option<&str>) -> Result<(), ba
     }
 }
 
+#[derive(Debug)]
+pub enum RuntimeCommand {
+    Restart,
+    FactoryReset { sample_dirs: Vec<std::path::PathBuf> },
+}
+
 pub struct Config<'a> {
     pub db: Arc<db::Database>,
     pub ui_dir: Option<&'a crate::cmds::run::config::UiDir>,
@@ -154,7 +160,7 @@ pub struct Config<'a> {
     pub time_zone_name: String,
     pub allow_unauthenticated_permissions: Option<db::Permissions>,
     pub privileged_unix_uid: Option<nix::unistd::Uid>,
-    pub restart_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
+    pub restart_tx: Option<tokio::sync::mpsc::UnboundedSender<RuntimeCommand>>,
 }
 
 pub struct Service {
@@ -165,7 +171,7 @@ pub struct Service {
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
     privileged_unix_uid: Option<nix::unistd::Uid>,
-    restart_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
+    restart_tx: Option<tokio::sync::mpsc::UnboundedSender<RuntimeCommand>>,
 }
 
 /// Useful HTTP `Cache-Control` values to set on successful (HTTP 200) API responses.
@@ -260,6 +266,10 @@ impl Service {
             Path::ConfigRestart => (
                 CacheControl::PrivateDynamic,
                 self.config_restart(&req, caller)?,
+            ),
+            Path::ConfigFactoryReset => (
+                CacheControl::PrivateDynamic,
+                self.config_factory_reset(&req, caller)?,
             ),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
@@ -420,7 +430,45 @@ impl Service {
             // shutdown begins. This keeps internal controllers from treating
             // an intentional restart as a failed request.
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            let _ = restart_tx.send(());
+            let _ = restart_tx.send(RuntimeCommand::Restart);
+        });
+        serve_json(req, &serde_json::json!({"accepted": true}))
+    }
+
+    fn config_factory_reset(
+        &self,
+        req: &Request<::hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
+        if !caller.permissions.admin_camera_configs {
+            bail!(
+                PermissionDenied,
+                msg("admin_camera_configs permission required")
+            );
+        }
+        if req.method() != http::Method::POST {
+            return Ok(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "POST expected",
+            ));
+        }
+        let Some(restart_tx) = self.restart_tx.as_ref() else {
+            bail!(
+                FailedPrecondition,
+                msg("runtime reset control is unavailable")
+            );
+        };
+        let sample_dirs = {
+            let db = self.db.lock();
+            db.sample_file_dirs_by_id()
+                .values()
+                .map(|dir| dir.pool().path().to_owned())
+                .collect::<Vec<_>>()
+        };
+        let restart_tx = restart_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let _ = restart_tx.send(RuntimeCommand::FactoryReset { sample_dirs });
         });
         serve_json(req, &serde_json::json!({"accepted": true}))
     }
