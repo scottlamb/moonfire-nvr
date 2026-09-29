@@ -316,6 +316,8 @@ async fn inner(
     shutdown_rx: base::shutdown::Receiver,
     restart_tx: tokio::sync::mpsc::UnboundedSender<web::RuntimeCommand>,
 ) -> Result<i32, Error> {
+    let runtime_id = uuid::Uuid::now_v7();
+    info!(%runtime_id, "Moonfire runtime instance starting");
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
         &config.db_dir,
@@ -431,6 +433,7 @@ async fn inner(
             time_zone_name: time_zone_name.to_owned(),
             privileged_unix_uid: bind.own_uid_is_privileged.then_some(own_euid),
             restart_tx: Some(restart_tx.clone()),
+            runtime_id,
         })?);
         let mut listener = make_listener(&bind.address, &mut preopened)?;
         let addr = bind.address.clone();
