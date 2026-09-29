@@ -161,6 +161,7 @@ pub struct Config<'a> {
     pub allow_unauthenticated_permissions: Option<db::Permissions>,
     pub privileged_unix_uid: Option<nix::unistd::Uid>,
     pub restart_tx: Option<tokio::sync::mpsc::UnboundedSender<RuntimeCommand>>,
+    pub runtime_id: Uuid,
 }
 
 pub struct Service {
@@ -172,6 +173,7 @@ pub struct Service {
     trust_forward_hdrs: bool,
     privileged_unix_uid: Option<nix::unistd::Uid>,
     restart_tx: Option<tokio::sync::mpsc::UnboundedSender<RuntimeCommand>>,
+    runtime_id: Uuid,
 }
 
 /// Useful HTTP `Cache-Control` values to set on successful (HTTP 200) API responses.
@@ -201,6 +203,7 @@ impl Service {
             time_zone_name: config.time_zone_name,
             privileged_unix_uid: config.privileged_unix_uid,
             restart_tx: config.restart_tx,
+            runtime_id: config.runtime_id,
         })
     }
 
@@ -266,6 +269,10 @@ impl Service {
             Path::ConfigRestart => (
                 CacheControl::PrivateDynamic,
                 self.config_restart(&req, caller)?,
+            ),
+            Path::ConfigRuntime => (
+                CacheControl::PrivateDynamic,
+                self.config_runtime(&req, caller)?,
             ),
             Path::ConfigFactoryReset => (
                 CacheControl::PrivateDynamic,
@@ -399,6 +406,31 @@ impl Service {
             );
         }
         Ok(response)
+    }
+
+    fn config_runtime(
+        &self,
+        req: &Request<::hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
+        if !caller.permissions.read_camera_configs && !caller.permissions.admin_camera_configs {
+            bail!(
+                PermissionDenied,
+                msg("read_camera_configs permission required")
+            );
+        }
+        if req.method() != http::Method::GET {
+            return Ok(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "GET expected",
+            ));
+        }
+        serve_json(
+            req,
+            &serde_json::json!({
+                "runtimeId": self.runtime_id,
+            }),
+        )
     }
 
     fn config_restart(
@@ -791,6 +823,7 @@ mod tests {
                     time_zone_name: "".to_owned(),
                     privileged_unix_uid: None,
                     restart_tx: None,
+                    runtime_id: Uuid::nil(),
                 })
                 .unwrap(),
             );
@@ -917,6 +950,8 @@ mod bench {
                         trust_forward_hdrs: false,
                         time_zone_name: "".to_owned(),
                         privileged_unix_uid: None,
+                        restart_tx: None,
+                        runtime_id: Uuid::nil(),
                     })
                     .unwrap(),
                 );
