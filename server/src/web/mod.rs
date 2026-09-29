@@ -154,6 +154,7 @@ pub struct Config<'a> {
     pub time_zone_name: String,
     pub allow_unauthenticated_permissions: Option<db::Permissions>,
     pub privileged_unix_uid: Option<nix::unistd::Uid>,
+    pub restart_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 pub struct Service {
@@ -164,6 +165,7 @@ pub struct Service {
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
     privileged_unix_uid: Option<nix::unistd::Uid>,
+    restart_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 /// Useful HTTP `Cache-Control` values to set on successful (HTTP 200) API responses.
@@ -192,6 +194,7 @@ impl Service {
             trust_forward_hdrs: config.trust_forward_hdrs,
             time_zone_name: config.time_zone_name,
             privileged_unix_uid: config.privileged_unix_uid,
+            restart_tx: config.restart_tx,
         })
     }
 
@@ -253,6 +256,10 @@ impl Service {
             Path::ConfigSampleFileDirs => (
                 CacheControl::PrivateDynamic,
                 self.config_sample_file_dirs(req, caller).await?,
+            ),
+            Path::ConfigRestart => (
+                CacheControl::PrivateDynamic,
+                self.config_restart(&req, caller)?,
             ),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
@@ -382,6 +389,35 @@ impl Service {
             );
         }
         Ok(response)
+    }
+
+    fn config_restart(
+        &self,
+        req: &Request<::hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
+        if !caller.permissions.admin_camera_configs {
+            bail!(
+                PermissionDenied,
+                msg("admin_camera_configs permission required")
+            );
+        }
+        if req.method() != http::Method::POST {
+            return Ok(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "POST expected",
+            ));
+        }
+        let Some(restart_tx) = self.restart_tx.as_ref() else {
+            bail!(
+                FailedPrecondition,
+                msg("runtime restart control is unavailable")
+            );
+        };
+        restart_tx
+            .send(())
+            .map_err(|_| err!(Unavailable, msg("runtime restart control is closed")).build())?;
+        serve_json(req, &serde_json::json!({"accepted": true}))
     }
 
     fn top_level(&self, req: &Request<::hyper::body::Incoming>, caller: Caller) -> ResponseResult {
@@ -701,6 +737,7 @@ mod tests {
                     trust_forward_hdrs: true,
                     time_zone_name: "".to_owned(),
                     privileged_unix_uid: None,
+                    restart_tx: None,
                 })
                 .unwrap(),
             );
