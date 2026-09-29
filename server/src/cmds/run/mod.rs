@@ -130,26 +130,62 @@ pub fn run(args: Args) -> Result<i32, Error> {
     r
 }
 
+fn clear_directory_contents(path: &Path) -> Result<usize, Error> {
+    if !path.is_absolute() || path == Path::new("/") {
+        bail!(
+            InvalidArgument,
+            msg("refusing to clear unsafe factory-reset path {}", path.display())
+        );
+    }
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error.into()),
+    };
+    let mut removed = 0usize;
+    for entry in entries {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() && !file_type.is_symlink() {
+            std::fs::remove_dir_all(entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+        removed += 1;
+    }
+    Ok(removed)
+}
+
 async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
     const RESTART_EXIT_CODE: i32 = 75;
 
     let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
     let mut shutdown_tx = Some(shutdown_tx);
-    let (restart_tx, mut restart_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-    let mut restart_requested = false;
+    let (runtime_tx, mut runtime_rx) =
+        tokio::sync::mpsc::unbounded_channel::<web::RuntimeCommand>();
+    let mut runtime_command: Option<web::RuntimeCommand> = None;
 
     tokio::pin! {
         let int = signal(SignalKind::interrupt())?;
         let term = signal(SignalKind::terminate())?;
         let quit = signal(SignalKind::quit())?;
-        let inner = inner(read_only, config, shutdown_rx, restart_tx);
+        let inner = inner(read_only, config, shutdown_rx, runtime_tx);
     }
 
     tokio::select! {
-        _ = restart_rx.recv() => {
-            info!("Runtime restart requested through internal API; shutting down gracefully.");
-            restart_requested = true;
-            shutdown_tx.take();
+        command = runtime_rx.recv() => {
+            if let Some(command) = command {
+                match &command {
+                    web::RuntimeCommand::Restart => {
+                        info!("Runtime restart requested through internal API; shutting down gracefully.");
+                    }
+                    web::RuntimeCommand::FactoryReset { .. } => {
+                        info!("Factory reset requested through internal API; shutting down gracefully before clearing storage.");
+                    }
+                }
+                runtime_command = Some(command);
+                shutdown_tx.take();
+            }
         },
         _ = int.recv() => {
             info!("Received SIGINT; shutting down gracefully. \
@@ -187,11 +223,25 @@ async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
         result = &mut inner => result,
     }?;
 
-    if restart_requested {
-        info!(exit_code = RESTART_EXIT_CODE, "Graceful restart shutdown complete");
-        Ok(RESTART_EXIT_CODE)
-    } else {
-        Ok(result)
+    match runtime_command {
+        Some(web::RuntimeCommand::Restart) => {
+            info!(exit_code = RESTART_EXIT_CODE, "Graceful restart shutdown complete");
+            Ok(RESTART_EXIT_CODE)
+        }
+        Some(web::RuntimeCommand::FactoryReset { sample_dirs }) => {
+            let mut removed = 0usize;
+            for path in sample_dirs {
+                removed += clear_directory_contents(&path)?;
+            }
+            removed += clear_directory_contents(&config.db_dir)?;
+            info!(
+                removed_entries = removed,
+                exit_code = RESTART_EXIT_CODE,
+                "Moonfire factory reset storage cleared after graceful shutdown"
+            );
+            Ok(RESTART_EXIT_CODE)
+        }
+        None => Ok(result),
     }
 }
 
@@ -264,7 +314,7 @@ async fn inner(
     read_only: bool,
     config: &ConfigFile,
     shutdown_rx: base::shutdown::Receiver,
-    restart_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    restart_tx: tokio::sync::mpsc::UnboundedSender<web::RuntimeCommand>,
 ) -> Result<i32, Error> {
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
