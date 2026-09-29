@@ -18,6 +18,7 @@ pub(super) enum Path {
     ConfigCamera(Uuid),                               // "/api/config/cameras/<uuid>"
     ConfigSampleFileDirs,                             // "/api/config/sample-file-dirs"
     ConfigRestart,                                    // "/api/config/restart"
+    ConfigRuntime,                                    // "/api/config/runtime"
     ConfigFactoryReset,                               // "/api/config/factory-reset"
     Signals,                                          // "/api/signals"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
@@ -55,6 +56,9 @@ impl Path {
         }
         if matches!(path, "config/restart" | "config/restart/") {
             return Path::ConfigRestart;
+        }
+        if matches!(path, "config/runtime" | "config/runtime/") {
+            return Path::ConfigRuntime;
         }
         if matches!(path, "config/factory-reset" | "config/factory-reset/") {
             return Path::ConfigFactoryReset;
@@ -165,6 +169,8 @@ mod tests {
         );
         assert_eq!(Path::decode("/api/config/restart"), Path::ConfigRestart);
         assert_eq!(Path::decode("/api/config/restart/"), Path::ConfigRestart);
+        assert_eq!(Path::decode("/api/config/runtime"), Path::ConfigRuntime);
+        assert_eq!(Path::decode("/api/config/runtime/"), Path::ConfigRuntime);
         assert_eq!(Path::decode("/api/config/factory-reset"), Path::ConfigFactoryReset);
         assert_eq!(Path::decode("/api/config/factory-reset/"), Path::ConfigFactoryReset);
         assert_eq!(
