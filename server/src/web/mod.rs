@@ -414,9 +414,14 @@ impl Service {
                 msg("runtime restart control is unavailable")
             );
         };
-        restart_tx
-            .send(())
-            .map_err(|_| err!(Unavailable, msg("runtime restart control is closed")).build())?;
+        let restart_tx = restart_tx.clone();
+        tokio::spawn(async move {
+            // Let the HTTP acknowledgement leave the socket before runtime
+            // shutdown begins. This keeps internal controllers from treating
+            // an intentional restart as a failed request.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let _ = restart_tx.send(());
+        });
         serve_json(req, &serde_json::json!({"accepted": true}))
     }
 
