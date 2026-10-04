@@ -8,7 +8,7 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
-## unreleased
+## v0.7.33 (2026-10-04)
 
 *   update Retina to v0.4.21, fixing TP-Link Tapo cameras which failed 15
     seconds into each session with an RTSP framing error.
