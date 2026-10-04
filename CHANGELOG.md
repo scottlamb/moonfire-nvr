@@ -8,6 +8,15 @@ upgrades, e.g. `v0.6.x` -> `v0.7.x`. The config file format and
 [API](ref/api.md) currently have no stability guarantees, so they may change
 even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
 
+## unreleased
+
+*   update Retina to v0.4.21, fixing TP-Link Tapo cameras which failed 15
+    seconds into each session with an RTSP framing error.
+    Fixes [#342](https://github.com/scottlamb/moonfire-nvr/issues/342) and
+    [#361](https://github.com/scottlamb/moonfire-nvr/issues/361).
+    Also fixes some Dahua NVRs and Rubetek cameras which send unusual `ssrc`
+    values.
+
 ## v0.7.32 (2026-08-14)
 
 *   update Retina to 0.4.20. This version features a more efficient I/O model and improves compatibility with some Anjvision cameras.

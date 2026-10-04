@@ -1899,9 +1899,9 @@ dependencies = [
 
 [[package]]
 name = "retina"
-version = "0.4.20"
+version = "0.4.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0eb740f743e678e071628ff6bf84ed5ed03df879997cc3d43b5afef64aff93"
+checksum = "031b39326ce8613be3273edaac2d132709a08790f73c4dee446a781f6c990e7c"
 dependencies = [
  "base64",
  "bitstream-io",
