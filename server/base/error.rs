@@ -415,7 +415,7 @@ where
 #[macro_export]
 macro_rules! bail {
     ($($arg:tt)+) => {
-        return Err($crate::err!($($arg)+).into());
+        return Err($crate::err!($($arg)+).into())
     };
 }
 
