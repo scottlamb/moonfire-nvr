@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: GPL-v3.0-or-later WITH GPL-3.0-linking-exception.
 
 pub mod accept;
+mod cameras;
+mod directories;
 mod live;
 mod path;
 mod session;
@@ -145,6 +147,12 @@ fn require_csrf_if_session(caller: &Caller, csrf: Option<&str>) -> Result<(), ba
     }
 }
 
+#[derive(Debug)]
+pub enum RuntimeCommand {
+    Restart,
+    FactoryReset { sample_dirs: Vec<std::path::PathBuf> },
+}
+
 pub struct Config<'a> {
     pub db: Arc<db::Database>,
     pub ui_dir: Option<&'a crate::cmds::run::config::UiDir>,
@@ -152,6 +160,8 @@ pub struct Config<'a> {
     pub time_zone_name: String,
     pub allow_unauthenticated_permissions: Option<db::Permissions>,
     pub privileged_unix_uid: Option<nix::unistd::Uid>,
+    pub restart_tx: Option<tokio::sync::mpsc::UnboundedSender<RuntimeCommand>>,
+    pub runtime_id: Uuid,
 }
 
 pub struct Service {
@@ -162,6 +172,8 @@ pub struct Service {
     allow_unauthenticated_permissions: Option<db::Permissions>,
     trust_forward_hdrs: bool,
     privileged_unix_uid: Option<nix::unistd::Uid>,
+    restart_tx: Option<tokio::sync::mpsc::UnboundedSender<RuntimeCommand>>,
+    runtime_id: Uuid,
 }
 
 /// Useful HTTP `Cache-Control` values to set on successful (HTTP 200) API responses.
@@ -190,6 +202,8 @@ impl Service {
             trust_forward_hdrs: config.trust_forward_hdrs,
             time_zone_name: config.time_zone_name,
             privileged_unix_uid: config.privileged_unix_uid,
+            restart_tx: config.restart_tx,
+            runtime_id: config.runtime_id,
         })
     }
 
@@ -240,6 +254,30 @@ impl Service {
                 self.request(&req, &authreq, caller)?,
             ),
             Path::Camera(uuid) => (CacheControl::PrivateDynamic, self.camera(&req, uuid)?),
+            Path::ConfigCameras => (
+                CacheControl::PrivateDynamic,
+                self.config_cameras(req, caller).await?,
+            ),
+            Path::ConfigCamera(uuid) => (
+                CacheControl::PrivateDynamic,
+                self.config_camera(req, caller, uuid).await?,
+            ),
+            Path::ConfigSampleFileDirs => (
+                CacheControl::PrivateDynamic,
+                self.config_sample_file_dirs(req, caller).await?,
+            ),
+            Path::ConfigRestart => (
+                CacheControl::PrivateDynamic,
+                self.config_restart(&req, caller)?,
+            ),
+            Path::ConfigRuntime => (
+                CacheControl::PrivateDynamic,
+                self.config_runtime(&req, caller)?,
+            ),
+            Path::ConfigFactoryReset => (
+                CacheControl::PrivateDynamic,
+                self.config_factory_reset(&req, caller)?,
+            ),
             Path::StreamRecordings(uuid, type_) => (
                 CacheControl::PrivateDynamic,
                 self.stream_recordings(&req, uuid, type_)?,
@@ -368,6 +406,103 @@ impl Service {
             );
         }
         Ok(response)
+    }
+
+    fn config_runtime(
+        &self,
+        req: &Request<::hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
+        if !caller.permissions.read_camera_configs && !caller.permissions.admin_camera_configs {
+            bail!(
+                PermissionDenied,
+                msg("read_camera_configs permission required")
+            );
+        }
+        if req.method() != http::Method::GET {
+            return Ok(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "GET expected",
+            ));
+        }
+        serve_json(
+            req,
+            &serde_json::json!({
+                "runtimeId": self.runtime_id,
+            }),
+        )
+    }
+
+    fn config_restart(
+        &self,
+        req: &Request<::hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
+        if !caller.permissions.admin_camera_configs {
+            bail!(
+                PermissionDenied,
+                msg("admin_camera_configs permission required")
+            );
+        }
+        if req.method() != http::Method::POST {
+            return Ok(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "POST expected",
+            ));
+        }
+        let Some(restart_tx) = self.restart_tx.as_ref() else {
+            bail!(
+                FailedPrecondition,
+                msg("runtime restart control is unavailable")
+            );
+        };
+        let restart_tx = restart_tx.clone();
+        tokio::spawn(async move {
+            // Let the HTTP acknowledgement leave the socket before runtime
+            // shutdown begins. This keeps internal controllers from treating
+            // an intentional restart as a failed request.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let _ = restart_tx.send(RuntimeCommand::Restart);
+        });
+        serve_json(req, &serde_json::json!({"accepted": true}))
+    }
+
+    fn config_factory_reset(
+        &self,
+        req: &Request<::hyper::body::Incoming>,
+        caller: Caller,
+    ) -> ResponseResult {
+        if !caller.permissions.admin_camera_configs {
+            bail!(
+                PermissionDenied,
+                msg("admin_camera_configs permission required")
+            );
+        }
+        if req.method() != http::Method::POST {
+            return Ok(plain_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "POST expected",
+            ));
+        }
+        let Some(restart_tx) = self.restart_tx.as_ref() else {
+            bail!(
+                FailedPrecondition,
+                msg("runtime reset control is unavailable")
+            );
+        };
+        let sample_dirs = {
+            let db = self.db.lock();
+            db.sample_file_dirs_by_id()
+                .values()
+                .map(|dir| dir.pool().path().to_owned())
+                .collect::<Vec<_>>()
+        };
+        let restart_tx = restart_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let _ = restart_tx.send(RuntimeCommand::FactoryReset { sample_dirs });
+        });
+        serve_json(req, &serde_json::json!({"accepted": true}))
     }
 
     fn top_level(&self, req: &Request<::hyper::body::Incoming>, caller: Caller) -> ResponseResult {
@@ -632,6 +767,7 @@ impl Service {
                     read_camera_configs: true,
                     update_signals: true,
                     admin_users: true,
+                    admin_camera_configs: true,
                     ..Default::default()
                 },
                 user: None,
@@ -686,6 +822,8 @@ mod tests {
                     trust_forward_hdrs: true,
                     time_zone_name: "".to_owned(),
                     privileged_unix_uid: None,
+                    restart_tx: None,
+                    runtime_id: Uuid::nil(),
                 })
                 .unwrap(),
             );
@@ -812,6 +950,8 @@ mod bench {
                         trust_forward_hdrs: false,
                         time_zone_name: "".to_owned(),
                         privileged_unix_uid: None,
+                        restart_tx: None,
+                        runtime_id: Uuid::nil(),
                     })
                     .unwrap(),
                 );

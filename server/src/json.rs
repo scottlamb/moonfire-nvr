@@ -9,7 +9,9 @@ use base::{err, Error};
 use db::auth::SessionHash;
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::BTreeMap;
 use std::ops::Not;
+use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -146,6 +148,112 @@ pub struct PostSignalsRequest<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct PostSignalsResponse {
     pub time_90k: Time,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct CameraConfigInput {
+    pub short_name: String,
+
+    #[serde(default)]
+    pub config: db::json::CameraConfig,
+
+    #[serde(default)]
+    pub streams: BTreeMap<String, StreamConfigInput>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct StreamConfigInput {
+    pub sample_file_dir_id: Option<i32>,
+
+    #[serde(default)]
+    pub config: db::json::StreamConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct CameraConfigMutation<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub camera: CameraConfigInput,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct DeleteCameraConfig<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraConfigView {
+    pub uuid: Uuid,
+    pub id: i32,
+    pub short_name: String,
+    pub config: db::json::CameraConfig,
+    pub streams: BTreeMap<String, StreamConfigView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamConfigView {
+    pub id: i32,
+    pub sample_file_dir_id: Option<i32>,
+    pub config: db::json::StreamConfig,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraConfigListResponse {
+    pub cameras: Vec<CameraConfigView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraConfigMutationResponse {
+    pub camera: CameraConfigView,
+    pub restart_required: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteCameraConfigResponse {
+    pub restart_required: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct SampleFileDirMutation<'a> {
+    #[serde(borrow)]
+    pub csrf: Option<&'a str>,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleFileDirView {
+    pub id: i32,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleFileDirListResponse {
+    pub sample_file_dirs: Vec<SampleFileDirView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleFileDirMutationResponse {
+    pub sample_file_dir: SampleFileDirView,
+    pub restart_required: bool,
 }
 
 #[derive(Default, Serialize)]
@@ -610,6 +718,9 @@ pub struct Permissions {
 
     #[serde(default)]
     pub admin_users: bool,
+
+    #[serde(default)]
+    pub admin_camera_configs: bool,
 }
 
 impl From<Permissions> for db::schema::Permissions {
@@ -619,6 +730,7 @@ impl From<Permissions> for db::schema::Permissions {
             read_camera_configs: p.read_camera_configs,
             update_signals: p.update_signals,
             admin_users: p.admin_users,
+            admin_camera_configs: p.admin_camera_configs,
             special_fields: Default::default(),
         }
     }
@@ -631,6 +743,7 @@ impl From<db::schema::Permissions> for Permissions {
             read_camera_configs: p.read_camera_configs,
             update_signals: p.update_signals,
             admin_users: p.admin_users,
+            admin_camera_configs: p.admin_camera_configs,
         }
     }
 }

@@ -14,6 +14,12 @@ pub(super) enum Path {
     Request,                                          // "/api/request"
     InitSegment(i32, bool),                           // "/api/init/<id>.mp4{.txt}"
     Camera(Uuid),                                     // "/api/cameras/<uuid>/"
+    ConfigCameras,                                    // "/api/config/cameras"
+    ConfigCamera(Uuid),                               // "/api/config/cameras/<uuid>"
+    ConfigSampleFileDirs,                             // "/api/config/sample-file-dirs"
+    ConfigRestart,                                    // "/api/config/restart"
+    ConfigRuntime,                                    // "/api/config/runtime"
+    ConfigFactoryReset,                               // "/api/config/factory-reset"
     Signals,                                          // "/api/signals"
     StreamRecordings(Uuid, db::StreamType),           // "/api/cameras/<uuid>/<type>/recordings"
     StreamViewMp4(Uuid, db::StreamType, bool),        // "/api/cameras/<uuid>/<type>/view.mp4{.txt}"
@@ -42,6 +48,30 @@ impl Path {
             "signals" => return Path::Signals,
             _ => {}
         };
+        if matches!(path, "config/cameras" | "config/cameras/") {
+            return Path::ConfigCameras;
+        }
+        if matches!(path, "config/sample-file-dirs" | "config/sample-file-dirs/") {
+            return Path::ConfigSampleFileDirs;
+        }
+        if matches!(path, "config/restart" | "config/restart/") {
+            return Path::ConfigRestart;
+        }
+        if matches!(path, "config/runtime" | "config/runtime/") {
+            return Path::ConfigRuntime;
+        }
+        if matches!(path, "config/factory-reset" | "config/factory-reset/") {
+            return Path::ConfigFactoryReset;
+        }
+        if let Some(path) = path.strip_prefix("config/cameras/") {
+            let path = path.strip_suffix('/').unwrap_or(path);
+            if path.is_empty() || path.contains('/') {
+                return Path::NotFound;
+            }
+            return Uuid::parse_str(path)
+                .map(Path::ConfigCamera)
+                .unwrap_or(Path::NotFound);
+        }
         if let Some(path) = path.strip_prefix("init/") {
             let (debug, path) = match path.strip_suffix(".txt") {
                 Some(p) => (true, p),
@@ -127,6 +157,34 @@ mod tests {
             Path::Camera(cam_uuid)
         );
         assert_eq!(Path::decode("/api/cameras/asdf/"), Path::NotFound);
+        assert_eq!(Path::decode("/api/config/cameras"), Path::ConfigCameras);
+        assert_eq!(Path::decode("/api/config/cameras/"), Path::ConfigCameras);
+        assert_eq!(
+            Path::decode("/api/config/sample-file-dirs"),
+            Path::ConfigSampleFileDirs
+        );
+        assert_eq!(
+            Path::decode("/api/config/sample-file-dirs/"),
+            Path::ConfigSampleFileDirs
+        );
+        assert_eq!(Path::decode("/api/config/restart"), Path::ConfigRestart);
+        assert_eq!(Path::decode("/api/config/restart/"), Path::ConfigRestart);
+        assert_eq!(Path::decode("/api/config/runtime"), Path::ConfigRuntime);
+        assert_eq!(Path::decode("/api/config/runtime/"), Path::ConfigRuntime);
+        assert_eq!(Path::decode("/api/config/factory-reset"), Path::ConfigFactoryReset);
+        assert_eq!(Path::decode("/api/config/factory-reset/"), Path::ConfigFactoryReset);
+        assert_eq!(
+            Path::decode("/api/config/cameras/35144640-ff1e-4619-b0d5-4c74c185741c"),
+            Path::ConfigCamera(cam_uuid)
+        );
+        assert_eq!(
+            Path::decode("/api/config/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/"),
+            Path::ConfigCamera(cam_uuid)
+        );
+        assert_eq!(
+            Path::decode("/api/config/cameras/not-a-uuid"),
+            Path::NotFound
+        );
         assert_eq!(
             Path::decode("/api/cameras/35144640-ff1e-4619-b0d5-4c74c185741c/main/recordings"),
             Path::StreamRecordings(cam_uuid, db::StreamType::Main)

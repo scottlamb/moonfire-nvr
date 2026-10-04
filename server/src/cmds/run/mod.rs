@@ -130,18 +130,63 @@ pub fn run(args: Args) -> Result<i32, Error> {
     r
 }
 
+fn clear_directory_contents(path: &Path) -> Result<usize, Error> {
+    if !path.is_absolute() || path == Path::new("/") {
+        bail!(
+            InvalidArgument,
+            msg("refusing to clear unsafe factory-reset path {}", path.display())
+        );
+    }
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error.into()),
+    };
+    let mut removed = 0usize;
+    for entry in entries {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() && !file_type.is_symlink() {
+            std::fs::remove_dir_all(entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+        removed += 1;
+    }
+    Ok(removed)
+}
+
 async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
+    const RESTART_EXIT_CODE: i32 = 75;
+
     let (shutdown_tx, shutdown_rx) = base::shutdown::channel();
     let mut shutdown_tx = Some(shutdown_tx);
+    let (runtime_tx, mut runtime_rx) =
+        tokio::sync::mpsc::unbounded_channel::<web::RuntimeCommand>();
+    let mut runtime_command: Option<web::RuntimeCommand> = None;
 
     tokio::pin! {
         let int = signal(SignalKind::interrupt())?;
         let term = signal(SignalKind::terminate())?;
         let quit = signal(SignalKind::quit())?;
-        let inner = inner(read_only, config, shutdown_rx);
+        let inner = inner(read_only, config, shutdown_rx, runtime_tx);
     }
 
     tokio::select! {
+        command = runtime_rx.recv() => {
+            if let Some(command) = command {
+                match &command {
+                    web::RuntimeCommand::Restart => {
+                        info!("Runtime restart requested through internal API; shutting down gracefully.");
+                    }
+                    web::RuntimeCommand::FactoryReset { .. } => {
+                        info!("Factory reset requested through internal API; shutting down gracefully before clearing storage.");
+                    }
+                }
+                runtime_command = Some(command);
+                shutdown_tx.take();
+            }
+        },
         _ = int.recv() => {
             info!("Received SIGINT; shutting down gracefully. \
                    Send another SIGINT or SIGTERM to shut down immediately.");
@@ -172,10 +217,31 @@ async fn async_run(read_only: bool, config: &ConfigFile) -> Result<i32, Error> {
         result = &mut inner => return result,
     }
 
-    tokio::select! {
+    let result = tokio::select! {
         _ = int.recv() => bail!(Cancelled, msg("immediate shutdown due to second signal (SIGINT)")),
         _ = term.recv() => bail!(Cancelled, msg("immediate shutdown due to second singal (SIGTERM)")),
         result = &mut inner => result,
+    }?;
+
+    match runtime_command {
+        Some(web::RuntimeCommand::Restart) => {
+            info!(exit_code = RESTART_EXIT_CODE, "Graceful restart shutdown complete");
+            Ok(RESTART_EXIT_CODE)
+        }
+        Some(web::RuntimeCommand::FactoryReset { sample_dirs }) => {
+            let mut removed = 0usize;
+            for path in sample_dirs {
+                removed += clear_directory_contents(&path)?;
+            }
+            removed += clear_directory_contents(&config.db_dir)?;
+            info!(
+                removed_entries = removed,
+                exit_code = RESTART_EXIT_CODE,
+                "Moonfire factory reset storage cleared after graceful shutdown"
+            );
+            Ok(RESTART_EXIT_CODE)
+        }
+        None => Ok(result),
     }
 }
 
@@ -248,7 +314,10 @@ async fn inner(
     read_only: bool,
     config: &ConfigFile,
     shutdown_rx: base::shutdown::Receiver,
+    restart_tx: tokio::sync::mpsc::UnboundedSender<web::RuntimeCommand>,
 ) -> Result<i32, Error> {
+    let runtime_id = uuid::Uuid::now_v7();
+    info!(%runtime_id, "Moonfire runtime instance starting");
     let clocks = clock::RealClocks {};
     let (_db_dir, conn) = super::open_conn(
         &config.db_dir,
@@ -363,6 +432,8 @@ async fn inner(
             trust_forward_hdrs: bind.trust_forward_headers,
             time_zone_name: time_zone_name.to_owned(),
             privileged_unix_uid: bind.own_uid_is_privileged.then_some(own_euid),
+            restart_tx: Some(restart_tx.clone()),
+            runtime_id,
         })?);
         let mut listener = make_listener(&bind.address, &mut preopened)?;
         let addr = bind.address.clone();
