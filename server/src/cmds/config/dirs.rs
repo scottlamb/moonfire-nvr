@@ -118,9 +118,13 @@ fn confirm_deletion(model: &Mutex<Model, 3>, siv: &mut Cursive, to_delete: i64) 
         actually_delete(model, siv);
     } else {
         siv.add_layer(
-            views::Dialog::text("Please confirm amount.")
-                .title("Try again")
-                .dismiss_button("Back"),
+            views::Dialog::text(format!(
+                "Typed amount doesn't match. Please type the entire amount \
+                exactly as shown: {}",
+                encode_size(to_delete)
+            ))
+            .title("Try again")
+            .dismiss_button("Back"),
         );
     }
 }
@@ -168,7 +172,8 @@ fn press_change(model: &Arc<Mutex<Model, 3>>, siv: &mut Cursive) {
     if to_delete > 0 {
         let prompt = format!(
             "Some streams' usage exceeds new limit. Please confirm the amount \
-            of data to delete by typing it back:\n\n{}",
+            of data to delete by typing back the entire amount shown below, \
+            including all space-separated parts:\n\n{}",
             encode_size(to_delete)
         );
         let dialog = views::Dialog::around(

@@ -16,6 +16,9 @@ even on minor releases, e.g. `v0.7.5` -> `v0.7.6`.
     [#361](https://github.com/scottlamb/moonfire-nvr/issues/361).
     Also fixes some Dahua NVRs and Rubetek cameras which send unusual `ssrc`
     values.
+*   `moonfire-nvr config`: clarify that the full amount must be typed to
+    confirm deletion when lowering retention.
+    Fixes [#362](https://github.com/scottlamb/moonfire-nvr/issues/362).
 
 ## v0.7.32 (2026-08-14)
 
